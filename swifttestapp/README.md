@@ -1,5 +1,13 @@
 # Swift in FoundationDB
 
+## Running FDB with Swift `getVersion` impl
+
+```
+../src/foundationdb/tests/loopback_cluster/run_cluster.sh . 1 cat | grep "\[swift"
+```
+
+Will show the `MasterServerActor` implemented in Swift.
+
 ## Running Swift experiments
 
 To build you have to currently:

@@ -3,7 +3,7 @@ import FDBServer
 
 print("[swift] start")
 
-installGlobalSwiftConcurrencyHooks() // hook swift concurrency up to the net runloop
+newNet2ThenInstallSwiftConcurrencyHooks() // hook swift concurrency up to the net runloop
 
 // capture the main thread ID
 let mainTID = _tid()

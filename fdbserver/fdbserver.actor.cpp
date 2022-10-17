@@ -86,7 +86,7 @@
 #include "flow/network.h"
 
 #include "flow/swift.h"
-#include "flow/swift_hooks.h"
+#include "flow/swift_net2_hooks.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -2049,14 +2049,16 @@ int main(int argc, char* argv[]) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
-			printf("[c++][sim2:%p][%s:%d](%s) using simulator!\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__);
+			printf("[c++][sim2:%p][%s:%d](%s) USING SIMULATOR! g_network = %p\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__, g_network);
+			installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
-			installGlobalSwiftConcurrencyHooks(g_network);
-			printf("[c++][net2:%p][%s:%d](%s) using simulator!\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__);
+			installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+			printf("[c++][net2:%p][%s:%d](%s) USING NET2!\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__);
 
 			// FIXME(swift): This is test code, remove.
 			if (getenv("FDBSWIFTTEST")) {

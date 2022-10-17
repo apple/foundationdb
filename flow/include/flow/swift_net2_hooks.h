@@ -1,5 +1,5 @@
 /*
- * network.h
+ * swift_net2_hooks.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_SWIFT_HOOKS_H
-#define FLOW_SWIFT_HOOKS_H
+#ifndef FLOW_SWIFT_NET2_HOOKS_H
+#define FLOW_SWIFT_NET2_HOOKS_H
 
 #include "swift.h"
 #include "swift/ABI/Task.h"
@@ -284,25 +284,29 @@ SWIFT_CC(swift)
 void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
                                   void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
 
-inline void installGlobalSwiftConcurrencyHooks(INetwork* net) {
+SWIFT_CC(swift)
+void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
+                                  void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
+
+inline void installSwiftConcurrencyHooks(bool isSimulator, INetwork* net) {
 	printf("[c++] net        = %p\n", net);
 	printf("[c++] g_network  = %p\n", g_network);
 	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
-	//	if (net != N2::g_net2) {
-	//		printf("[c++] Failed to initialize the global network var: N2::g_net2\n");
-	//		exit(-1);
-	//	}
 
-	swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
-	printf("[c++] configured: swift_task_enqueueGlobal_hook\n");
+	if (isSimulator) {
+		swift_task_enqueueGlobal_hook = &sim2_enqueueGlobal_hook_impl;
+		printf("[c++][sim2+net2] configured: swift_task_enqueueGlobal_hook\n");
+	} else {
+		swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
+		printf("[c++][net2] configured: swift_task_enqueueGlobal_hook\n");
+	}
 }
 
-
-inline void installGlobalSwiftConcurrencyHooks() {
+inline void newNet2ThenInstallSwiftConcurrencyHooks() {
   auto tls = new TLSConfig();
   g_network = _swift_newNet2(tls, false, false);
 
-  installGlobalSwiftConcurrencyHooks(g_network);
+  installSwiftConcurrencyHooks(/*isSimulator=*/false, g_network);
 }
 
 inline void globalNetworkRun() {

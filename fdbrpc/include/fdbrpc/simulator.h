@@ -205,8 +205,12 @@ public:
 			return listener->second;
 		}
 
-		inline flowGlobalType global(int id) const { return (globals.size() > id) ? globals[id] : nullptr; };
+		inline flowGlobalType global(int id) const {
+			return (globals.size() > id) ? globals[id] : nullptr;
+		};
 		inline void setGlobal(size_t id, flowGlobalType v) {
+			printf("[c++][%s:%d](%s) set global (%zu) = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, id, v);
+
 			globals.resize(std::max(globals.size(), id + 1));
 			globals[id] = v;
 		};
@@ -265,9 +269,16 @@ public:
 		}
 	};
 
-	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
-	ProcessInfo* getCurrentProcess() { return currentProcess; }
-	ProcessInfo const* getCurrentProcess() const { return currentProcess; }
+	ProcessInfo* getProcess(Endpoint const& endpoint) {
+    return getProcessByAddress(endpoint.getPrimaryAddress());
+  }
+	ProcessInfo* getCurrentProcess() {
+    return currentProcess;
+  }
+	ProcessInfo const* getCurrentProcess() const {
+    return currentProcess;
+  }
+
 	// onProcess: wait for the process to be scheduled by the runloop; a task will be created for the process.
 	virtual Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID = TaskPriority::Zero) = 0;
 	virtual Future<Void> onMachine(ISimulator::ProcessInfo* process, TaskPriority taskID = TaskPriority::Zero) = 0;
@@ -497,8 +508,17 @@ public:
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
-	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
-	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
+	flowGlobalType global(int id) const final {
+//		printf("[c++][%s:%d](%s) get global (%d) \n", __FILE_NAME__, __LINE__, __FUNCTION__, id);
+		auto p = getCurrentProcess();
+//		printf("[c++][%s:%d](%s) get global (%d); p = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, id, p);
+		ASSERT(p && "process must not be null");
+		return p->global(id);
+	};
+	void setGlobal(size_t id, flowGlobalType v) final {
+//		printf("[c++][%s:%d](%s) set global (%zu), v = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, id, v);
+		getCurrentProcess()->setGlobal(id, v);
+	};
 
 	void disableFor(const std::string& desc, double time) { disabledMap[desc] = time; }
 

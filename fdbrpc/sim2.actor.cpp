@@ -45,6 +45,9 @@
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
+#include "flow/swift.h"
+#include "flow/swift_net2_hooks.h"
+#include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.actor.h"
@@ -906,9 +909,22 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess, true);
 	}
-	void _swiftEnqueue(void* task) override {
-		ASSERT(false && "not implemented yet"); // TODO: implement enqueues onto the sim2 loop
-	}
+	void _swiftEnqueue(void* _swiftJob) override {
+    printf("[c++][sim2][%s:%d](%s) ready.push SWIFT JOB AS SIMULATOR TASK: job=%p\n", __FILE_NAME__, __LINE__, __FUNCTION__,
+		       _swiftJob);
+
+	swift::Job* swiftJob = (swift::Job*)_swiftJob;
+//    Sim2::Task *orderedTask = (N2::Task *) swiftJobTask; // FIXME: figure it out
+//	auto task = Sim2::Task(time + seconds, taskID, taskCount++, machine, f);
+
+	auto machine = currentProcess;
+	auto taskID = TaskPriority::DefaultOnMainThread; // FIXME(swift): make a conversion
+
+    mutex.enter();
+	auto task = Sim2::Task(time, taskID, taskCount++, machine, swiftJob);
+    tasks.push(task);
+    mutex.leave();
+  }
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
@@ -921,7 +937,8 @@ public:
 		}
 
 		mutex.enter();
-		tasks.push(Task(time + seconds, taskID, taskCount++, machine, f));
+    	auto task = Sim2::Task(time + seconds, taskID, taskCount++, machine, f);
+		tasks.push(task);
 		mutex.leave();
 
 		return f;
@@ -1110,8 +1127,10 @@ public:
 
 	// Starts a new thread, making sure to set any thread local state
 	THREAD_FUNC simStartThread(void* arg) {
-		SimThreadArgs* simArgs = (SimThreadArgs*)arg;
+    printf("[c++][sim2][%s:%d](%s) simStartThread\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+    SimThreadArgs* simArgs = (SimThreadArgs*)arg;
 		ISimulator::currentProcess = simArgs->currentProcess;
+    printf("[c++][sim2][%s:%d](%s) ISimulator::currentProcess = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, ISimulator::currentProcess);
 		simArgs->func(simArgs->arg);
 
 		delete simArgs;
@@ -1215,7 +1234,9 @@ public:
 	}
 
 	static void runLoop(Sim2* self) {
-		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+    printf("[c++][sim2:%p][%s:%d](%s) runLoop ...\n", self, __FILE_NAME__, __LINE__, __FUNCTION__);
+
+    ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
 			self->mutex.enter();
 			if (self->tasks.size() == 0) {
@@ -1229,7 +1250,8 @@ public:
 			self->tasks.pop();
 			self->mutex.leave();
 
-			self->execTask(t);
+      // printf("[c++][sim2:%p][%s:%d](%s) self->execTask ...\n", self, __FILE_NAME__, __LINE__, __FUNCTION__);
+      self->execTask(t);
 			self->yielded = false;
 		}
 		self->currentProcess = callingMachine;
@@ -1250,6 +1272,10 @@ public:
 	                        const char* dataFolder,
 	                        const char* coordinationFolder,
 	                        ProtocolVersion protocol) override {
+
+		printf("[c++][sim2:%p][%s:%d](%s) NEW PROCESS! ip = %s\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__, ip.toString().c_str());
+
+
 		ASSERT(locality.machineId().present());
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
@@ -2187,7 +2213,7 @@ public:
 		// create a key pair for AuthZ testing
 		auto key = mkcert::makeEcP256();
 		authKeys.insert(std::make_pair(Standalone<StringRef>("DefaultKey"_sr), key));
-		g_network = net2 = newNet2(TLSConfig(), false, true);
+		g_network = net2 = newNet2(TLSConfig(), /*useThreadPool=*/false, true);
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
@@ -2200,30 +2226,54 @@ public:
 		uint64_t stable;
 		ProcessInfo* machine;
 		Promise<Void> action;
+    	swift::Job* _Nullable swiftJob = nullptr;
+
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action)
-		  : taskID(taskID), time(time), stable(stable), machine(machine), action(std::move(action)) {}
+		  : taskID(taskID), time(time), stable(stable), machine(machine),
+		    action(std::move(action)),
+			swiftJob(nullptr) {
+			printf("[c++][%s:%d](%s) task init 1 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+		}
+
+		// Swift entry point, ignore the action and do inline run of job instead.
+		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, swift::Job* _Nonnull swiftJob)
+		  : taskID(taskID), time(time), stable(stable), machine(machine),
+		    action(Promise<Void>()),
+			swiftJob(swiftJob) {
+			printf("[c++][%s:%d](%s) task init 2 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+		}
+
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
-		  : taskID(taskID), time(time), stable(stable), machine(machine) {
+		  : taskID(taskID), time(time), stable(stable), machine(machine), swiftJob(nullptr) {
 			future = action.getFuture();
+			printf("[c++][%s:%d](%s) task init 3 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		}
 		Task(Task&& rhs) noexcept
 		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
-		    action(std::move(rhs.action)) {}
+		    action(std::move(rhs.action)),
+		    swiftJob(nullptr) {
+			printf("[c++][%s:%d](%s) task init 4 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+		}
 		void operator=(Task const& rhs) {
 			taskID = rhs.taskID;
 			time = rhs.time;
 			stable = rhs.stable;
 			machine = rhs.machine;
 			action = rhs.action;
+			swiftJob = rhs.swiftJob;
 		}
 		Task(Task const& rhs)
-		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), action(rhs.action) {}
+		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
+		    action(rhs.action),
+		    swiftJob(rhs.swiftJob) {}
+
 		void operator=(Task&& rhs) noexcept {
 			time = rhs.time;
 			taskID = rhs.taskID;
 			stable = rhs.stable;
 			machine = rhs.machine;
 			action = std::move(rhs.action);
+			swiftJob = rhs.swiftJob;
 		}
 
 		bool operator<(Task const& rhs) const {
@@ -2235,6 +2285,7 @@ public:
 	};
 
 	void execTask(struct Task& t) {
+		printf("[c++][sim2][%s:%d](%s) execTask ...\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 		if (t.machine->failed) {
 			t.action.send(Never());
 		} else {
@@ -2248,7 +2299,12 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
-				t.action.send(Void());
+				if (t.swiftJob) {
+					printf("[c++][sim2][%s:%d](%s) execTask AS SWIFT JOB ...\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+					swift_job_run(t.swiftJob, ExecutorRef::generic());
+				} else {
+					t.action.send(Void());
+				}
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);

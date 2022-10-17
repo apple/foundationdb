@@ -105,7 +105,7 @@ public actor MasterDataActor {
             if myself.referenceVersion.present() {
                 // FIXME: myself.referenceVersion.get()
                 // FIXME: getMutating() ambiguity
-                var r = myself.referenceVersion
+                let r = myself.referenceVersion
                 // FIXME: Do not use r.__getUnsafe
                 myself.version = figureVersion(current: myself.version,
                                                now: SwiftGNetwork.timer(),
