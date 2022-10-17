@@ -577,7 +577,7 @@ class ApiTest(Test):
                     key1, key2 = key2, key1
 
                 # TODO: randomize chunkSize but should not exceed 100M(shard limit)
-                chunkSize = 10000000 # 10M
+                chunkSize = 10000000  # 10M
                 instructions.push_args(key1, key2, chunkSize)
                 instructions.append(op)
                 self.add_strings(1)
