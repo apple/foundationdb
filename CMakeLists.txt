@@ -204,7 +204,8 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_link_options(-lexecinfo)
 endif()
-
+include(CompileOtel)
+build_opentelemetry()
 ################################################################################
 # process compile commands for IDE
 ################################################################################
