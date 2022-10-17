@@ -241,7 +241,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				TraceEvent("IBackupSystemRestoreAttempt").detail("BeginVersion", beginVersion);
 				wait(success(self->backupAgent.restore(cx,
 				                                       cx,
-				                                       StringRef("system_restore"),
+				                                       "system_restore"_sr,
 				                                       backupURL,
 				                                       {},
 				                                       getSystemBackupRanges(),

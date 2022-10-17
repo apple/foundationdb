@@ -119,7 +119,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		for (int i = 0; i < systemBackupRanges.size(); i++) {
 			restores.push_back((self->backupAgent.restore(cx,
 			                                              cx,
-			                                              StringRef("system_restore"),
+			                                              "system_restore"_sr,
 			                                              Key(self->backupContainer->getURL()),
 			                                              self->backupContainer->getProxy(),
 			                                              WaitForComplete::True,
