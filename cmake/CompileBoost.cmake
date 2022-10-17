@@ -74,7 +74,7 @@ function(compile_boost)
     BUILD_IN_SOURCE    ON
     INSTALL_COMMAND    ""
     UPDATE_COMMAND     ""
-    BUILD_BYPRODUCTS   "${BOOST_INSTALL_DIR}/boost/config.hpp"
+    BUILD_BYPRODUCTS   "${BOOST_INSTALL_DIR}/include/boost/config.hpp"
                        "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
