@@ -26,49 +26,83 @@ class TransactionCostWorkload : public TestWorkload {
 	Key prefix;
 	bool debugTransactions{ false };
 
-	static constexpr auto transactionTypes = 3;
+	static constexpr auto transactionTypes = 4;
 
-	ACTOR static Future<Void> read(Database cx, Optional<UID> debugID) {
+	Key getKey(uint32_t size, uint64_t index) const {
+		return BinaryWriter::toValue(index, Unversioned()).withPrefix(prefix);
+	}
+
+	static Value getValue(uint32_t size) { return makeString(size); }
+
+	static UID getDebugID(uint64_t index) { return UID(index << 32, index << 32); }
+
+	ACTOR static Future<Void> readLargeValue(TransactionCostWorkload* self, Database cx, uint64_t index) {
 		state Transaction tr(cx);
-		if (debugID.present()) {
-			tr.debugTransaction(debugID.get());
+		loop {
+			try {
+				tr.set(self->getKey(20, index), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
+				wait(tr.commit());
+				tr.reset();
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 		loop {
 			try {
 				ASSERT_EQ(tr.getTotalCost(), 0);
-				wait(success(tr.get("foo"_sr)));
-				ASSERT_EQ(tr.getTotalCost(), 1);
+				wait(success(tr.get(self->getKey(20, index))));
+				ASSERT_EQ(tr.getTotalCost(), 2);
 				return Void();
 			} catch (Error& e) {
+				TraceEvent("TransactionCost_ReadLargeValueError").error(e);
 				wait(tr.onError(e));
 			}
 		}
 	}
 
-	ACTOR static Future<Void> write(Database cx, Optional<UID> debugID) {
+	ACTOR static Future<Void> readEmpty(TransactionCostWorkload* self, Database cx, uint64_t index) {
 		state Transaction tr(cx);
-		if (debugID.present()) {
-			tr.debugTransaction(debugID.get());
+		if (self->debugTransactions) {
+			tr.debugTransaction(getDebugID(index));
 		}
 		loop {
 			try {
 				ASSERT_EQ(tr.getTotalCost(), 0);
-				tr.set("foo"_sr, "bar"_sr);
+				wait(success(tr.get(self->getKey(20, index))));
+				ASSERT_EQ(tr.getTotalCost(), 1);
+				return Void();
+			} catch (Error& e) {
+				TraceEvent("TransactionCost_ReadEmptyError").error(e);
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> write(TransactionCostWorkload* self, Database cx, uint64_t index) {
+		state Transaction tr(cx);
+		if (self->debugTransactions) {
+			tr.debugTransaction(getDebugID(index));
+		}
+		loop {
+			try {
+				ASSERT_EQ(tr.getTotalCost(), 0);
+				tr.set(self->getKey(20, index), getValue(20));
 				ASSERT_EQ(tr.getTotalCost(), CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO);
 				wait(tr.commit());
 				ASSERT_EQ(tr.getTotalCost(), CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO);
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("TransactionCost_Error").error(e);
+				TraceEvent("TransactionCost_WriteError").error(e);
 				wait(tr.onError(e));
 			}
 		}
 	}
 
-	ACTOR static Future<Void> clear(Database cx, Optional<UID> debugID) {
+	ACTOR static Future<Void> clear(TransactionCostWorkload* self, Database cx, uint64_t index) {
 		state Transaction tr(cx);
-		if (debugID.present()) {
-			tr.debugTransaction(debugID.get());
+		if (self->debugTransactions) {
+			tr.debugTransaction(getDebugID(index));
 		}
 		loop {
 			try {
@@ -80,6 +114,7 @@ class TransactionCostWorkload : public TestWorkload {
 				ASSERT_EQ(tr.getTotalCost(), 0);
 				return Void();
 			} catch (Error& e) {
+				TraceEvent("TransactionCost_ClearError").error(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -90,13 +125,14 @@ class TransactionCostWorkload : public TestWorkload {
 		state Future<Void> f;
 		for (; i < self->iterations; ++i) {
 			int rand = deterministicRandom()->randomInt(0, transactionTypes);
-			auto const debugID = self->debugTransactions ? UID(i << 32, i << 32) : Optional<UID>();
 			if (rand == 0) {
-				f = read(cx, debugID);
+				f = readEmpty(self, cx, i);
 			} else if (rand == 1) {
-				f = write(cx, debugID);
+				f = write(self, cx, i);
 			} else if (rand == 2) {
-				f = clear(cx, debugID);
+				f = clear(self, cx, i);
+			} else if (rand == 3) {
+				f = readLargeValue(self, cx, i);
 			}
 			wait(f);
 		}
@@ -116,7 +152,7 @@ public:
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return start(this, cx); }
+	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 
