@@ -853,6 +853,10 @@ extern "C" DLLEXPORT fdb_error_t fdb_transaction_get_committed_version(FDBTransa
 	CATCH_AND_RETURN(*out_version = TXN(tr)->getCommittedVersion(););
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr) {
+	return (FDBFuture*)TXN(tr)->getTotalCost().extractPtr();
+}
+
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
 	return (FDBFuture*)TXN(tr)->getApproximateSize().extractPtr();
 }

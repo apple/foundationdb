@@ -414,6 +414,20 @@ Version DLTransaction::getCommittedVersion() {
 	return version;
 }
 
+ThreadFuture<int64_t> DLTransaction::getTotalCost() {
+	if (!api->transactionGetTotalCost) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->transactionGetTotalCost(tr);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		int64_t size = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
+		ASSERT(!error);
+		return size;
+	});
+}
+
 ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 	if (!api->transactionGetApproximateSize) {
 		return unsupported_operation();
@@ -863,6 +877,8 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_committed_version",
 	                   headerVersion >= 0);
+	loadClientFunction(
+	    &api->transactionGetTotalCost, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 730);
 	loadClientFunction(&api->transactionGetApproximateSize,
 	                   lib,
 	                   fdbCPath,
@@ -1397,6 +1413,12 @@ ThreadFuture<SpanContext> MultiVersionTransaction::getSpanContext() {
 	}
 
 	return SpanContext();
+}
+
+ThreadFuture<int64_t> MultiVersionTransaction::getTotalCost() {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getTotalCost() : makeTimeout<int64_t>();
+	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {

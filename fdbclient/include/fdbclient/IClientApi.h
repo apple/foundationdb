@@ -120,6 +120,7 @@ public:
 	// later if they are not really needed.
 	virtual ThreadFuture<VersionVector> getVersionVector() = 0;
 	virtual ThreadFuture<SpanContext> getSpanContext() = 0;
+	virtual ThreadFuture<int64_t> getTotalCost() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;

@@ -585,6 +585,14 @@ ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	});
 }
 
+ThreadFuture<int64_t> ThreadSafeTransaction::getTotalCost() {
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<int64_t> {
+		tr->checkDeferredError();
+		return tr->getTotalCost();
+	});
+}
+
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> {
