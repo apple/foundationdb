@@ -103,6 +103,42 @@ def maintenance(logger):
     output3 = run_fdbcli_command('maintenance')
     assert output3 == no_maintenance_output
 
+@enable_logging()
+def quota(logger):
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '<empty>'
+
+    command = 'quota set green total_throughput 32768'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == ''
+
+    command = 'quota set green reserved_throughput 16384'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == ''
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '32768'
+
+    command = 'quota get green reserved_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '16384'
+
+    command = 'quota clear green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == ''
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '<empty>'
 
 @enable_logging()
 def setclass(logger):
@@ -1035,10 +1071,12 @@ if __name__ == '__main__':
         integer_options()
         tls_address_suffix()
         knobmanagement()
+        quota()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
         killall()
+        quota()
         # TODO: fix the failure where one process is not available after setclass call
         # setclass()
