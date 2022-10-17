@@ -1228,12 +1228,15 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
 
 	const WorkerInterface& w = req.wi;
-	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get()) {
+	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
+	    req.processClass != ProcessClass::TesterClass) {
+		// TODO: Track invalid processes separately, report status in status json
 		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "WorkerBelongsToExistingCluster", self->id)
 		    .detail("WorkerClusterId", req.clusterId)
 		    .detail("ClusterControllerClusterId", self->clusterId->get())
 		    .detail("WorkerId", w.id())
 		    .detail("ProcessId", w.locality.processId());
+		req.reply.sendError(invalid_cluster_id());
 		return Void();
 	}
 

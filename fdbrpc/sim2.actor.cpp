@@ -1958,28 +1958,17 @@ public:
 		           probe::context::sim2,
 		           probe::assert::simOnly);
 
-		// Check if any processes on machine are rebooting
-		if (processesOnMachine != processesPerMachine && kt >= RebootAndDelete) {
+		if (processesOnMachine == processesPerMachine + 1 && originalKt == KillType::RebootProcessAndSwitch) {
+			// Simulation runs which test DR add an extra process to each
+			// machine in the original cluster. When killing processes with the
+			// RebootProcessAndSwitch kill type, processes in the original
+			// cluster should be rebooted in order to kill any zombie
+			// processes.
+			kt = KillType::Reboot;
+		} else if (processesOnMachine != processesPerMachine) {
+			// Check if any processes on machine are rebooting
 			CODE_PROBE(true,
 			           "Attempted reboot, but the target did not have all of its processes running",
-			           probe::context::sim2,
-			           probe::assert::simOnly);
-			TraceEvent(SevWarn, "AbortedKill")
-			    .detail("KillType", kt)
-			    .detail("MachineId", machineId)
-			    .detail("Reason", "Machine processes does not match number of processes per machine")
-			    .detail("Processes", processesOnMachine)
-			    .detail("ProcessesPerMachine", processesPerMachine)
-			    .backtrace();
-			if (ktFinal)
-				*ktFinal = None;
-			return false;
-		}
-
-		// Check if any processes on machine are rebooting
-		if (processesOnMachine != processesPerMachine) {
-			CODE_PROBE(true,
-			           "Attempted reboot and kill, but the target did not have all of its processes running",
 			           probe::context::sim2,
 			           probe::assert::simOnly);
 			TraceEvent(SevWarn, "AbortedKill")
