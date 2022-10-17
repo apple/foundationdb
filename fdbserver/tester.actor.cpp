@@ -838,21 +838,26 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 ACTOR Future<Void> clearData(Database cx) {
 	state Transaction tr(cx);
 	state UID debugID = debugRandom()->randomUniqueID();
-	TraceEvent("TesterClearingDatabaseStart", debugID).log();
 	tr.debugTransaction(debugID);
+
+	const_cast<ServerKnobs*>(SERVER_KNOBS)->MAX_WRITE_TRANSACTION_LIFE_VERSIONS = 5 * SERVER_KNOBS->VERSIONS_PER_SECOND;
 	loop {
 		try {
+			TraceEvent("TesterClearingDatabaseStart", debugID).log();
 			// This transaction needs to be self-conflicting, but not conflict consistently with
 			// any other transactions
 			tr.clear(normalKeys);
 			tr.makeSelfConflicting();
-			wait(success(tr.getReadVersion())); // required since we use addReadConflictRange but not get
+			Version rv = wait(tr.getReadVersion()); // required since we use addReadConflictRange but not get
+			TraceEvent("TesterClearingDatabaseRV", debugID).detail("RV", rv);
 			wait(tr.commit());
 			TraceEvent("TesterClearingDatabase", debugID).detail("AtVersion", tr.getCommittedVersion());
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingDatabaseError", debugID).error(e);
 			wait(tr.onError(e));
+			debugID = debugRandom()->randomUniqueID();
+			tr.debugTransaction(debugID);
 		}
 	}
 
