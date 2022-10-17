@@ -56,10 +56,18 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 };
 
 struct GranuleMaterializeStats {
+	// file-level stats
 	int64_t inputBytes;
 	int64_t outputBytes;
 
-	GranuleMaterializeStats() : inputBytes(0), outputBytes(0) {}
+	// merge stats
+	int32_t snapshotRows;
+	int32_t rowsCleared;
+	int32_t rowsInserted;
+	int32_t rowsUpdated;
+
+	GranuleMaterializeStats()
+	  : inputBytes(0), outputBytes(0), snapshotRows(0), rowsCleared(0), rowsInserted(0), rowsUpdated(0) {}
 };
 
 struct BlobGranuleCipherKeysMeta {

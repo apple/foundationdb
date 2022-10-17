@@ -105,7 +105,9 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 			arena.dependsOn(data.arena());
 		}
 
-		return materializeBlobGranule(chunk, keyRange, beginVersion, readVersion, snapshotData, deltaData);
+		// TODO do something useful with stats?
+		GranuleMaterializeStats stats;
+		return materializeBlobGranule(chunk, keyRange, beginVersion, readVersion, snapshotData, deltaData, stats);
 
 	} catch (Error& e) {
 		throw e;
