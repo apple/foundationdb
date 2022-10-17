@@ -686,6 +686,9 @@ ACTOR Future<Void> registrationClient(
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
 			when(wait(recovered)) { break; }
+			when(wait(clusterId->onChange())) {
+				break;
+			}
 		}
 	}
 }
@@ -2845,7 +2848,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled ||
-		          e.code() == error_code_please_reboot_delete || e.code() == error_code_local_config_changed;
+		          e.code() == error_code_please_reboot_delete || e.code() == error_code_local_config_changed ||
+		          e.code() == error_code_invalid_cluster_id;
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
@@ -2882,6 +2886,7 @@ static std::set<int> const& normalWorkerErrors() {
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_please_reboot_delete);
 		s.insert(error_code_local_config_changed);
+		s.insert(error_code_invalid_cluster_id);
 	}
 	return s;
 }
@@ -3663,7 +3668,13 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Otherwise, these actors may get a broken promise error.
 		for (auto f : actors)
 			f.cancel();
-		Error err = checkIOTimeout(e);
+		state Error err = checkIOTimeout(e);
+		if (e.code() == error_code_invalid_cluster_id) {
+			// If this process tried to join an invalid cluster, become a
+			// zombie and wait for manual action by the operator.
+			TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "ZombieProcess").error(e);
+			wait(Never());
+		}
 		throw err;
 	}
 }
