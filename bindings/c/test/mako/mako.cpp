@@ -616,11 +616,11 @@ int runWorkload(Database db,
 
 		/* enable idempotency ids */
 		if (idempotency_id_size > 0) {
-			idempotency_id.clear();
-			for (int i = 0; i < idempotency_id_size; ++i) {
-				idempotency_id.push_back(urand(0, 255));
-			}
-			auto err = tx.setOptionNothrow(FDB_TR_OPTION_IDEMPOTENCY_ID, toBytesRef(idempotency_id));
+			// idempotency_id.clear();
+			// for (int i = 0; i < idempotency_id_size; ++i) {
+			// 	idempotency_id.push_back(urand(0, 255));
+			// }
+			auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTOMATIC_IDEMPOTENCY, BytesRef());
 			if (err) {
 				logr.error("FDB_TR_OPTION_IDEMPOTENCY_ID: {}", err.what());
 			}

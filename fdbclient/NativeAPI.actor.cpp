@@ -6479,6 +6479,16 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 						                                       ci.version,
 						                                       req,
 						                                       trState->tenant()));
+					if (trState->automaticIdempotency) {
+						// Even if the caller somehow never finds about the
+						// successful commit, the caller has no idea what the
+						// idempotency id actually is so they can't check if it
+						// committed and get the wrong answer after we expire
+						// it. It's ok if this request fails - the
+						// idempotencyIdCleaner will eventually clean it.
+						ci.expireIdempotencyId.send(ExpireIdempotencyIdRequest{
+						    ci.version, uint8_t(ci.txnBatchId >> 8), trState->getTenantInfo() });
+					}
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -6964,11 +6974,16 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		tr.idempotencyId = IdempotencyIdRef(tr.arena, IdempotencyIdRef(value.get()));
+		trState->automaticIdempotency = false;
 		break;
 	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
 		validateOptionValueNotPresent(value);
-		tr.idempotencyId = IdempotencyIdRef(
-		    tr.arena, IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+		if (!tr.idempotencyId.valid()) {
+			tr.idempotencyId = IdempotencyIdRef(
+			    tr.arena,
+			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+		}
+		trState->automaticIdempotency = true;
 		break;
 
 	default:

@@ -1864,11 +1864,28 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
 
 	std::fill(self->nextTr.begin(), self->nextTr.end(), 0);
+	// The proxy responsible for serving ExpireIdempotencyIdRequest's for this
+	// batch is chosen randomly as a primitive form of load balancing. It's
+	// important that all ExpireIdempotencyIdRequest for an idempotency key
+	// value pair are routed to the same proxy, otherwise it won't actually be
+	// able to do anything.
+	auto idempotencyIdProxy =
+	    pProxyCommitData->db->get().client.commitProxies.size()
+	        ? deterministicRandom()->randomChoice(pProxyCommitData->db->get().client.commitProxies)
+	        : CommitProxyInterface();
+	std::unordered_map<uint8_t, uint8_t> idCountsForKey;
 	for (int t = 0; t < self->trs.size(); t++) {
 		auto& tr = self->trs[t];
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
 			ASSERT_WE_THINK(self->commitVersion != invalidVersion);
-			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
+			if (self->trs[t].idempotencyId.valid()) {
+				idCountsForKey[uint8_t(t >> 8)] += 1;
+			}
+			tr.reply.send(CommitID(self->commitVersion,
+			                       t,
+			                       self->metadataVersionAfter,
+			                       Optional<Standalone<VectorRef<int>>>(),
+			                       idempotencyIdProxy.expireIdempotencyId));
 		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
 		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure) {
@@ -1892,11 +1909,19 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 				}
 				// At least one keyRange index should be returned
 				ASSERT(conflictingKRIndices.size());
-				tr.reply.send(CommitID(
-				    invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
+				tr.reply.send(CommitID(invalidVersion,
+				                       t,
+				                       Optional<Value>(),
+				                       Optional<Standalone<VectorRef<int>>>(conflictingKRIndices),
+				                       idempotencyIdProxy.expireIdempotencyId));
 			} else {
 				tr.reply.sendError(not_committed());
 			}
+		}
+
+		for (auto [highOrderBatchIndex, count] : idCountsForKey) {
+			idempotencyIdProxy.expireIdempotencyKeyValuePair.send(
+			    ExpireIdempotencyKeyValuePairRequest{ self->commitVersion, highOrderBatchIndex, count });
 		}
 
 		// Update corresponding transaction indices on each resolver
@@ -2532,6 +2557,99 @@ ACTOR static Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference
 	return result;
 }
 
+ACTOR static Future<Void> deleteIdempotencyKV(Database db, Version version, uint8_t highOrderBatchIndex) {
+	state Transaction tr(db);
+	state Key key;
+
+	BinaryWriter wr{ Unversioned() };
+	wr.serializeBytes(idempotencyIdKeys.begin);
+	wr << bigEndian64(version);
+	wr << highOrderBatchIndex;
+	key = wr.toValue();
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.clear(key);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+namespace {
+struct ExpireServerEntry {
+	int expectedCount = 0;
+	int receivedCount = 0;
+	bool initialized = false;
+};
+
+struct IdempotencyKey {
+	Version version;
+	uint8_t highOrderBatchIndex;
+	bool operator==(const IdempotencyKey& other) const {
+		return version == other.version && highOrderBatchIndex == other.highOrderBatchIndex;
+	}
+};
+
+} // namespace
+
+namespace std {
+template <>
+struct hash<IdempotencyKey> {
+	std::size_t operator()(const IdempotencyKey& key) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<Version>{}(key.version));
+		boost::hash_combine(seed, std::hash<uint8_t>{}(key.highOrderBatchIndex));
+		return seed;
+	}
+};
+
+} // namespace std
+ACTOR static Future<Void> idempotencyIdsExpireServer(
+    Database db,
+    PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
+    RequestStream<ExpireIdempotencyKeyValuePairRequest> expireIdempotencyKeyValuePair) {
+	state std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
+	state ActorCollection actors;
+	state IdempotencyKey key;
+	state ExpireServerEntry* status = nullptr;
+	loop {
+		choose {
+			when(ExpireIdempotencyIdRequest req = waitNext(expireIdempotencyId.getFuture())) {
+				key = IdempotencyKey{req.commitVersion, req.batchIndexHighByte};
+				status = &idStatus[key];
+				status->receivedCount += 1;
+			}
+			when(ExpireIdempotencyKeyValuePairRequest req = waitNext(expireIdempotencyKeyValuePair.getFuture())) {
+				key = IdempotencyKey{req.commitVersion, req.batchIndexHighByte};
+				status = &idStatus[key];
+				status->expectedCount = req.idempotencyIdCount;
+			}
+		}
+		if (status->initialized) {
+			if (status->receivedCount == status->expectedCount) {
+				actors.add(deleteIdempotencyKV(db, key.version, key.highOrderBatchIndex));
+				idStatus.erase(key);
+			}
+		} else {
+			// All of this "proactively deleting idempotency ids" stuff is
+			// done on a best effort basis, so it's ok if this key is
+			// deleted from the in-memory map too early, or if this process
+			// dies altogether.
+			actors.add(map(delay(10), [&](const Void&) {
+				// This capture is ok because actors gets destroyed before idStatus
+				idStatus.erase(key);
+				return Void();
+			}));
+			status->initialized = true;
+		}
+	}
+}
+
 ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 	state int64_t idmpKeySize;
 	state int64_t candidateDeleteSize;
@@ -2550,6 +2668,7 @@ ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)));
+				fmt::print("idmpKeySize: {}\n", idmpKeySize);
 				if (idmpKeySize <= SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET) {
 					break;
 				}
@@ -2891,6 +3010,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	if (firstProxy) {
 		addActor.send(idempotencyIdsCleaner(openDBOnServer(db)));
 	}
+	addActor.send(
+	    idempotencyIdsExpireServer(openDBOnServer(db), proxy.expireIdempotencyId, proxy.expireIdempotencyKeyValuePair));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

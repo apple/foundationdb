@@ -61,6 +61,8 @@ struct CommitProxyInterface {
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
+	RequestStream<struct ExpireIdempotencyKeyValuePairRequest> expireIdempotencyKeyValuePair;
+	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -87,6 +89,10 @@ struct CommitProxyInterface {
 			exclusionSafetyCheckReq =
 			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			expireIdempotencyKeyValuePair = RequestStream<struct ExpireIdempotencyKeyValuePairRequest>(
+			    commit.getEndpoint().getAdjustedEndpoint(10));
+			expireIdempotencyId =
+			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 		}
 	}
 
@@ -103,6 +109,8 @@ struct CommitProxyInterface {
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
+		streams.push_back(expireIdempotencyKeyValuePair.getReceiver());
+		streams.push_back(expireIdempotencyId.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -151,25 +159,61 @@ struct ClientDBInfo {
 	}
 };
 
+struct ExpireIdempotencyIdRequest {
+	constexpr static FileIdentifier file_identifier = 1900933;
+	Version commitVersion = invalidVersion;
+	uint8_t batchIndexHighByte = 0;
+	TenantInfo tenant;
+
+	ExpireIdempotencyIdRequest() {}
+	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte, TenantInfo tenant)
+	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte), tenant(tenant) {}
+
+	bool verify() const { return tenant.isAuthorized(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, commitVersion, batchIndexHighByte, tenant);
+	}
+};
+
+struct ExpireIdempotencyKeyValuePairRequest {
+	constexpr static FileIdentifier file_identifier = 11455947;
+	Version commitVersion = invalidVersion;
+	uint8_t batchIndexHighByte = 0;
+	uint8_t idempotencyIdCount = 0;
+
+	ExpireIdempotencyKeyValuePairRequest() {}
+	ExpireIdempotencyKeyValuePairRequest(Version commitVersion, uint8_t batchIndexHighByte, uint8_t idempotencyIdCount)
+	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte), idempotencyIdCount(idempotencyIdCount) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, commitVersion, batchIndexHighByte, idempotencyIdCount);
+	}
+};
+
 struct CommitID {
 	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; // returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
 	Optional<Value> metadataVersion;
 	Optional<Standalone<VectorRef<int>>> conflictingKRIndices;
+	PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, txnBatchId, metadataVersion, conflictingKRIndices);
+		serializer(ar, version, txnBatchId, metadataVersion, conflictingKRIndices, expireIdempotencyId);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
 	CommitID(Version version,
 	         uint16_t txnBatchId,
 	         const Optional<Value>& metadataVersion,
-	         const Optional<Standalone<VectorRef<int>>>& conflictingKRIndices = Optional<Standalone<VectorRef<int>>>())
+	         const Optional<Standalone<VectorRef<int>>>& conflictingKRIndices,
+	         const PublicRequestStream<ExpireIdempotencyIdRequest>& expireIdempotencyId)
 	  : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion),
-	    conflictingKRIndices(conflictingKRIndices) {}
+	    conflictingKRIndices(conflictingKRIndices), expireIdempotencyId(expireIdempotencyId) {}
 };
 
 struct CommitTransactionRequest : TimedRequest {
