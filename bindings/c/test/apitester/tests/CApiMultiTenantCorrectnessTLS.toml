@@ -11,6 +11,7 @@ maxTenants = 5
 
 [[server]]
 tls_enabled = true
+max_num_processes = 1
 
     [[test.workload]]
     name = 'ApiCorrectness'

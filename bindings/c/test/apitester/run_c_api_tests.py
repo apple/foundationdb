@@ -148,6 +148,9 @@ class TestConfig:
         self.tls_enabled = server_config.get("tls_enabled", False)
         self.client_chain_len = server_config.get("tls_client_chain_len", 2)
         self.server_chain_len = server_config.get("tls_server_chain_len", 3)
+        self.min_num_processes = server_config.get("min_num_processes", 1)
+        self.max_num_processes = server_config.get("max_num_processes", 3)
+        self.num_processes = random.randint(self.min_num_processes, self.max_num_processes)
 
 
 def run_test(args, test_file):
@@ -162,6 +165,7 @@ def run_test(args, test_file):
 
     with TempCluster(
         args.build_dir,
+        config.num_processes,
         enable_tenants=config.tenants_enabled,
         blob_granules_enabled=config.blob_granules_enabled,
         tls_config=tls_config,
