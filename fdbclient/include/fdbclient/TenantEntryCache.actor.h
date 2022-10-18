@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H)
 #define FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H
 #include "fdbclient/TenantEntryCache.actor.g.h"
@@ -81,7 +80,7 @@ private:
 	Future<Void> refresher;
 	Future<Void> watchRefresher;
 	Future<Void> lastTenantIdRefresher;
-	Promise<Void> setInitalWatch;
+	Promise<Void> setInitialWatch;
 	Optional<int64_t> lastTenantId;
 	Map<int64_t, TenantEntryCachePayload<T>> mapByTenantId;
 	Map<TenantName, TenantEntryCachePayload<T>> mapByTenantName;
@@ -111,7 +110,7 @@ private:
 	ACTOR static Future<Void> refreshCacheById(int64_t tenantId,
 	                                           TenantEntryCache<T>* cache,
 	                                           TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevInfo, "TenantEntryCacheIDRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
 			try {
@@ -130,14 +129,15 @@ private:
 				wait(tr->onError(e));
 			}
 		}
-		TraceEvent(SevInfo, "TenantEntryCacheIDRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
 		return Void();
 	}
 
 	ACTOR static Future<Void> refreshCacheByName(TenantName name,
 	                                             TenantEntryCache<T>* cache,
 	                                             TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevInfo, "TenantEntryCacheNameRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshStart", cache->id())
+		    .detail("Reason", static_cast<int>(reason));
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
 			try {
@@ -153,7 +153,7 @@ private:
 				wait(tr->onError(e));
 			}
 		}
-		TraceEvent(SevInfo, "TenantEntryCacheNameRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
 		return Void();
 	}
 
@@ -174,7 +174,6 @@ private:
 		    .detail("Reason", static_cast<int>(reason));
 
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
-		state bool first = true;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -182,9 +181,9 @@ private:
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Future<Void> tenantModifiedWatch = TenantMetadata::lastTenantModification().watch(tr);
 				wait(tr->commit());
-				if (first) {
-					cache->setInitalWatch.send(Void());
-					first = false;
+				TraceEvent(SevDebug, "TenantEntryCacheRefreshWatchSet", cache->id());
+				if (cache->setInitialWatch.canBeSet()) {
+					cache->setInitialWatch.send(Void());
 				}
 				wait(tenantModifiedWatch);
 				// If watch triggered then refresh the cache as tenant metadata was updated
@@ -194,7 +193,7 @@ private:
 				tr->reset();
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "TenantEntryCacheRefreshUsingWatchError", cache->id())
+					TraceEvent("TenantEntryCacheRefreshUsingWatchError", cache->id())
 					    .errorUnsuppressed(e)
 					    .suppressFor(1.0);
 				}
@@ -248,7 +247,7 @@ private:
 			} catch (Error& e) {
 				state Error err(e);
 				if (err.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "TenantEntryCacheLastTenantIdWatchError", cache->id())
+					TraceEvent("TenantEntryCacheLastTenantIdWatchError", cache->id())
 					    .errorUnsuppressed(err)
 					    .suppressFor(1.0);
 					// In case watch errors out refresh the lastTenantId in case it has changed or we would have missed
@@ -278,9 +277,7 @@ private:
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "TenantEntryCacheRefreshError", cache->id())
-					    .errorUnsuppressed(e)
-					    .suppressFor(1.0);
+					TraceEvent("TenantEntryCacheRefreshError", cache->id()).errorUnsuppressed(e).suppressFor(1.0);
 				}
 				wait(tr->onError(e));
 			}
@@ -305,7 +302,7 @@ private:
 			return Optional<TenantEntryCachePayload<T>>();
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCacheGetByIdRefresh").detail("TenantId", tenantId);
+		TraceEvent("TenantEntryCacheGetByIdRefresh").detail("TenantId", tenantId);
 
 		if (cache->refreshMode == TenantEntryCacheRefreshMode::WATCH) {
 			// Entry not found. Do a point refresh
@@ -486,7 +483,7 @@ public:
 		TraceEvent("TenantEntryCacheCreated", uid);
 	}
 
-	Future<Void> init() {
+	Future<Void> init(bool waitForInitalWatch = false) {
 		TraceEvent("TenantEntryCacheInit", uid);
 
 		Future<Void> f = refreshImpl(this, TenantEntryCacheRefreshReason::INIT);
@@ -502,7 +499,9 @@ public:
 			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* intialDelay */
 			                           TaskPriority::Worker);
 		} else if (refreshMode == TenantEntryCacheRefreshMode::WATCH) {
-			initalWatchFuture = setInitalWatch.getFuture();
+			if (waitForInitalWatch) {
+				initalWatchFuture = setInitialWatch.getFuture();
+			}
 			watchRefresher = refreshCacheUsingWatch(this, TenantEntryCacheRefreshReason::WATCH_TRIGGER);
 		}
 

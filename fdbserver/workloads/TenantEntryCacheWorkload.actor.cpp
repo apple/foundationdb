@@ -318,7 +318,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 	ACTOR static Future<Void> testCacheWatchRefresh(Database cx) {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
 		    cx, deterministicRandom()->randomUniqueID(), createPayload, TenantEntryCacheRefreshMode::WATCH);
-		wait(cache->init());
+		wait(cache->init(true));
 		// Ensure associated counter values gets updated
 		ASSERT_EQ(cache->numRefreshByInit(), 1);
 		ASSERT_GE(cache->numCacheRefreshes(), 1);
