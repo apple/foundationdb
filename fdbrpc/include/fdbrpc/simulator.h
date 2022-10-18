@@ -269,15 +269,9 @@ public:
 		}
 	};
 
-	ProcessInfo* getProcess(Endpoint const& endpoint) {
-    return getProcessByAddress(endpoint.getPrimaryAddress());
-  }
-	ProcessInfo* getCurrentProcess() {
-    return currentProcess;
-  }
-	ProcessInfo const* getCurrentProcess() const {
-    return currentProcess;
-  }
+	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
+	ProcessInfo* getCurrentProcess() { return currentProcess; }
+	ProcessInfo const* getCurrentProcess() const { return currentProcess; }
 
 	// onProcess: wait for the process to be scheduled by the runloop; a task will be created for the process.
 	virtual Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID = TaskPriority::Zero) = 0;

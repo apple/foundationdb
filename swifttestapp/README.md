@@ -32,7 +32,45 @@ This runs a bunch of "show it works" examples.
 
 We're working towards executing a complete `getVersion` in `masterserver` in Swift along side the real implementation. 
 
+## Running Simulator test-case
+
+A simple example that ends up invoking the Swift implementation of `getVersion`:
+
+```
+bin/fdbserver -r simulation --crash --logsize 1024MB -f ~/src/foundationdb/tests/fast/TxnStateStoreCycleTest.toml -s 447933818 -b off  | grep swift
+```
+
+Results in:
+
+```
+[c++][sim2+net2] configured: swift_task_enqueueGlobal_hook
+[swift][tid:139788310125504][fdbserver_swift/masterserver.swift:172](getVersion(req:result:)) Calling swift getVersion impl!
+[c++][sim2][swift_sim2_hooks.cpp:82](sim2_enqueueGlobal_hook_impl) intercepted job enqueue: 0x7f22fd9da6c0 to g_network (0x7f22fe36a000)
+[c++][sim2][sim2.actor.cpp:913](_swiftEnqueue) ready.push SWIFT JOB AS SIMULATOR TASK: job=0x7f22fd9da6c0
+[swift][tid:139788310125504][fdbserver_swift/masterserver.swift:172](getVersion(req:result:)) Calling swift getVersion impl!
+[c++][sim2][swift_sim2_hooks.cpp:82](sim2_enqueueGlobal_hook_impl) intercepted job enqueue: 0x7f22f068d7c0 to g_network (0x7f22fe36a000)
+[c++][sim2][sim2.actor.cpp:913](_swiftEnqueue) ready.push SWIFT JOB AS SIMULATOR TASK: job=0x7f22f068d7c0
+[swift][tid:139788310125504][fdbserver_swift/masterserver.swift:172](getVersion(req:result:)) Calling swift getVersion impl!
+[c++][sim2][swift_sim2_hooks.cpp:82](sim2_enqueueGlobal_hook_impl) intercepted job enqueue: 0x7f22f068e300 to g_network (0x7f22fe36a000)
+[c++][sim2][sim2.actor.cpp:913](_swiftEnqueue) ready.push SWIFT JOB AS SIMULATOR TASK: job=0x7f22f068e300
+[swift][tid:139788310125504][fdbserver_swift/masterserver.swift:172](getVersion(req:result:)) Calling swift getVersion impl!
+[c++][sim2][swift_sim2_hooks.cpp:82](sim2_enqueueGlobal_hook_impl) intercepted job enqueue: 0x7f22f068d400 to g_network (0x7f22fe36a000)
+[c++][sim2][sim2.actor.cpp:913](_swiftEnqueue) ready.push SWIFT JOB AS SIMULATOR TASK: job=0x7f22f068d400
+```
+
+
 ## Developer notes
+
+### Adding new *.swift files
+
+E.g. in flow we have swift files, don't forget to add new ones to CMake in `flow/CMakeLists.txt`:
+
+```asm
+add_library(flow_swift STATIC
+    future_support.swift
+    ...
+)
+```
 
 ### Importing reference types
 

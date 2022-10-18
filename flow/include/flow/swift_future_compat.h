@@ -40,15 +40,6 @@ using CallbackVoid = Callback<Void>;
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
-//struct SWIFT_CXX_REF_IMMORTAL CCResumeCInt {
-//	void* cc;
-//	void (*resumeWithValue)(void*, int);
-//
-//	explicit CCResumeCInt(void* cc, void (*resumeWithValue)(void*, int)) : cc(cc), resumeWithValue(resumeWithValue) {}
-//
-//	void resume(int value) { resumeWithValue(this->cc, value); }
-//};
-
 struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackCInt : Callback<int> {
 private:
 	void* _Nonnull continuationBox;
@@ -75,7 +66,7 @@ public:
     f.addCallbackAndClear(this);
   }
 
-	// TODO: virtual is an issue
+	// TODO(swift): virtual is an issue
 	void fire(int const& value) {
 		printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		Callback<int>::remove();
@@ -83,7 +74,7 @@ public:
 		resumeWithValue(continuationBox, value);
 	}
 
-	// TODO: virtual is an issue
+	// TODO(swift): virtual is an issue
 	void error(Error error) {
 		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
 		Callback<int>::remove();
@@ -92,7 +83,7 @@ public:
 	}
 	void unwait() {
 		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
-		// TODO: implement
+		// TODO(swift): implement
 	}
 };
 
@@ -116,13 +107,11 @@ public:
 		return new SwiftContinuationCallbackVoid(continuationBox, returning, throwing);
 	}
 
-//	CallbackVoid* _Nonnull cast() { return this; }
-
 	void addCallbackAndClearTo(FutureVoid f) {
     f.addCallbackAndClear(this);
   }
 
-	// TODO: virtual is an issue
+	// TODO(swift): virtual is an issue
 	void fire(Void const& value) {
 		printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		Callback<Void>::remove();
@@ -130,7 +119,7 @@ public:
 		resumeWithValue(continuationBox, value);
 	}
 
-	// TODO: virtual is an issue
+	// TODO(swift): virtual is an issue
 	void error(Error error) {
 		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
 		Callback<Void>::remove();
@@ -139,7 +128,7 @@ public:
 	}
 	void unwait() {
 		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
-		// TODO: implement
+		// TODO(swift): implement
 	}
 };
 

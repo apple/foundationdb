@@ -35,7 +35,6 @@ ACTOR template <class T>
 void networkSender(Future<T> input, Endpoint endpoint) {
 	try {
 		T value = wait(input);
-		printf("[c++][%s:%d][tid:](%s) send value -> endpoint\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint, false);
 	} catch (Error& err) {
 		// if (err.code() == error_code_broken_promise) return;

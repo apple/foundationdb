@@ -910,21 +910,16 @@ public:
 		return delay(seconds, taskID, currentProcess, true);
 	}
 	void _swiftEnqueue(void* _swiftJob) override {
-    printf("[c++][sim2][%s:%d](%s) ready.push SWIFT JOB AS SIMULATOR TASK: job=%p\n", __FILE_NAME__, __LINE__, __FUNCTION__,
-		       _swiftJob);
+		swift::Job* swiftJob = (swift::Job*)_swiftJob;
 
-	swift::Job* swiftJob = (swift::Job*)_swiftJob;
-//    Sim2::Task *orderedTask = (N2::Task *) swiftJobTask; // FIXME: figure it out
-//	auto task = Sim2::Task(time + seconds, taskID, taskCount++, machine, f);
+		auto machine = currentProcess;
+		auto taskID = TaskPriority::DefaultOnMainThread; // FIXME(swift): make a conversion
 
-	auto machine = currentProcess;
-	auto taskID = TaskPriority::DefaultOnMainThread; // FIXME(swift): make a conversion
-
-    mutex.enter();
-	auto task = Sim2::Task(time, taskID, taskCount++, machine, swiftJob);
-    tasks.push(task);
-    mutex.leave();
-  }
+		mutex.enter();
+		auto task = Sim2::Task(time, taskID, taskCount++, machine, swiftJob);
+		tasks.push(task);
+		mutex.leave();
+	}
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
@@ -2232,7 +2227,6 @@ public:
 		  : taskID(taskID), time(time), stable(stable), machine(machine),
 		    action(std::move(action)),
 			swiftJob(nullptr) {
-			printf("[c++][%s:%d](%s) task init 1 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		}
 
 		// Swift entry point, ignore the action and do inline run of job instead.
@@ -2240,19 +2234,16 @@ public:
 		  : taskID(taskID), time(time), stable(stable), machine(machine),
 		    action(Promise<Void>()),
 			swiftJob(swiftJob) {
-			printf("[c++][%s:%d](%s) task init 2 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		}
 
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
 		  : taskID(taskID), time(time), stable(stable), machine(machine), swiftJob(nullptr) {
 			future = action.getFuture();
-			printf("[c++][%s:%d](%s) task init 3 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		}
 		Task(Task&& rhs) noexcept
 		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
 		    action(std::move(rhs.action)),
 		    swiftJob(nullptr) {
-			printf("[c++][%s:%d](%s) task init 4 = %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		}
 		void operator=(Task const& rhs) {
 			taskID = rhs.taskID;
@@ -2285,7 +2276,6 @@ public:
 	};
 
 	void execTask(struct Task& t) {
-		printf("[c++][sim2][%s:%d](%s) execTask ...\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 		if (t.machine->failed) {
 			t.action.send(Never());
 		} else {
@@ -2299,8 +2289,8 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
+				// TODO(swift): I wonder if there
 				if (t.swiftJob) {
-					printf("[c++][sim2][%s:%d](%s) execTask AS SWIFT JOB ...\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 					swift_job_run(t.swiftJob, ExecutorRef::generic());
 				} else {
 					t.action.send(Void());

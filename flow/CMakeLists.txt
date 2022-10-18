@@ -108,11 +108,10 @@ generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
 )
 
 add_library(flow_swift STATIC
-        future_support.swift
-        clock_support.swift
-        SwiftFileA.swift
-        SwiftFileB.swift
-        )
+    future_support.swift
+    clock_support.swift
+    SwiftFileA.swift
+    SwiftFileB.swift)
 
 target_include_directories(flow_swift PUBLIC
     "${CMAKE_BINARY_DIR}/flow/include"
@@ -144,6 +143,6 @@ generate_cxx_compat_header(flow_swift "Flow")
 
 add_dependencies(flow_swift flow_actors)
 add_dependencies(flow_swift boost_targetProject)
-# This does not work! (see rdar://99107402)
+# TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is released:
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(flow flow_swift)
