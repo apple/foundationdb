@@ -121,37 +121,33 @@ public:
 	ACTOR static Future<Void> monitorStorageUsage(TenantCache* tenantCache) {
 		TraceEvent(SevInfo, "StartingTenantCacheStorageUsageMonitor", tenantCache->id()).log();
 
-		state ReadYourWritesTransaction tr(tenantCache->dbcx());
-
 		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_REFRESH_INTERVAL;
 		state double lastTenantListFetchTime = now();
 
 		loop {
-			try {
-				if (now() - lastTenantListFetchTime > (2 * refreshInterval)) {
-					TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshDelay", tenantCache->id()).log();
-				}
-
-				state std::vector<Key> tenantPrefixList = tenantCache->getTenantPrefixList();
-
-				state int i;
-				for (i = 0; i < tenantPrefixList.size(); i++) {
-					state int64_t size =
-					    wait(tr.getEstimatedRangeSizeBytes(KeyRangeRef::entireRangeWithPrefix(tenantPrefixList[i])));
-					tenantCache->updateStorageUsage(tenantPrefixList[i], size);
-				}
-
-				lastTenantListFetchTime = now();
-				tr.reset();
-				wait(delay(refreshInterval));
-			} catch (Error& e) {
-				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id())
-					    .errorUnsuppressed(e)
-					    .suppressFor(1.0);
-				}
-				wait(tr.onError(e));
+			if (now() - lastTenantListFetchTime > (2 * refreshInterval)) {
+				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshDelay", tenantCache->id()).log();
 			}
+
+			state std::vector<std::pair<KeyRef, TenantName>> tenantList = tenantCache->getTenantList();
+			state int i;
+			for (i = 0; i < tenantList.size(); i++) {
+				state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenantList[i].second);
+				try {
+					state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
+					tenantCache->updateStorageUsage(tenantList[i].first, size);
+				} catch (Error& e) {
+					if (e.code() != error_code_actor_cancelled) {
+						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id())
+						    .errorUnsuppressed(e)
+						    .suppressFor(1.0);
+					}
+					wait(tr.onError(e));
+				}
+			}
+
+			lastTenantListFetchTime = now();
+			wait(delay(refreshInterval));
 		}
 	}
 };
@@ -208,12 +204,12 @@ int TenantCache::cleanup() {
 	return tenantsRemoved;
 }
 
-std::vector<Key> TenantCache::getTenantPrefixList() const {
-	std::vector<Key> prefixes;
+std::vector<std::pair<KeyRef, TenantName>> TenantCache::getTenantList() const {
+	std::vector<std::pair<KeyRef, TenantName>> tenants;
 	for (const auto& [prefix, entry] : tenantCache) {
-		prefixes.emplace_back(prefix);
+		tenants.push_back({ prefix, entry->name() });
 	}
-	return prefixes;
+	return tenants;
 }
 
 void TenantCache::updateStorageUsage(KeyRef prefix, int64_t size) {
