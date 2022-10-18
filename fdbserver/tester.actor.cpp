@@ -840,7 +840,6 @@ ACTOR Future<Void> clearData(Database cx) {
 	state UID debugID = debugRandom()->randomUniqueID();
 	tr.debugTransaction(debugID);
 
-	const_cast<ServerKnobs*>(SERVER_KNOBS)->MAX_WRITE_TRANSACTION_LIFE_VERSIONS = 5 * SERVER_KNOBS->VERSIONS_PER_SECOND;
 	loop {
 		try {
 			TraceEvent("TesterClearingDatabaseStart", debugID).log();
