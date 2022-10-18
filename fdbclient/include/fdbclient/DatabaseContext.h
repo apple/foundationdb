@@ -388,10 +388,14 @@ public:
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
-	Future<bool> blobbifyRange(KeyRange range);
-	Future<bool> unblobbifyRange(KeyRange range);
-	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
-	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
+	Future<bool> blobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
+	Future<bool> unblobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
+	                                                                int rangeLimit,
+	                                                                Optional<TenantName> tenantName = {});
+	Future<Version> verifyBlobRange(const KeyRange& range,
+	                                Optional<Version> version,
+	                                Optional<TenantName> tenantName = {});
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,

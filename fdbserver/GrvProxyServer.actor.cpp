@@ -62,6 +62,7 @@ struct GrvProxyStats {
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
 
+	// These latency bands and samples ignore latency injected by the GrvProxyTransactionTagThrottler
 	LatencyBands grvLatencyBands;
 	LatencySample grvLatencySample; // GRV latency metric sample of default priority
 	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
@@ -692,7 +693,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 
 	double end = g_network->timer();
 	for (GetReadVersionRequest const& request : requests) {
-		double duration = end - request.requestTime();
+		double duration = end - request.requestTime() - request.proxyTagThrottledDuration;
 		if (request.priority == TransactionPriority::BATCH) {
 			stats->grvBatchLatencySample.addMeasurement(duration);
 		}

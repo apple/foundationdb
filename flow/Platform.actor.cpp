@@ -2126,7 +2126,7 @@ static void mprotectSafe(void* p, size_t s, int prot) {
 }
 
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
-	if (guardPages) {
+	if (guardPages && FLOW_KNOBS->FAST_ALLOC_ALLOW_GUARD_PAGES) {
 		static size_t pageSize = sysconf(_SC_PAGESIZE);
 		length = RightAlign(length, pageSize);
 		length += 2 * pageSize; // Map enough for the guard pages
