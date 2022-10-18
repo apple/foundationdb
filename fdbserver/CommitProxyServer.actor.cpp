@@ -2582,6 +2582,7 @@ ACTOR static Future<Void> deleteIdempotencyKV(Database db, Version version, uint
 
 namespace {
 struct ExpireServerEntry {
+	int64_t timeReceived;
 	int expectedCount = 0;
 	int receivedCount = 0;
 	bool initialized = false;
@@ -2617,17 +2618,34 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 	state ActorCollection actors;
 	state IdempotencyKey key;
 	state ExpireServerEntry* status = nullptr;
+	state Future<Void> purgeOld = Void();
 	loop {
 		choose {
 			when(ExpireIdempotencyIdRequest req = waitNext(expireIdempotencyId.getFuture())) {
-				key = IdempotencyKey{req.commitVersion, req.batchIndexHighByte};
+				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
 				status = &idStatus[key];
 				status->receivedCount += 1;
 			}
 			when(ExpireIdempotencyKeyValuePairRequest req = waitNext(expireIdempotencyKeyValuePair.getFuture())) {
-				key = IdempotencyKey{req.commitVersion, req.batchIndexHighByte};
+				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
 				status = &idStatus[key];
 				status->expectedCount = req.idempotencyIdCount;
+			}
+			when(wait(purgeOld)) {
+				purgeOld = delay(10);
+				int64_t purgeBefore = now() - 10;
+				for (auto iter = idStatus.begin(); iter != idStatus.end();) {
+					if (check_yield()) {
+						break;
+					}
+					if (iter->second.timeReceived < purgeBefore) {
+						iter = idStatus.erase(iter);
+					} else {
+						++iter;
+					}
+				}
+				wait(yield());
+				continue;
 			}
 		}
 		if (status->initialized) {
@@ -2636,15 +2654,7 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 				idStatus.erase(key);
 			}
 		} else {
-			// All of this "proactively deleting idempotency ids" stuff is
-			// done on a best effort basis, so it's ok if this key is
-			// deleted from the in-memory map too early, or if this process
-			// dies altogether.
-			actors.add(map(delay(10), [&](const Void&) {
-				// This capture is ok because actors gets destroyed before idStatus
-				idStatus.erase(key);
-				return Void();
-			}));
+			status->timeReceived = now();
 			status->initialized = true;
 		}
 	}
@@ -2668,7 +2678,6 @@ ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)));
-				fmt::print("idmpKeySize: {}\n", idmpKeySize);
 				if (idmpKeySize <= SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET) {
 					break;
 				}
