@@ -22,6 +22,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/ApiVersion.h"
@@ -669,7 +670,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 				state bool containsSystemKeys = false;
 				for (auto r : self->backupRanges) {
-					if (!r.intersects(getSystemBackupRanges())) {
+					if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
 						restoreRange.push_back_deep(
 						    restoreRange.arena(),
 						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));

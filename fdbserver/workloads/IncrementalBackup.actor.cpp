@@ -231,7 +231,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state bool containsSystemKeys = false;
 			for (auto r : backupRanges) {
-				if (!r.intersects(getSystemBackupRanges())) {
+				if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					containsSystemKeys = true;

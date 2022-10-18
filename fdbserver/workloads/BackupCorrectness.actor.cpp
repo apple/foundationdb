@@ -695,7 +695,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
 				bool hasSystemRanges = false;
 				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (!self->restoreRanges[i].intersects(getSystemBackupRanges())) {
+					if (!SERVER_KNOBS->ENABLE_ENCRYPTION ||
+					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {
 						hasSystemRanges = true;

@@ -24,6 +24,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -113,31 +114,43 @@ struct RestoreBackupWorkload : TestWorkload {
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
-		// restore system keys
-		VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
-		state std::vector<Future<Version>> restores;
-		for (int i = 0; i < systemBackupRanges.size(); i++) {
-			restores.push_back((self->backupAgent.restore(cx,
-			                                              cx,
-			                                              "system_restore"_sr,
-			                                              Key(self->backupContainer->getURL()),
-			                                              self->backupContainer->getProxy(),
-			                                              WaitForComplete::True,
-			                                              ::invalidVersion,
-			                                              Verbose::True,
-			                                              systemBackupRanges[i])));
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+			// restore system keys
+			VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
+			state std::vector<Future<Version>> restores;
+			for (int i = 0; i < systemBackupRanges.size(); i++) {
+				restores.push_back((self->backupAgent.restore(cx,
+				                                              cx,
+				                                              "system_restore"_sr,
+				                                              Key(self->backupContainer->getURL()),
+				                                              self->backupContainer->getProxy(),
+				                                              WaitForComplete::True,
+				                                              ::invalidVersion,
+				                                              Verbose::True,
+				                                              systemBackupRanges[i])));
+			}
+			waitForAll(restores);
+			// restore non-system keys
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       self->tag,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True,
+			                                       normalKeys)));
+		} else {
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       self->tag,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True)));
 		}
-		waitForAll(restores);
-		// restore non-system keys
-		wait(success(self->backupAgent.restore(cx,
-		                                       cx,
-		                                       self->tag,
-		                                       Key(self->backupContainer->getURL()),
-		                                       self->backupContainer->getProxy(),
-		                                       WaitForComplete::True,
-		                                       ::invalidVersion,
-		                                       Verbose::True,
-		                                       normalKeys)));
+
 		return Void();
 	}
 
