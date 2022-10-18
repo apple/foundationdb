@@ -156,6 +156,9 @@ enum {
 	OPT_RESTORE_CLUSTERFILE_ORIG,
 	OPT_RESTORE_BEGIN_VERSION,
 	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
+	// The two restore options below allow callers of fdbrestore to divide a normal restore into one which restores just
+	// the system keyspace and another that restores just the user key space. This is unlike the backup command where
+	// all keys (both system and user) will be backed up together
 	OPT_RESTORE_USER_DATA,
 	OPT_RESTORE_SYSTEM_DATA,
 
@@ -1192,11 +1195,11 @@ static void printRestoreUsage(bool devhelp) {
 	printf("                 The cluster file for the original database from which the backup was created.  The "
 	       "original database\n");
 	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
-	printf("  --user-data"
+	printf("  --user-data\n"
 	       "                  Restore only the user keyspace. This option should NOT be used alongside "
 	       "--system-metadata (below) and CANNOT be used alongside other specified key ranges.\n");
 	printf(
-	    "  --system-metadata"
+	    "  --system-metadata\n"
 	    "                 Restore only the relevant system keyspace (currently only tenant metadata). This option "
 	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
