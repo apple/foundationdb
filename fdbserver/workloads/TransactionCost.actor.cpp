@@ -115,10 +115,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return Void();
 		}
 
-		int64_t expectedFinalCost() const override {
-			// Clears are not measured in Transaction::getTotalCost
-			return 0;
-		}
+		int64_t expectedFinalCost() const override { return 1; }
 	};
 
 	class ReadRangeTest : public ITest {
