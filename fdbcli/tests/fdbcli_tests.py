@@ -105,10 +105,22 @@ def maintenance(logger):
 
 @enable_logging()
 def quota(logger):
+    # Should be a noop
+    command = 'quota clear green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == ''
+
     command = 'quota get green total_throughput'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
     assert output == '<empty>'
+
+    # Ignored update
+    command = 'quota set red total_throughput 49152'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == ''
 
     command = 'quota set green total_throughput 32768'
     output = run_fdbcli_command(command)
@@ -139,6 +151,11 @@ def quota(logger):
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
     assert output == '<empty>'
+
+    # Too few arguments, should log help message
+    command = 'quota get green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
 
 @enable_logging()
 def setclass(logger):
@@ -1077,6 +1094,5 @@ if __name__ == '__main__':
         coordinators()
         exclude()
         killall()
-        quota()
         # TODO: fix the failure where one process is not available after setclass call
         # setclass()
