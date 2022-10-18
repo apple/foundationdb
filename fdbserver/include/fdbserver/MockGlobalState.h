@@ -45,7 +45,10 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 		return to == MockShardStatus::COMPLETED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
 	case MockShardStatus::COMPLETED:
 		return to == MockShardStatus::EMPTY;
+	default:
+		ASSERT(false);
 	}
+	return false;
 }
 
 class MockStorageServer {

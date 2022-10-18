@@ -243,7 +243,7 @@ class DDTxnProcessorImpl {
 	    MoveKeysLock moveKeysLock,
 	    std::vector<Optional<Key>> remoteDcIds,
 	    const DDEnabledState* ddEnabledState,
-	    bool skipDDModeCheck = false) {
+	    SkipDDModeCheck skipDDModeCheck) {
 		state Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
 		state Key beginKey = allKeys.begin;
 
@@ -256,7 +256,7 @@ class DDTxnProcessorImpl {
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
 		state int numDataMoves = 0;
 
-		CODE_PROBE(skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
+		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
 		loop {
@@ -627,7 +627,7 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
     const DDEnabledState* ddEnabledState,
     SkipDDModeCheck skipDDModeCheck) {
 	return DDTxnProcessorImpl::getInitialDataDistribution(
-	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, (bool)skipDDModeCheck);
+	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, skipDDModeCheck);
 }
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
