@@ -425,7 +425,7 @@ if __name__ == "__main__":
         print("data-dir: {}".format(test.data))
         print("cluster-file: {}".format(test.etc.joinpath("fdb.cluster")))
         errcode = test.exec_test(args)
-        if not test.check_cluster_logs():
+        if not test.cluster.check_cluster_logs():
             errcode = 1 if errcode == 0 else errcode
         test.dump_warnings_in_logs()
         if errcode != 0 and not args.disable_log_dump:
