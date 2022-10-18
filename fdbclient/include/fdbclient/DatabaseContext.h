@@ -554,8 +554,17 @@ public:
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
+
+	// Blob Granule Read metrics. Omit from logging if not used.
+	bool anyBGReads;
+	CounterCollection ccBG;
 	Counter bgReadInputBytes;
 	Counter bgReadOutputBytes;
+	Counter bgReadSnapshotRows;
+	Counter bgReadRowsCleared;
+	Counter bgReadRowsInserted;
+	Counter bgReadRowsUpdated;
+	ContinuousSample<double> bgLatencies, bgGranulesPerRequest;
 
 	// Change Feed metrics. Omit change feed metrics from logging if not used
 	bool usedAnyChangeFeeds;
@@ -568,7 +577,7 @@ public:
 	Counter feedPopsFallback;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
+	    bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
@@ -597,7 +606,6 @@ public:
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 	bool blobGranuleNoMaterialize = false;
-	bool anyBlobGranuleRequests = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

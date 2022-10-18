@@ -689,24 +689,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
 			    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
 			    .detail("NumLocalityCacheEntries", cx->locationCache.size());
-			if (cx->anyBlobGranuleRequests) {
-				ev.detail("MeanBGLatency", cx->bgLatencies.mean())
-				    .detail("MedianBGLatency", cx->bgLatencies.median())
-				    .detail("MaxBGLatency", cx->bgLatencies.max())
-				    .detail("MeanBGGranulesPerRequest", cx->bgGranulesPerRequest.mean())
-				    .detail("MedianBGGranulesPerRequest", cx->bgGranulesPerRequest.median())
-				    .detail("MaxBGGranulesPerRequest", cx->bgGranulesPerRequest.max());
-			}
 		}
-
-		cx->latencies.clear();
-		cx->readLatencies.clear();
-		cx->GRVLatencies.clear();
-		cx->commitLatencies.clear();
-		cx->mutationsPerCommit.clear();
-		cx->bytesPerCommit.clear();
-		cx->bgLatencies.clear();
-		cx->bgGranulesPerRequest.clear();
 
 		if (cx->usedAnyChangeFeeds && logTraces) {
 			TraceEvent feedEv("ChangeFeedClientMetrics", cx->dbId);
@@ -720,6 +703,37 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 
 			cx->ccFeed.logToTraceEvent(feedEv);
 		}
+
+		if (cx->anyBGReads && logTraces) {
+			TraceEvent bgReadEv("BlobGranuleReadMetrics", cx->dbId);
+
+			bgReadEv.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Cluster",
+			            cx->getConnectionRecord()
+			                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
+			                : "")
+			    .detail("Internal", cx->internal);
+
+			// add counters
+			cx->ccBG.logToTraceEvent(bgReadEv);
+
+			// add latencies
+			bgReadEv.detail("MeanBGLatency", cx->bgLatencies.mean())
+			    .detail("MedianBGLatency", cx->bgLatencies.median())
+			    .detail("MaxBGLatency", cx->bgLatencies.max())
+			    .detail("MeanBGGranulesPerRequest", cx->bgGranulesPerRequest.mean())
+			    .detail("MedianBGGranulesPerRequest", cx->bgGranulesPerRequest.median())
+			    .detail("MaxBGGranulesPerRequest", cx->bgGranulesPerRequest.max());
+		}
+
+		cx->latencies.clear();
+		cx->readLatencies.clear();
+		cx->GRVLatencies.clear();
+		cx->commitLatencies.clear();
+		cx->mutationsPerCommit.clear();
+		cx->bytesPerCommit.clear();
+		cx->bgLatencies.clear();
+		cx->bgGranulesPerRequest.clear();
 
 		lastLogged = now();
 	}
@@ -1526,17 +1540,21 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), bgReadInputBytes("BGReadInputBytes", cc),
-    bgReadOutputBytes("BGReadOutputBytes", cc), usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"),
-    feedStreamStarts("FeedStreamStarts", ccFeed), feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed),
-    feedErrors("FeedErrors", ccFeed), feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed),
-    feedPops("FeedPops", ccFeed), feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
-    lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), anyBGReads(false),
+    ccBG("BlobGranuleReadMetrics"), bgReadInputBytes("BGReadInputBytes", ccBG),
+    bgReadOutputBytes("BGReadOutputBytes", ccBG), bgReadSnapshotRows("BGReadSnapshotRows", ccBG),
+    bgReadRowsCleared("BGReadRowsCleared", ccBG), bgReadRowsInserted("BGReadRowsInserted", ccBG),
+    bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(1000), bgGranulesPerRequest(1000),
+    usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
+    feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000), commitLatencies(1000),
+    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0), sharedStatePtr(nullptr),
+    lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0),
+    lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 
@@ -1826,14 +1844,17 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), bgReadInputBytes("BGReadInputBytes", cc),
-    bgReadOutputBytes("BGReadOutputBytes", cc), usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"),
-    feedStreamStarts("FeedStreamStarts", ccFeed), feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed),
-    feedErrors("FeedErrors", ccFeed), feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed),
-    feedPops("FeedPops", ccFeed), feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), sharedStatePtr(nullptr), transactionTracingSample(false),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), anyBGReads(false),
+    ccBG("BlobGranuleReadMetrics"), bgReadInputBytes("BGReadInputBytes", ccBG),
+    bgReadOutputBytes("BGReadOutputBytes", ccBG), bgReadSnapshotRows("BGReadSnapshotRows", ccBG),
+    bgReadRowsCleared("BGReadRowsCleared", ccBG), bgReadRowsInserted("BGReadRowsInserted", ccBG),
+    bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(1000), bgGranulesPerRequest(1000),
+    usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
+    feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000), commitLatencies(1000),
+    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), sharedStatePtr(nullptr),
+    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -8088,8 +8109,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	}
 	if (blobGranuleMapping.more) {
 		if (BG_REQUEST_DEBUG) {
-			fmt::print(
-			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
+			fmt::print("BG Mapping for [{0} - {1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
 		TraceEvent(SevWarn, "BGMappingTooLarge")
 		    .detail("Range", range)
@@ -8302,7 +8322,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		}
 	}
 
-	self->trState->cx->anyBlobGranuleRequests = true;
+	self->trState->cx->anyBGReads = true;
 	self->trState->cx->bgGranulesPerRequest.addSample(results.size());
 	self->trState->cx->bgLatencies.addSample(now() - startTime);
 
@@ -8344,8 +8364,13 @@ Transaction::summarizeBlobGranules(const KeyRange& range, Optional<Version> summ
 }
 
 void Transaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stats) {
+	trState->cx->anyBGReads = true;
 	trState->cx->bgReadInputBytes += stats.inputBytes;
 	trState->cx->bgReadOutputBytes += stats.outputBytes;
+	trState->cx->bgReadSnapshotRows += stats.snapshotRows;
+	trState->cx->bgReadRowsCleared += stats.rowsCleared;
+	trState->cx->bgReadRowsInserted += stats.rowsInserted;
+	trState->cx->bgReadRowsUpdated += stats.rowsUpdated;
 }
 
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
