@@ -35,7 +35,7 @@ static void bench_populate(benchmark::State& state) {
 	size_t items = state.range(0);
 	size_t size = state.range(1);
 	auto kv = getKV(size, size);
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		Standalone<VectorRef<MutationRef>> mutations;
 		mutations.reserve(mutations.arena(), items);
 		for (int i = 0; i < items; ++i) {

@@ -1,0 +1,29 @@
+[[test]]
+title = 'API Correctness Single Threaded'
+minClients = 1
+maxClients = 3
+minDatabases = 1
+maxDatabases = 3
+multiThreaded = false
+disableClientBypass = true
+
+    [[test.workload]]
+    name = 'ApiCorrectness'
+    minKeyLength = 1
+    maxKeyLength = 64
+    minValueLength = 1
+    maxValueLength = 1000
+    maxKeysPerTransaction = 50
+    initialSize = 100
+    numRandomOperations = 100
+    readExistingKeysRatio = 0.9
+
+    [[test.workload]]
+    name = 'AtomicOpsCorrectness'
+    initialSize = 0
+    numRandomOperations = 100
+
+    [[test.workload]]
+    name = 'WatchAndWait'
+    initialSize = 0
+    numRandomOperations = 10

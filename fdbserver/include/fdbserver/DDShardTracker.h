@@ -19,7 +19,7 @@
  */
 #ifndef FOUNDATIONDB_DDSHARDTRACKER_H
 #define FOUNDATIONDB_DDSHARDTRACKER_H
-#include "DataDistribution.actor.h"
+#include "fdbserver/DataDistribution.actor.h"
 
 // send request/signal to DDTracker through interface
 // call synchronous method from components outside DDShardTracker

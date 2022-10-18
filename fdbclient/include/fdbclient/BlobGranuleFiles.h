@@ -43,14 +43,16 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
                                                     const KeyRangeRef& keyRange,
                                                     Version beginVersion,
                                                     Version readVersion,
-                                                    ReadBlobGranuleContext granuleContext);
+                                                    ReadBlobGranuleContext granuleContext,
+                                                    GranuleMaterializeStats& stats);
 
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,
                                    Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
-                                   StringRef deltaFileData[]);
+                                   StringRef deltaFileData[],
+                                   GranuleMaterializeStats& stats);
 
 std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix);
 

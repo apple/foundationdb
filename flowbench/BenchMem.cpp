@@ -31,7 +31,7 @@ static void bench_memcmp(benchmark::State& state) {
 	memset(b2.get(), 0, kLength);
 	b2.get()[kLength - 1] = 1;
 
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		benchmark::DoNotOptimize(memcmp(b1.get(), b2.get(), kLength));
 	}
 }
@@ -42,7 +42,7 @@ static void bench_memcpy(benchmark::State& state) {
 	std::unique_ptr<char[]> b2{ new char[kLength] };
 	memset(b1.get(), 0, kLength);
 
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		benchmark::DoNotOptimize(memcpy(b2.get(), b1.get(), kLength));
 	}
 }

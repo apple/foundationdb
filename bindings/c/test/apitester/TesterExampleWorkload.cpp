@@ -35,8 +35,8 @@ public:
 	void start() override { setAndGet(NO_OP_TASK); }
 
 	void setAndGet(TTaskFct cont) {
-		fdb::Key key = keyPrefix + random.randomStringLowerCase(10, 100);
-		fdb::Value value = random.randomStringLowerCase(10, 1000);
+		fdb::Key key = keyPrefix + random.randomByteStringLowerCase(10, 100);
+		fdb::Value value = random.randomByteStringLowerCase(10, 1000);
 		execTransaction(
 		    [key, value](auto ctx) {
 			    ctx->tx().set(key, value);

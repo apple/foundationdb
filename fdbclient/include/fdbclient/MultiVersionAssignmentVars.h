@@ -28,16 +28,24 @@ template <class T>
 class AbortableSingleAssignmentVar final : public ThreadSingleAssignmentVar<T>, public ThreadCallback {
 public:
 	AbortableSingleAssignmentVar(ThreadFuture<T> future, ThreadFuture<Void> abortSignal)
-	  : future(future), abortSignal(abortSignal), hasBeenSet(false), callbacksCleared(false) {
+	  : future(future), abortSignal(abortSignal), hasBeenSet(false), callbacksCleared(true) {
 		int userParam;
 
 		ThreadSingleAssignmentVar<T>::addref();
 		ThreadSingleAssignmentVar<T>::addref();
 
-		// abortSignal comes first, because otherwise future could immediately call fire/error and attempt to remove
-		// this callback from abortSignal prematurely
 		abortSignal.callOrSetAsCallback(this, userParam, 0);
 		future.callOrSetAsCallback(this, userParam, 0);
+
+		// One of the signals could be already fired
+		// Make sure that the other is cancelled, and the references removed
+		lock.enter();
+		callbacksCleared = false;
+		bool hasBeenSet_ = hasBeenSet;
+		lock.leave();
+		if (hasBeenSet_) {
+			cancelCallbacks();
+		}
 	}
 
 	void cancel() override {
@@ -104,12 +112,28 @@ private:
 			callbacksCleared = true;
 			lock.leave();
 
-			future.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this
-			                           // callback gets destroyed
-			future.getPtr()->cancel();
+			bool notificationRequired = true;
+
+			if (future.clearCallback(this)) {
+				ThreadSingleAssignmentVar<T>::delref();
+			} else {
+				notificationRequired = false;
+				future.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this
+				                           // callback gets destroyed
+				future.getPtr()->cancel();
+			}
 
 			if (abortSignal.clearCallback(this)) {
 				ThreadSingleAssignmentVar<T>::delref();
+			} else {
+				notificationRequired = false;
+			}
+
+			if (notificationRequired) {
+				// The future has been cancelled before any of the signals were
+				// fired. Notify the futures about the cancellation
+				ASSERT(!hasBeenSet);
+				ThreadSingleAssignmentVar<T>::sendError(operation_cancelled());
 			}
 		} else {
 			lock.leave();

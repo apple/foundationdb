@@ -48,7 +48,8 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
 ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
                                              std::vector<RestoreFileFR>* pRangeFiles,
                                              Key url,
-                                             Optional<std::string> proxy);
+                                             Optional<std::string> proxy,
+                                             Optional<Database> cx);
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerData> self,
                                                    Database cx,
@@ -335,7 +336,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	// Build range versions: version of key ranges in range file
 	state KeyRangeMap<Version> rangeVersions(minRangeVersion, allKeys.end);
 	if (SERVER_KNOBS->FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE) {
-		wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url, request.proxy));
+		wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url, request.proxy, cx));
 	} else {
 		// Debug purpose, dump range versions
 		auto ranges = rangeVersions.ranges();
@@ -657,12 +658,12 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
 	    .detail("SlotSize", slotSize);
 
 	std::set<Key> keyrangeSplitter; // unique key to split key range for appliers
-	keyrangeSplitter.insert(normalKeys.begin); // First slot
+	keyrangeSplitter.insert(allKeys.begin); // First slot
 	TraceEvent("FastRestoreControllerPhaseCalculateApplierKeyRanges")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("CumulativeSize", cumulativeSize)
 	    .detail("Slot", 0)
-	    .detail("LowerBoundKey", normalKeys.begin);
+	    .detail("LowerBoundKey", allKeys.begin);
 	int slotIdx = 1;
 	while (cumulativeSize < batchData->samplesSize) {
 		IndexedSet<Key, int64_t>::iterator lowerBound = batchData->samples.index(cumulativeSize);
@@ -774,7 +775,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
 
 	state VectorRef<KeyRangeRef> restoreRanges;
 	restoreRanges.add(request.range);
-	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion, restoreRanges));
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion, cx, restoreRanges));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreControllerPhaseCollectBackupFiles")
@@ -843,12 +844,13 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
 // set (beginKey, endKey) and file->version to pRangeVersions
 ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions,
                                              RestoreFileFR* file,
-                                             Reference<IBackupContainer> bc) {
+                                             Reference<IBackupContainer> bc,
+                                             Optional<Database> cx) {
 	TraceEvent("FastRestoreControllerDecodeRangeVersion").detail("File", file->toString());
 	RangeFile rangeFile = { file->version, (uint32_t)file->blockSize, file->fileName, file->fileSize };
 
 	// First and last key are the range for this file: endKey is exclusive
-	KeyRange fileRange = wait(bc->getSnapshotFileKeyRange(rangeFile));
+	KeyRange fileRange = wait(bc->getSnapshotFileKeyRange(rangeFile, cx));
 	TraceEvent("FastRestoreControllerInsertRangeVersion")
 	    .detail("DecodedRangeFile", file->fileName)
 	    .detail("KeyRange", fileRange)
@@ -883,7 +885,8 @@ ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersion
 ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
                                              std::vector<RestoreFileFR>* pRangeFiles,
                                              Key url,
-                                             Optional<std::string> proxy) {
+                                             Optional<std::string> proxy,
+                                             Optional<Database> cx) {
 	if (!g_network->isSimulated()) {
 		TraceEvent(SevError, "ExpensiveBuildRangeVersions")
 		    .detail("Reason", "Parsing all range files is slow and memory intensive");
@@ -896,7 +899,7 @@ ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersion
 	state int fileIndex = 0;
 	state std::vector<Future<Void>> fInsertRangeVersions;
 	for (; fileIndex < pRangeFiles->size(); ++fileIndex) {
-		fInsertRangeVersions.push_back(insertRangeVersion(pRangeVersions, &pRangeFiles->at(fileIndex), bc));
+		fInsertRangeVersions.push_back(insertRangeVersion(pRangeVersions, &pRangeFiles->at(fileIndex), bc, cx));
 	}
 
 	wait(waitForAll(fInsertRangeVersions));

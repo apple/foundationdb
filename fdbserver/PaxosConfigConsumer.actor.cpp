@@ -53,10 +53,18 @@ class GetCommittedVersionQuorum {
 	Version largestCompactedResponse{ 0 };
 	// Last durably committed version.
 	Version lastSeenVersion;
+	// Largest compacted version on the existing ConfigNodes.
+	Version largestCompacted;
 	size_t totalRepliesReceived{ 0 };
 	size_t maxAgreement{ 0 };
+	// Stores the largest live version out of all the responses.
+	Version largestLive{ 0 };
 	// Stores the largest committed version out of all responses.
 	Version largestCommitted{ 0 };
+	bool allowSpecialCaseRollforward_{ false };
+	// True if a quorum has zero as their committed version. See explanation
+	// comment below.
+	bool specialZeroQuorum{ false };
 
 	// Sends rollback/rollforward messages to any nodes that are not up to date
 	// with the latest committed version as determined by the quorum. Should
@@ -67,9 +75,18 @@ class GetCommittedVersionQuorum {
 	                                     Version lastCompacted,
 	                                     ConfigFollowerInterface cfi) {
 		state Version target = quorumVersion.lastCommitted;
+		// TraceEvent("ConsumerUpdateNodeStart")
+		// 		.detail("NodeAddress", cfi.address())
+		// 		.detail("Target", target)
+		// 		.detail("NodeVersionLastCommitted", nodeVersion.lastCommitted)
+		// 		.detail("NodeVersionSecondToLastCommitted", nodeVersion.secondToLastCommitted)
+		// 		.detail("QuorumVersionLastCommitted", quorumVersion.lastCommitted)
+		// 		.detail("QuorumVersionSecondToLastCommitted", quorumVersion.secondToLastCommitted)
+		// 		.detail("LargestCompacted", self->largestCompacted);
 		if (nodeVersion.lastCommitted == target) {
 			return Void();
 		}
+
 		if (nodeVersion.lastCommitted < target) {
 			state Optional<Version> rollback;
 			if (nodeVersion.lastCommitted > quorumVersion.secondToLastCommitted) {
@@ -83,7 +100,7 @@ class GetCommittedVersionQuorum {
 				// On the other hand, if the node is on an older committed
 				// version, it's possible the version it is on was never made
 				// durable. To be safe, roll it back by one version.
-				rollback = std::max(nodeVersion.lastCommitted - 1, Version{ 0 });
+				rollback = std::max(nodeVersion.lastCommitted - 1, self->largestCompacted);
 			}
 
 			if (rollback.present()) {
@@ -118,18 +135,34 @@ class GetCommittedVersionQuorum {
 				                                       ConfigFollowerGetChangesRequest{ lastSeenVersion, target }),
 				                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 
+				// TraceEvent("ConsumerUpdateNodeSendingRollforward")
+				// 		.detail("NodeAddress", cfi.address())
+				// 		.detail("RollbackTo", rollback)
+				// 		.detail("LastKnownCommitted", nodeVersion.lastCommitted)
+				// 		.detail("Target", target)
+				// 		.detail("ChangesSize", reply.changes.size())
+				// 		.detail("AnnotationsSize", reply.annotations.size())
+				// 		.detail("LargestCompacted", self->largestCompactedResponse)
+				// 		.detail("SpecialZeroQuorum", self->specialZeroQuorum);
 				if (cfi.hostname.present()) {
 					wait(timeoutError(
-					    retryGetReplyFromHostname(
-					        ConfigFollowerRollforwardRequest{
-					            rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations },
-					        cfi.hostname.get(),
-					        WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD),
+					    retryGetReplyFromHostname(ConfigFollowerRollforwardRequest{ rollback,
+					                                                                nodeVersion.lastCommitted,
+					                                                                target,
+					                                                                reply.changes,
+					                                                                reply.annotations,
+					                                                                self->specialZeroQuorum },
+					                              cfi.hostname.get(),
+					                              WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD),
 					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 				} else {
 					wait(timeoutError(
-					    cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
-					        rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
+					    cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{ rollback,
+					                                                               nodeVersion.lastCommitted,
+					                                                               target,
+					                                                               reply.changes,
+					                                                               reply.annotations,
+					                                                               self->specialZeroQuorum }),
 					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 				}
 			} catch (Error& e) {
@@ -139,7 +172,7 @@ class GetCommittedVersionQuorum {
 					// one of these errors in response to a get changes or
 					// rollforward request. The retry loop should handle this
 					// case.
-					TraceEvent(SevInfo, "ConfigNodeRollforwardError").error(e);
+					TraceEvent(SevInfo, "ConsumerConfigNodeRollforwardError").error(e);
 				} else {
 					throw;
 				}
@@ -163,9 +196,19 @@ class GetCommittedVersionQuorum {
 				    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 			}
 
+			if (!reply.registered) {
+				// ConfigNodes serve their GetCommittedVersion interface before
+				// being registered to allow them to be rolled forward.
+				// However, their responses should not count towards the
+				// quorum.
+				throw future_version();
+			}
+
 			++self->totalRepliesReceived;
 			self->largestCompactedResponse = std::max(self->largestCompactedResponse, reply.lastCompacted);
 			state Version lastCompacted = reply.lastCompacted;
+			self->committed[cfi.address()] = reply.lastCommitted;
+			self->largestLive = std::max(self->largestLive, reply.lastLive);
 			self->largestCommitted = std::max(self->largestCommitted, reply.lastCommitted);
 			state CommittedVersions committedVersions = CommittedVersions{ self->lastSeenVersion, reply.lastCommitted };
 			if (self->priorVersions.find(committedVersions.lastCommitted) == self->priorVersions.end()) {
@@ -174,7 +217,59 @@ class GetCommittedVersionQuorum {
 			auto& nodes = self->replies[committedVersions.lastCommitted];
 			nodes.push_back(cfi);
 			self->maxAgreement = std::max(nodes.size(), self->maxAgreement);
+			// TraceEvent("ConsumerGetCommittedVersionReply")
+			// 	.detail("From", cfi.address())
+			// 	.detail("LastCompactedVersion", lastCompacted)
+			// 	.detail("LastCommittedVersion", reply.lastCommitted)
+			// 	.detail("LastSeenVersion", self->lastSeenVersion)
+			// 	.detail("Replies", self->totalRepliesReceived)
+			// 	.detail("RepliesMatchingVersion", nodes.size())
+			// 	.detail("Coordinators", self->cfis.size())
+			// 	.detail("AllowSpecialCaseRollforward", self->allowSpecialCaseRollforward_);
 			if (nodes.size() >= self->cfis.size() / 2 + 1) {
+				// A quorum at version 0 should use any higher committed
+				// version seen instead of 0. Imagine the following scenario
+				// with three coordinators:
+				//
+				//      t0   t1   t2  t3
+				//   A  1    1    |   1
+				//   B  1   dies  |   0
+				//   C  0    0    |   0
+				//
+				// At t0, a value at version 1 is committed to A and B. At t1,
+				// B dies, and now the value only exists on A. At t2, a change
+				// coordinators command is executed by a client, causing a
+				// recovery. When the ConfigBroadcaster comes online and
+				// attempts to read the state of the previous coordinators (at
+				// time t3) so it can transfer it to the new coordinators, 2/3
+				// ConfigNodes are unregistered and only know about version 0.
+				// Quorum logic dictates the committed version is, thus,
+				// version 0. But we know a majority committed version 1. This
+				// is a special case error where a ConfigNode losing data is
+				// immediately followed by a coordinator change and recovery,
+				// and 0 is a special case. Imagine the following if C instead
+				// has had some values committed:
+				//
+				//      t0   t1   t2   t3  t4
+				//   A  1    2    2    |   2
+				//   B  1    2   dies  |   0
+				//   C  1    1    1    |   1
+				//
+				// In this case, there is no quorum, and so all nodes would
+				// (correctly) be rolled forward to version 2. Since a node
+				// losing data is equivalent to saying it has a committed
+				// version of 0, we must treat a quorum of nodes at version 0
+				// as a special case, and instead use the largest committed
+				// version we've seen as the quorum version. This does not
+				// affect correctness because version 0 means nothing was
+				// committed, so there shouldn't be an issue rolling those
+				// nodes forward.
+				if (self->allowSpecialCaseRollforward_ && committedVersions.lastCommitted == 0 &&
+				    self->largestCommitted > 0) {
+					self->specialZeroQuorum = true;
+					committedVersions = CommittedVersions{ 0, self->largestCommitted };
+				}
+
 				// A quorum of ConfigNodes agree on the latest committed version.
 				if (self->quorumVersion.canBeSet()) {
 					self->quorumVersion.send(QuorumVersion{ committedVersions, true });
@@ -186,7 +281,8 @@ class GetCommittedVersionQuorum {
 				// but the node we just got a reply from is not one of them. We may
 				// need to roll it forward or back.
 				QuorumVersion quorumVersion = wait(self->quorumVersion.getFuture());
-				ASSERT(committedVersions.lastCommitted != quorumVersion.versions.lastCommitted);
+				ASSERT(committedVersions.lastCommitted != quorumVersion.versions.lastCommitted ||
+				       self->specialZeroQuorum);
 				wait(self->updateNode(self, committedVersions, quorumVersion.versions, lastCompacted, cfi));
 			} else if (self->maxAgreement + (self->cfis.size() - self->totalRepliesReceived) <
 			           (self->cfis.size() / 2 + 1)) {
@@ -213,13 +309,18 @@ class GetCommittedVersionQuorum {
 		} catch (Error& e) {
 			// Count a timeout as a reply.
 			++self->totalRepliesReceived;
+			// TraceEvent("ConsumerGetCommittedVersionError").error(e)
+			// 	.detail("From", cfi.address())
+			// 	.detail("Replies", self->totalRepliesReceived)
+			// 	.detail("Coordinators", self->cfis.size());
 			if (e.code() == error_code_version_already_compacted) {
 				if (self->quorumVersion.canBeSet()) {
 					// Calling sendError could delete self
 					auto local = self->quorumVersion;
 					local.sendError(e);
 				}
-			} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
+			} else if (e.code() != error_code_timed_out && e.code() != error_code_future_version &&
+			           e.code() != error_code_broken_promise) {
 				if (self->quorumVersion.canBeSet()) {
 					// Calling sendError could delete self
 					auto local = self->quorumVersion;
@@ -231,6 +332,7 @@ class GetCommittedVersionQuorum {
 				    std::accumulate(self->replies.begin(), self->replies.end(), 0, [](int value, auto const& p) {
 					    return value + p.second.size();
 				    });
+
 				if (nonTimeoutReplies >= self->cfis.size() / 2 + 1) {
 					// Make sure to trigger the quorumVersion if a timeout
 					// occurred, a quorum disagree on the committed version,
@@ -239,6 +341,14 @@ class GetCommittedVersionQuorum {
 					// back the largest committed version seen.
 					self->quorumVersion.send(
 					    QuorumVersion{ CommittedVersions{ self->lastSeenVersion, self->largestCommitted }, false });
+
+					if (e.code() == error_code_future_version) {
+						wait(self->updateNode(self,
+						                      CommittedVersions{ self->lastSeenVersion, self->largestCommitted },
+						                      self->quorumVersion.getFuture().get().versions,
+						                      self->largestCompactedResponse,
+						                      cfi));
+					}
 				} else if (!self->quorumVersion.isSet()) {
 					// Otherwise, if a quorum agree on the committed version,
 					// some other occurred. Notify the caller of it.
@@ -253,8 +363,10 @@ class GetCommittedVersionQuorum {
 	}
 
 public:
-	explicit GetCommittedVersionQuorum(std::vector<ConfigFollowerInterface> const& cfis, Version lastSeenVersion)
-	  : cfis(cfis), lastSeenVersion(lastSeenVersion) {}
+	explicit GetCommittedVersionQuorum(std::vector<ConfigFollowerInterface> const& cfis,
+	                                   Version lastSeenVersion,
+	                                   Version largestCompacted)
+	  : cfis(cfis), lastSeenVersion(lastSeenVersion), largestCompacted(largestCompacted) {}
 	Future<QuorumVersion> getCommittedVersion() {
 		ASSERT(!isReady()); // ensures this function is not accidentally called before resetting state
 		for (const auto& cfi : cfis) {
@@ -273,6 +385,7 @@ public:
 		ASSERT(isReady());
 		return replies.at(quorumVersion.getFuture().get().versions.lastCommitted);
 	}
+	Version getLargestLive() const { return largestLive; }
 	Version getSmallestCommitted() const {
 		if (committed.size() == cfis.size()) {
 			Version smallest = MAX_VERSION;
@@ -283,6 +396,8 @@ public:
 		}
 		return ::invalidVersion;
 	}
+	void allowSpecialCaseRollforward() { allowSpecialCaseRollforward_ = true; }
+	bool isSpecialZeroQuorum() const { return specialZeroQuorum; }
 	Future<Void> complete() const { return waitForAll(actors); }
 };
 
@@ -293,9 +408,14 @@ class PaxosConfigConsumerImpl {
 	Version compactionVersion{ 0 };
 	double pollingInterval;
 	Optional<double> compactionInterval;
+	bool allowSpecialCaseRollforward_{ false };
+	bool readPreviousCoordinators{ false };
 	UID id;
 
 	ACTOR static Future<Version> getCommittedVersion(PaxosConfigConsumerImpl* self) {
+		if (self->allowSpecialCaseRollforward_) {
+			self->getCommittedVersionQuorum.allowSpecialCaseRollforward();
+		}
 		QuorumVersion quorumVersion = wait(self->getCommittedVersionQuorum.getCommittedVersion());
 		if (!quorumVersion.isQuorum) {
 			throw failed_to_reach_quorum();
@@ -357,29 +477,37 @@ class PaxosConfigConsumerImpl {
 				                                       &ConfigFollowerInterface::getSnapshotAndChanges,
 				                                       ConfigFollowerGetSnapshotAndChangesRequest{ committedVersion }),
 				                      SERVER_KNOBS->GET_SNAPSHOT_AND_CHANGES_TIMEOUT));
+				Version smallestCommitted = self->getCommittedVersionQuorum.getSmallestCommitted();
 				TraceEvent(SevDebug, "ConfigConsumerGotSnapshotAndChanges", self->id)
 				    .detail("SnapshotVersion", reply.snapshotVersion)
 				    .detail("SnapshotSize", reply.snapshot.size())
 				    .detail("ChangesVersion", committedVersion)
 				    .detail("ChangesSize", reply.changes.size())
-				    .detail("AnnotationsSize", reply.annotations.size());
+				    .detail("AnnotationsSize", reply.annotations.size())
+				    .detail("LargestLiveVersion", self->getCommittedVersionQuorum.getLargestLive())
+				    .detail("SmallestCommitted", smallestCommitted);
 				ASSERT_GE(committedVersion, self->lastSeenVersion);
 				self->lastSeenVersion = committedVersion;
-				Version smallestCommitted = self->getCommittedVersionQuorum.getSmallestCommitted();
 				self->compactionVersion = std::max(self->compactionVersion, smallestCommitted);
 				broadcaster->applySnapshotAndChanges(std::move(reply.snapshot),
 				                                     reply.snapshotVersion,
 				                                     reply.changes,
 				                                     committedVersion,
 				                                     reply.annotations,
-				                                     self->getCommittedVersionQuorum.getReadReplicas());
+				                                     self->getCommittedVersionQuorum.getReadReplicas(),
+				                                     self->getCommittedVersionQuorum.getLargestLive(),
+				                                     self->readPreviousCoordinators);
 				wait(self->getCommittedVersionQuorum.complete());
+				if (self->allowSpecialCaseRollforward_) {
+					self->allowSpecialCaseRollforward_ = false;
+				}
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
 					wait(self->getCommittedVersionQuorum.complete());
 				} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise &&
-				           e.code() != error_code_version_already_compacted && e.code() != error_code_process_behind) {
+				           e.code() != error_code_version_already_compacted && e.code() != error_code_process_behind &&
+				           e.code() != error_code_future_version) {
 					throw;
 				}
 				wait(delayJittered(0.1));
@@ -404,7 +532,8 @@ class PaxosConfigConsumerImpl {
 				// ConfigNodes changes to 1, 1, 2, the committed version
 				// returned would be 1.
 				if (committedVersion > self->lastSeenVersion) {
-					ASSERT(self->getCommittedVersionQuorum.getReadReplicas().size() >= self->cfis.size() / 2 + 1);
+					ASSERT(self->getCommittedVersionQuorum.getReadReplicas().size() >= self->cfis.size() / 2 + 1 ||
+					       self->getCommittedVersionQuorum.isSpecialZeroQuorum());
 					state std::vector<ConfigFollowerInterface> readReplicas =
 					    self->getCommittedVersionQuorum.getReadReplicas();
 					std::vector<Future<Void>> fs;
@@ -448,8 +577,8 @@ class PaxosConfigConsumerImpl {
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted || e.code() == error_code_timed_out ||
 				    e.code() == error_code_failed_to_reach_quorum || e.code() == error_code_version_already_compacted ||
-				    e.code() == error_code_process_behind) {
-					CODE_PROBE(true, "PaxosConfigConsumer get version_already_compacted error");
+				    e.code() == error_code_process_behind || e.code() == error_code_future_version) {
+					CODE_PROBE(true, "PaxosConfigConsumer fetch error");
 					if (e.code() == error_code_failed_to_reach_quorum) {
 						try {
 							wait(self->getCommittedVersionQuorum.complete());
@@ -483,37 +612,56 @@ class PaxosConfigConsumerImpl {
 	}
 
 	void resetCommittedVersionQuorum() {
-		getCommittedVersionQuorum = GetCommittedVersionQuorum{ cfis, lastSeenVersion };
+		getCommittedVersionQuorum = GetCommittedVersionQuorum{ cfis, lastSeenVersion, compactionVersion };
 	}
 
 public:
+	Future<Void> readSnapshot(ConfigBroadcaster& broadcaster) { return getSnapshotAndChanges(this, &broadcaster); }
+
 	Future<Void> consume(ConfigBroadcaster& broadcaster) {
 		return fetchChanges(this, &broadcaster) || compactor(this, &broadcaster);
 	}
+
+	void allowSpecialCaseRollforward() { this->allowSpecialCaseRollforward_ = true; }
 
 	UID getID() const { return id; }
 
 	PaxosConfigConsumerImpl(std::vector<ConfigFollowerInterface> const& cfis,
 	                        double pollingInterval,
-	                        Optional<double> compactionInterval)
-	  : cfis(cfis), getCommittedVersionQuorum(cfis, 0), pollingInterval(pollingInterval),
-	    compactionInterval(compactionInterval), id(deterministicRandom()->randomUniqueID()) {}
+	                        Optional<double> compactionInterval,
+	                        bool readPreviousCoordinators)
+	  : cfis(cfis), getCommittedVersionQuorum(cfis, 0, 0), pollingInterval(pollingInterval),
+	    compactionInterval(compactionInterval), readPreviousCoordinators(readPreviousCoordinators),
+	    id(deterministicRandom()->randomUniqueID()) {}
 };
 
 PaxosConfigConsumer::PaxosConfigConsumer(std::vector<ConfigFollowerInterface> const& cfis,
                                          double pollingInterval,
-                                         Optional<double> compactionInterval)
-  : impl(PImpl<PaxosConfigConsumerImpl>::create(cfis, pollingInterval, compactionInterval)) {}
+                                         Optional<double> compactionInterval,
+                                         bool readPreviousCoordinators)
+  : impl(PImpl<PaxosConfigConsumerImpl>::create(cfis, pollingInterval, compactionInterval, readPreviousCoordinators)) {}
 
 PaxosConfigConsumer::PaxosConfigConsumer(ServerCoordinators const& coordinators,
                                          double pollingInterval,
-                                         Optional<double> compactionInterval)
-  : impl(PImpl<PaxosConfigConsumerImpl>::create(coordinators.configServers, pollingInterval, compactionInterval)) {}
+                                         Optional<double> compactionInterval,
+                                         bool readPreviousCoordinators)
+  : impl(PImpl<PaxosConfigConsumerImpl>::create(coordinators.configServers,
+                                                pollingInterval,
+                                                compactionInterval,
+                                                readPreviousCoordinators)) {}
 
 PaxosConfigConsumer::~PaxosConfigConsumer() = default;
 
+Future<Void> PaxosConfigConsumer::readSnapshot(ConfigBroadcaster& broadcaster) {
+	return impl->readSnapshot(broadcaster);
+}
+
 Future<Void> PaxosConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
 	return impl->consume(broadcaster);
+}
+
+void PaxosConfigConsumer::allowSpecialCaseRollforward() {
+	impl->allowSpecialCaseRollforward();
 }
 
 UID PaxosConfigConsumer::getID() const {

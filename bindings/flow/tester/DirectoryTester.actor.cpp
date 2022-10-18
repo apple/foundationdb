@@ -545,11 +545,10 @@ struct DirectoryLogDirectoryFunc : InstructionFunc {
 			pathTuple.append(p, true);
 		}
 
-		instruction->tr->set(logSubspace.pack(LiteralStringRef("path"), true), pathTuple.pack());
-		instruction->tr->set(logSubspace.pack(LiteralStringRef("layer"), true),
-		                     Tuple().append(directory->getLayer()).pack());
-		instruction->tr->set(logSubspace.pack(LiteralStringRef("exists"), true), Tuple().append(exists ? 1 : 0).pack());
-		instruction->tr->set(logSubspace.pack(LiteralStringRef("children"), true), childrenTuple.pack());
+		instruction->tr->set(logSubspace.pack("path"_sr, true), pathTuple.pack());
+		instruction->tr->set(logSubspace.pack("layer"_sr, true), Tuple().append(directory->getLayer()).pack());
+		instruction->tr->set(logSubspace.pack("exists"_sr, true), Tuple().append(exists ? 1 : 0).pack());
+		instruction->tr->set(logSubspace.pack("children"_sr, true), childrenTuple.pack());
 
 		return Void();
 	}

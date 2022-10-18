@@ -196,6 +196,7 @@ ACTOR Future<Void> testKVCommit(KVTest* test, TestHistogram<float>* latency, Per
 Future<Void> testKVStore(struct KVStoreTestWorkload* const&);
 
 struct KVStoreTestWorkload : TestWorkload {
+	static constexpr auto NAME = "KVStoreTest";
 	bool enabled, saturation;
 	double testDuration, operationsPerSecond;
 	double commitFraction, setFraction;
@@ -210,21 +211,20 @@ struct KVStoreTestWorkload : TestWorkload {
 	KVStoreTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), reads("Reads"), sets("Sets"), commits("Commits"), setupTook(0) {
 		enabled = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		operationsPerSecond = getOption(options, LiteralStringRef("operationsPerSecond"), 100e3);
-		commitFraction = getOption(options, LiteralStringRef("commitFraction"), .001);
-		setFraction = getOption(options, LiteralStringRef("setFraction"), .1);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 100000);
-		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 8);
-		valueBytes = getOption(options, LiteralStringRef("valueBytes"), 8);
-		doSetup = getOption(options, LiteralStringRef("setup"), false);
-		doClear = getOption(options, LiteralStringRef("clear"), false);
-		doCount = getOption(options, LiteralStringRef("count"), false);
-		filename = getOption(options, LiteralStringRef("filename"), Value()).toString();
-		saturation = getOption(options, LiteralStringRef("saturation"), false);
-		storeType = getOption(options, LiteralStringRef("storeType"), LiteralStringRef("ssd")).toString();
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		operationsPerSecond = getOption(options, "operationsPerSecond"_sr, 100e3);
+		commitFraction = getOption(options, "commitFraction"_sr, .001);
+		setFraction = getOption(options, "setFraction"_sr, .1);
+		nodeCount = getOption(options, "nodeCount"_sr, 100000);
+		keyBytes = getOption(options, "keyBytes"_sr, 8);
+		valueBytes = getOption(options, "valueBytes"_sr, 8);
+		doSetup = getOption(options, "setup"_sr, false);
+		doClear = getOption(options, "clear"_sr, false);
+		doCount = getOption(options, "count"_sr, false);
+		filename = getOption(options, "filename"_sr, Value()).toString();
+		saturation = getOption(options, "saturation"_sr, false);
+		storeType = getOption(options, "storeType"_sr, "ssd"_sr).toString();
 	}
-	std::string description() const override { return "KVStoreTest"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -251,7 +251,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory("KVStoreTest");
+WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory;
 
 ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 	state KVTest& test = *ptest;
@@ -271,7 +271,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		state Key k;
 		state double cst = timer();
 		while (true) {
-			RangeResult kv = wait(test.store->readRange(KeyRangeRef(k, LiteralStringRef("\xff\xff\xff\xff")), 1000));
+			RangeResult kv = wait(test.store->readRange(KeyRangeRef(k, "\xff\xff\xff\xff"_sr), 1000));
 			count += kv.size();
 			if (kv.size() < 1000)
 				break;

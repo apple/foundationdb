@@ -36,7 +36,7 @@ function(compile_boost)
   set(B2_COMMAND "./b2")
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 -w)
   set(BOOST_LINK_FLAGS "")
-  if(APPLE OR CLANG OR ICX OR USE_LIBCXX)
+  if(APPLE OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
     list(APPEND BOOST_LINK_FLAGS -lc++ -lc++abi)
     if (NOT APPLE)
@@ -57,19 +57,27 @@ function(compile_boost)
 
   # Build boost
   include(ExternalProject)
+
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
-    URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
-    URL_HASH SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
-    CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
-    BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
-    BUILD_IN_SOURCE ON
-    INSTALL_COMMAND ""
-    UPDATE_COMMAND ""
-    BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
+    URL                "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
+    URL_HASH           SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
+    CONFIGURE_COMMAND  ${BOOTSTRAP_COMMAND}
+                       ${BOOTSTRAP_ARGS}
+                       --with-libraries=${BOOTSTRAP_LIBRARIES}
+                       --with-toolset=${BOOST_TOOLSET}
+    BUILD_COMMAND      ${B2_COMMAND}
+                       link=static
+                       ${COMPILE_BOOST_BUILD_ARGS}
+                       --prefix=${BOOST_INSTALL_DIR}
+                       ${USER_CONFIG_FLAG} install
+    BUILD_IN_SOURCE    ON
+    INSTALL_COMMAND    ""
+    UPDATE_COMMAND     ""
+    BUILD_BYPRODUCTS   "${BOOST_INSTALL_DIR}/include/boost/config.hpp"
+                       "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
+                       "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
+                       "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
@@ -133,7 +141,7 @@ if(WIN32)
   return()
 endif()
 
-find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND Boost_iostreams_FOUND AND NOT FORCE_BOOST_BUILD)

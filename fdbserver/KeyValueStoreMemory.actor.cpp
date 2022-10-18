@@ -18,16 +18,18 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DeltaTree.h"
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueContainer.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
 #include "flow/ActorCollection.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -198,11 +200,11 @@ public:
 		return c;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadValue(this, key);
+			return waitAndReadValue(this, key, options);
 
 		auto it = data.find(key);
 		if (it == data.end())
@@ -210,14 +212,11 @@ public:
 		return Optional<Value>(it.getValue());
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadType,
-	                                        Optional<UID> debugID) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadValuePrefix(this, key, maxLength);
+			return waitAndReadValuePrefix(this, key, maxLength, options);
 
 		auto it = data.find(key);
 		if (it == data.end())
@@ -232,11 +231,14 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              Optional<ReadOptions> options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadRange(this, keys, rowLimit, byteLimit);
+			return waitAndReadRange(this, keys, rowLimit, byteLimit, options);
 
 		RangeResult result;
 		if (rowLimit == 0) {
@@ -285,6 +287,8 @@ public:
 	}
 
 	void enableSnapshot() override { disableSnapshot = false; }
+
+	int uncommittedBytes() { return queue.totalSize(); }
 
 private:
 	enum OpType {
@@ -489,7 +493,10 @@ private:
 			ASSERT(cipherKeys.cipherTextKey.isValid());
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());
 			EncryptBlobCipherAes265Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+			    cipherKeys.cipherTextKey,
+			    cipherKeys.cipherHeaderKey,
+			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+			    BlobCipherMetrics::KV_MEMORY);
 			BlobCipherEncryptHeader cipherHeader;
 			Arena arena;
 			StringRef ciphertext =
@@ -497,7 +504,7 @@ private:
 			log->push(StringRef((const uint8_t*)&cipherHeader, BlobCipherEncryptHeader::headerSize));
 			log->push(ciphertext);
 		}
-		return log->push(LiteralStringRef("\x01")); // Changes here should be reflected in OP_DISK_OVERHEAD
+		return log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
 	// In case the op data is not encrypted, simply read the operands and the zero fill flag.
@@ -527,8 +534,10 @@ private:
 			return data;
 		}
 		state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, cipherHeader));
-		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv);
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
+		DecryptBlobCipherAes256Ctr cipher(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
 		Arena arena;
 		StringRef plaintext = cipher
 		                          .decrypt(data.begin() + BlobCipherEncryptHeader::headerSize,
@@ -724,12 +733,15 @@ private:
 				    .detail("Commits", dbgCommitCount)
 				    .detail("TimeTaken", now() - startt);
 
-				self->semiCommit();
-
-				// Make sure cipher keys are ready before recovery finishes.
+				// Make sure cipher keys are ready before recovery finishes. The semiCommit below also require cipher
+				// keys.
 				if (self->enableEncryption) {
 					wait(updateCipherKeys(self));
 				}
+
+				CODE_PROBE(self->enableEncryption && self->uncommittedBytes() > 0,
+				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled");
+				self->semiCommit();
 
 				return Void();
 			} catch (Error& e) {
@@ -825,7 +837,7 @@ private:
 
 					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
 					//TraceEvent("SnapshotEnd", self->id)
-					//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
+					//	.detail("LastKey", lastKey.present() ? lastKey.get() : "<none>"_sr)
 					//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
 					//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
 					//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
@@ -926,20 +938,26 @@ private:
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self, Key key) {
+	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self,
+	                                                      Key key,
+	                                                      Optional<ReadOptions> options) {
 		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readValue(key).get();
+		return static_cast<IKeyValueStore*>(self)->readValue(key, options).get();
 	}
-	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self, Key key, int maxLength) {
+	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self,
+	                                                            Key key,
+	                                                            int maxLength,
+	                                                            Optional<ReadOptions> options) {
 		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength).get();
+		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength, options).get();
 	}
 	ACTOR static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
 	                                                  KeyRange keys,
 	                                                  int rowLimit,
-	                                                  int byteLimit) {
+	                                                  int byteLimit,
+	                                                  Optional<ReadOptions> options) {
 		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit).get();
+		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
 	}
 	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
 		wait(self->recovering);
@@ -955,7 +973,8 @@ private:
 	}
 
 	ACTOR static Future<Void> updateCipherKeys(KeyValueStoreMemory* self) {
-		TextAndHeaderCipherKeys cipherKeys = wait(getLatestSystemEncryptCipherKeys(self->db));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestSystemEncryptCipherKeys(self->db, BlobCipherMetrics::KV_MEMORY));
 		self->cipherKeys = cipherKeys;
 		return Void();
 	}

@@ -34,7 +34,7 @@ static void bench_vv_getdelta(benchmark::State& benchState) {
 
 	i = 0;
 	const int64_t numDeltas = benchState.range(1);
-	while (benchState.KeepRunning()) {
+	for (auto _ : benchState) {
 		vv.setVersion(Tag(0, i++), ++version);
 		i %= tags;
 

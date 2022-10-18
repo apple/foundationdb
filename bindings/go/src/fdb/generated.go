@@ -102,6 +102,11 @@ func (o NetworkOptions) SetTraceFileIdentifier(param string) error {
 	return o.setOpt(36, []byte(param))
 }
 
+// Use the same base trace file name for all client threads as it did before version 7.2. The current default behavior is to use distinct trace file names for client threads by including their version and thread index.
+func (o NetworkOptions) SetTraceShareAmongClientThreads() error {
+	return o.setOpt(37, nil)
+}
+
 // Set file suffix for partially written log files.
 //
 // Parameter: Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension.
@@ -261,6 +266,11 @@ func (o NetworkOptions) SetEnableRunLoopProfiling() error {
 	return o.setOpt(71, nil)
 }
 
+// Prevents the multi-version client API from being disabled, even if no external clients are configured. This option is required to use GRV caching.
+func (o NetworkOptions) SetDisableClientBypass() error {
+	return o.setOpt(72, nil)
+}
+
 // Enable client buggify - will make requests randomly fail (intended for client testing)
 func (o NetworkOptions) SetClientBuggifyEnable() error {
 	return o.setOpt(80, nil)
@@ -380,6 +390,11 @@ func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
 // Deprecated. Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
 func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
 	return o.setOpt(505, nil)
+}
+
+// Set a random idempotency id for all transactions. See the transaction option description for more information.
+func (o DatabaseOptions) SetTransactionAutomaticIdempotency() error {
+	return o.setOpt(506, nil)
 }
 
 // Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information.
@@ -541,6 +556,18 @@ func (o TransactionOptions) SetSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
 }
 
+// Associate this transaction with this ID for the purpose of checking whether or not this transaction has already committed. Must be at least 16 bytes and less than 256 bytes.
+//
+// Parameter: Unique ID
+func (o TransactionOptions) SetIdempotencyId(param string) error {
+	return o.setOpt(504, []byte(param))
+}
+
+// Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future.
+func (o TransactionOptions) SetAutomaticIdempotency() error {
+	return o.setOpt(505, nil)
+}
+
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
 func (o TransactionOptions) SetSnapshotRywEnable() error {
 	return o.setOpt(600, nil)
@@ -617,9 +644,16 @@ func (o TransactionOptions) SetBypassUnreadable() error {
 	return o.setOpt(1100, nil)
 }
 
-// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
+// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions. The disable_client_bypass option must also be set.
 func (o TransactionOptions) SetUseGrvCache() error {
 	return o.setOpt(1101, nil)
+}
+
+// Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized
+//
+// Parameter: A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload.
+func (o TransactionOptions) SetAuthorizationToken(param string) error {
+	return o.setOpt(2000, []byte(param))
 }
 
 type StreamingMode int

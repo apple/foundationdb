@@ -27,13 +27,10 @@ Each special key that existed before api version 630 is its own module. These ar
 Prior to api version 630, it was also possible to read a range starting at ``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
 but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
 
-Api version 630 includes two new modules:
+Api version 630 includes three new modules:
 
 #. ``\xff\xff/transaction/`` - information about the current transaction
 #. ``\xff\xff/metrics/`` - various metrics, not transactional
-
-Api version 720 includes one new module:
-
 #. ``\xff\xff/clusterId`` - returns an immutable unique ID for a cluster
 
 Transaction module
@@ -279,7 +276,6 @@ Deprecated Keys
 Listed below are the special keys that have been deprecated. Special key(s) will no longer be accessible when the client specifies an API version equal to or larger than the version where they were deprecated. Clients specifying older API versions will be able to continue using the deprecated key(s).
 
 #. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Deprecated as of API version 720. The corresponding functionalities are now covered by the global configuration module. For details, see :doc:`global-configuration`. Read/write. Changing these two keys will change the corresponding system keys ``\xff\x02/fdbClientInfo/<client_txn_sample_rate|client_txn_size_limit>``, respectively. The value of ``\xff\xff/management/client_txn_sample_rate`` is a literal text of ``double``, and the value of ``\xff\xff/management/client_txn_size_limit`` is a literal text of ``int64_t``. A special value ``default`` can be set to or read from these two keys, representing the client profiling is disabled. In addition, ``clear`` in this range is not allowed. For more details, see help text of ``fdbcli`` command ``profile client``.
-#. ``\xff\xff/management/tenant_map/<tenant>`` Removed as of API version 720 and renamed to ``\xff\xff/management/tenant/map/<tenant>``.
 
 Versioning
 ==========

@@ -68,7 +68,7 @@ struct VFSAsyncFile {
 		// Error code is only checked for non-zero because the SQLite API error code after an injected error
 		// may not match the error code returned by VFSAsyncFile when the inject error occurred.
 		bool e = g_network->global(INetwork::enSQLiteInjectedError) != (flowGlobalType)0;
-		bool f = g_simulator.checkInjectedCorruption();
+		bool f = g_simulator->checkInjectedCorruption();
 		TraceEvent("VFSCheckInjectedError")
 		    .detail("InjectedIOError", e)
 		    .detail("InjectedCorruption", f)

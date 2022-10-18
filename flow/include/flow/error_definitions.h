@@ -99,6 +99,8 @@ ERROR( data_move_cancelled, 1075, "Data move was cancelled" )
 ERROR( data_move_dest_team_not_found, 1076, "Dest team was not found for data move" )
 ERROR( blob_worker_full, 1077, "Blob worker cannot take on more granule assignments" )
 ERROR( grv_proxy_memory_limit_exceeded, 1078, "GetReadVersion proxy memory limit exceeded" )
+ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
+ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -125,8 +127,10 @@ ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cance
 ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
 ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different cluster ID" )
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
-ERROR( please_reboot_remote_kv_store, 1219, "Need to reboot the storage engine process as it died abnormally")
+ERROR( please_reboot_kv_store, 1219, "Need to reboot the storage engine")
 ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
+ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
+ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -152,6 +156,7 @@ ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Reque
 ERROR( rest_invalid_uri, 1526, "Invalid REST URI")
 ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
 ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
+ERROR( lock_file_failure, 1529, "Unable to lock the file")
 
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
@@ -314,28 +319,28 @@ ERROR( json_malformed, 2401, "JSON string was malformed")
 ERROR( json_eof_expected, 2402, "JSON string did not terminate where expected")
 
 // 2500 - disk snapshot based backup errors
-ERROR( snap_disable_tlog_pop_failed,  2500, "Failed to disable tlog pops")
-ERROR( snap_storage_failed,  2501, "Failed to snapshot storage nodes")
-ERROR( snap_tlog_failed,  2502, "Failed to snapshot TLog nodes")
-ERROR( snap_coord_failed,  2503, "Failed to snapshot coordinator nodes")
-ERROR( snap_enable_tlog_pop_failed,  2504, "Failed to enable tlog pops")
-ERROR( snap_path_not_whitelisted, 2505, "Snapshot create binary path not whitelisted")
-ERROR( snap_not_fully_recovered_unsupported, 2506, "Unsupported when the cluster is not fully recovered")
-ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum is configured")
-ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported")
-ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length hex string")
+ERROR( snap_disable_tlog_pop_failed,  2500, "Failed to disable tlog pops" )
+ERROR( snap_storage_failed,  2501, "Failed to snapshot storage nodes" )
+ERROR( snap_tlog_failed,  2502, "Failed to snapshot TLog nodes" )
+ERROR( snap_coord_failed,  2503, "Failed to snapshot coordinator nodes" )
+ERROR( snap_enable_tlog_pop_failed,  2504, "Failed to enable tlog pops" )
+ERROR( snap_path_not_whitelisted, 2505, "Snapshot create binary path not whitelisted" )
+ERROR( snap_not_fully_recovered_unsupported, 2506, "Unsupported when the cluster is not fully recovered" )
+ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum is configured" )
+ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported" )
+ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length hex string" )
 
 // 27XX - Encryption operations errors
-ERROR( encrypt_ops_error, 2700, "Encryption operation error")
-ERROR( encrypt_header_metadata_mismatch, 2701, "Encryption header metadata mismatch")
-ERROR( encrypt_key_not_found, 2702, "Expected encryption key is missing")
-ERROR( encrypt_key_ttl_expired, 2703, "Expected encryption key TTL has expired")
-ERROR( encrypt_header_authtoken_mismatch, 2704, "Encryption header authentication token mismatch")
-ERROR( encrypt_update_cipher, 2705, "Attempt to update encryption cipher key")
-ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details")
-ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS failed")
-ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc.")
-ERROR( encrypt_unsupported, 2709, "Encryption not supported")
+ERROR( encrypt_ops_error, 2700, "Encryption operation error" )
+ERROR( encrypt_header_metadata_mismatch, 2701, "Encryption header metadata mismatch" )
+ERROR( encrypt_key_not_found, 2702, "Expected encryption key is missing" )
+ERROR( encrypt_key_ttl_expired, 2703, "Expected encryption key TTL has expired" )
+ERROR( encrypt_header_authtoken_mismatch, 2704, "Encryption header authentication token mismatch" )
+ERROR( encrypt_update_cipher, 2705, "Attempt to update encryption cipher key" )
+ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details" )
+ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS failed" )
+ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc." )
+ERROR( encrypt_unsupported, 2709, "Encryption not supported" )
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

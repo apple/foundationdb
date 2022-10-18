@@ -24,6 +24,19 @@
 FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
 FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 
+std::string clusterTypeToString(const ClusterType& clusterType) {
+	switch (clusterType) {
+	case ClusterType::STANDALONE:
+		return "standalone";
+	case ClusterType::METACLUSTER_MANAGEMENT:
+		return "metacluster_management";
+	case ClusterType::METACLUSTER_DATA:
+		return "metacluster_data";
+	default:
+		return "unknown";
+	}
+}
+
 std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState) {
 	switch (clusterState) {
 	case DataClusterState::READY:

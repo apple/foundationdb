@@ -54,7 +54,7 @@ NOTE: All blocks except for the final block will have one last  value which will
 
 The code related to how a range file is written is in the `struct RangeFileWriter` in `namespace fileBackup`.
 
-The code that decodes a range block is in `ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset, int len)`.
+The code that decodes a range block is in `ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset, int len, Database cx)`.
 
 
 ### Data format in a log file

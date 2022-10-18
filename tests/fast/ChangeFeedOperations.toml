@@ -1,7 +1,6 @@
 [configuration]
 allowDefaultTenant = false
-
-# TODO add failure events, and then add a version that also supports randomMoveKeys
+testClass = "ChangeFeeds"
 
 [[test]]
 testTitle = 'ChangeFeedOperationsTest'

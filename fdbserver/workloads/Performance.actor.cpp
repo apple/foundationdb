@@ -25,6 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PerformanceWorkload : TestWorkload {
+	static constexpr auto NAME = "Performance";
+
 	Value probeWorkload;
 	Standalone<VectorRef<KeyValueRef>> savedOptions;
 
@@ -34,7 +36,7 @@ struct PerformanceWorkload : TestWorkload {
 	PerfMetric maxAchievedTPS;
 
 	PerformanceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		probeWorkload = getOption(options, LiteralStringRef("probeWorkload"), LiteralStringRef("ReadWrite"));
+		probeWorkload = getOption(options, "probeWorkload"_sr, "ReadWrite"_sr);
 
 		// "Consume" all options and save for later tests
 		for (int i = 0; i < options.size(); i++) {
@@ -44,13 +46,12 @@ struct PerformanceWorkload : TestWorkload {
 				       i,
 				       printable(options[i].key).c_str(),
 				       printable(options[i].value).c_str());
-				options[i].value = LiteralStringRef("");
+				options[i].value = ""_sr;
 			}
 		}
 		printf("saved %d options\n", savedOptions.size());
 	}
 
-	std::string description() const override { return "PerformanceTestWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (!clientId)
 			return _setup(cx, this);
@@ -78,10 +79,9 @@ struct PerformanceWorkload : TestWorkload {
 	Standalone<VectorRef<VectorRef<KeyValueRef>>> getOpts(double transactionsPerSecond) {
 		Standalone<VectorRef<KeyValueRef>> options;
 		Standalone<VectorRef<VectorRef<KeyValueRef>>> opts;
-		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("testName"), probeWorkload));
-		options.push_back_deep(
-		    options.arena(),
-		    KeyValueRef(LiteralStringRef("transactionsPerSecond"), format("%f", transactionsPerSecond)));
+		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, probeWorkload));
+		options.push_back_deep(options.arena(),
+		                       KeyValueRef("transactionsPerSecond"_sr, format("%f", transactionsPerSecond)));
 		for (int i = 0; i < savedOptions.size(); i++) {
 			options.push_back_deep(options.arena(), savedOptions[i]);
 			printf("option [%d]: '%s'='%s'\n",
@@ -134,7 +134,7 @@ struct PerformanceWorkload : TestWorkload {
 		std::vector<TesterInterface> testers = wait(self->getTesters(self));
 		self->testers = testers;
 
-		TestSpec spec(LiteralStringRef("PerformanceSetup"), false, false);
+		TestSpec spec("PerformanceSetup"_sr, false, false);
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
 		DistributedTestResults results = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
@@ -169,7 +169,7 @@ struct PerformanceWorkload : TestWorkload {
 			}
 			state DistributedTestResults results;
 			try {
-				TestSpec spec(LiteralStringRef("PerformanceRun"), false, false);
+				TestSpec spec("PerformanceRun"_sr, false, false);
 				spec.phases = TestWorkload::EXECUTION | TestWorkload::METRICS;
 				spec.options = options;
 				DistributedTestResults r = wait(runWorkload(cx, self->testers, spec, Optional<TenantName>()));
@@ -229,4 +229,4 @@ struct PerformanceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<PerformanceWorkload> PerformanceWorkloadFactory("Performance");
+WorkloadFactory<PerformanceWorkload> PerformanceWorkloadFactory;

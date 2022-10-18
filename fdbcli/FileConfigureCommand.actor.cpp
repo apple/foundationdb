@@ -78,7 +78,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 			    name + "=" +
 			    json_spirit::write_string(json_spirit::mValue(value.get_array()), json_spirit::Output_options::none);
 		} else {
-			printUsage(LiteralStringRef("fileconfigure"));
+			printUsage("fileconfigure"_sr);
 			return false;
 		}
 	}

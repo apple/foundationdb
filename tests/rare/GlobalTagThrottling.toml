@@ -8,7 +8,7 @@ testTitle='GlobalTagThrottling'
   [[test.workload]]
   testName='GlobalTagThrottling'
   transactionTag='sampleTag1'
-  totalReadQuota=1.0
+  totalQuota=1.0
 
   [[test.workload]]
   testName='ReadWrite'

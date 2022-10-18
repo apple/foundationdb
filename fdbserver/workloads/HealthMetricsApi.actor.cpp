@@ -46,16 +46,14 @@ struct HealthMetricsApiWorkload : TestWorkload {
 
 	// internal states
 	bool healthMetricsStoppedUpdating = false;
-	static constexpr const char* NAME = "HealthMetricsApi";
+	static constexpr auto NAME = "HealthMetricsApi";
 
 	HealthMetricsApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		healthMetricsCheckInterval = getOption(options, LiteralStringRef("healthMetricsCheckInterval"), 1.0);
-		sendDetailedHealthMetrics = getOption(options, LiteralStringRef("sendDetailedHealthMetrics"), true);
-		maxAllowedStaleness = getOption(options, LiteralStringRef("maxAllowedStaleness"), 60.0);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		healthMetricsCheckInterval = getOption(options, "healthMetricsCheckInterval"_sr, 1.0);
+		sendDetailedHealthMetrics = getOption(options, "sendDetailedHealthMetrics"_sr, true);
+		maxAllowedStaleness = getOption(options, "maxAllowedStaleness"_sr, 60.0);
 	}
-
-	std::string description() const override { return HealthMetricsApiWorkload::NAME; }
 
 	ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
 		if (!self->sendDetailedHealthMetrics) {
@@ -176,4 +174,4 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		};
 	}
 };
-WorkloadFactory<HealthMetricsApiWorkload> HealthMetricsApiWorkloadFactory(HealthMetricsApiWorkload::NAME);
+WorkloadFactory<HealthMetricsApiWorkload> HealthMetricsApiWorkloadFactory;

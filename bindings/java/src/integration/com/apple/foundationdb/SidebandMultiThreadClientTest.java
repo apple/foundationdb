@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Assertions;
  * This test is to verify the causal consistency of transactions for mutli-threaded client. 
  */
 public class SidebandMultiThreadClientTest {
+    public static final int API_VERSION = 720;
+
     public static final MultiClientHelper clientHelper = new MultiClientHelper();
 
     private static final Map<Database, BlockingQueue<String>> db2Queues = new HashMap<>();
@@ -26,7 +28,7 @@ public class SidebandMultiThreadClientTest {
     private static final int txnCnt = 1000;
 
     public static void main(String[] args) throws Exception {
-        FDB fdb = FDB.selectAPIVersion(720);
+        FDB fdb = FDB.selectAPIVersion(API_VERSION);
         setupThreads(fdb);
         Collection<Database> dbs = clientHelper.openDatabases(fdb); // the clientHelper will close the databases for us
         for (Database db : dbs) {

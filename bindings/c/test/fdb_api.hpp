@@ -46,6 +46,8 @@ namespace native {
 #include <foundationdb/fdb_c.h>
 }
 
+#define TENANT_API_VERSION_GUARD 720
+
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
 using CharsRef = std::string_view;
@@ -61,6 +63,22 @@ struct KeyValue {
 struct KeyRange {
 	Key beginKey;
 	Key endKey;
+};
+struct GranuleSummary {
+	KeyRange keyRange;
+	int64_t snapshotVersion;
+	int64_t snapshotSize;
+	int64_t deltaVersion;
+	int64_t deltaSize;
+
+	GranuleSummary(const native::FDBGranuleSummary& nativeSummary) {
+		keyRange.beginKey = fdb::Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
+		keyRange.endKey = fdb::Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
+		snapshotVersion = nativeSummary.snapshot_version;
+		snapshotSize = nativeSummary.snapshot_size;
+		deltaVersion = nativeSummary.delta_version;
+		deltaSize = nativeSummary.delta_size;
+	}
 };
 
 inline uint8_t const* toBytePtr(char const* ptr) noexcept {
@@ -137,6 +155,13 @@ struct None {
 	struct Type {};
 	static Error extract(native::FDBFuture*, Type&) noexcept { return Error(0); }
 };
+struct Bool {
+	using Type = native::fdb_bool_t;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		auto err = native::fdb_future_get_bool(f, &out);
+		return Error(err);
+	}
+};
 struct Int64 {
 	using Type = int64_t;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
@@ -196,6 +221,27 @@ struct KeyRangeRefArray {
 		auto& [out_ranges, out_count] = out;
 		auto err = native::fdb_future_get_keyrange_array(
 		    f, reinterpret_cast<const native::FDBKeyRange**>(&out_ranges), &out_count);
+		return Error(err);
+	}
+};
+
+struct GranuleSummaryRef : native::FDBGranuleSummary {
+	fdb::KeyRef beginKey() const noexcept {
+		return fdb::KeyRef(native::FDBGranuleSummary::key_range.begin_key,
+		                   native::FDBGranuleSummary::key_range.begin_key_length);
+	}
+	fdb::KeyRef endKey() const noexcept {
+		return fdb::KeyRef(native::FDBGranuleSummary::key_range.end_key,
+		                   native::FDBGranuleSummary::key_range.end_key_length);
+	}
+};
+
+struct GranuleSummaryRefArray {
+	using Type = std::tuple<GranuleSummaryRef const*, int>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		auto& [out_summaries, out_count] = out;
+		auto err = native::fdb_future_get_granule_summary_array(
+		    f, reinterpret_cast<const native::FDBGranuleSummary**>(&out_summaries), &out_count);
 		return Error(err);
 	}
 };
@@ -310,6 +356,7 @@ public:
 class Future {
 protected:
 	friend class Transaction;
+	friend class Database;
 	friend std::hash<Future>;
 	std::shared_ptr<native::FDBFuture> f;
 
@@ -468,6 +515,14 @@ public:
 	Transaction(const Transaction&) noexcept = default;
 	Transaction& operator=(const Transaction&) noexcept = default;
 
+	void atomic_store(Transaction other) { std::atomic_store(&tr, other.tr); }
+
+	Transaction atomic_load() {
+		Transaction retVal;
+		retVal.tr = std::atomic_load(&tr);
+		return retVal;
+	}
+
 	bool valid() const noexcept { return tr != nullptr; }
 
 	explicit operator bool() const noexcept { return valid(); }
@@ -573,6 +628,14 @@ public:
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), begin_version, read_version, context));
 	}
 
+	TypedFuture<future_var::GranuleSummaryRefArray> summarizeBlobGranules(KeyRef begin,
+	                                                                      KeyRef end,
+	                                                                      int64_t summaryVersion,
+	                                                                      int rangeLimit) {
+		return native::fdb_transaction_summarize_blob_granules(
+		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), summaryVersion, rangeLimit);
+	}
+
 	TypedFuture<future_var::None> watch(KeyRef key) {
 		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
 	}
@@ -599,6 +662,13 @@ public:
 	void clearRange(KeyRef begin, KeyRef end) {
 		native::fdb_transaction_clear_range(tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
+
+	void addReadConflictRange(KeyRef begin, KeyRef end) {
+		if (auto err = Error(native::fdb_transaction_add_conflict_range(
+		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), FDB_CONFLICT_RANGE_TYPE_READ))) {
+			throwError("fdb_transaction_add_conflict_range returned error: ", err);
+		}
+	}
 };
 
 class Tenant final {
@@ -621,6 +691,7 @@ public:
 	static void createTenant(Transaction tr, BytesRef name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 		tr.set(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), BytesRef());
 	}
 
@@ -661,6 +732,14 @@ public:
 		db = std::shared_ptr<native::FDBDatabase>(db_raw, &native::fdb_database_destroy);
 	}
 	Database() noexcept : db(nullptr) {}
+
+	void atomic_store(Database other) { std::atomic_store(&db, other.db); }
+
+	Database atomic_load() {
+		Database retVal;
+		retVal.db = std::atomic_load(&db);
+		return retVal;
+	}
 
 	Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
 		return Error(native::fdb_database_set_option(
@@ -707,10 +786,50 @@ public:
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
 	}
+
+	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) {
+		if (!db)
+			throw std::runtime_error("listBlobbifiedRanges from null database");
+		return native::fdb_database_list_blobbified_ranges(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
+	}
+
+	TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) {
+		if (!db)
+			throw std::runtime_error("verifyBlobRange from null database");
+		return native::fdb_database_verify_blob_range(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
+	}
+
+	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) {
+		if (!db)
+			throw std::runtime_error("blobbifyRange from null database");
+		return native::fdb_database_blobbify_range(db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
+	TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) {
+		if (!db)
+			throw std::runtime_error("unblobbifyRange from null database");
+		return native::fdb_database_unblobbify_range(db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
+	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) {
+		if (!db)
+			throw std::runtime_error("purgeBlobGranules from null database");
+		native::fdb_bool_t forceBool = force;
+		return native::fdb_database_purge_blob_granules(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), version, forceBool);
+	}
+
+	TypedFuture<future_var::None> waitPurgeGranulesComplete(KeyRef purgeKey) {
+		if (!db)
+			throw std::runtime_error("purgeBlobGranules from null database");
+		return native::fdb_database_wait_purge_granules_complete(db.get(), purgeKey.data(), intSize(purgeKey));
+	}
 };
 
 inline Error selectApiVersionNothrow(int version) {
-	if (version < 720) {
+	if (version < TENANT_API_VERSION_GUARD) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(native::fdb_select_api_version(version));
@@ -723,7 +842,7 @@ inline void selectApiVersion(int version) {
 }
 
 inline Error selectApiVersionCappedNothrow(int version) {
-	if (version < 720) {
+	if (version < TENANT_API_VERSION_GUARD) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(

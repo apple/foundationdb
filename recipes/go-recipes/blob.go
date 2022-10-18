@@ -29,6 +29,8 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
+const API_VERSION int = 720
+
 const CHUNK_SIZE int = 5
 
 func write_blob(t fdb.Transactor, blob_subspace subspace.Subspace, blob []byte) (err error) {
@@ -79,7 +81,7 @@ func read_blob(t fdb.ReadTransactor, blob_subspace subspace.Subspace) ([]byte, e
 }
 
 func main() {
-	fdb.MustAPIVersion(720)
+	fdb.MustAPIVersion(API_VERSION)
 
 	db := fdb.MustOpenDefault()
 

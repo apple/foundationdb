@@ -26,22 +26,29 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/Schemas.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ChangeConfigWorkload : TestWorkload {
+	static constexpr auto NAME = "ChangeConfig";
 	double minDelayBeforeChange, maxDelayBeforeChange;
 	std::string configMode; //<\"single\"|\"double\"|\"triple\">
 	std::string networkAddresses; // comma separated list e.g. "127.0.0.1:4000,127.0.0.1:4001"
+	int coordinatorChanges; // number of times to change coordinators. Only applied if `coordinators` is set to `auto`
 
 	ChangeConfigWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		minDelayBeforeChange = getOption(options, LiteralStringRef("minDelayBeforeChange"), 0);
-		maxDelayBeforeChange = getOption(options, LiteralStringRef("maxDelayBeforeChange"), 0);
+		minDelayBeforeChange = getOption(options, "minDelayBeforeChange"_sr, 0);
+		maxDelayBeforeChange = getOption(options, "maxDelayBeforeChange"_sr, 0);
 		ASSERT(maxDelayBeforeChange >= minDelayBeforeChange);
-		configMode = getOption(options, LiteralStringRef("configMode"), StringRef()).toString();
-		networkAddresses = getOption(options, LiteralStringRef("coordinators"), StringRef()).toString();
+		configMode = getOption(options, "configMode"_sr, StringRef()).toString();
+		networkAddresses = getOption(options, "coordinators"_sr, StringRef()).toString();
+		coordinatorChanges = getOption(options, "coordinatorChanges"_sr, 1);
+		if (networkAddresses != "auto") {
+			coordinatorChanges = 1;
+		}
 	}
 
-	std::string description() const override { return "ChangeConfig"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
 	Future<Void> start(Database const& cx) override {
 		if (this->clientId != 0)
@@ -56,11 +63,11 @@ struct ChangeConfigWorkload : TestWorkload {
 	ACTOR Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
 		wait(delay(5 * deterministicRandom()->random01()));
 		if (self->configMode.size()) {
-			if (g_simulator.startingDisabledConfiguration != "") {
+			if (g_simulator->startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
 				wait(success(
-				    ManagementAPI::changeConfig(db.getReference(), g_simulator.startingDisabledConfiguration, true)));
+				    ManagementAPI::changeConfig(db.getReference(), g_simulator->startingDisabledConfiguration, true)));
 				TraceEvent("WaitForReplicasExtra").log();
 				wait(waitForFullReplication(db));
 				TraceEvent("WaitForReplicasExtraEnd").log();
@@ -83,9 +90,8 @@ struct ChangeConfigWorkload : TestWorkload {
 	Future<Void> configureExtraDatabases(ChangeConfigWorkload* self) {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
-			for (auto extraDatabase : g_simulator.extraDatabases) {
-				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(extraDatabase));
-				Database db = Database::createDatabase(extraFile, -1);
+			for (auto extraDatabase : g_simulator->extraDatabases) {
+				Database db = Database::createSimulatedExtraDatabase(extraDatabase);
 				futures.push_back(configureExtraDatabase(self, db));
 			}
 		}
@@ -105,22 +111,28 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (self->configMode.size()) {
-			if (g_network->isSimulated() && g_simulator.startingDisabledConfiguration != "") {
+			if (g_network->isSimulated() && g_simulator->startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
 				wait(success(
-				    ManagementAPI::changeConfig(cx.getReference(), g_simulator.startingDisabledConfiguration, true)));
+				    ManagementAPI::changeConfig(cx.getReference(), g_simulator->startingDisabledConfiguration, true)));
 				TraceEvent("WaitForReplicas").log();
 				wait(waitForFullReplication(cx));
 				TraceEvent("WaitForReplicasEnd").log();
 			}
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), self->configMode, true)));
 		}
-		if (self->networkAddresses.size()) {
-			if (self->networkAddresses == "auto")
-				wait(CoordinatorsChangeActor(cx, self, true));
-			else
-				wait(CoordinatorsChangeActor(cx, self));
+		if ((g_network->isSimulated() && g_simulator->configDBType != ConfigDBType::SIMPLE) ||
+		    !g_network->isSimulated()) {
+			if (self->networkAddresses.size()) {
+				state int i;
+				for (i = 0; i < self->coordinatorChanges; ++i) {
+					if (i > 0) {
+						wait(delay(20));
+					}
+					wait(CoordinatorsChangeActor(cx, self, self->networkAddresses == "auto"));
+				}
+			}
 		}
 
 		if (!extraConfigureBefore) {
@@ -139,9 +151,11 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (autoChange) { // if auto, we first get the desired addresses by read \xff\xff/management/auto_coordinators
 			loop {
 				try {
-					Optional<Value> newCoordinatorsKey = wait(tr.get(
-					    LiteralStringRef("auto_coordinators")
-					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+					// Set RAW_ACCESS to explicitly avoid using tenants because
+					// access to management keys is denied for tenant transactions
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					Optional<Value> newCoordinatorsKey = wait(tr.get("auto_coordinators"_sr.withPrefix(
+					    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 					ASSERT(newCoordinatorsKey.present());
 					desiredCoordinatorsKey = newCoordinatorsKey.get().toString();
 					tr.reset();
@@ -178,8 +192,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tr.set(LiteralStringRef("processes")
-				           .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+				tr.set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
 				       Value(desiredCoordinatorsKey));
 				TraceEvent(SevDebug, "CoordinatorsChangeBeforeCommit")
 				    .detail("Auto", autoChange)
@@ -212,4 +225,4 @@ struct ChangeConfigWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ChangeConfigWorkload> ChangeConfigWorkloadFactory("ChangeConfig");
+WorkloadFactory<ChangeConfigWorkload> ChangeConfigWorkloadFactory;

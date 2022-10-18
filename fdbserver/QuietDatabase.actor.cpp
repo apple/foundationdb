@@ -35,7 +35,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -111,8 +111,8 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 ACTOR Future<int64_t> getDataInFlight(Database cx, WorkerInterface distributorWorker) {
 	try {
 		TraceEvent("DataInFlight").detail("Stage", "ContactingDataDistributor");
-		TraceEventFields md = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
+		TraceEventFields md = wait(
+		    timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("TotalDataInFlight"_sr)), 1.0));
 		int64_t dataInFlight = boost::lexical_cast<int64_t>(md.getValue("TotalBytes"));
 		return dataInFlight;
 	} catch (Error& e) {
@@ -300,7 +300,7 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 		    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		    return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+		    return tr->get("usable_regions"_sr.withPrefix(configKeysPrefix));
 	    }));
 	int usableRegions = 1;
 	if (regionsValue.present()) {
@@ -440,8 +440,8 @@ ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
 	try {
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "ContactingDataDistributor");
 
-		TraceEventFields movingDataMessage = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		TraceEventFields movingDataMessage =
+		    wait(timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
 
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "GotString");
 
@@ -483,8 +483,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
-			    dataDistributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TeamCollectionInfo"))),
-			    1.0));
+			    dataDistributorWorker.eventLogRequest.getReply(EventLogRequest("TeamCollectionInfo"_sr)), 1.0));
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
@@ -591,8 +590,8 @@ ACTOR Future<bool> getDataDistributionActive(Database cx, WorkerInterface distri
 	try {
 		TraceEvent("DataDistributionActive").detail("Stage", "ContactingDataDistributor");
 
-		TraceEventFields activeMessage = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		TraceEventFields activeMessage = wait(
+		    timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("DDTrackerStarting"_sr)), 1.0));
 
 		return activeMessage.getValue("State") == "Active";
 	} catch (Error& e) {
@@ -657,9 +656,9 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
-	if (g_network->isSimulated() && g_simulator.usableRegions > 1) {
-		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
-		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
+	if (g_network->isSimulated() && g_simulator->usableRegions > 1) {
+		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
+		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -673,10 +672,10 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
-			g_simulator.usableRegions = 1;
+			g_simulator->usableRegions = 1;
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
-			    (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1",
+			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
 			    true)));
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				wait(dbInfo->onChange());
@@ -768,7 +767,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
-	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 3600.0 : 1000.0);
+	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 4000.0 : 1000.0);
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;

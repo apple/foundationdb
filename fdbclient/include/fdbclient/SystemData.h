@@ -28,7 +28,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
-#include "Tenant.h"
+#include "fdbclient/Tenant.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -93,6 +93,13 @@ void decodeKeyServersValue(RangeResult result,
                            bool missingIsError = true);
 
 extern const KeyRef clusterIdKey;
+
+extern const KeyRangeRef auditRange;
+extern const KeyRef auditPrefix;
+const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
+const Key auditRangePrefix(const AuditType type, const UID& auditId);
+const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
+AuditStorageState decodeAuditStorageState(const ValueRef& value);
 
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
 extern const KeyRef checkpointPrefix;
@@ -162,6 +169,9 @@ extern const KeyRangeRef cacheChangeKeys;
 extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
+
+// For persisting the consistency scan configuration and metrics
+extern const KeyRef consistencyScanInfoKey;
 
 // "\xff/tss/[[serverId]]" := "[[tssId]]"
 extern const KeyRangeRef tssMappingKeys;
@@ -273,6 +283,9 @@ extern const KeyRef perpetualStorageWiggleStatsPrefix;
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
 
+// Encryption data at-rest config key
+extern const KeyRef encryptionAtRestModeConfKey;
+
 //	The differences between excluded and failed can be found in "command-line-interface.rst"
 //	and in the help message of the fdbcli command "exclude".
 
@@ -373,6 +386,12 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // 0 = Send a signal to resume/already resumed.
 // 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
+
+//	"\xff/previousCoordinators" = "[[ClusterConnectionString]]"
+//	Set to the encoded structure of the cluster's previous set of coordinators.
+//	Changed when performing quorumChange.
+//	See "CoordinationInterface.h" struct ClusterConnectionString for more details
+extern const KeyRef previousCoordinatorsKey;
 
 //	"\xff/coordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's current set of coordinators.
@@ -695,6 +714,9 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 extern const KeyRangeRef storageQuotaKeys;
 extern const KeyRef storageQuotaPrefix;
 Key storageQuotaKey(StringRef tenantName);
+
+extern const KeyRangeRef idempotencyIdKeys;
+extern const KeyRef idempotencyIdsExpiredVersion;
 
 #pragma clang diagnostic pop
 

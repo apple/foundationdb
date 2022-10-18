@@ -382,7 +382,8 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 			DebugLogTraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID)
 			    .errorUnsuppressed(e)
 			    .detail("Tag", self->tag);
-			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete) {
+			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete ||
+			    e.code() == error_code_request_maybe_delivered) {
 				// NOTE: delay in order to avoid the endless retry loop block other tasks
 				self->peekReplyStream.reset();
 				wait(delay(0));

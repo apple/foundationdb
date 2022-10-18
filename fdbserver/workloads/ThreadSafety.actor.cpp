@@ -102,6 +102,8 @@ private:
 
 // A workload which uses the thread safe API from multiple threads
 struct ThreadSafetyWorkload : TestWorkload {
+	static constexpr auto NAME = "ThreadSafety";
+
 	int threadsPerClient;
 	double threadDuration;
 
@@ -123,9 +125,9 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	ThreadSafetyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), stopped(false) {
 
-		threadsPerClient = getOption(options, LiteralStringRef("threadsPerClient"), 3);
-		threadDuration = getOption(options, LiteralStringRef("threadDuration"), 60.0);
-		numKeys = getOption(options, LiteralStringRef("numKeys"), 100);
+		threadsPerClient = getOption(options, "threadsPerClient"_sr, 3);
+		threadDuration = getOption(options, "threadDuration"_sr, 60.0);
+		numKeys = getOption(options, "numKeys"_sr, 100);
 
 		commitBarrier.setNumRequired(threadsPerClient);
 
@@ -134,8 +136,6 @@ struct ThreadSafetyWorkload : TestWorkload {
 		// This test is not deterministic
 		noUnseed = true;
 	}
-
-	std::string description() const override { return "ThreadSafety"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -149,7 +149,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->db = dbRef;
 
 		if (deterministicRandom()->coinflip()) {
-			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 
@@ -292,4 +292,4 @@ struct ThreadSafetyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ThreadSafetyWorkload> ThreadSafetyWorkloadFactory("ThreadSafety");
+WorkloadFactory<ThreadSafetyWorkload> ThreadSafetyWorkloadFactory;

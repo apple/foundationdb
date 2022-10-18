@@ -78,6 +78,7 @@ public:
 	int64_t CHANGE_FEED_CACHE_SIZE;
 	double CHANGE_FEED_POP_TIMEOUT;
 	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
+	double CHANGE_FEED_START_INTERVAL;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -198,6 +199,7 @@ public:
 	int32_t DEFAULT_MAX_GRV_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
+	bool DELETE_NATIVE_LIB_AFTER_LOADING;
 
 	double GLOBAL_CONFIG_REFRESH_BACKOFF;
 	double GLOBAL_CONFIG_REFRESH_MAX_BACKOFF;
@@ -253,12 +255,13 @@ public:
 	int MAX_TRANSACTION_TAG_LENGTH;
 	int MAX_TAGS_PER_TRANSACTION;
 	int COMMIT_SAMPLE_COST; // The expectation of sampling is every COMMIT_SAMPLE_COST sample once
-	int WRITE_COST_BYTE_FACTOR;
 	int INCOMPLETE_SHARD_PLUS; // The size of (possible) incomplete shard when estimate clear range
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
+	int64_t WRITE_COST_BYTE_FACTOR; // Used to round up the cost of write operations
+	int64_t READ_COST_BYTE_FACTOR; // Used to round up the cost of read operations
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -283,6 +286,10 @@ public:
 	int METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK;
 	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
+	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
+
+	// Encryption-at-rest
+	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

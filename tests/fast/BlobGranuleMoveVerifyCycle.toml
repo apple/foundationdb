@@ -1,4 +1,5 @@
 [configuration]
+testClass = "BlobGranule"
 blobGranulesEnabled = true 
 allowDefaultTenant = false
 # FIXME: re-enable rocks at some point

@@ -1,3 +1,5 @@
+testClass = "Backup"
+
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
 

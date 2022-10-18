@@ -42,6 +42,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct DataLossRecoveryWorkload : TestWorkload {
+	static constexpr auto NAME = "DataLossRecovery";
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
@@ -59,9 +60,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		pass = false;
 	}
 
-	std::string description() const override { return "DataLossRecovery"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
 
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
@@ -188,7 +189,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
 				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
-				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
+				if (g_simulator->protectedAddresses.count(interf.address()) == 0) {
 					dest.push_back(interf.uniqueID);
 					addr = interf.address();
 				}
@@ -213,18 +214,18 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 				TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
 				wait(moveKeys(cx,
-				              deterministicRandom()->randomUniqueID(),
-				              keys,
-				              dest,
-				              dest,
-				              moveKeysLock,
-				              Promise<Void>(),
-				              &self->startMoveKeysParallelismLock,
-				              &self->finishMoveKeysParallelismLock,
-				              false,
-				              UID(), // for logging only
-				              &ddEnabledState,
-				              CancelConflictingDataMoves::True));
+				              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
+				                              keys,
+				                              dest,
+				                              dest,
+				                              moveKeysLock,
+				                              Promise<Void>(),
+				                              &self->startMoveKeysParallelismLock,
+				                              &self->finishMoveKeysParallelismLock,
+				                              false,
+				                              UID(), // for logging only
+				                              &ddEnabledState,
+				                              CancelConflictingDataMoves::True }));
 				break;
 			} catch (Error& e) {
 				TraceEvent("DataLossRecovery").error(e).detail("Phase", "MoveRangeError");
@@ -256,9 +257,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	}
 
 	void killProcess(DataLossRecoveryWorkload* self, const NetworkAddress& addr) {
-		ISimulator::ProcessInfo* process = g_simulator.getProcessByAddress(addr);
+		ISimulator::ProcessInfo* process = g_simulator->getProcessByAddress(addr);
 		ASSERT(process->addresses.contains(addr));
-		g_simulator.killProcess(process, ISimulator::KillInstantly);
+		g_simulator->killProcess(process, ISimulator::KillInstantly);
 		TraceEvent("TestTeamKilled").detail("Address", addr);
 	}
 
@@ -267,4 +268,4 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory("DataLossRecovery");
+WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory;

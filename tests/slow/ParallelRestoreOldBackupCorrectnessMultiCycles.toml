@@ -1,6 +1,6 @@
-# Disable buggify for parallel restore
-#[configuration]
-#buggify=off
+[configuration]
+# tenants are not supported with parallel restore
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'BackupAndRestore'

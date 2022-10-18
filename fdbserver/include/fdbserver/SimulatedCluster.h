@@ -28,4 +28,16 @@ void setupAndRun(std::string const& dataFolder,
                  bool const& restoring,
                  std::string const& whitelistBinPath);
 
+class BasicTestConfig {
+public:
+	int minimumReplication = 0;
+	int logAntiQuorum = -1;
+	// Set true to simplify simulation configs for easier debugging
+	bool simpleConfig = false;
+	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType, machineCount,
+	    coordinators;
+};
+
+DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig);
+
 #endif

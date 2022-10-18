@@ -478,7 +478,7 @@ ACTOR Future<Void> fdbClient() {
 	state Transaction tx(db);
 	state std::string keyPrefix = "/tut/";
 	state Key startKey;
-	state KeyRef endKey = LiteralStringRef("/tut0");
+	state KeyRef endKey = "/tut0"_sr;
 	state int beginIdx = 0;
 	loop {
 		try {
@@ -494,7 +494,7 @@ ACTOR Future<Void> fdbClient() {
 			RangeResult range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
 			for (int i = 0; i < 10; ++i) {
 				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
-				tx.set(k, LiteralStringRef("foo"));
+				tx.set(k, "foo"_sr);
 			}
 			wait(tx.commit());
 			std::cout << "Committed\n";

@@ -47,7 +47,7 @@ static void bench_encrypt(benchmark::State& state) {
 	auto key = StreamCipherKey::getGlobalCipherKey();
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		for (int chunk = 0; chunk < chunks; ++chunk) {
 			benchmark::DoNotOptimize(encrypt(key, iv, data.begin() + chunk * chunkSize, chunkSize));
 		}
@@ -64,7 +64,7 @@ static void bench_decrypt(benchmark::State& state) {
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
 	auto encrypted = encrypt(key, iv, data.begin(), data.size());
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		Arena arena;
 		DecryptionStreamCipher decryptor(key, iv);
 		for (int chunk = 0; chunk < chunks; ++chunk) {

@@ -1,0 +1,10 @@
+[configuration]
+generateFearless = false # prevent generating remote dc because in MGS there's no region setting yet
+disableTss = true # There's no TSS in MGS this prevent the DD operate TSS mapping
+
+[[test]]
+testTitle = 'IDDTxnProcessorApiCorrectness'
+
+    [[test.workload]]
+    testName = 'IDDTxnProcessorApiCorrectness'
+    testDuration = 50.0

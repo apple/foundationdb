@@ -50,8 +50,7 @@ struct SpanContext {
 	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
 	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
 	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(Arena arena, const SpanContext& span)
-	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
+	SpanContext(const SpanContext& span) = default;
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
 	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
@@ -61,6 +60,9 @@ struct SpanContext {
 		serializer(ar, traceID, spanID, m_Flags);
 	}
 };
+
+template <>
+struct flow_ref<SpanContext> : std::false_type {};
 
 // Span
 //
@@ -155,7 +157,7 @@ public:
 	// We've determined for initial tracing release, spans with only a location will not be traced.
 	// Generally these are for background processes, some are called infrequently, while others may be high volume.
 	// TODO: review and address in subsequent PRs.
-	Span(const Location& location) : location(location), begin(g_network->now()) {}
+	explicit Span(const Location& location) : Span(location, SpanContext()) {}
 
 	Span(const Span&) = delete;
 	Span(Span&& o) {

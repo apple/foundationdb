@@ -38,6 +38,7 @@ public:
 	                   ConfigFollowerInterface const&);
 
 public: // Testing
+	Future<Void> serve(ConfigBroadcastInterface const&);
 	Future<Void> serve(ConfigTransactionInterface const&);
 	Future<Void> serve(ConfigFollowerInterface const&);
 	void close();

@@ -20,6 +20,7 @@
 
 #pragma once
 #include "fdbserver/EncryptionOpsUtils.h"
+#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -31,9 +32,9 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ResolverInterface.h"
-#include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "flow/IRandom.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -135,27 +136,17 @@ struct ProxyStats {
 	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    maxComputeNS(0), minComputeNS(1e12),
-	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                                   LiteralStringRef("CommitBatchQueuing"),
-	                                                   Histogram::Unit::microseconds)),
-	    getCommitVersionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                                 LiteralStringRef("GetCommitVersion"),
-	                                                 Histogram::Unit::microseconds)),
-	    resolutionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                           LiteralStringRef("Resolution"),
-	                                           Histogram::Unit::microseconds)),
-	    postResolutionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                               LiteralStringRef("PostResolutionQueuing"),
-	                                               Histogram::Unit::microseconds)),
-	    processingMutationDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                                   LiteralStringRef("ProcessingMutation"),
-	                                                   Histogram::Unit::microseconds)),
-	    tlogLoggingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                            LiteralStringRef("TlogLogging"),
-	                                            Histogram::Unit::microseconds)),
-	    replyCommitDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                            LiteralStringRef("ReplyCommit"),
-	                                            Histogram::Unit::microseconds)) {
+	    commitBatchQueuingDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "CommitBatchQueuing"_sr, Histogram::Unit::microseconds)),
+	    getCommitVersionDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "GetCommitVersion"_sr, Histogram::Unit::microseconds)),
+	    resolutionDist(Histogram::getHistogram("CommitProxy"_sr, "Resolution"_sr, Histogram::Unit::microseconds)),
+	    postResolutionDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "PostResolutionQueuing"_sr, Histogram::Unit::microseconds)),
+	    processingMutationDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "ProcessingMutation"_sr, Histogram::Unit::microseconds)),
+	    tlogLoggingDist(Histogram::getHistogram("CommitProxy"_sr, "TlogLogging"_sr, Histogram::Unit::microseconds)),
+	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::microseconds)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return pVersion->get(); });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -173,6 +164,7 @@ struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
 	std::map<TenantName, TenantMapEntry> tenantMap;
+	std::unordered_map<int64_t, TenantName> tenantIdIndex;
 	ProxyStats stats;
 	MasterInterface master;
 	std::vector<ResolverInterface> resolvers;
@@ -300,10 +292,9 @@ struct ProxyCommitData {
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), localCommitBatchesStarted(0),
 	    getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
-	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), lastTxsPop(0), popRemoteTxs(false),
-	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
-	    lastMasterReset(now()), lastResolverReset(now()),
-	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client)) {
+	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
+	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
+	    lastResolverReset(now()), isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct IndexScanWorkload : KVWorkload {
+	constexpr static auto NAME = "IndexScan";
 	uint64_t rowsRead, chunks;
 	int bytesPerRead, failedTransactions, scans;
 	double totalTimeFetching, testDuration, transactionDuration;
@@ -34,14 +35,12 @@ struct IndexScanWorkload : KVWorkload {
 
 	IndexScanWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), rowsRead(0), chunks(0), failedTransactions(0), scans(0) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		bytesPerRead = getOption(options, LiteralStringRef("bytesPerRead"), 80000);
-		transactionDuration = getOption(options, LiteralStringRef("transactionDuration"), 1.0);
-		singleProcess = getOption(options, LiteralStringRef("singleProcess"), true);
-		readYourWrites = getOption(options, LiteralStringRef("readYourWrites"), true);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		bytesPerRead = getOption(options, "bytesPerRead"_sr, 80000);
+		transactionDuration = getOption(options, "transactionDuration"_sr, 1.0);
+		singleProcess = getOption(options, "singleProcess"_sr, true);
+		readYourWrites = getOption(options, "readYourWrites"_sr, true);
 	}
-
-	std::string description() const override { return "SimpleRead"; }
 
 	Future<Void> setup(Database const& cx) override {
 		// this will be set up by and external force!
@@ -144,4 +143,4 @@ struct IndexScanWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<IndexScanWorkload> IndexScanWorkloadFactory("IndexScan");
+WorkloadFactory<IndexScanWorkload> IndexScanWorkloadFactory;

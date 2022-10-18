@@ -23,17 +23,15 @@
 #include "flow/Platform.h"
 
 static void bench_timer(benchmark::State& state) {
-	while (state.KeepRunning()) {
-		double time = timer();
-		benchmark::DoNotOptimize(time);
+	for (auto _ : state) {
+		benchmark::DoNotOptimize(timer());
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
 static void bench_timer_monotonic(benchmark::State& state) {
-	while (state.KeepRunning()) {
-		double time = timer_monotonic();
-		benchmark::DoNotOptimize(time);
+	for (auto _ : state) {
+		benchmark::DoNotOptimize(timer_monotonic());
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }

@@ -139,10 +139,10 @@ struct ResolveTransactionBatchRequest {
 		           transactions,
 		           txnStateTransactions,
 		           reply,
-		           arena,
 		           debugID,
 		           writtenTags,
-		           spanContext);
+		           spanContext,
+		           arena);
 	}
 };
 

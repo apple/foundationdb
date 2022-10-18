@@ -40,6 +40,7 @@ struct ClusterInterface {
 	RequestStream<struct MoveShardRequest> moveShard;
 	RequestStream<struct RepairSystemDataRequest> repairSystemData;
 	RequestStream<struct SplitShardRequest> splitShard;
+	RequestStream<struct TriggerAuditRequest> triggerAudit;
 
 	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
@@ -51,7 +52,7 @@ struct ClusterInterface {
 		       databaseStatus.getFuture().isReady() || ping.getFuture().isReady() ||
 		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady() ||
 		       moveShard.getFuture().isReady() || repairSystemData.getFuture().isReady() ||
-		       splitShard.getFuture().isReady();
+		       splitShard.getFuture().isReady() || triggerAudit.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -64,6 +65,7 @@ struct ClusterInterface {
 		moveShard.getEndpoint(TaskPriority::ClusterController);
 		repairSystemData.getEndpoint(TaskPriority::ClusterController);
 		splitShard.getEndpoint(TaskPriority::ClusterController);
+		triggerAudit.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -77,7 +79,8 @@ struct ClusterInterface {
 		           forceRecovery,
 		           moveShard,
 		           repairSystemData,
-		           splitShard);
+		           splitShard,
+		           triggerAudit);
 	}
 };
 
@@ -114,7 +117,7 @@ struct OpenDatabaseRequest {
 
 		template <typename Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, samples);
+			serializer(ar, count, samples);
 		}
 
 		// Merges a set of Samples into *this

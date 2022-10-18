@@ -22,11 +22,11 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_EVENTTYPES_ACTOR_G_H)
-#define FDBCLIENT_EVENTTYPES_ACTOR_G_H
+#if defined(NO_INTELLISENSE) && !defined(FLOW_EVENTTYPES_ACTOR_G_H)
+#define FLOW_EVENTTYPES_ACTOR_G_H
 #include "flow/EventTypes.actor.g.h"
-#elif !defined(FDBCLIENT_EVENTTYPES_ACTOR_H)
-#define FDBCLIENT_EVENTTYPESS_ACTOR_H
+#elif !defined(FLOW_EVENTTYPES_ACTOR_H)
+#define FLOW_EVENTTYPES_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"

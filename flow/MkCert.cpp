@@ -166,13 +166,13 @@ PrivateKey makeEcP256() {
 	return PrivateKey(DerEncoded{}, StringRef(buf, len));
 }
 
-PrivateKey makeRsa2048Bit() {
+PrivateKey makeRsa4096Bit() {
 	auto kctx = AutoCPointer(::EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr), &::EVP_PKEY_CTX_free);
 	OSSL_ASSERT(kctx);
 	auto key = AutoCPointer(nullptr, &::EVP_PKEY_free);
 	auto keyRaw = std::add_pointer_t<EVP_PKEY>();
 	OSSL_ASSERT(0 < ::EVP_PKEY_keygen_init(kctx));
-	OSSL_ASSERT(0 < ::EVP_PKEY_CTX_set_rsa_keygen_bits(kctx, 2048));
+	OSSL_ASSERT(0 < ::EVP_PKEY_CTX_set_rsa_keygen_bits(kctx, 4096));
 	OSSL_ASSERT(0 < ::EVP_PKEY_keygen(kctx, &keyRaw));
 	OSSL_ASSERT(keyRaw);
 	key.reset(keyRaw);

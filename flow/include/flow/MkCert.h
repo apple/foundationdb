@@ -39,7 +39,7 @@ void printPrivateKey(FILE* out, StringRef privateKeyPem);
 
 PrivateKey makeEcP256();
 
-PrivateKey makeRsa2048Bit();
+PrivateKey makeRsa4096Bit();
 
 struct Asn1EntryRef {
 	// field must match one of ASN.1 object short/long names: e.g. "C", "countryName", "CN", "commonName",

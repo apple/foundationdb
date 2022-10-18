@@ -3,44 +3,48 @@
 When the `GLOBAL_TAG_THROTTLING` knob is enabled, the ratekeeper will use the [transaction tagging feature](https://apple.github.io/foundationdb/transaction-tagging.html) to throttle tags according to the global tag throttling algorithm. This page describes the implementation of this algorithm.
 
 ### Tag Quotas
-The global tag throttler bases throttling decisions on "quotas" provided by clients through the tag quota API. Each tag quota has four different components:
+The global tag throttler bases throttling decisions on "quotas" provided by clients through the tag quota API. Each tag quota has two components:
 
-* Reserved read quota
-* Reserved write quota
-* Total read quota
-* Total write quota
+* Reserved quota
+* Total quota
 
-The global tag throttler can not throttle tags to a throughput below the reserved quotas, and it cannot allow throughput to exceed the total quotas.
+The global tag throttler cannot throttle tags to a throughput below the reserved quota, and it cannot allow throughput to exceed the total quota.
 
 ### Cost
-The units for these quotas are computed as follows. The "cost" of a read operation is computed as:
+Internally, the units for these quotas are "page costs", computed as follows. The "page cost" of a read operation is computed as:
 
 ```
-readCost = bytesRead / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1;
+readCost = ceiling(bytesRead / CLIENT_KNOBS->READ_COST_BYTE_FACTOR);
 ```
 
-The "cost" of a write operation is computed as:
+The "page cost" of a write operation is computed as:
 
 ```
-writeCost = bytesWritten / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1;
+writeCost = SERVER_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * ceiling(bytesWritten / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR);
 ```
 
 Here `bytesWritten` includes cleared bytes. The size of range clears is estimated at commit time.
 
 ### Tuple Layer
-Tag quotas are stored inside of the system keyspace (with prefix `\xff/tagQuota/`). They are stored using the tuple layer, in a tuple of form: `(reservedReadQuota, totalReadQuota, reservedWriteQuota, totalWriteQuota)`. There is currently no custom code in the bindings for manipulating these system keys. However, in any language for which bindings are available, it is possible to use the tuple layer to manipulate tag quotas.
+Tag quotas are stored inside of the system keyspace (with prefix `\xff/tagQuota/`). They are stored using the tuple layer, in a tuple of form: `(reservedQuota, totalQuota)`. There is currently no custom code in the bindings for manipulating these system keys. However, in any language for which bindings are available, it is possible to use the tuple layer to manipulate tag quotas.
 
 ### fdbcli
-The easiest way for an external client to interact with tag quotas is through `fdbcli`. To get the quota of a particular tag, run the following command:
+The easiest way for an external client to interact with tag quotas is through `fdbcli`. To get the quota (in bytes/second) of a particular tag, run the following command:
 
 ```
-fdbcli> get <tag> [reserved|total] [read|write]
+fdbcli> quota get <tag> [reserved_throughput|total_throughput]
 ```
 
 To set the quota through `fdbcli`, run:
 
 ```
-fdbcli> set <tag> [reserved|total] [read|write] <value>
+fdbcli> quota set <tag> [reserved_throughput|total_throughput] <bytes_per_second>
+```
+
+Note that the quotas are specified in terms of bytes/second, and internally converted to page costs:
+
+```
+page_cost_quota = ceiling(byte_quota / CLIENT_KNOBS->READ_COST_BYTE_FACTOR)
 ```
 
 ### Limit Calculation
@@ -125,20 +129,3 @@ In each test, the `GlobalTagThrottlerTesting::monitor` function is used to perio
 On the ratekeeper, every `SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL` seconds, the ratekeeper will call `GlobalTagThrottler::getClientRates`. At the end of the rate calculation for each tag, a trace event of type `GlobalTagThrottler_GotClientRate` is produced. This trace event reports the relevant inputs that went in to the rate calculation, and can be used for debugging.
 
 On storage servers, every `SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL` seconds, there are `BusyReadTag` events for every tag that has sufficient read cost to be reported to the ratekeeper. Both cost and fractional busyness are reported.
-
-### Status
-For each storage server, the busiest read tag is reported in the full status output, along with its cost and fractional busyness. 
-
-At path `.cluster.qos.global_tag_throttler`, throttling limitations for each tag are reported:
-
-```
-{
-  "<tagName>": {
-    "desired_tps": <number>,
-    "reserved_tps": <number>,
-    "limiting_tps": [<number>|"unset"],
-    "target_tps": <number>
-  },
-  ...
-}
-```

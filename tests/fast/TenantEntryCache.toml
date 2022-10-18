@@ -1,0 +1,10 @@
+[configuration]
+allowDefaultTenant = false
+allowDisablingTenants = false
+
+[[test]]
+testTitle = 'TenantEntryCacheTest'
+
+    [[test.workload]]
+    testName = 'TenantEntryCache'
+    maxTenants = 100

@@ -193,7 +193,7 @@ public:
 		memset(firstPages[0], 0xFF, sizeof(Page));
 		firstPages[1] = (Page*)((uintptr_t)firstPages[0] + 4096);
 		memset(firstPages[1], 0xFF, sizeof(Page));
-		stallCount.init(LiteralStringRef("RawDiskQueue.StallCount"));
+		stallCount.init("RawDiskQueue.StallCount"_sr);
 	}
 
 	Future<Void> pushAndCommit(StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {

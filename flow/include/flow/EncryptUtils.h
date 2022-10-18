@@ -29,21 +29,28 @@
 #include <string>
 #include <string_view>
 
-#define ENCRYPT_INVALID_DOMAIN_ID -1
-#define ENCRYPT_INVALID_CIPHER_KEY_ID 0
-#define ENCRYPT_INVALID_RANDOM_SALT 0
-
-#define AUTH_TOKEN_SIZE 32
-
-#define SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID -2
-#define ENCRYPT_HEADER_DOMAIN_ID -3
-
-const std::string FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain";
+constexpr const int AUTH_TOKEN_HMAC_SHA_SIZE = 32;
+constexpr const int AUTH_TOKEN_AES_CMAC_SIZE = 16;
+constexpr const int AUTH_TOKEN_MAX_SIZE = AUTH_TOKEN_HMAC_SHA_SIZE;
 
 using EncryptCipherDomainId = int64_t;
-using EncryptCipherDomainName = StringRef;
+using EncryptCipherDomainNameRef = StringRef;
+using EncryptCipherDomainName = Standalone<EncryptCipherDomainNameRef>;
 using EncryptCipherBaseKeyId = uint64_t;
 using EncryptCipherRandomSalt = uint64_t;
+
+constexpr const EncryptCipherDomainId INVALID_ENCRYPT_DOMAIN_ID = -1;
+constexpr const EncryptCipherDomainId SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID = -2;
+constexpr const EncryptCipherDomainId ENCRYPT_HEADER_DOMAIN_ID = -3;
+constexpr const EncryptCipherDomainId FDB_DEFAULT_ENCRYPT_DOMAIN_ID = -4;
+
+constexpr const EncryptCipherBaseKeyId INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
+
+constexpr const EncryptCipherRandomSalt INVALID_ENCRYPT_RANDOM_SALT = 0;
+
+extern const EncryptCipherDomainName FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME;
+extern const EncryptCipherDomainName FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
+extern const EncryptCipherDomainName FDB_ENCRYPT_HEADER_DOMAIN_NAME;
 
 typedef enum {
 	ENCRYPT_CIPHER_MODE_NONE = 0,
@@ -66,12 +73,28 @@ EncryptCipherMode encryptModeFromString(const std::string& modeStr);
 typedef enum {
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE = 1,
-	ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI = 2,
 	ENCRYPT_HEADER_AUTH_TOKEN_LAST = 3 // Always the last element
 } EncryptAuthTokenMode;
 
 static_assert(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptHeaderAuthToken value overflow");
+
+typedef enum {
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE = 0,
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA = 1,
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC = 2,
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST = 3 // Always the last element
+} EncryptAuthTokenAlgo;
+
+static_assert(EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST <= std::numeric_limits<uint8_t>::max(),
+              "EncryptHeaerAuthTokenAlgo value overflow");
+
+bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode);
+bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo);
+bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo);
+EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode);
+EncryptAuthTokenMode getRandomAuthTokenMode();
+EncryptAuthTokenAlgo getRandomAuthTokenAlgo();
 
 constexpr std::string_view ENCRYPT_DBG_TRACE_CACHED_PREFIX = "Chd";
 constexpr std::string_view ENCRYPT_DBG_TRACE_QUERY_PREFIX = "Qry";
@@ -90,5 +113,7 @@ std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
                                         EncryptCipherBaseKeyId baseCipherId,
                                         int64_t refAfterTS,
                                         int64_t expAfterTS);
+
+int getEncryptHeaderAuthTokenSize(int algo);
 
 #endif

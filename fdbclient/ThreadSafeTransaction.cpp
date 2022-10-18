@@ -55,7 +55,7 @@ Reference<ITenant> ThreadSafeDatabase::openTenant(TenantNameRef tenantName) {
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	auto type = isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>()));
 }
 
@@ -88,6 +88,7 @@ ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address,
 	DatabaseContext* db = this->db;
 	Key addressKey = address;
 	return onMainThread([db, addressKey, check, duration]() -> Future<int64_t> {
+		db->checkDeferredError();
 		return db->rebootWorker(addressKey, check, duration);
 	});
 }
@@ -95,14 +96,20 @@ ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address,
 ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
 	DatabaseContext* db = this->db;
 	Key dcidKey = dcid;
-	return onMainThread([db, dcidKey]() -> Future<Void> { return db->forceRecoveryWithDataLoss(dcidKey); });
+	return onMainThread([db, dcidKey]() -> Future<Void> {
+		db->checkDeferredError();
+		return db->forceRecoveryWithDataLoss(dcidKey);
+	});
 }
 
 ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
 	DatabaseContext* db = this->db;
 	Key snapUID = uid;
 	Key cmd = snapshot_command;
-	return onMainThread([db, snapUID, cmd]() -> Future<Void> { return db->createSnapshot(snapUID, cmd); });
+	return onMainThread([db, snapUID, cmd]() -> Future<Void> {
+		db->checkDeferredError();
+		return db->createSnapshot(snapUID, cmd);
+	});
 }
 
 ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState() {
@@ -126,14 +133,17 @@ double ThreadSafeDatabase::getMainThreadBusyness() {
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	DatabaseContext* db = this->db;
-	return onMainThread(
-	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
+	return onMainThread([db, expectedVersion]() -> Future<ProtocolVersion> {
+		db->checkDeferredError();
+		return db->getClusterProtocol(expectedVersion);
+	});
 }
 
 ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
 	return onMainThread([db, range, purgeVersion, force]() -> Future<Key> {
+		db->checkDeferredError();
 		return db->purgeBlobGranules(range, purgeVersion, {}, force);
 	});
 }
@@ -141,33 +151,47 @@ ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRa
 ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
 	DatabaseContext* db = this->db;
 	Key key = purgeKey;
-	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
+	return onMainThread([db, key]() -> Future<Void> {
+		db->checkDeferredError();
+		return db->waitPurgeGranulesComplete(key);
+	});
 }
 
 ThreadFuture<bool> ThreadSafeDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> { return db->blobbifyRange(range); });
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->blobbifyRange(range);
+	});
 }
 
 ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> { return db->blobbifyRange(range); });
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->unblobbifyRange(range);
+	});
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
                                                                                           int rangeLimit) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
-	return onMainThread(
-	    [=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> { return db->listBlobbifiedRanges(range, rangeLimit); });
+	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+		db->checkDeferredError();
+		return db->listBlobbifiedRanges(range, rangeLimit);
+	});
 }
 
 ThreadFuture<Version> ThreadSafeDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<Version> { return db->verifyBlobRange(range, version); });
+	return onMainThread([=]() -> Future<Version> {
+		db->checkDeferredError();
+		return db->verifyBlobRange(range, version);
+	});
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType,
@@ -200,7 +224,7 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 }
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
-	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
 }
 
@@ -216,7 +240,51 @@ ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRang
 ThreadFuture<Void> ThreadSafeTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
 	DatabaseContext* db = this->db->db;
 	Key key = purgeKey;
-	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
+	return onMainThread([db, key]() -> Future<Void> {
+		db->checkDeferredError();
+		return db->waitPurgeGranulesComplete(key);
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->blobbifyRange(range, tenantName);
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->unblobbifyRange(range, tenantName);
+	});
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTenant::listBlobbifiedRanges(const KeyRangeRef& keyRange,
+                                                                                        int rangeLimit) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+		db->checkDeferredError();
+		return db->listBlobbifiedRanges(range, rangeLimit, tenantName);
+	});
+}
+
+ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<Version> {
+		db->checkDeferredError();
+		return db->verifyBlobRange(range, version, tenantName);
+	});
 }
 
 ThreadSafeTenant::~ThreadSafeTenant() {}
@@ -400,34 +468,53 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
                                                                   Version beginVersion,
                                                                   Optional<Version> readVersion,
                                                                   ReadBlobGranuleContext granule_context) {
-	// FIXME: prevent from calling this from another main thread!
+	// This should not be called directly, bypassMultiversionApi should not be set
+	return ThreadResult<RangeResult>(unsupported_operation());
+}
 
+ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::readBlobGranulesStart(
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Optional<Version> readVersion,
+    Version* readVersionOut) {
 	ISingleThreadTransaction* tr = this->tr;
 	KeyRange r = keyRange;
 
-	int64_t readVersionOut;
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> getFilesFuture = onMainThread(
-	    [tr, r, beginVersion, readVersion, &readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
+	return onMainThread(
+	    [tr, r, beginVersion, readVersion, readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
 		    tr->checkDeferredError();
-		    return tr->readBlobGranules(r, beginVersion, readVersion, &readVersionOut);
+		    return tr->readBlobGranules(r, beginVersion, readVersion, readVersionOut);
 	    });
+}
 
-	// FIXME: can this safely avoid another main thread jump?
-	getFilesFuture.blockUntilReadyCheckOnMainThread();
-
-	// propagate error to client
-	if (getFilesFuture.isError()) {
-		return ThreadResult<RangeResult>(getFilesFuture.getError());
-	}
-
-	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
-
+ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
+    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Version readVersion,
+    ReadBlobGranuleContext granuleContext) {
 	// do this work off of fdb network threads for performance!
-	if (granule_context.debugNoMaterialize) {
-		return ThreadResult<RangeResult>(blob_granule_not_materialized());
-	} else {
-		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersionOut, granule_context);
+	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
+	GranuleMaterializeStats stats;
+	auto ret = loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext, stats);
+	if (!ret.isError()) {
+		ISingleThreadTransaction* tr = this->tr;
+		onMainThreadVoid([tr, stats]() { tr->addGranuleMaterializeStats(stats); });
 	}
+	return ret;
+}
+
+ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
+    const KeyRangeRef& keyRange,
+    Optional<Version> summaryVersion,
+    int rangeLimit) {
+	ISingleThreadTransaction* tr = this->tr;
+	KeyRange r = keyRange;
+
+	return onMainThread([=]() -> Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> {
+		tr->checkDeferredError();
+		return tr->summarizeBlobGranules(r, summaryVersion, rangeLimit);
+	});
 }
 
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -525,22 +612,34 @@ Version ThreadSafeTransaction::getCommittedVersion() {
 
 ThreadFuture<VersionVector> ThreadSafeTransaction::getVersionVector() {
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr]() -> Future<VersionVector> { return tr->getVersionVector(); });
+	return onMainThread([tr]() -> Future<VersionVector> {
+		tr->checkDeferredError();
+		return tr->getVersionVector();
+	});
 }
 
 ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr]() -> Future<SpanContext> { return tr->getSpanContext(); });
+	return onMainThread([tr]() -> Future<SpanContext> {
+		tr->checkDeferredError();
+		return tr->getSpanContext();
+	});
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr]() -> Future<int64_t> { return tr->getApproximateSize(); });
+	return onMainThread([tr]() -> Future<int64_t> {
+		tr->checkDeferredError();
+		return tr->getApproximateSize();
+	});
 }
 
 ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr]() -> Future<Standalone<StringRef>> { return tr->getVersionstamp(); });
+	return onMainThread([tr]() -> Future<Standalone<StringRef>> {
+		tr->checkDeferredError();
+		return tr->getVersionstamp();
+	});
 }
 
 void ThreadSafeTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -602,7 +701,7 @@ extern const char* getSourceVersion();
 ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
-	this->apiVersion = apiVersion;
+	this->apiVersion = ApiVersion(apiVersion);
 }
 
 const char* ThreadSafeApi::getClientVersion() {
@@ -674,12 +773,12 @@ void ThreadSafeApi::stopNetwork() {
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
 	return Reference<IDatabase>(
-	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion));
+	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version()));
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
 	return Reference<IDatabase>(new ThreadSafeDatabase(
-	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion));
+	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion.version()));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

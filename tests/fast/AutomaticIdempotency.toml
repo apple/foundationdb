@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'AutomaticIdempotency'
+
+    [[test.workload]]
+    testName = 'AutomaticIdempotencyCorrectness'
+
+    [[test.workload]]
+    testName='Attrition'
+    testDuration=10.0

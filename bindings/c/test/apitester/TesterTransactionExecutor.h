@@ -38,6 +38,9 @@ class ITransactionContext : public std::enable_shared_from_this<ITransactionCont
 public:
 	virtual ~ITransactionContext() {}
 
+	// Current FDB database
+	virtual fdb::Database db() = 0;
+
 	// Current FDB transaction
 	virtual fdb::Transaction tx() = 0;
 
@@ -62,57 +65,11 @@ public:
 	virtual void continueAfterAll(std::vector<fdb::Future> futures, TTaskFct cont);
 };
 
-/**
- * Interface of an actor object implementing a concrete transaction
- */
-class ITransactionActor {
-public:
-	virtual ~ITransactionActor() {}
+// Type of the lambda functions implementing a database operation
+using TOpStartFct = std::function<void(std::shared_ptr<ITransactionContext>)>;
 
-	// Initialize with the given transaction context
-	virtual void init(std::shared_ptr<ITransactionContext> ctx) = 0;
-
-	// Start execution of the transaction, also called on retries
-	virtual void start() = 0;
-
-	// Transaction completion result (error_code_success in case of success)
-	virtual fdb::Error getError() = 0;
-
-	// Notification about the completion of the transaction
-	virtual void complete(fdb::Error err) = 0;
-};
-
-/**
- * A helper base class for transaction actors
- */
-class TransactionActorBase : public ITransactionActor {
-public:
-	void init(std::shared_ptr<ITransactionContext> ctx) override { context = ctx; }
-	fdb::Error getError() override { return error; }
-	void complete(fdb::Error err) override;
-
-protected:
-	std::shared_ptr<ITransactionContext> ctx() { return context; }
-
-private:
-	std::shared_ptr<ITransactionContext> context;
-	fdb::Error error = fdb::Error::success();
-};
-
-// Type of the lambda functions implementing a transaction
-using TTxStartFct = std::function<void(std::shared_ptr<ITransactionContext>)>;
-
-/**
- * A wrapper class for transactions implemented by lambda functions
- */
-class TransactionFct : public TransactionActorBase {
-public:
-	TransactionFct(TTxStartFct startFct) : startFct(startFct) {}
-	void start() override { startFct(this->ctx()); }
-
-private:
-	TTxStartFct startFct;
-};
+// Type of the lambda functions implementing a database operation
+using TOpContFct = std::function<void(fdb::Error)>;
 
 /**
  * Configuration of transaction execution mode
@@ -124,11 +81,27 @@ struct TransactionExecutorOptions {
 	// Create each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
+	// Enable injection of database create errors
+	bool injectDatabaseCreateErrors = false;
+
+	// Test tampering cluster file contents
+	bool tamperClusterFile = false;
+
+	// The probability of injected database create errors
+	// Used if injectDatabaseCreateErrors = true
+	double databaseCreateErrorRatio = 0.1;
+
 	// The size of the database instance pool
 	int numDatabases = 1;
 
+	// The number of tenants to create in the cluster. If 0, no tenants are used.
+	int numTenants = 0;
+
 	// Maximum number of retries per transaction (0 - unlimited)
 	int transactionRetryLimit = 0;
+
+	// Temporary directory
+	std::string tmpDir;
 };
 
 /**
@@ -140,7 +113,14 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
-	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
+	virtual void execute(TOpStartFct start,
+	                     TOpContFct cont,
+	                     std::optional<fdb::BytesRef> tenantName,
+	                     bool transactional,
+	                     bool restartOnTimeout) = 0;
+	virtual fdb::Database selectDatabase() = 0;
+	virtual std::string getClusterFileForErrorInjection() = 0;
+	virtual const TransactionExecutorOptions& getOptions() = 0;
 };
 
 // Create a transaction executor for the given options

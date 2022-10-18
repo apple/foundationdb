@@ -90,7 +90,9 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 		{ DataMovementReason::TEAM_1_LEFT, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT },
 		{ DataMovementReason::TEAM_FAILED, SERVER_KNOBS->PRIORITY_TEAM_FAILED },
 		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
-		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD }
+		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD },
+		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
+		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD }
 	};
 
 	static PriorityDmReasonMapping priorityReason;
@@ -626,10 +628,11 @@ struct DDQueue : public IDDRelocationQueue {
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
-	std::shared_ptr<IDDTxnProcessor> txnProcessor;
+	Reference<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	Reference<PhysicalShardCollection> physicalShardCollection;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;
@@ -725,9 +728,10 @@ struct DDQueue : public IDDRelocationQueue {
 
 	DDQueue(UID mid,
 	        MoveKeysLock lock,
-	        Database cx,
+	        Reference<IDDTxnProcessor> db,
 	        std::vector<TeamCollectionInterface> teamCollections,
 	        Reference<ShardsAffectedByTeamFailure> sABTF,
+	        Reference<PhysicalShardCollection> physicalShardCollection,
 	        PromiseStream<Promise<int64_t>> getAverageShardBytes,
 	        int teamSize,
 	        int singleRegionTeamSize,
@@ -735,9 +739,9 @@ struct DDQueue : public IDDRelocationQueue {
 	        FutureStream<RelocateShard> input,
 	        PromiseStream<GetMetricsRequest> getShardMetrics,
 	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
-	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)),
+	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(db->context()), txnProcessor(db),
 	    teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
-	    getAverageShardBytes(getAverageShardBytes),
+	    physicalShardCollection(physicalShardCollection), getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
@@ -1226,7 +1230,11 @@ struct DDQueue : public IDDRelocationQueue {
 					// TODO(psm): The shard id is determined by DD.
 					rrs.dataMove.reset();
 					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-						rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+							rrs.dataMoveId = UID();
+						} else {
+							rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
 					}
@@ -1285,6 +1293,7 @@ struct DDQueue : public IDDRelocationQueue {
 
 	// Schedules cancellation of a data move.
 	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
+		ASSERT(!txnProcessor->isMocked()); // the mock implementation currently doesn't support data move
 		std::vector<Future<Void>> cleanup;
 		auto f = this->dataMoves.intersectingRanges(range);
 		for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1316,6 +1325,24 @@ struct DDQueue : public IDDRelocationQueue {
 	}
 
 	int getUnhealthyRelocationCount() override { return unhealthyRelocations; }
+
+	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
+	                                        const GetTeamRequest& srcReq,
+	                                        const GetTeamRequest& destReq,
+	                                        const int& priority,
+	                                        TraceEvent* traceEvent);
+
+	Future<bool> rebalanceReadLoad(DataMovementReason moveReason,
+	                               Reference<IDataDistributionTeam> sourceTeam,
+	                               Reference<IDataDistributionTeam> destTeam,
+	                               bool primary,
+	                               TraceEvent* traceEvent);
+
+	Future<bool> rebalanceTeams(DataMovementReason moveReason,
+	                            Reference<IDataDistributionTeam const> sourceTeam,
+	                            Reference<IDataDistributionTeam const> destTeam,
+	                            bool primary,
+	                            TraceEvent* traceEvent);
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
@@ -1379,6 +1406,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
 	state std::vector<UID> destIds;
+	state uint64_t debugID = deterministicRandom()->randomUInt64();
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1417,11 +1445,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("Range", kr);
 				}
 			}
-			self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
+			if (rd.isRestore() || !SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+					ASSERT(rd.dataMoveId.isValid());
+				}
+				self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
+			}
 		}
 
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
+
+		state uint64_t physicalShardIDCandidate = UID().first();
+		state bool forceToUseNewPhysicalShard = false;
 
 		ASSERT(rd.src.size());
 		loop {
@@ -1483,6 +1519,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
 
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
+						    tciIndex == 1) {
+							ASSERT(physicalShardIDCandidate != UID().first() &&
+							       physicalShardIDCandidate != anonymousShardId.first());
+							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
+							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
+							        physicalShardIDCandidate, metrics, debugID);
+							if (remoteTeamWithPhysicalShard.present()) {
+								// Exists a remoteTeam in the mapping that has the physicalShardIDCandidate
+								// use the remoteTeam with the physicalShard as the bestTeam
+								req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
+							}
+						}
+
 						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 						// server that hosts the relocateData. This is possible, for example, in a fearless
 						// configuration when the remote DC is just brought up.
@@ -1514,10 +1564,62 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							anyWithSource = true;
 						}
 
-						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+							// critical to the correctness of team selection by PhysicalShardCollection
+							// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
+							// team Thus, tryGetAvailableRemoteTeamWith() may select an almost full remote team In this
+							// case, we must re-select a remote team We set foundTeams = false to avoid finishing team
+							// selection Then, forceToUseNewPhysicalShard is set, which enforce to use getTeam to select
+							// a remote team
+							if (tciIndex == 1 && !forceToUseNewPhysicalShard) {
+								bool minAvailableSpaceRatio = bestTeam.first.get()->getMinAvailableSpaceRatio(true);
+								if (minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+									foundTeams = false;
+									break;
+								}
+							}
+						}
+
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+							bestTeams.emplace_back(bestTeam.first.get(), true);
+							// Always set bestTeams[i].second = true to disable optimization in data move between DCs
+							// for the correctness of PhysicalShardCollection
+							// Currently, enabling the optimization will break the invariant of PhysicalShardCollection
+							// Invariant: once a physical shard is created with a specific set of SSes, this SS set will
+							// never get changed.
+						} else {
+							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+						}
+
+						// get physicalShardIDCandidate
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
+						    tciIndex == 0) {
+							ASSERT(foundTeams);
+							ShardsAffectedByTeamFailure::Team primaryTeam =
+							    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
+							physicalShardIDCandidate =
+							    self->physicalShardCollection->determinePhysicalShardIDGivenPrimaryTeam(
+							        primaryTeam, metrics, forceToUseNewPhysicalShard, debugID);
+							ASSERT(physicalShardIDCandidate != UID().first() &&
+							       physicalShardIDCandidate != anonymousShardId.first());
+						}
 					}
 					tciIndex++;
 				}
+
+				// critical to the correctness of team selection by PhysicalShardCollection
+				// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary team
+				// Thus, tryGetAvailableRemoteTeamWith() may select an unhealthy remote team
+				// In this case, we must re-select a remote team
+				// We set foundTeams = false to avoid finishing team selection
+				// Then, forceToUseNewPhysicalShard is set, which enforce to use getTeam to select a remote team
+				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
+				    bestTeams.size() > 1 && !forceToUseNewPhysicalShard) {
+					if (!bestTeams[1].first->isHealthy()) {
+						foundTeams = false;
+					}
+				}
+
 				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
 				// already
 				anyDestOverloaded = !canLaunchDest(bestTeams, rd.priority, self->destBusymap);
@@ -1538,6 +1640,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size())
 					    .detail("Servers", destServersString(bestTeams));
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+						if (rd.isRestore() && destOverloadedCount > 50) {
+							throw data_move_dest_team_not_found();
+						}
+					}
 					wait(delay(SERVER_KNOBS->DEST_OVERLOADED_DELAY, TaskPriority::DataDistributionLaunch));
 				} else {
 					CODE_PROBE(true, "did not find a healthy destination team on the first attempt");
@@ -1554,8 +1661,40 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 					wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
 				}
+				// When forceToUseNewPhysicalShard = false, we get paired primary team and remote team
+				// However, this may be failed
+				// Any retry triggers to use new physicalShard which enters the normal routine
+				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+					forceToUseNewPhysicalShard = true;
+				}
 
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
+			}
+
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				if (!rd.isRestore()) {
+					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
+					// thus, update the physicalShardIDCandidate to related data structures
+					ASSERT(physicalShardIDCandidate != UID().first());
+					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
+					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+					inFlightRange.value().dataMoveId = rd.dataMoveId;
+					auto f = self->dataMoves.intersectingRanges(rd.keys);
+					for (auto it = f.begin(); it != f.end(); ++it) {
+						KeyRangeRef kr(it->range().begin, it->range().end);
+						const UID mId = it->value().id;
+						if (mId.isValid() && mId != rd.dataMoveId) {
+							TraceEvent("DDRelocatorConflictingDataMoveAfterGetTeam", distributorId)
+							    .detail("CurrentDataMoveID", rd.dataMoveId)
+							    .detail("DataMoveID", mId)
+							    .detail("Range", kr);
+						}
+					}
+					self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
+				}
+				ASSERT(rd.dataMoveId.first() != UID().first());
+				auto dataMoveRange = self->dataMoves.rangeContaining(rd.keys.begin);
+				ASSERT(dataMoveRange.value().id == rd.dataMoveId);
 			}
 
 			// set cancellable to false on inFlight's entry for this key range
@@ -1650,19 +1789,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
-			state Future<Void> doMoveKeys = moveKeys(self->cx,
-			                                         rd.dataMoveId,
-			                                         rd.keys,
-			                                         destIds,
-			                                         healthyIds,
-			                                         self->lock,
-			                                         dataMovementComplete,
-			                                         &self->startMoveKeysParallelismLock,
-			                                         &self->finishMoveKeysParallelismLock,
-			                                         self->teamCollections.size() > 1,
-			                                         relocateShardInterval.pairID,
-			                                         ddEnabledState,
-			                                         CancelConflictingDataMoves::False);
+			state Future<Void> doMoveKeys =
+			    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
+			                                                 rd.keys,
+			                                                 destIds,
+			                                                 healthyIds,
+			                                                 self->lock,
+			                                                 dataMovementComplete,
+			                                                 &self->startMoveKeysParallelismLock,
+			                                                 &self->finishMoveKeysParallelismLock,
+			                                                 self->teamCollections.size() > 1,
+			                                                 relocateShardInterval.pairID,
+			                                                 ddEnabledState,
+			                                                 CancelConflictingDataMoves::False });
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1675,19 +1814,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 								extraIds.clear();
 								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
-								doMoveKeys = moveKeys(self->cx,
-								                      rd.dataMoveId,
-								                      rd.keys,
-								                      destIds,
-								                      healthyIds,
-								                      self->lock,
-								                      Promise<Void>(),
-								                      &self->startMoveKeysParallelismLock,
-								                      &self->finishMoveKeysParallelismLock,
-								                      self->teamCollections.size() > 1,
-								                      relocateShardInterval.pairID,
-								                      ddEnabledState,
-								                      CancelConflictingDataMoves::False);
+								doMoveKeys =
+								    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
+								                                                 rd.keys,
+								                                                 destIds,
+								                                                 healthyIds,
+								                                                 self->lock,
+								                                                 Promise<Void>(),
+								                                                 &self->startMoveKeysParallelismLock,
+								                                                 &self->finishMoveKeysParallelismLock,
+								                                                 self->teamCollections.size() > 1,
+								                                                 relocateShardInterval.pairID,
+								                                                 ddEnabledState,
+								                                                 CancelConflictingDataMoves::False });
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -1776,12 +1915,26 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					self->bytesWritten += metrics.bytes;
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
+
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+						// update physical shard collection
+						std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams;
+						for (int i = 0; i < bestTeams.size(); i++) {
+							auto serverIds = bestTeams[i].first->getServerIDs();
+							selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
+						}
+						// The update of PhysicalShardToTeams, PhysicalShardInstances, keyRangePhysicalShardIDMap should
+						// be atomic
+						self->physicalShardCollection->updatePhysicalShardCollection(
+						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
+					}
+
 					return Void();
 				} else {
 					throw error;
 				}
 			} else {
-				CODE_PROBE(true, "move to removed server");
+				CODE_PROBE(true, "move to removed server", probe::decoration::rare);
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				auto readLoad = metrics.bytesReadPerKSecond;
 				auto& destinationRef = healthyDestinations;
@@ -1847,7 +2000,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
                                      Reference<IDataDistributionTeam> destTeam,
                                      bool primary,
                                      TraceEvent* traceEvent) {
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
 	}
@@ -1881,8 +2034,8 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 	// randomly choose topK shards
-	int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
-	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
+	int topK = std::max(1, std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK));
+	state Future<HealthMetrics> healthMetrics = self->txnProcessor->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
 	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
@@ -1933,7 +2086,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueue* self,
                                          Reference<IDataDistributionTeam const> destTeam,
                                          bool primary,
                                          TraceEvent* traceEvent) {
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
 	}
@@ -2030,16 +2183,60 @@ ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
 	return {};
 }
 
+Future<SrcDestTeamPair> DDQueue::getSrcDestTeams(const int& teamCollectionIndex,
+                                                 const GetTeamRequest& srcReq,
+                                                 const GetTeamRequest& destReq,
+                                                 const int& priority,
+                                                 TraceEvent* traceEvent) {
+	return ::getSrcDestTeams(this, teamCollectionIndex, srcReq, destReq, priority, traceEvent);
+}
+Future<bool> DDQueue::rebalanceReadLoad(DataMovementReason moveReason,
+                                        Reference<IDataDistributionTeam> sourceTeam,
+                                        Reference<IDataDistributionTeam> destTeam,
+                                        bool primary,
+                                        TraceEvent* traceEvent) {
+	return ::rebalanceReadLoad(this, moveReason, sourceTeam, destTeam, primary, traceEvent);
+}
+
+Future<bool> DDQueue::rebalanceTeams(DataMovementReason moveReason,
+                                     Reference<const IDataDistributionTeam> sourceTeam,
+                                     Reference<const IDataDistributionTeam> destTeam,
+                                     bool primary,
+                                     TraceEvent* traceEvent) {
+	return ::rebalanceTeams(this, moveReason, sourceTeam, destTeam, primary, traceEvent);
+}
+
+ACTOR Future<bool> getSkipRebalanceValue(Reference<IDDTxnProcessor> txnProcessor, bool readRebalance) {
+	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
+
+	if (!val.present())
+		return false;
+
+	bool skipCurrentLoop = false;
+	// NOTE: check special value "" and "on" might written in old version < 7.2
+	if (val.get().size() > 0 && val.get() != "on"_sr) {
+		int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
+		if (readRebalance) {
+			skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
+		} else {
+			skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
+		}
+	} else {
+		skipCurrentLoop = true;
+	}
+
+	return skipCurrentLoop;
+}
+
 ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovementReason reason) {
-	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-	state Transaction tr(self->cx);
+	state int resetCount = 0;
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
-	state Future<Void> delayF = Never();
 	state const bool readRebalance = isDataMovementForReadBalancing(reason);
-	state const char* eventName =
-	    isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
+	state const char* eventName = isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper" : "BgDDValleyFiller";
 	state int ddPriority = dataMovementPriority(reason);
+	state double rebalancePollingInterval = 0;
+
 	loop {
 		state bool moved = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
@@ -2048,40 +2245,24 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state GetTeamRequest destReq;
 		state TraceEvent traceEvent(eventName, self->distributorId);
 		traceEvent.suppressFor(5.0)
-		    .detail("PollingInterval", SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL)
+		    .detail("PollingInterval", rebalancePollingInterval)
 		    .detail("Rebalance", readRebalance ? "Read" : "Disk");
 
+		// NOTE: the DD throttling relies on DDQueue, so here just trigger the balancer periodically
+		wait(delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch));
 		try {
-			// NOTE: the DD throttling relies on DDQueue
-			delayF = delay(SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
+				wait(store(skipCurrentLoop, getSkipRebalanceValue(self->txnProcessor, readRebalance)));
 				lastRead = now();
-				if (!val.present()) {
-					skipCurrentLoop = false;
-				} else {
-					// NOTE: check special value "" and "on" might written in old version < 7.2
-					if (val.get().size() > 0 && val.get() != "on"_sr) {
-						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-						if (readRebalance) {
-							skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
-						} else {
-							skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-						}
-					} else {
-						skipCurrentLoop = true;
-					}
-				}
 			}
-
 			traceEvent.detail("Enabled", !skipCurrentLoop);
 
-			wait(delayF);
 			if (skipCurrentLoop) {
-				tr.reset();
+				rebalancePollingInterval =
+				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
 				continue;
+			} else {
+				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 			}
 
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
@@ -2101,7 +2282,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                         ForReadBalance(readRebalance),
 				                         PreferLowerReadUtil::True);
 				state Future<SrcDestTeamPair> getTeamFuture =
-				    getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
+				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
 				sourceTeam = getTeamFuture.get().first;
 				destTeam = getTeamFuture.get().second;
@@ -2109,9 +2290,9 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				// clang-format off
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,self->rebalanceReadLoad( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					} else {
-						wait(store(moved,rebalanceTeams(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,self->rebalanceTeams( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
 				}
 				// clang-format on
@@ -2119,11 +2300,10 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 			}
 
 			traceEvent.detail("ResetCount", resetCount);
-			tr.reset();
 		} catch (Error& e) {
 			// Log actor_cancelled because it's not legal to suppress an event that's initialized
 			traceEvent.errorUnsuppressed(e);
-			wait(tr.onError(e));
+			throw;
 		}
 
 		traceEvent.detail("Moved", moved);
@@ -2131,204 +2311,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	}
 }
 
-ACTOR Future<Void> BgDDMountainChopper(DDQueue* self, int teamCollectionIndex) {
-	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-	state Transaction tr(self->cx);
-	state double lastRead = 0;
-	state bool skipCurrentLoop = false;
-	loop {
-		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
-		state bool moved = false;
-		state TraceEvent traceEvent("BgDDMountainChopper_Old", self->distributorId);
-		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
-
-		try {
-			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
-			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-				lastRead = now();
-				if (!val.present()) {
-					// reset loop interval
-					if (skipCurrentLoop) {
-						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-					}
-					skipCurrentLoop = false;
-				} else {
-					// NOTE: check special value "" and "on" might written in old version < 7.2
-					if (val.get().size() > 0 && val.get() != "on"_sr) {
-						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-						skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-					} else {
-						skipCurrentLoop = true;
-					}
-				}
-			}
-
-			traceEvent.detail("Enabled", !skipCurrentLoop);
-
-			wait(delayF);
-			if (skipCurrentLoop) {
-				// set loop interval to avoid busy wait here.
-				rebalancePollingInterval =
-				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
-				tr.reset();
-				continue;
-			}
-
-			traceEvent.detail("QueuedRelocations",
-			                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
-			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
-			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
-				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-				        GetTeamRequest(WantNewServers::True,
-				                       WantTrueBest::False,
-				                       PreferLowerDiskUtil::True,
-				                       TeamMustHaveShards::False))));
-				randomTeam = _randomTeam;
-				traceEvent.detail("DestTeam",
-				                  printable(randomTeam.first.map<std::string>(
-				                      [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
-
-				if (randomTeam.first.present()) {
-					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> loadedTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(WantNewServers::True,
-					                       WantTrueBest::True,
-					                       PreferLowerDiskUtil::False,
-					                       TeamMustHaveShards::True))));
-
-					traceEvent.detail(
-					    "SourceTeam",
-					    printable(loadedTeam.first.map<std::string>(
-					        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
-
-					if (loadedTeam.first.present()) {
-						bool _moved = wait(rebalanceTeams(self,
-						                                  DataMovementReason::REBALANCE_OVERUTILIZED_TEAM,
-						                                  loadedTeam.first.get(),
-						                                  randomTeam.first.get(),
-						                                  teamCollectionIndex == 0,
-						                                  &traceEvent));
-						moved = _moved;
-					}
-				}
-			}
-
-			tr.reset();
-		} catch (Error& e) {
-			// Log actor_cancelled because it's not legal to suppress an event that's initialized
-			traceEvent.errorUnsuppressed(e);
-			wait(tr.onError(e));
-		}
-
-		traceEvent.detail("Moved", moved);
-		traceEvent.log();
-	}
-}
-
-ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
-	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-	state Transaction tr(self->cx);
-	state double lastRead = 0;
-	state bool skipCurrentLoop = false;
-
-	loop {
-		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
-		state bool moved = false;
-		state TraceEvent traceEvent("BgDDValleyFiller_Old", self->distributorId);
-		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
-
-		try {
-			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
-			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-				lastRead = now();
-				if (!val.present()) {
-					// reset loop interval
-					if (skipCurrentLoop) {
-						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-					}
-					skipCurrentLoop = false;
-				} else {
-					// NOTE: check special value "" and "on" might written in old version < 7.2
-					if (val.get().size() > 0 && val.get() != "on"_sr) {
-						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-						skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-					} else {
-						skipCurrentLoop = true;
-					}
-				}
-			}
-
-			traceEvent.detail("Enabled", !skipCurrentLoop);
-
-			wait(delayF);
-			if (skipCurrentLoop) {
-				// set loop interval to avoid busy wait here.
-				rebalancePollingInterval =
-				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
-				tr.reset();
-				continue;
-			}
-
-			traceEvent.detail("QueuedRelocations",
-			                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
-			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
-			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
-				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-				        GetTeamRequest(WantNewServers::True,
-				                       WantTrueBest::False,
-				                       PreferLowerDiskUtil::False,
-				                       TeamMustHaveShards::True))));
-				randomTeam = _randomTeam;
-				traceEvent.detail("SourceTeam",
-				                  printable(randomTeam.first.map<std::string>(
-				                      [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
-
-				if (randomTeam.first.present()) {
-					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> unloadedTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(WantNewServers::True,
-					                       WantTrueBest::True,
-					                       PreferLowerDiskUtil::True,
-					                       TeamMustHaveShards::False))));
-
-					traceEvent.detail(
-					    "DestTeam",
-					    printable(unloadedTeam.first.map<std::string>(
-					        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
-
-					if (unloadedTeam.first.present()) {
-						bool _moved = wait(rebalanceTeams(self,
-						                                  DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM,
-						                                  randomTeam.first.get(),
-						                                  unloadedTeam.first.get(),
-						                                  teamCollectionIndex == 0,
-						                                  &traceEvent));
-						moved = _moved;
-					}
-				}
-			}
-
-			tr.reset();
-		} catch (Error& e) {
-			// Log actor_cancelled because it's not legal to suppress an event that's initialized
-			traceEvent.errorUnsuppressed(e);
-			wait(tr.onError(e));
-		}
-
-		traceEvent.detail("Moved", moved);
-		traceEvent.log();
-	}
-}
-
-ACTOR Future<Void> dataDistributionQueue(Database cx,
+ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
@@ -2337,6 +2320,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                         Reference<PhysicalShardCollection> physicalShardCollection,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
                                          FutureStream<Promise<int>> getUnhealthyRelocationCount,
@@ -2346,9 +2330,10 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          const DDEnabledState* ddEnabledState) {
 	state DDQueue self(distributorId,
 	                   lock,
-	                   cx,
+	                   db,
 	                   teamCollections,
 	                   shardsAffectedByTeamFailure,
+	                   physicalShardCollection,
 	                   getAverageShardBytes,
 	                   teamSize,
 	                   singleRegionTeamSize,
@@ -2367,15 +2352,12 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	state Future<Void> launchQueuedWorkTimeout = Never();
 
 	for (int i = 0; i < teamCollections.size(); i++) {
-		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
-		// ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
-		// ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
+		ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
+		ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
 			ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
 		}
-		ddQueueFutures.push_back(BgDDMountainChopper(&self, i));
-		ddQueueFutures.push_back(BgDDValleyFiller(&self, i));
 	}
 	ddQueueFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
 	ddQueueFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));

@@ -206,8 +206,7 @@ std::string Histogram::drawHistogram() {
 
 TEST_CASE("/flow/histogram/smoke_test") {
 	{
-		Reference<Histogram> h =
-		    Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		Reference<Histogram> h = Histogram::getHistogram("smoke_test"_sr, "counts"_sr, Histogram::Unit::bytes);
 
 		h->sample(0);
 		ASSERT(h->buckets[0] == 1);
@@ -222,15 +221,13 @@ TEST_CASE("/flow/histogram/smoke_test") {
 		ASSERT(h->buckets[0] == 0);
 		h->sample(0);
 		ASSERT(h->buckets[0] == 1);
-		h = Histogram::getHistogram(
-		    LiteralStringRef("smoke_test"), LiteralStringRef("counts2"), Histogram::Unit::bytes);
+		h = Histogram::getHistogram("smoke_test"_sr, "counts2"_sr, Histogram::Unit::bytes);
 
 		// confirm that old h was deallocated.
-		h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		h = Histogram::getHistogram("smoke_test"_sr, "counts"_sr, Histogram::Unit::bytes);
 		ASSERT(h->buckets[0] == 0);
 
-		h = Histogram::getHistogram(
-		    LiteralStringRef("smoke_test"), LiteralStringRef("times"), Histogram::Unit::microseconds);
+		h = Histogram::getHistogram("smoke_test"_sr, "times"_sr, Histogram::Unit::microseconds);
 
 		h->sampleSeconds(0.000000);
 		h->sampleSeconds(0.0000019);

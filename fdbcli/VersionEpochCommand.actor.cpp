@@ -32,7 +32,7 @@
 
 namespace fdb_cli {
 
-const KeyRef versionEpochSpecialKey = LiteralStringRef("\xff\xff/management/version_epoch");
+const KeyRef versionEpochSpecialKey = "\xff\xff/management/version_epoch"_sr;
 
 struct VersionInfo {
 	int64_t version;

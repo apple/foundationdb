@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
@@ -99,8 +100,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 		try {
 			choose {
 				when(IKVSGetValueRequest getReq = waitNext(ikvsInterface.getValue.getFuture())) {
-					actors.add(cancellableForwardPromise(getReq.reply,
-					                                     kvStore->readValue(getReq.key, getReq.type, getReq.debugID)));
+					actors.add(cancellableForwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.options)));
 				}
 				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) { kvStore->set(req.keyValue); }
 				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) { kvStore->clear(req.range); }
@@ -110,16 +110,16 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 				when(IKVSReadValuePrefixRequest readPrefixReq = waitNext(ikvsInterface.readValuePrefix.getFuture())) {
 					actors.add(cancellableForwardPromise(
 					    readPrefixReq.reply,
-					    kvStore->readValuePrefix(
-					        readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID)));
+					    kvStore->readValuePrefix(readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.options)));
 				}
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
 					actors.add(cancellableForwardPromise(
 					    readRangeReq.reply,
-					    fmap(
-					        [](const RangeResult& result) { return IKVSReadRangeReply(result); },
-					        kvStore->readRange(
-					            readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type))));
+					    fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
+					         kvStore->readRange(readRangeReq.keys,
+					                            readRangeReq.rowLimit,
+					                            readRangeReq.byteLimit,
+					                            readRangeReq.options))));
 				}
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					StorageBytes storageBytes = kvStore->getStorageBytes();
@@ -178,6 +178,8 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 		                              SERVER_KNOBS->CONN_FILE,
 		                              "--logdir",
 		                              SERVER_KNOBS->LOG_DIRECTORY,
+		                              "--trace-format",
+		                              getTraceFormatExtension(),
 		                              "-p",
 		                              flowProcessAddr,
 		                              "--process-name",
@@ -227,12 +229,6 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
 	return self;
 }
 
-ACTOR static Future<Void> delayFlowProcessRunAction(FlowProcess* self, double time) {
-	wait(delay(time));
-	wait(self->run());
-	return Void();
-}
-
 Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint) {
 	TraceEvent(SevInfo, "RunFlowProcessStart").log();
 	FlowProcess* self = IProcessFactory::create(name.c_str());
@@ -242,5 +238,5 @@ Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint) {
 	req.flowProcessInterface = self->serializedInterface();
 	registerProcess.send(req);
 	TraceEvent(SevDebug, "FlowProcessInitFinished").log();
-	return delayFlowProcessRunAction(self, g_network->isSimulated() ? 0 : SERVER_KNOBS->REMOTE_KV_STORE_INIT_DELAY);
+	return self->run();
 }

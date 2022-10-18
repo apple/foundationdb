@@ -41,6 +41,8 @@ import org.junit.jupiter.api.Assertions;
  *   are still seeting the initialValue even after new transactions set them to a new value. 
  */
 public class RepeatableReadMultiThreadClientTest {
+    public static final int API_VERSION = 720;
+
     public static final MultiClientHelper clientHelper = new MultiClientHelper();
 
     private static final int oldValueReadCount = 30;
@@ -52,7 +54,7 @@ public class RepeatableReadMultiThreadClientTest {
     private static final Map<Thread, OldValueReader> threadToOldValueReaders = new HashMap<>();
 
     public static void main(String[] args) throws Exception {
-        FDB fdb = FDB.selectAPIVersion(720);
+        FDB fdb = FDB.selectAPIVersion(API_VERSION);
         setupThreads(fdb);
         Collection<Database> dbs = clientHelper.openDatabases(fdb); // the clientHelper will close the databases for us
         System.out.println("Starting tests");

@@ -442,6 +442,13 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n  Blob granules          - enabled";
 				}
 
+				outputString += "\n  Encryption at-rest     - ";
+				if (statusObjConfig.get("encryption_at_rest_mode", strVal)) {
+					outputString += strVal;
+				} else {
+					outputString += "disabled";
+				}
+
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {
 					outputString += std::to_string(intVal);
@@ -1249,7 +1256,7 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");

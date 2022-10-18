@@ -62,11 +62,11 @@ const int AsyncFileWorkload::_PAGE_SIZE = 4096;
 AsyncFileWorkload::AsyncFileWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), fileHandle(nullptr) {
 	// Only run on one client
 	enabled = clientId == 0;
-	testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-	unbufferedIO = getOption(options, LiteralStringRef("unbufferedIO"), false);
-	uncachedIO = getOption(options, LiteralStringRef("uncachedIO"), false);
-	fillRandom = getOption(options, LiteralStringRef("fillRandom"), false);
-	path = getOption(options, LiteralStringRef("fileName"), LiteralStringRef("")).toString();
+	testDuration = getOption(options, "testDuration"_sr, 10.0);
+	unbufferedIO = getOption(options, "unbufferedIO"_sr, false);
+	uncachedIO = getOption(options, "uncachedIO"_sr, false);
+	fillRandom = getOption(options, "fillRandom"_sr, false);
+	path = getOption(options, "fileName"_sr, ""_sr).toString();
 }
 
 Reference<AsyncFileBuffer> AsyncFileWorkload::allocateBuffer(size_t size) {

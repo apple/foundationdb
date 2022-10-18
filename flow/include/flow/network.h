@@ -467,6 +467,11 @@ public:
 	// this may not be an address we can connect to!
 	virtual NetworkAddress getPeerAddress() const = 0;
 
+	// Returns whether the peer is trusted.
+	// For TLS-enabled connections, this is true if the peer has presented a valid chain of certificates trusted by the
+	// local endpoint. For non-TLS connections this is always true for any valid open connection.
+	virtual bool hasTrustedPeer() const = 0;
+
 	virtual UID getDebugID() const = 0;
 
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
@@ -501,6 +506,9 @@ public:
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
 	// on. Note that there are tools for disk access, scheduling, etc as well as networking, and that almost all access
 	//   to the network should be through FlowTransport, not directly through these low level interfaces!
+
+	// Time instants (e.g. from now()) within TIME_EPS are considered to be equal.
+	static constexpr double TIME_EPS = 1e-7; // 100ns
 
 	enum enumGlobal {
 		enFailureMonitor = 0,

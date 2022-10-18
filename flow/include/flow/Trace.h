@@ -256,6 +256,7 @@ FORMAT_TRACEABLE(long int, "%ld");
 FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
+FORMAT_TRACEABLE(float, "%g");
 FORMAT_TRACEABLE(double, "%g");
 FORMAT_TRACEABLE(void*, "%p");
 FORMAT_TRACEABLE(volatile long, "%ld");
@@ -661,6 +662,9 @@ void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
+void setTraceLocalAddress(const NetworkAddress& addr);
+void disposeTraceFileWriter();
+std::string getTraceFormatExtension();
 uint64_t getTraceThreadId();
 
 template <class T>

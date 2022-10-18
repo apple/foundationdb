@@ -182,7 +182,7 @@ private:
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
-					CODE_PROBE(true, "Zero fill within size field");
+					CODE_PROBE(true, "Zero fill within size field", probe::decoration::rare);
 					int payloadSize = 0;
 					memcpy(&payloadSize, h.begin(), h.size());
 					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
@@ -221,17 +221,14 @@ private:
 ////// Persistence format (for self->persistentData)
 
 // Immutable keys
-static const KeyValueRef persistFormat(LiteralStringRef("Format"), LiteralStringRef("FoundationDB/LogServer/2/3"));
-static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/LogServer/2/3"),
-                                                    LiteralStringRef("FoundationDB/LogServer/2/4"));
-static const KeyRangeRef persistRecoveryCountKeys =
-    KeyRangeRef(LiteralStringRef("DbRecoveryCount/"), LiteralStringRef("DbRecoveryCount0"));
+static const KeyValueRef persistFormat("Format"_sr, "FoundationDB/LogServer/2/3"_sr);
+static const KeyRangeRef persistFormatReadableRange("FoundationDB/LogServer/2/3"_sr, "FoundationDB/LogServer/2/4"_sr);
+static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef("DbRecoveryCount/"_sr, "DbRecoveryCount0"_sr);
 
 // Updated on updatePersistentData()
-static const KeyRangeRef persistCurrentVersionKeys =
-    KeyRangeRef(LiteralStringRef("version/"), LiteralStringRef("version0"));
-static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
-static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef("version/"_sr, "version0"_sr);
+static const KeyRange persistTagMessagesKeys = prefixRange("TagMsg/"_sr);
+static const KeyRange persistTagPoppedKeys = prefixRange("TagPop/"_sr);
 
 static Key persistTagMessagesKey(UID id, OldTag tag, Version version) {
 	BinaryWriter wr(Unversioned());
@@ -450,10 +447,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		          "Restored");
 		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
-		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
-		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
-		version.initMetric(LiteralStringRef("TLog.Version"), cc.id);
-		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
+		persistentDataVersion.init("TLog.PersistentDataVersion"_sr, cc.id);
+		persistentDataDurableVersion.init("TLog.PersistentDataDurableVersion"_sr, cc.id);
+		version.initMetric("TLog.Version"_sr, cc.id);
+		queueCommittedVersion.initMetric("TLog.QueueCommittedVersion"_sr, cc.id);
 
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "SharedBytesInput", [tLogData]() { return tLogData->bytesInput; });
@@ -491,7 +488,7 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 
 	CODE_PROBE(true, "TLog stopped by recovering master");
 	CODE_PROBE(logData->stopped, "LogData already stopped");
-	CODE_PROBE(!logData->stopped, "LogData not yet stopped");
+	CODE_PROBE(!logData->stopped, "LogData not yet stopped", probe::decoration::rare);
 
 	TraceEvent("TLogStop", logData->logId)
 	    .detail("Ver", stopVersion)
@@ -1029,7 +1026,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			}
 			if (sequenceData.isSet()) {
 				if (sequenceData.getFuture().get() != rep.end) {
-					CODE_PROBE(true, "tlog peek second attempt ended at a different version");
+					CODE_PROBE(true, "tlog peek second attempt ended at a different version", probe::decoration::rare);
 					replyPromise.sendError(operation_obsolete());
 					return Void();
 				}
@@ -1102,7 +1099,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		auto& sequenceData = trackerData.sequence_version[sequence + 1];
 		if (sequenceData.isSet()) {
 			if (sequenceData.getFuture().get() != reply.end) {
-				CODE_PROBE(true, "tlog peek second attempt ended at a different version (2)");
+				CODE_PROBE(true, "tlog peek second attempt ended at a different version (2)", probe::decoration::rare);
 				replyPromise.sendError(operation_obsolete());
 				return Void();
 			}
@@ -1463,9 +1460,10 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	}
 
 	if (!fFormat.get().present()) {
-		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
+		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), "\xff"_sr), 1));
 		if (!v.size()) {
-			CODE_PROBE(true, "The DB is completely empty, so it was never initialized.  Delete it.");
+			CODE_PROBE(
+			    true, "The DB is completely empty, so it was never initialized.  Delete it.", probe::decoration::rare);
 			throw worker_removed();
 		} else {
 			// This should never happen
@@ -1551,7 +1549,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	try {
 		loop {
 			if (allRemoved.isReady()) {
-				CODE_PROBE(true, "all tlogs removed during queue recovery");
+				CODE_PROBE(true, "all tlogs removed during queue recovery", probe::decoration::rare);
 				throw worker_removed();
 			}
 			choose {
@@ -1635,6 +1633,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId).detail("Version", "4.6");
 
 	try {
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 		wait(restorePersistentState(&self, locality));
 
 		self.sharedActors.send(cleanupPeekTrackers(&self));

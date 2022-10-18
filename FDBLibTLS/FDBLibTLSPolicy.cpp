@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <exception>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 

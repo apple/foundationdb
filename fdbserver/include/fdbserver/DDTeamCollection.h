@@ -424,8 +424,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	// Check the status of a storage server.
 	// Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
-	Future<Void> storageServerTracker(Database cx,
-	                                  TCServerInfo* server,
+	Future<Void> storageServerTracker(TCServerInfo* server,
 	                                  Promise<Void> errorOut,
 	                                  Version addedVersion,
 	                                  DDEnabledState const& ddEnabledState,
@@ -439,12 +438,9 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	bool isCorrectDC(TCServerInfo const& server) const;
 
-	Future<Void> storageServerFailureTracker(TCServerInfo* server,
-	                                         Database cx,
-	                                         ServerStatus* status,
-	                                         Version addedVersion);
+	Future<Void> storageServerFailureTracker(TCServerInfo* server, ServerStatus* status, Version addedVersion);
 
-	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
+	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
 
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.
@@ -482,12 +478,13 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	auto eraseStorageWiggleMap(KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())>* metadataMap,
 	                           UID id) {
-		return runRYWTransaction(cx, [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			metadataMap->erase(tr, id);
-			return Void();
-		});
+		return runRYWTransaction(dbContext(),
+		                         [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			                         tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			                         tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			                         metadataMap->erase(tr, id);
+			                         return Void();
+		                         });
 	}
 
 	// Read storage metadata from database, get the server's storeType, and do necessary updates. Error is caught by the
@@ -603,7 +600,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
 public:
-	Database cx;
+	Reference<IDDTxnProcessor> db;
 
 	DatabaseConfiguration configuration;
 
@@ -620,7 +617,7 @@ public:
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
 
-	DDTeamCollection(Database const& cx,
+	DDTeamCollection(Reference<IDDTxnProcessor>& db,
 	                 UID distributorId,
 	                 MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,
@@ -692,4 +689,6 @@ public:
 	// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
 	// task on the run loop.
 	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
+
+	Database dbContext() const { return db->context(); }
 };

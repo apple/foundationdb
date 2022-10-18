@@ -68,6 +68,12 @@ Future<Reference<Response>> doRequest(Reference<IConnection> const& conn,
                                       Reference<IRateControl> const& recvRate,
                                       const std::string& requestHeader = std::string());
 
+// Connect to proxy, send CONNECT command, and connect to the remote host.
+Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
+                                            const std::string& remoteService,
+                                            const std::string& proxyHost,
+                                            const std::string& proxyService);
+
 constexpr int HTTP_STATUS_CODE_OK = 200;
 constexpr int HTTP_STATUS_CODE_CREATED = 201;
 constexpr int HTTP_STATUS_CODE_ACCEPTED = 202;

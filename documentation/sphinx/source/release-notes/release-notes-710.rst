@@ -2,6 +2,32 @@
 Release Notes
 #############
 
+7.1.23
+======
+* Same as 7.1.22 release with AVX enabled.
+
+7.1.22
+======
+* Released with AVX disabled.
+* Added new latency samples for GetValue, GetRange, QueueWait, and VersionWait in storage servers. `(PR #8215) <https://github.com/apple/foundationdb/pull/8215>`_
+* Fixed a rare partial data write for TLogs. `(PR #8210) <https://github.com/apple/foundationdb/pull/8210>`_
+* Added HTTP proxy support for backup agents. `(PR #8193) <https://github.com/apple/foundationdb/pull/8193>`_
+* Fixed a memory bug of secondary queries in index prefetch. `(PR #8195) <https://github.com/apple/foundationdb/pull/8195>`_, `(PR #8190) <https://github.com/apple/foundationdb/pull/8190>`_
+* Introduced STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT knob to recreate SS at io_timeout errors. `(PR #8123) <https://github.com/apple/foundationdb/pull/8123>`_
+* Fixed two TLog stopped bugs and a CC leader replacement bug. `(PR #8081) <https://github.com/apple/foundationdb/pull/8081>`_
+* Added back RecoveryAvailable trace event for status's seconds_since_last_recovered field. `(PR #8068) <https://github.com/apple/foundationdb/pull/8068>`_
+
+7.1.21
+======
+* Same as 7.1.20 release with AVX enabled.
+
+7.1.20
+======
+* Released with AVX disabled.
+* Fixed missing localities for fdbserver that can cause cross DC calls among storage servers. `(PR #7995) <https://github.com/apple/foundationdb/pull/7995>`_
+* Removed extremely spammy trace event in FetchKeys and fixed transaction_profiling_analyzer.py. `(PR #7934) <https://github.com/apple/foundationdb/pull/7934>`_
+* Fixed bugs when GRV proxy returns an error. `(PR #7860) <https://github.com/apple/foundationdb/pull/7860>`_
+
 7.1.19
 ======
 * Same as 7.1.18 release with AVX enabled.

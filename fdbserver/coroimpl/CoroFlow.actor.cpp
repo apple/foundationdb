@@ -103,7 +103,7 @@ protected:
 		blocked = Promise<Void>();
 		double before = now();
 		CoroThreadPool::waitFor(blocked.getFuture());
-		if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+		if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 			TraceEvent("CoroUnblocked").detail("After", now() - before);
 	}
 

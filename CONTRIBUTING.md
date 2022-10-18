@@ -38,6 +38,9 @@ We love pull requests! For minor changes, feel free to open up a PR directly. Fo
 
 CI will be run automatically for core committers, and for community PRs it will be initiated by the request of a core committer.  Tests can also be run locally via `ctest`, and core committers can run additional validation on pull requests prior to merging them.
 
+### Python pre-commit
+We use a pre-commit pipeline with black and flake8 to enforce python best coding practices. Install pre-commit ```pip install pre-commit```. Install it in your FoundationDB directory ```pre-commit install```.
+
 ### Reporting issues
 Please refer to the section below on [using GitHub issues and the community forums](#using-github-issues-and-community-forums) for more info.
 

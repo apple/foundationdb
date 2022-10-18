@@ -32,11 +32,13 @@ struct BlobManagerInterface {
 	RequestStream<struct HaltBlobManagerRequest> haltBlobManager;
 	RequestStream<struct HaltBlobGranulesRequest> haltBlobGranules;
 	RequestStream<struct BlobManagerExclusionSafetyCheckRequest> blobManagerExclCheckReq;
+	RequestStream<struct BlobManagerBlockedRequest> blobManagerBlockedReq;
 	struct LocalityData locality;
 	UID myId;
+	int64_t epoch;
 
-	BlobManagerInterface() {}
-	explicit BlobManagerInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
+	BlobManagerInterface() : epoch(0) {}
+	BlobManagerInterface(const struct LocalityData& l, UID id, int64_t epoch) : locality(l), myId(id), epoch(epoch) {}
 
 	void initEndpoints() {}
 	UID id() const { return myId; }
@@ -46,7 +48,15 @@ struct BlobManagerInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltBlobManager, haltBlobGranules, blobManagerExclCheckReq, locality, myId);
+		serializer(ar,
+		           waitFailure,
+		           haltBlobManager,
+		           haltBlobGranules,
+		           blobManagerExclCheckReq,
+		           blobManagerBlockedReq,
+		           locality,
+		           myId,
+		           epoch);
 	}
 };
 
@@ -103,6 +113,31 @@ struct BlobManagerExclusionSafetyCheckRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, exclusions, reply);
+	}
+};
+
+struct BlobManagerBlockedReply {
+	constexpr static FileIdentifier file_identifier = 8078627;
+	int64_t blockedAssignments;
+
+	BlobManagerBlockedReply() : blockedAssignments(0) {}
+	explicit BlobManagerBlockedReply(int64_t blockedAssignments) : blockedAssignments(blockedAssignments) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, blockedAssignments);
+	}
+};
+
+struct BlobManagerBlockedRequest {
+	constexpr static FileIdentifier file_identifier = 1986387;
+	ReplyPromise<BlobManagerBlockedReply> reply;
+
+	BlobManagerBlockedRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

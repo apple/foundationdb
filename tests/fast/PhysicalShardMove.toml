@@ -1,6 +1,6 @@
 [configuration]
 config = 'triple'
-storageEngineType = 4
+storageEngineType = 5
 processesPerMachine = 1
 coordinators = 3
 machineCount = 15
@@ -8,7 +8,7 @@ allowDefaultTenant = false
 
 [[knobs]]
 shard_encode_location_metadata = true
-storage_server_shard_aware = true
+enable_dd_physical_shard = true
 
 [[test]]
 testTitle = 'PhysicalShardMove'

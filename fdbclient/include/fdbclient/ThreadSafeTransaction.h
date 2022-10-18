@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_THREADSAFETRANSACTION_H
 #define FDBCLIENT_THREADSAFETRANSACTION_H
+#include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
 #pragma once
 
@@ -95,6 +96,13 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
 
@@ -164,6 +172,22 @@ public:
 	                                           Optional<Version> readVersion,
 	                                           ReadBlobGranuleContext granuleContext) override;
 
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
+	                                                                               Version beginVersion,
+	                                                                               Optional<Version> readVersion,
+	                                                                               Version* readVersionOut) override;
+
+	ThreadResult<RangeResult> readBlobGranulesFinish(
+	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Version readVersion,
+	    ReadBlobGranuleContext granuleContext) override;
+
+	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
+	                                                                                 Optional<Version> summaryVersion,
+	                                                                                 int rangeLimit) override;
+
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
 
@@ -230,7 +254,7 @@ private:
 	friend IClientApi* getLocalClientAPI();
 	ThreadSafeApi();
 
-	int apiVersion;
+	ApiVersion apiVersion;
 	std::string clientVersion;
 	uint64_t transportId;
 

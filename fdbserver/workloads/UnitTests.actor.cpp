@@ -42,10 +42,15 @@ void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
 void forceLinkRESTKmsConnectorTest();
 void forceLinkCompressionUtilsTest();
+void forceLinkAtomicTests();
+void forceLinkIdempotencyIdTests();
 
 struct UnitTestWorkload : TestWorkload {
+	static constexpr auto NAME = "UnitTests";
+
 	bool enabled;
 	std::string testPattern;
+	Optional<std::string> testsIgnored;
 	int testRunLimit;
 	UnitTestParameters testParams;
 	bool cleanupAfterTests;
@@ -59,6 +64,9 @@ struct UnitTestWorkload : TestWorkload {
 	    totalSimTime("Total flow time (s)") {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, "testsMatching"_sr, Value()).toString();
+		if (hasOption(options, "testsIgnored"_sr)) {
+			testsIgnored = getOption(options, "testsIgnored"_sr, Value()).toString();
+		}
 		testRunLimit = getOption(options, "maxTestCases"_sr, -1);
 		if (g_network->isSimulated()) {
 			testParams.setDataDir(getOption(options, "dataDir"_sr, "simfdb/unittests/"_sr).toString());
@@ -81,7 +89,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
 		forceLinkStreamCipherTests();
-		void forceLinkBlobCipherTests();
+		forceLinkBlobCipherTests();
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
@@ -94,9 +102,10 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRESTUtilsTests();
 		forceLinkRESTKmsConnectorTest();
 		forceLinkCompressionUtilsTest();
+		forceLinkAtomicTests();
+		forceLinkIdempotencyIdTests();
 	}
 
-	std::string description() const override { return "UnitTests"; }
 	Future<Void> setup(Database const& cx) override {
 		platform::eraseDirectoryRecursive(testParams.getDataDir());
 		return Void();
@@ -115,11 +124,16 @@ struct UnitTestWorkload : TestWorkload {
 		m.push_back(totalSimTime.getMetric());
 	}
 
+	bool testMatched(std::string const& testName) const {
+		return StringRef(testName).startsWith(testPattern) &&
+		       (!testsIgnored.present() || !StringRef(testName).startsWith(testsIgnored.get()));
+	}
+
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
 		state std::vector<UnitTest*> tests;
 
 		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
-			if (StringRef(test->name).startsWith(self->testPattern)) {
+			if (self->testMatched(test->name)) {
 				++self->testsAvailable;
 				tests.push_back(test);
 			}
@@ -132,7 +146,9 @@ struct UnitTestWorkload : TestWorkload {
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 
 		if (tests.size() == 0) {
-			TraceEvent(SevError, "NoMatchingUnitTests").detail("TestPattern", self->testPattern);
+			TraceEvent(SevError, "NoMatchingUnitTests")
+			    .detail("TestPattern", self->testPattern)
+			    .detail("TestsIgnored", self->testsIgnored);
 			++self->testsFailed;
 			return Void();
 		}
@@ -184,7 +200,7 @@ struct UnitTestWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
+WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory;
 
 TEST_CASE("/fdbserver/UnitTestWorkload/long delay") {
 	wait(delay(60));

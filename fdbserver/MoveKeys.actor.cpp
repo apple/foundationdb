@@ -185,6 +185,34 @@ bool DDEnabledState::setDDEnabled(bool status, UID snapUID) {
 	return true;
 }
 
+ACTOR Future<Void> readMoveKeysLock(Transaction* tr, MoveKeysLock* lock) {
+	{
+		Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
+		lock->prevOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	}
+	{
+		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
+		lock->prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	}
+	return Void();
+}
+
+ACTOR Future<MoveKeysLock> readMoveKeysLock(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			state MoveKeysLock lock;
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(readMoveKeysLock(&tr, &lock));
+			return lock;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+			CODE_PROBE(true, "readMoveKeysLock retry");
+		}
+	}
+}
+
 ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	state Transaction tr(cx);
 	loop {
@@ -197,16 +225,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 				txnId = deterministicRandom()->randomUniqueID();
 				tr.debugTransaction(txnId);
 			}
-			{
-				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
-				lock.prevOwner =
-				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			}
-			{
-				Optional<Value> readVal = wait(tr.get(moveKeysLockWriteKey));
-				lock.prevWrite =
-				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			}
+			wait(readMoveKeysLock(&tr, &lock));
 			lock.myOwner = deterministicRandom()->randomUniqueID();
 			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
 			wait(tr.commit());
@@ -282,6 +301,7 @@ Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const
 	return checkMoveKeysLock(tr, lock, ddEnabledState, false);
 }
 
+namespace {
 ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> fReply, UID uid, Version version) {
 	ErrorOr<GetShardStateReply> reply = wait(fReply);
 	if (!reply.present() || reply.get().first < version)
@@ -632,7 +652,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							// Attempt to move onto a server that isn't in serverList (removed or never added to the
 							// database) This can happen (why?) and is handled by the data distribution algorithm
 							// FIXME: Answer why this can happen?
-							CODE_PROBE(true, "start move keys moving to a removed server");
+							CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
 							throw move_to_removed_server();
 						}
 					}
@@ -826,7 +846,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			for (int s = 0; s < serverListValues.size(); s++) {
 				if (!serverListValues[s].present()) {
 					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					CODE_PROBE(true, "check fetching state moved to removed server");
+					CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
 					throw move_to_removed_server();
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
@@ -1795,6 +1815,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	return Void();
 }
 
+}; // anonymous namespace
+
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
@@ -2303,6 +2325,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
                                    const DDEnabledState* ddEnabledState) {
+	state KeyRange range;
 	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 
@@ -2314,7 +2337,9 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			state Transaction tr(occ);
 			state std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
 			state std::set<UID> oldDests;
-			state KeyRange range;
+			state DataMoveMetaData dataMove;
+
+			range = KeyRange();
 
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
@@ -2324,7 +2349,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
-					state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
+					dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(SevVerbose, "CleanUpDataMoveMetaData", dataMoveId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveMetaData", dataMove.toString());
@@ -2444,76 +2469,75 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	return Void();
 }
 
-ACTOR Future<Void> moveKeys(Database cx,
-                            UID dataMoveId,
-                            KeyRange keys,
-                            std::vector<UID> destinationTeam,
-                            std::vector<UID> healthyDestinations,
-                            MoveKeysLock lock,
-                            Promise<Void> dataMovementComplete,
-                            FlowLock* startMoveKeysParallelismLock,
-                            FlowLock* finishMoveKeysParallelismLock,
-                            bool hasRemote,
-                            UID relocationIntervalId,
-                            const DDEnabledState* ddEnabledState,
-                            CancelConflictingDataMoves cancelConflictingDataMoves) {
-	ASSERT(destinationTeam.size());
-	std::sort(destinationTeam.begin(), destinationTeam.end());
+Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		return startMoveShards(std::move(occ),
+		                       params.dataMoveId,
+		                       params.keys,
+		                       params.destinationTeam,
+		                       params.lock,
+		                       params.startMoveKeysParallelismLock,
+		                       params.relocationIntervalId,
+		                       params.ddEnabledState,
+		                       params.cancelConflictingDataMoves);
+	}
+	return startMoveKeys(std::move(occ),
+	                     params.keys,
+	                     params.destinationTeam,
+	                     params.lock,
+	                     params.startMoveKeysParallelismLock,
+	                     params.relocationIntervalId,
+	                     &tssMapping,
+	                     params.ddEnabledState);
+}
+
+Future<Void> rawFinishMovement(Database occ,
+                               MoveKeysParams& params,
+                               const std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		return finishMoveShards(std::move(occ),
+		                        params.dataMoveId,
+		                        params.keys,
+		                        params.destinationTeam,
+		                        params.lock,
+		                        params.finishMoveKeysParallelismLock,
+		                        params.hasRemote,
+		                        params.relocationIntervalId,
+		                        tssMapping,
+		                        params.ddEnabledState);
+	}
+	return finishMoveKeys(std::move(occ),
+	                      params.keys,
+	                      params.destinationTeam,
+	                      params.lock,
+	                      params.finishMoveKeysParallelismLock,
+	                      params.hasRemote,
+	                      params.relocationIntervalId,
+	                      tssMapping,
+	                      params.ddEnabledState);
+}
+
+ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
+	ASSERT(params.destinationTeam.size());
+	std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		wait(startMoveShards(cx,
-		                     dataMoveId,
-		                     keys,
-		                     destinationTeam,
-		                     lock,
-		                     startMoveKeysParallelismLock,
-		                     relocationIntervalId,
-		                     ddEnabledState,
-		                     cancelConflictingDataMoves));
+	wait(rawStartMovement(occ, params, tssMapping));
 
-	} else {
-		wait(startMoveKeys(cx,
-		                   keys,
-		                   destinationTeam,
-		                   lock,
-		                   startMoveKeysParallelismLock,
-		                   relocationIntervalId,
-		                   &tssMapping,
-		                   ddEnabledState));
-	}
+	state Future<Void> completionSignaller = checkFetchingState(occ,
+	                                                            params.healthyDestinations,
+	                                                            params.keys,
+	                                                            params.dataMovementComplete,
+	                                                            params.relocationIntervalId,
+	                                                            tssMapping);
 
-	state Future<Void> completionSignaller =
-	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
-
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		wait(finishMoveShards(cx,
-		                      dataMoveId,
-		                      keys,
-		                      destinationTeam,
-		                      lock,
-		                      finishMoveKeysParallelismLock,
-		                      hasRemote,
-		                      relocationIntervalId,
-		                      tssMapping,
-		                      ddEnabledState));
-	} else {
-		wait(finishMoveKeys(cx,
-		                    keys,
-		                    destinationTeam,
-		                    lock,
-		                    finishMoveKeysParallelismLock,
-		                    hasRemote,
-		                    relocationIntervalId,
-		                    tssMapping,
-		                    ddEnabledState));
-	}
+	wait(rawFinishMovement(occ, params, tssMapping));
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
-	if (!dataMovementComplete.isSet())
-		dataMovementComplete.send(Void());
+	if (!params.dataMovementComplete.isSet())
+		params.dataMovementComplete.send(Void());
 
 	return Void();
 }

@@ -226,6 +226,7 @@ public:
 	}
 
 	T const& getInterface(int index) { return alternatives[index]->interf; }
+	LBDistance::Type getDistance(int index) const { return (LBDistance::Type)alternatives[index]->distance; }
 	UID getId(int index) const { return alternatives[index]->interf.id(); }
 	bool hasInterface(UID id) const {
 		for (const auto& ref : alternatives) {

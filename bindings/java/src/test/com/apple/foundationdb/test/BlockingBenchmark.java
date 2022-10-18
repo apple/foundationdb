@@ -29,11 +29,13 @@ import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.Transaction;
 
 public class BlockingBenchmark {
+	public static final int API_VERSION = 720;
+
 	private static final int REPS = 100000;
 	private static final int PARALLEL = 100;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB fdb = FDB.selectAPIVersion(720);
+		FDB fdb = FDB.selectAPIVersion(API_VERSION);
 
 		// The cluster file DOES NOT need to be valid, although it must exist.
 		//  This is because the database is never really contacted in this test.

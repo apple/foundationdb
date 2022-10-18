@@ -34,7 +34,6 @@ struct RatekeeperInterface {
 	RequestStream<struct ReportCommitCostEstimationRequest> reportCommitCostEstimation;
 	struct LocalityData locality;
 	UID myId;
-	RequestStream<struct GlobalTagThrottlerStatusRequest> getGlobalTagThrottlerStatus;
 
 	RatekeeperInterface() {}
 	explicit RatekeeperInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -47,14 +46,7 @@ struct RatekeeperInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar,
-		           waitFailure,
-		           getRateInfo,
-		           haltRatekeeper,
-		           reportCommitCostEstimation,
-		           locality,
-		           myId,
-		           getGlobalTagThrottlerStatus);
+		serializer(ar, waitFailure, getRateInfo, haltRatekeeper, reportCommitCostEstimation, locality, myId);
 	}
 };
 
@@ -89,7 +81,7 @@ struct GetRateInfoReply {
 	// Depending on the value of SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES,
 	// one of these fields may be populated
 	Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>> clientThrottledTags;
-	Optional<PrioritizedTransactionTagMap<double>> proxyThrottledTags;
+	Optional<TransactionTagMap<double>> proxyThrottledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -164,41 +156,6 @@ struct ReportCommitCostEstimationRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ssTrTagCommitCost, reply);
-	}
-};
-
-struct GlobalTagThrottlerStatusReply {
-	constexpr static FileIdentifier file_identifier = 9510482;
-
-	struct TagStats {
-		constexpr static FileIdentifier file_identifier = 6018293;
-		double desiredTps;
-		Optional<double> limitingTps;
-		double targetTps;
-		double reservedTps;
-
-		template <class Ar>
-		void serialize(Ar& ar) {
-			serializer(ar, desiredTps, limitingTps, targetTps, reservedTps);
-		}
-	};
-
-	std::unordered_map<TransactionTag, TagStats> status;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, status);
-	}
-};
-
-struct GlobalTagThrottlerStatusRequest {
-	constexpr static FileIdentifier file_identifier = 5620934;
-
-	ReplyPromise<struct GlobalTagThrottlerStatusReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
 	}
 };
 

@@ -30,7 +30,6 @@
 
 struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;
-	// TODO: mimic what StorageServerInterface does with sequential endpoint IDs
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	PublicRequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
@@ -114,6 +113,7 @@ struct BlobGranuleFileRequest {
 	Version readVersion;
 	bool canCollapseBegin = true;
 	TenantInfo tenantInfo;
+	bool summarize = false;
 	ReplyPromise<BlobGranuleFileReply> reply;
 
 	BlobGranuleFileRequest() {}
@@ -122,7 +122,7 @@ struct BlobGranuleFileRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, tenantInfo, reply, arena);
+		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, tenantInfo, summarize, reply, arena);
 	}
 };
 

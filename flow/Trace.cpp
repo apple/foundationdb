@@ -37,6 +37,7 @@
 #include "flow/EventTypes.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
+#include "flow/network.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -162,11 +163,11 @@ public:
 	bool logTraceEventMetrics;
 
 	void initMetrics() {
-		SevErrorNames.init(LiteralStringRef("TraceEvents.SevError"));
-		SevWarnAlwaysNames.init(LiteralStringRef("TraceEvents.SevWarnAlways"));
-		SevWarnNames.init(LiteralStringRef("TraceEvents.SevWarn"));
-		SevInfoNames.init(LiteralStringRef("TraceEvents.SevInfo"));
-		SevDebugNames.init(LiteralStringRef("TraceEvents.SevDebug"));
+		SevErrorNames.init("TraceEvents.SevError"_sr);
+		SevWarnAlwaysNames.init("TraceEvents.SevWarnAlways"_sr);
+		SevWarnNames.init("TraceEvents.SevWarn"_sr);
+		SevInfoNames.init("TraceEvents.SevInfo"_sr);
+		SevDebugNames.init("TraceEvents.SevDebug"_sr);
 		logTraceEventMetrics = true;
 	}
 
@@ -568,6 +569,16 @@ public:
 		universalFields[name] = value;
 	}
 
+	void setLocalAddress(const NetworkAddress& addr) {
+		MutexHolder holder(mutex);
+		this->localAddress = addr;
+	}
+
+	void disposeWriter() {
+		writer->addref();
+		writer.clear();
+	}
+
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
 		auto f = ping->ack.getFuture();
@@ -589,7 +600,7 @@ public:
 NetworkAddress getAddressIndex() {
 	// ahm
 	//	if( g_network->isSimulated() )
-	//		return g_simulator.getCurrentProcess()->address;
+	//		return g_simulator->getCurrentProcess()->address;
 	//	else
 	return g_network->getLocalAddress();
 }
@@ -811,6 +822,18 @@ void setTraceLogGroup(const std::string& logGroup) {
 
 void addUniversalTraceField(const std::string& name, const std::string& value) {
 	g_traceLog.addUniversalTraceField(name, value);
+}
+
+void setTraceLocalAddress(const NetworkAddress& addr) {
+	g_traceLog.setLocalAddress(addr);
+}
+
+void disposeTraceFileWriter() {
+	g_traceLog.disposeWriter();
+}
+
+std::string getTraceFormatExtension() {
+	return std::string(g_traceLog.formatter->getExtension());
 }
 
 BaseTraceEvent::BaseTraceEvent() : initialized(true), enabled(false), logged(true) {}
@@ -1286,6 +1309,10 @@ thread_local bool BaseTraceEvent::networkThread = false;
 void BaseTraceEvent::setNetworkThread() {
 	if (!networkThread) {
 		if (FLOW_KNOBS->ALLOCATION_TRACING_ENABLED) {
+			// Ensure that threadId is initialized before we enable allocation tracing, otherwise it would
+			// be initialized either by first normal usage of TraceEvent or by allocation tracing which is
+			// non-deterministic, and we could run into https://github.com/apple/foundationdb/issues/7872.
+			getTraceThreadId();
 			--g_allocation_tracing_disabled;
 		}
 

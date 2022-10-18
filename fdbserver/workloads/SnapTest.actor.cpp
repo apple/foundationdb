@@ -25,7 +25,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/SimpleIni.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -96,6 +96,8 @@ void printMessages(std::vector<Future<TraceEventFields>>& messages) {
 }
 
 struct SnapTestWorkload : TestWorkload {
+	static constexpr auto NAME = "SnapTest";
+
 public: // variables
 	int numSnaps; // num of snapshots to be taken
 	              // FIXME: currently validation works on numSnap = 1
@@ -114,18 +116,16 @@ public: // ctor & dtor
 		std::string workloadName = "SnapTest";
 		maxRetryCntToRetrieveMessage = 10;
 
-		numSnaps = getOption(options, LiteralStringRef("numSnaps"), 0);
-		maxSnapDelay = getOption(options, LiteralStringRef("maxSnapDelay"), 25.0);
-		testID = getOption(options, LiteralStringRef("testID"), 0);
-		restartInfoLocation =
-		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
-		        .toString();
+		numSnaps = getOption(options, "numSnaps"_sr, 0);
+		maxSnapDelay = getOption(options, "maxSnapDelay"_sr, 25.0);
+		testID = getOption(options, "testID"_sr, 0);
+		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		skipCheck = false;
-		retryLimit = getOption(options, LiteralStringRef("retryLimit"), 5);
+		retryLimit = getOption(options, "retryLimit"_sr, 5);
+		g_simulator->allowLogSetKills = false;
 	}
 
 public: // workload functions
-	std::string description() const override { return "SnapTest"; }
 	Future<Void> setup(Database const& cx) override {
 		TraceEvent("SnapTestWorkloadSetup").log();
 		return Void();
@@ -148,7 +148,7 @@ public: // workload functions
 		loop {
 			try {
 				Standalone<StringRef> keyStr =
-				    LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
+				    "\xff/SnapTestFailStatus/"_sr.withSuffix(StringRef(self->snapUID.toString()));
 				TraceEvent("TestKeyStr").detail("Value", keyStr);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(keyStr));
@@ -232,7 +232,7 @@ public: // workload functions
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
-					StringRef snapCmdRef = LiteralStringRef("/bin/snap_create.sh");
+					StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
 					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
 					wait(status);
 					break;
@@ -290,7 +290,7 @@ public: // workload functions
 					}
 
 					for (int i = 0; i < kvRange.size(); i++) {
-						if (kvRange[i].key.startsWith(LiteralStringRef("snapKey"))) {
+						if (kvRange[i].key.startsWith("snapKey"_sr)) {
 							std::string tmp1 = kvRange[i].key.substr(7).toString();
 							int64_t id = strtol(tmp1.c_str(), nullptr, 0);
 							if (id % 2 != 0) {
@@ -321,7 +321,7 @@ public: // workload functions
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
-					StringRef snapCmdRef = LiteralStringRef("/bin/snap_create1.sh");
+					StringRef snapCmdRef = "/bin/snap_create1.sh"_sr;
 					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
 					wait(status);
 					break;
@@ -344,4 +344,4 @@ public: // workload functions
 	}
 };
 
-WorkloadFactory<SnapTestWorkload> SnapTestWorkloadFactory("SnapTest");
+WorkloadFactory<SnapTestWorkload> SnapTestWorkloadFactory;

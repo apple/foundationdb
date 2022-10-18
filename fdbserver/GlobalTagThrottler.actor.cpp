@@ -107,17 +107,11 @@ class GlobalTagThrottlerImpl {
 			if (opType == OpType::READ) {
 				readCost.setTotal(newCost);
 			} else {
-				writeCost.setTotal(newCost);
+				writeCost.setTotal(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * newCost);
 			}
 		}
 
-		double getCost(OpType opType) const {
-			if (opType == OpType::READ) {
-				return readCost.smoothTotal();
-			} else {
-				return writeCost.smoothTotal();
-			}
-		}
+		double getCost() const { return readCost.smoothTotal() + writeCost.smoothTotal(); }
 	};
 
 	// Track various statistics per tag, aggregated across all storage servers
@@ -126,12 +120,13 @@ class GlobalTagThrottlerImpl {
 		Smoother transactionCounter;
 		Smoother perClientRate;
 		Smoother targetRate;
+		double transactionsLastAdded;
 
 	public:
 		explicit PerTagStatistics()
 		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
+		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()) {}
 
 		Optional<ThrottleApi::TagQuotaValue> getQuota() const { return quota; }
 
@@ -139,7 +134,10 @@ class GlobalTagThrottlerImpl {
 
 		void clearQuota() { quota = {}; }
 
-		void addTransactions(int count) { transactionCounter.addDelta(count); }
+		void addTransactions(int count) {
+			transactionsLastAdded = now();
+			transactionCounter.addDelta(count);
+		}
 
 		double getTransactionRate() const { return transactionCounter.smoothRate(); }
 
@@ -157,21 +155,23 @@ class GlobalTagThrottlerImpl {
 			targetRate.setTotal(targetTps);
 			return targetRate.smoothTotal();
 		}
+
+		bool recentTransactionsAdded() const {
+			return now() - transactionsLastAdded < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
+		}
 	};
 
 	Database db;
 	UID id;
 	uint64_t throttledTagChangeId{ 0 };
-	uint32_t lastBusyReadTagCount{ 0 };
-	uint32_t lastBusyWriteTagCount{ 0 };
+	uint32_t lastBusyTagCount{ 0 };
 
 	std::unordered_map<UID, Optional<double>> throttlingRatios;
 	std::unordered_map<TransactionTag, PerTagStatistics> tagStatistics;
 	std::unordered_map<UID, std::unordered_map<TransactionTag, ThroughputCounters>> throughput;
-	GlobalTagThrottlerStatusReply statusReply;
 
 	// Returns the cost rate for the given tag on the given storage server
-	Optional<double> getCurrentCost(UID storageServerId, TransactionTag tag, OpType opType) const {
+	Optional<double> getCurrentCost(UID storageServerId, TransactionTag tag) const {
 		auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
 		if (!tagToThroughputCounters.present()) {
 			return {};
@@ -180,40 +180,37 @@ class GlobalTagThrottlerImpl {
 		if (!throughputCounter.present()) {
 			return {};
 		}
-		return throughputCounter.get().getCost(opType);
+		return throughputCounter.get().getCost();
 	}
 
 	// Return the cost rate on the given storage server, summed across all tags
-	Optional<double> getCurrentCost(UID storageServerId, OpType opType) const {
+	Optional<double> getCurrentCost(UID storageServerId) const {
 		auto tagToPerTagThroughput = tryGet(throughput, storageServerId);
 		if (!tagToPerTagThroughput.present()) {
 			return {};
 		}
 		double result = 0;
 		for (const auto& [tag, perTagThroughput] : tagToPerTagThroughput.get()) {
-			result += perTagThroughput.getCost(opType);
+			result += perTagThroughput.getCost();
 		}
 		return result;
 	}
 
 	// Return the cost rate for the given tag, summed across all storage servers
-	double getCurrentCost(TransactionTag tag, OpType opType) const {
+	double getCurrentCost(TransactionTag tag) const {
 		double result{ 0.0 };
 		for (const auto& [id, _] : throughput) {
-			result += getCurrentCost(id, tag, opType).orDefault(0);
+			result += getCurrentCost(id, tag).orDefault(0);
 		}
-		TraceEvent("GlobalTagThrottler_GetCurrentCost")
-		    .detail("Tag", printable(tag))
-		    .detail("Op", (opType == OpType::READ) ? "Read" : "Write")
-		    .detail("Cost", result);
+		TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
 
 		return result;
 	}
 
 	// For transactions with the provided tag, returns the average cost that gets associated with the provided storage
 	// server
-	Optional<double> getAverageTransactionCost(TransactionTag tag, UID storageServerId, OpType opType) const {
-		auto const cost = getCurrentCost(storageServerId, tag, opType);
+	Optional<double> getAverageTransactionCost(TransactionTag tag, UID storageServerId) const {
+		auto const cost = getCurrentCost(storageServerId, tag);
 		if (!cost.present()) {
 			return {};
 		}
@@ -231,8 +228,8 @@ class GlobalTagThrottlerImpl {
 
 	// For transactions with the provided tag, returns the average cost of all transactions
 	// accross the cluster. The minimum cost is 1.
-	double getAverageTransactionCost(TransactionTag tag, OpType opType) const {
-		auto const cost = getCurrentCost(tag, opType);
+	double getAverageTransactionCost(TransactionTag tag) const {
+		auto const cost = getCurrentCost(tag);
 		auto const stats = tryGet(tagStatistics, tag);
 		if (!stats.present()) {
 			return 1.0;
@@ -240,7 +237,6 @@ class GlobalTagThrottlerImpl {
 		auto const transactionRate = stats.get().getTransactionRate();
 		TraceEvent("GlobalTagThrottler_GetAverageTransactionCost")
 		    .detail("Tag", tag)
-		    .detail("OpType", (opType == OpType::READ) ? "Read" : "Write")
 		    .detail("TransactionRate", transactionRate)
 		    .detail("Cost", cost);
 		if (transactionRate == 0.0) {
@@ -265,7 +261,7 @@ class GlobalTagThrottlerImpl {
 		return result;
 	}
 
-	Optional<double> getQuota(TransactionTag tag, OpType opType, LimitType limitType) const {
+	Optional<double> getQuota(TransactionTag tag, LimitType limitType) const {
 		auto const stats = tryGet(tagStatistics, tag);
 		if (!stats.present()) {
 			return {};
@@ -275,22 +271,22 @@ class GlobalTagThrottlerImpl {
 			return {};
 		}
 		if (limitType == LimitType::TOTAL) {
-			return (opType == OpType::READ) ? quota.get().totalReadQuota : quota.get().totalWriteQuota;
+			return quota.get().totalQuota;
 		} else {
-			return (opType == OpType::READ) ? quota.get().reservedReadQuota : quota.get().reservedWriteQuota;
+			return quota.get().reservedQuota;
 		}
 	}
 
 	// Of all tags meaningfully performing workload on the given storage server,
 	// returns the ratio of total quota allocated to the specified tag
-	double getQuotaRatio(TransactionTagRef tag, UID storageServerId, OpType opType) const {
+	double getQuotaRatio(TransactionTagRef tag, UID storageServerId) const {
 		double sumQuota{ 0.0 };
 		double tagQuota{ 0.0 };
 		auto const tagsAffectingStorageServer = getTagsAffectingStorageServer(storageServerId);
 		for (const auto& t : tagsAffectingStorageServer) {
-			auto const tQuota = getQuota(t, opType, LimitType::TOTAL);
+			auto const tQuota = getQuota(t, LimitType::TOTAL);
 			sumQuota += tQuota.orDefault(0);
-			if (tag.compare(tag) == 0) {
+			if (t.compare(tag) == 0) {
 				tagQuota = tQuota.orDefault(0);
 			}
 		}
@@ -303,9 +299,9 @@ class GlobalTagThrottlerImpl {
 
 	// Returns the desired cost for a storage server, based on its current
 	// cost and throttling ratio
-	Optional<double> getLimitingCost(UID storageServerId, OpType opType) const {
+	Optional<double> getLimitingCost(UID storageServerId) const {
 		auto const throttlingRatio = tryGet(throttlingRatios, storageServerId);
-		auto const currentCost = getCurrentCost(storageServerId, opType);
+		auto const currentCost = getCurrentCost(storageServerId);
 		if (!throttlingRatio.present() || !currentCost.present() || !throttlingRatio.get().present()) {
 			return {};
 		}
@@ -313,10 +309,10 @@ class GlobalTagThrottlerImpl {
 	}
 
 	// For a given storage server and tag combination, return the limiting transaction rate.
-	Optional<double> getLimitingTps(UID storageServerId, TransactionTag tag, OpType opType) const {
-		auto const quotaRatio = getQuotaRatio(tag, storageServerId, opType);
-		auto const limitingCost = getLimitingCost(storageServerId, opType);
-		auto const averageTransactionCost = getAverageTransactionCost(tag, storageServerId, opType);
+	Optional<double> getLimitingTps(UID storageServerId, TransactionTag tag) const {
+		auto const quotaRatio = getQuotaRatio(tag, storageServerId);
+		auto const limitingCost = getLimitingCost(storageServerId);
+		auto const averageTransactionCost = getAverageTransactionCost(tag, storageServerId);
 		if (!limitingCost.present() || !averageTransactionCost.present()) {
 			return {};
 		}
@@ -326,20 +322,17 @@ class GlobalTagThrottlerImpl {
 	}
 
 	// Return the limiting transaction rate, aggregated across all storage servers
-	Optional<double> getLimitingTps(TransactionTag tag, OpType opType) const {
+	Optional<double> getLimitingTps(TransactionTag tag) const {
 		Optional<double> result;
 		for (const auto& [id, _] : throttlingRatios) {
-			auto const targetTpsForSS = getLimitingTps(id, tag, opType);
+			auto const targetTpsForSS = getLimitingTps(id, tag);
 			result = getMin(result, targetTpsForSS);
 		}
 		return result;
 	}
 
-	Optional<double> getTps(TransactionTag tag,
-	                        OpType opType,
-	                        LimitType limitType,
-	                        double averageTransactionCost) const {
-		auto const cost = getQuota(tag, opType, limitType);
+	Optional<double> getTps(TransactionTag tag, LimitType limitType, double averageTransactionCost) const {
+		auto const cost = getQuota(tag, limitType);
 		if (!cost.present()) {
 			return {};
 		} else {
@@ -375,6 +368,7 @@ class GlobalTagThrottlerImpl {
 						tagsWithQuota.insert(tag);
 					}
 					self->removeUnseenQuotas(tagsWithQuota);
+					self->removeExpiredTags();
 					++self->throttledTagChangeId;
 					wait(delay(5.0));
 					break;
@@ -386,47 +380,25 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	Optional<double> getTargetTps(TransactionTag tag, bool& isReadBusy, bool& isWriteBusy, TraceEvent& te) {
-		auto const readLimitingTps = getLimitingTps(tag, OpType::READ);
-		auto const writeLimitingTps = getLimitingTps(tag, OpType::WRITE);
-		Optional<double> limitingTps;
-		limitingTps = getMin(readLimitingTps, writeLimitingTps);
-
-		auto const averageTransactionReadCost = getAverageTransactionCost(tag, OpType::READ);
-		auto const averageTransactionWriteCost = getAverageTransactionCost(tag, OpType::WRITE);
-		auto const readDesiredTps = getTps(tag, OpType::READ, LimitType::TOTAL, averageTransactionReadCost);
-		auto const writeDesiredTps = getTps(tag, OpType::WRITE, LimitType::TOTAL, averageTransactionWriteCost);
-		Optional<double> desiredTps;
-		desiredTps = getMin(readDesiredTps, writeDesiredTps);
-
+	Optional<double> getTargetTps(TransactionTag tag, bool& isBusy, TraceEvent& te) {
+		auto const limitingTps = getLimitingTps(tag);
+		auto const averageTransactionCost = getAverageTransactionCost(tag);
+		auto const desiredTps = getTps(tag, LimitType::TOTAL, averageTransactionCost);
 		if (!desiredTps.present()) {
 			return {};
 		}
-
-		isReadBusy = readLimitingTps.present() && readLimitingTps.get() < readDesiredTps.orDefault(0);
-		isWriteBusy = writeLimitingTps.present() && writeLimitingTps.get() < writeDesiredTps.orDefault(0);
-
-		auto const readReservedTps = getTps(tag, OpType::READ, LimitType::RESERVED, averageTransactionReadCost);
-		auto const writeReservedTps = getTps(tag, OpType::WRITE, LimitType::RESERVED, averageTransactionWriteCost);
-		Optional<double> reservedTps;
-		reservedTps = getMax(readReservedTps, writeReservedTps);
-
+		auto reservedTps = getTps(tag, LimitType::RESERVED, averageTransactionCost);
 		auto targetTps = getMax(reservedTps, getMin(desiredTps, limitingTps));
+
+		isBusy = limitingTps.present() && limitingTps.get() < desiredTps.orDefault(0);
 
 		te.detail("Tag", printable(tag))
 		    .detail("TargetTps", targetTps)
-		    .detail("AverageTransactionReadCost", averageTransactionReadCost)
-		    .detail("AverageTransactionWriteCost", averageTransactionWriteCost)
+		    .detail("AverageTransactionCost", averageTransactionCost)
 		    .detail("LimitingTps", limitingTps)
 		    .detail("ReservedTps", reservedTps)
 		    .detail("DesiredTps", desiredTps)
 		    .detail("NumStorageServers", throughput.size());
-
-		auto& tagStats = statusReply.status[tag];
-		tagStats.desiredTps = desiredTps.get();
-		tagStats.limitingTps = limitingTps;
-		tagStats.targetTps = targetTps.get();
-		tagStats.reservedTps = reservedTps.get();
 
 		return targetTps;
 	}
@@ -434,29 +406,41 @@ class GlobalTagThrottlerImpl {
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-	void addRequests(TransactionTag tag, int count) { tagStatistics[tag].addTransactions(static_cast<double>(count)); }
+	void addRequests(TransactionTag tag, int count) {
+		auto it = tagStatistics.find(tag);
+		if (it == tagStatistics.end()) {
+			if (tagStatistics.size() == SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {
+				CODE_PROBE(true,
+				           "Global tag throttler ignoring transactions because maximum number of trackable tags has "
+				           "been reached");
+				TraceEvent("GlobalTagThrottler_IgnoringRequests")
+				    .suppressFor(1.0)
+				    .detail("Tag", printable(tag))
+				    .detail("Count", count);
+			} else {
+				tagStatistics[tag].addTransactions(static_cast<double>(count));
+			}
+		} else {
+			it->second.addTransactions(static_cast<double>(count));
+		}
+	}
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 
-	PrioritizedTransactionTagMap<double> getProxyRates(int numProxies) {
-		PrioritizedTransactionTagMap<double> result;
-		lastBusyReadTagCount = lastBusyWriteTagCount = 0;
-		statusReply = {};
+	TransactionTagMap<double> getProxyRates(int numProxies) {
+		TransactionTagMap<double> result;
+		lastBusyTagCount = 0;
 
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
-			bool isReadBusy = false, isWriteBusy = false;
-			auto const targetTps = getTargetTps(tag, isReadBusy, isWriteBusy, te);
-			if (isReadBusy) {
-				++lastBusyReadTagCount;
-			}
-			if (isWriteBusy) {
-				++lastBusyWriteTagCount;
+			bool isBusy{ false };
+			auto const targetTps = getTargetTps(tag, isBusy, te);
+			if (isBusy) {
+				++lastBusyTagCount;
 			}
 			if (targetTps.present()) {
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
-				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
-				    smoothedTargetTps / numProxies;
+				result[tag] = smoothedTargetTps / numProxies;
 			} else {
 				te.disable();
 			}
@@ -467,20 +451,16 @@ public:
 
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
 		PrioritizedTransactionTagMap<ClientTagThrottleLimits> result;
-		lastBusyReadTagCount = lastBusyWriteTagCount = 0;
-		statusReply = {};
+		lastBusyTagCount = 0;
 
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
-			bool isReadBusy = false, isWriteBusy = false;
+			bool isBusy{ false };
 			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
-			auto const targetTps = getTargetTps(tag, isReadBusy, isWriteBusy, te);
+			auto const targetTps = getTargetTps(tag, isBusy, te);
 
-			if (isReadBusy) {
-				++lastBusyReadTagCount;
-			}
-			if (isWriteBusy) {
-				++lastBusyWriteTagCount;
+			if (isBusy) {
+				++lastBusyTagCount;
 			}
 
 			if (targetTps.present()) {
@@ -503,18 +483,22 @@ public:
 		}
 		return result;
 	}
-	uint32_t busyReadTagCount() const { return lastBusyReadTagCount; }
-	uint32_t busyWriteTagCount() const { return lastBusyWriteTagCount; }
+	uint32_t busyReadTagCount() const { return lastBusyTagCount; }
+	uint32_t busyWriteTagCount() const { return lastBusyTagCount; }
 	int64_t manualThrottleCount() const { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 		throttlingRatios[ss.id] = ss.getThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
 		                                                SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
 		for (const auto& busyReadTag : ss.busiestReadTags) {
-			throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
+			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
+				throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
+			}
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
-			throughput[ss.id][busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+			if (tagStatistics.find(busyWriteTag.tag) != tagStatistics.end()) {
+				throughput[ss.id][busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+			}
 		}
 		return Void();
 	}
@@ -525,7 +509,21 @@ public:
 
 	void removeQuota(TransactionTagRef tag) { tagStatistics[tag].clearQuota(); }
 
-	GlobalTagThrottlerStatusReply getStatus() const { return statusReply; }
+	void removeExpiredTags() {
+		for (auto it = tagStatistics.begin(); it != tagStatistics.end();) {
+			const auto& [tag, stats] = *it;
+			if (!stats.recentTransactionsAdded()) {
+				for (auto& [ss, tagToCounters] : throughput) {
+					tagToCounters.erase(tag);
+				}
+				it = tagStatistics.erase(it);
+			} else {
+				++it;
+			}
+		}
+	}
+
+	uint32_t tagsTracked() const { return tagStatistics.size(); }
 };
 
 GlobalTagThrottler::GlobalTagThrottler(Database db, UID id) : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id)) {}
@@ -544,7 +542,7 @@ uint64_t GlobalTagThrottler::getThrottledTagChangeId() const {
 PrioritizedTransactionTagMap<ClientTagThrottleLimits> GlobalTagThrottler::getClientRates() {
 	return impl->getClientRates();
 }
-PrioritizedTransactionTagMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
+TransactionTagMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
 	return impl->getProxyRates(numProxies);
 }
 int64_t GlobalTagThrottler::autoThrottleCount() const {
@@ -574,8 +572,12 @@ void GlobalTagThrottler::removeQuota(TransactionTagRef tag) {
 	return impl->removeQuota(tag);
 }
 
-GlobalTagThrottlerStatusReply GlobalTagThrottler::getGlobalTagThrottlerStatusReply() const {
-	return impl->getStatus();
+uint32_t GlobalTagThrottler::tagsTracked() const {
+	return impl->tagsTracked();
+}
+
+void GlobalTagThrottler::removeExpiredTags() {
+	return impl->removeExpiredTags();
 }
 
 namespace GlobalTagThrottlerTesting {
@@ -716,7 +718,7 @@ Future<Void> monitor(GlobalTagThrottler* globalTagThrottler, Check check) {
 }
 
 bool isNear(double a, double b) {
-	return abs(a - b) < 1.0;
+	return abs(a - b) < 3.0;
 }
 
 bool isNear(Optional<double> a, Optional<double> b) {
@@ -727,20 +729,12 @@ bool isNear(Optional<double> a, Optional<double> b) {
 	}
 }
 
-bool isNear(GlobalTagThrottlerStatusReply::TagStats const& a, GlobalTagThrottlerStatusReply::TagStats const& b) {
-	return isNear(a.desiredTps, b.desiredTps) && isNear(a.targetTps, b.targetTps) &&
-	       isNear(a.reservedTps, b.reservedTps) && isNear(a.limitingTps, b.limitingTps);
-}
-
 bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag, Optional<double> expected) {
 	Optional<double> rate;
 	auto targetRates = globalTagThrottler.getProxyRates(1);
-	auto it1 = targetRates.find(TransactionPriority::DEFAULT);
-	if (it1 != targetRates.end()) {
-		auto it2 = it1->second.find(tag);
-		if (it2 != it1->second.end()) {
-			rate = it2->second;
-		}
+	auto it = targetRates.find(tag);
+	if (it != targetRates.end()) {
+		rate = it->second;
 	}
 	TraceEvent("GlobalTagThrottling_RateMonitor")
 	    .detail("Tag", tag)
@@ -766,22 +760,6 @@ bool clientRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag
 	return isNear(rate, expected);
 }
 
-bool statusIsNear(GlobalTagThrottler const& globalTagThrottler,
-                  TransactionTag tag,
-                  GlobalTagThrottlerStatusReply::TagStats expectedStats) {
-	auto const stats = globalTagThrottler.getGlobalTagThrottlerStatusReply().status[tag];
-	TraceEvent("GlobalTagThrottling_StatusMonitor")
-	    .detail("DesiredTps", stats.desiredTps)
-	    .detail("ExpectedDesiredTps", expectedStats.desiredTps)
-	    .detail("LimitingTps", stats.limitingTps)
-	    .detail("ExpectedLimitingTps", expectedStats.limitingTps)
-	    .detail("TargetTps", stats.targetTps)
-	    .detail("ExpectedTargetTps", expectedStats.targetTps)
-	    .detail("ReservedTps", stats.reservedTps)
-	    .detail("ExpectedReservedTps", expectedStats.reservedTps);
-	return isNear(stats, expectedStats);
-}
-
 ACTOR Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottler,
                                             StorageServerCollection const* storageServers) {
 	loop {
@@ -800,7 +778,7 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -809,7 +787,7 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -818,7 +796,7 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::WRITE);
@@ -827,7 +805,7 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -837,7 +815,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue);
 	state std::vector<Future<Void>> futures;
@@ -852,7 +830,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 		    return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag1, 100.0 / 6.0) &&
 		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 100.0 / 6.0);
 	    });
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
@@ -861,7 +839,7 @@ TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 20.0, 10.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -870,7 +848,7 @@ TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -879,7 +857,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -891,7 +869,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || client2 || updater, 300.0));
+	wait(timeoutError(monitor || client || client2 || updater, 600.0));
 	return Void();
 }
 
@@ -900,7 +878,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 20.0, 10.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -912,7 +890,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -922,7 +900,7 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 5.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -934,7 +912,7 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -944,7 +922,7 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -953,13 +931,13 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
-	tagQuotaValue.totalReadQuota = 50.0;
+	wait(timeoutError(monitor || client || updater, 600.0));
+	tagQuotaValue.totalQuota = 50.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
 		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, 50.0 / 6.0);
 	});
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -968,7 +946,7 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -977,12 +955,12 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	globalTagThrottler.removeQuota(testTag);
 	monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
 		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, {});
 	});
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -991,7 +969,7 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -1000,7 +978,7 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -1011,8 +989,8 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue1.totalReadQuota = tagQuotaValue1.totalWriteQuota = 50.0;
-	tagQuotaValue2.totalReadQuota = tagQuotaValue2.totalWriteQuota = 100.0;
+	tagQuotaValue1.totalQuota = 50.0;
+	tagQuotaValue2.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
 	std::vector<Future<Void>> futures;
@@ -1027,7 +1005,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 		           gtt.busyReadTagCount() == 2;
 	    });
 	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
@@ -1038,8 +1016,8 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue1.totalReadQuota = tagQuotaValue1.totalWriteQuota = 100.0;
-	tagQuotaValue2.totalReadQuota = tagQuotaValue2.totalWriteQuota = 100.0;
+	tagQuotaValue1.totalQuota = 100.0;
+	tagQuotaValue2.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
 	std::vector<Future<Void>> futures;
@@ -1053,7 +1031,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 50 / 6.0) && gtt.busyReadTagCount() == 2;
 	    });
 	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
@@ -1064,8 +1042,8 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue1.totalReadQuota = tagQuotaValue1.totalWriteQuota = 100.0;
-	tagQuotaValue2.totalReadQuota = tagQuotaValue2.totalWriteQuota = 100.0;
+	tagQuotaValue1.totalQuota = 100.0;
+	tagQuotaValue2.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
 	std::vector<Future<Void>> futures;
@@ -1079,17 +1057,17 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 100 / 6.0) && gtt.busyReadTagCount() == 1;
 	    });
 	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
-TEST_CASE("/GlobalTagThrottler/ReservedReadQuota") {
+TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
-	tagQuotaValue.reservedReadQuota = 70.0;
+	tagQuotaValue.totalQuota = 100.0;
+	tagQuotaValue.reservedQuota = 70.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
@@ -1098,49 +1076,50 @@ TEST_CASE("/GlobalTagThrottler/ReservedReadQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
-TEST_CASE("/GlobalTagThrottler/ReservedWriteQuota") {
+// Test that tags are expired iff a sufficient amount of time has passed since the
+// last transaction with that tag
+TEST_CASE("/GlobalTagThrottler/ExpireTags") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
-	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
-	tagQuotaValue.reservedWriteQuota = 70.0;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::WRITE);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 70 / 6.0);
-	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+
+	state Future<Void> client =
+	    timeout(GlobalTagThrottlerTesting::runClient(
+	                &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ),
+	            60.0,
+	            Void());
+	state Future<Void> updater = timeout(
+	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers), 60.0, Void());
+	wait(client && updater);
+	client.cancel();
+	updater.cancel();
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
+	globalTagThrottler.removeExpiredTags();
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
+	wait(delay(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER + 1.0));
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
+	globalTagThrottler.removeExpiredTags();
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 0);
 	return Void();
 }
 
-TEST_CASE("/GlobalTagThrottler/Status") {
+// Test that the number of tags tracked does not grow beyond SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED
+TEST_CASE("/GlobalTagThrottler/TagLimit") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
-	GlobalTagThrottlerStatusReply::TagStats expectedStats;
-	ThrottleApi::TagQuotaValue tagQuotaValue;
-	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	expectedStats.desiredTps = 100.0 / 6.0;
-	expectedStats.limitingTps = {};
-	expectedStats.targetTps = 100.0 / 6.0;
-	expectedStats.reservedTps = 0.0;
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor =
-	    GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag, expectedStats](auto& gtt) {
-		    return GlobalTagThrottlerTesting::statusIsNear(gtt, testTag, expectedStats);
-	    });
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	std::vector<Future<Void>> futures;
+	for (int i = 0; i < 2 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED; ++i) {
+		Arena arena;
+		TransactionTag tag = makeString(8, arena);
+		deterministicRandom()->randomBytes(mutateString(tag), tag.size());
+		futures.push_back(GlobalTagThrottlerTesting::runClient(
+		    &globalTagThrottler, &storageServers, tag, 1.0, 6.0, GlobalTagThrottlerTesting::OpType::READ));
+	}
+	wait(timeout(waitForAll(futures), 60.0, Void()));
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED);
 	return Void();
 }

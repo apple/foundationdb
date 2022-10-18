@@ -266,7 +266,7 @@ struct SimpleWorkload final : FDBWorkload {
 		insertsPerTx = context->getOption("insertsPerTx", 100ul);
 		opsPerTx = context->getOption("opsPerTx", 100ul);
 		runFor = context->getOption("runFor", 10.0);
-		auto err = fdb_select_api_version(720);
+		auto err = fdb_select_api_version(FDB_API_VERSION);
 		if (err) {
 			context->trace(
 			    FDBSeverity::Info, "SelectAPIVersionFailed", { { "Error", std::string(fdb_get_error(err)) } });

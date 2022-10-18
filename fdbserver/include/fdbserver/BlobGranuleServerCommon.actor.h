@@ -1,5 +1,5 @@
 /*
- * BlobGranuleServerCommon.h
+ * BlobGranuleServerCommon.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -33,21 +33,10 @@
 #include "fdbclient/Tenant.h"
 
 #include "fdbserver/ServerDBInfo.h"
-
+#include "fdbserver/Knobs.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-
-struct GranuleHistory {
-	KeyRange range;
-	Version version;
-	Standalone<BlobGranuleHistoryValue> value;
-
-	GranuleHistory() {}
-
-	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
-	  : range(range), version(version), value(value) {}
-};
 
 // Stores info about a file in blob storage
 struct BlobFileIndex {
@@ -87,7 +76,8 @@ struct GranuleFiles {
 	              bool canCollapse,
 	              BlobGranuleChunkRef& chunk,
 	              Arena& replyArena,
-	              int64_t& deltaBytesCounter) const;
+	              int64_t& deltaBytesCounter,
+	              bool summarize) const;
 };
 
 // serialize change feed key as UID bytes, to use 16 bytes on disk
@@ -115,10 +105,15 @@ struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
 	GranuleTenantData() {}
 	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
 
-	void setBStore(Reference<BlobConnectionProvider> bs) {
-		ASSERT(bstoreLoaded.canBeSet());
-		bstore = bs;
-		bstoreLoaded.send(Void());
+	void updateBStore(const BlobMetadataDetailsRef& metadata) {
+		if (bstoreLoaded.canBeSet()) {
+			// new
+			bstore = BlobConnectionProvider::newBlobConnectionProvider(metadata);
+			bstoreLoaded.send(Void());
+		} else {
+			// update existing
+			bstore->update(metadata);
+		}
 	}
 };
 
@@ -129,7 +124,7 @@ public:
 	void removeTenants(std::vector<int64_t> tenantIds);
 
 	Optional<TenantMapEntry> getTenantById(int64_t id);
-	Reference<GranuleTenantData> getDataForGranule(const KeyRangeRef& keyRange);
+	Future<Reference<GranuleTenantData>> getDataForGranule(const KeyRangeRef& keyRange);
 
 	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
 	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;
@@ -143,6 +138,13 @@ public:
 
 private:
 	Future<Void> collection;
+};
+
+ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo);
+ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
+inline bool isFullRestoreMode() {
+	return SERVER_KNOBS->BLOB_FULL_RESTORE_MODE;
 };
 
 #include "flow/unactorcompiler.h"

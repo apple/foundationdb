@@ -38,58 +38,58 @@
 // RestoreCommon.actor.cpp
 
 KeyBackedProperty<ERestoreState> RestoreConfigFR::stateEnum() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 Future<StringRef> RestoreConfigFR::stateText(Reference<ReadYourWritesTransaction> tr) {
 	return map(stateEnum().getD(tr), [](ERestoreState s) -> StringRef { return FileBackupAgent::restoreStateText(s); });
 }
 KeyBackedProperty<Key> RestoreConfigFR::addPrefix() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 KeyBackedProperty<Key> RestoreConfigFR::removePrefix() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 // XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 KeyBackedProperty<KeyRange> RestoreConfigFR::restoreRange() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 KeyBackedProperty<std::vector<KeyRange>> RestoreConfigFR::restoreRanges() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 KeyBackedProperty<Key> RestoreConfigFR::batchFuture() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 KeyBackedProperty<Version> RestoreConfigFR::restoreVersion() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 
 KeyBackedProperty<Reference<IBackupContainer>> RestoreConfigFR::sourceContainer() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 // Get the source container as a bare URL, without creating a container instance
 KeyBackedProperty<Value> RestoreConfigFR::sourceContainerURL() {
-	return configSpace.pack(LiteralStringRef("sourceContainer"));
+	return configSpace.pack("sourceContainer"_sr);
 }
 
 // Total bytes written by all log and range restore tasks.
 KeyBackedBinaryValue<int64_t> RestoreConfigFR::bytesWritten() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 // File blocks that have had tasks created for them by the Dispatch task
 KeyBackedBinaryValue<int64_t> RestoreConfigFR::filesBlocksDispatched() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 // File blocks whose tasks have finished
 KeyBackedBinaryValue<int64_t> RestoreConfigFR::fileBlocksFinished() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 // Total number of files in the fileMap
 KeyBackedBinaryValue<int64_t> RestoreConfigFR::fileCount() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 // Total number of file blocks in the fileMap
 KeyBackedBinaryValue<int64_t> RestoreConfigFR::fileBlockCount() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 
 Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
@@ -108,7 +108,7 @@ ACTOR Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault_i
 }
 
 KeyBackedSet<RestoreConfigFR::RestoreFile> RestoreConfigFR::fileSet() {
-	return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	return configSpace.pack(__FUNCTION__sr);
 }
 
 Future<bool> RestoreConfigFR::isRunnable(Reference<ReadYourWritesTransaction> tr) {

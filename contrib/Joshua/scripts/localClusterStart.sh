@@ -210,7 +210,7 @@ function stopCluster
   then
     # Ensure that process is dead
     if ! kill -0 "${FDBSERVERID}" 2> /dev/null; then
-      log "Killed cluster (${FDBSERVERID}) via cli"
+      log "Killed cluster (${FDBSERVERID}) via cli" "${DEBUGLEVEL}"
     elif ! kill -9 "${FDBSERVERID}"; then
       log "Failed to kill FDB Server process (${FDBSERVERID}) via cli or kill command"
       let status="${status} + 1"

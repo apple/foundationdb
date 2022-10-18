@@ -528,7 +528,8 @@
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
-                  "fetch_storage_wiggler_stats_timeout"
+                  "fetch_storage_wiggler_stats_timeout",
+                  "fetch_consistency_scan_info_timeout"
                ]
             },
             "issues":[
@@ -790,6 +791,11 @@
              "disabled",
              "optional_experimental",
              "required_experimental"
+         ]},
+         "encryption_at_rest_mode": {
+             "$enum":[
+             "disabled",
+             "aes_256_ctr"
          ]}
       },
       "data":{

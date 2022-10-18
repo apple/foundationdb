@@ -108,7 +108,7 @@ Standalone<VectorRef<KeyValueRef>> advanceData(Standalone<VectorRef<KeyValueRef>
                                                Standalone<VectorRef<MutationsAndVersionRef>> mutations,
                                                Version begin,
                                                Version end) {
-	StringRef dbgKey = LiteralStringRef("");
+	StringRef dbgKey = ""_sr;
 	std::map<KeyRef, ValueRef> data;
 	for (auto& kv : source) {
 		if (kv.key == dbgKey)
@@ -165,6 +165,7 @@ bool compareData(Standalone<VectorRef<KeyValueRef>> source, Standalone<VectorRef
 }
 
 struct ChangeFeedsWorkload : TestWorkload {
+	static constexpr auto NAME = "ChangeFeeds";
 	double testDuration;
 	Future<Void> client;
 
@@ -172,7 +173,6 @@ struct ChangeFeedsWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
-	std::string description() const override { return "ChangeFeedsWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
@@ -235,4 +235,4 @@ struct ChangeFeedsWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ChangeFeedsWorkload> ChangeFeedsWorkloadFactory("ChangeFeeds");
+WorkloadFactory<ChangeFeedsWorkload> ChangeFeedsWorkloadFactory;

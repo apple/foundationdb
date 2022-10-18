@@ -79,6 +79,7 @@ private:
 };
 
 Error systemErrorCodeToError();
+extern const std::set<int> transactionRetryableErrors;
 
 #undef ERROR
 #define ERROR(name, number, description)                                                                               \

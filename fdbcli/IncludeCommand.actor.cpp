@@ -92,8 +92,7 @@ ACTOR Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressEx
 					// This is why we now make two clears: first only of the ip
 					// address, the second will delete all ports.
 					if (s.isWholeMachine())
-						tr->clear(KeyRangeRef(addr.withSuffix(LiteralStringRef(":")),
-						                      addr.withSuffix(LiteralStringRef(";"))));
+						tr->clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
 				}
 			}
 			wait(safeThreadFutureToFuture(tr->commit()));
@@ -112,9 +111,9 @@ ACTOR Future<bool> include(Reference<IDatabase> db, std::vector<StringRef> token
 	state bool failed = false;
 	state bool all = false;
 	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
-		if (*t == LiteralStringRef("all")) {
+		if (*t == "all"_sr) {
 			all = true;
-		} else if (*t == LiteralStringRef("failed")) {
+		} else if (*t == "failed"_sr) {
 			failed = true;
 		} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) && t->toString().find(':') != std::string::npos) {
 			// if the token starts with 'locality_' prefix.

@@ -21,15 +21,15 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/flow.h"
 
-const StringRef BaseEventMetric::metricType = LiteralStringRef("Event");
+const StringRef BaseEventMetric::metricType = "Event"_sr;
 template <>
-const StringRef Int64Metric::metricType = LiteralStringRef("Int64");
+const StringRef Int64Metric::metricType = "Int64"_sr;
 template <>
-const StringRef DoubleMetric::metricType = LiteralStringRef("Double");
+const StringRef DoubleMetric::metricType = "Double"_sr;
 template <>
-const StringRef BoolMetric::metricType = LiteralStringRef("Bool");
+const StringRef BoolMetric::metricType = "Bool"_sr;
 template <>
-const StringRef StringMetric::metricType = LiteralStringRef("String");
+const StringRef StringMetric::metricType = "String"_sr;
 
 std::string reduceFilename(std::string const& filename) {
 	std::string r = filename;
@@ -60,29 +60,29 @@ std::string reduceFilename(std::string const& filename) {
 }
 
 void MetricKeyRef::writeField(BinaryWriter& wr) const {
-	wr.serializeBytes(LiteralStringRef("\x01"));
+	wr.serializeBytes("\x01"_sr);
 	wr.serializeBytes(fieldName);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(fieldType);
-	wr.serializeBytes(LiteralStringRef("\x00"));
+	wr.serializeBytes("\x00"_sr);
 }
 
 void MetricKeyRef::writeMetricName(BinaryWriter& wr) const {
-	wr.serializeBytes(LiteralStringRef("\x01"));
+	wr.serializeBytes("\x01"_sr);
 	wr.serializeBytes(name.name);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(name.type);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(address);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(name.id);
-	wr.serializeBytes(LiteralStringRef("\x00"));
+	wr.serializeBytes("\x00"_sr);
 }
 
 const Standalone<StringRef> MetricKeyRef::packLatestKey() const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
-	wr.serializeBytes(LiteralStringRef("\x01TDMetricsLastValue\x00"));
+	wr.serializeBytes("\x01TDMetricsLastValue\x00"_sr);
 	writeMetricName(wr);
 	return wr.toValue();
 }
@@ -91,9 +91,9 @@ const Standalone<StringRef> MetricKeyRef::packDataKey(int64_t time) const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
 	if (isField())
-		wr.serializeBytes(LiteralStringRef("\x01TDFieldData\x00"));
+		wr.serializeBytes("\x01TDFieldData\x00"_sr);
 	else
-		wr.serializeBytes(LiteralStringRef("\x01TDMetricData\x00"));
+		wr.serializeBytes("\x01TDMetricData\x00"_sr);
 	writeMetricName(wr);
 	if (isField())
 		writeField(wr);
@@ -107,15 +107,15 @@ const Standalone<StringRef> MetricKeyRef::packFieldRegKey() const {
 	ASSERT(isField());
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
-	wr.serializeBytes(LiteralStringRef("\x01TDFields\x00\x01"));
+	wr.serializeBytes("\x01TDFields\x00\x01"_sr);
 	wr.serializeBytes(name.name);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(name.type);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(fieldName);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(fieldType);
-	wr.serializeBytes(LiteralStringRef("\x00"));
+	wr.serializeBytes("\x00"_sr);
 	return wr.toValue();
 }
 
@@ -134,7 +134,7 @@ bool TDMetricCollection::canLog(int level) const {
 void TDMetricCollection::checkRoll(uint64_t t, int64_t usedBytes) {
 	currentTimeBytes += usedBytes;
 	if (currentTimeBytes > 1e6) {
-		CODE_PROBE(true, "metrics were rolled");
+		CODE_PROBE(true, "metrics were rolled", probe::decoration::rare);
 		currentTimeBytes = 0;
 		rollTimes.push_back(t);
 		for (auto& it : metricMap)

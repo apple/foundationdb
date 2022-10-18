@@ -20,6 +20,7 @@
 
 #include "TesterWorkload.h"
 #include "TesterUtil.h"
+#include "fdb_c_options.g.h"
 #include "fmt/core.h"
 #include "test/apitester/TesterScheduler.h"
 #include <cstdlib>
@@ -80,13 +81,16 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
-    failed(false), numTxCompleted(0) {
+    failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false) {
 	maxErrors = config.getIntOption("maxErrors", 10);
+	minTxTimeoutMs = config.getIntOption("minTxTimeoutMs", 0);
+	maxTxTimeoutMs = config.getIntOption("maxTxTimeoutMs", 0);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
 
 void WorkloadBase::init(WorkloadManager* manager) {
 	this->manager = manager;
+	inProgress = true;
 }
 
 void WorkloadBase::printStats() {
@@ -94,6 +98,7 @@ void WorkloadBase::printStats() {
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
+	ASSERT(inProgress);
 	if (failed) {
 		return;
 	}
@@ -104,28 +109,56 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError) {
+void WorkloadBase::execTransaction(TOpStartFct startFct,
+                                   TTaskFct cont,
+                                   std::optional<fdb::BytesRef> tenant,
+                                   bool failOnError) {
+	doExecute(startFct, cont, tenant, failOnError, true);
+}
+
+// Execute a non-transactional database operation within the workload
+void WorkloadBase::execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError) {
+	doExecute(startFct, cont, {}, failOnError, false);
+}
+
+void WorkloadBase::doExecute(TOpStartFct startFct,
+                             TTaskFct cont,
+                             std::optional<fdb::BytesRef> tenant,
+                             bool failOnError,
+                             bool transactional) {
+	ASSERT(inProgress);
 	if (failed) {
 		return;
 	}
 	tasksScheduled++;
-	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
-		numTxCompleted++;
-		fdb::Error err = tx->getError();
-		if (err.code() == error_code_success) {
-			cont();
-		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
-			if (failOnError) {
-				error(msg);
-				failed = true;
-			} else {
-				info(msg);
-				cont();
-			}
-		}
-		scheduledTaskDone();
-	});
+	numTxStarted++;
+	manager->txExecutor->execute( //
+	    [this, transactional, cont, startFct](auto ctx) {
+		    if (transactional && maxTxTimeoutMs > 0) {
+			    int timeoutMs = Random::get().randomInt(minTxTimeoutMs, maxTxTimeoutMs);
+			    ctx->tx().setOption(FDB_TR_OPTION_TIMEOUT, timeoutMs);
+		    }
+		    startFct(ctx);
+	    },
+	    [this, cont, failOnError](fdb::Error err) {
+		    numTxCompleted++;
+		    if (err.code() == error_code_success) {
+			    cont();
+		    } else {
+			    std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
+			    if (failOnError) {
+				    error(msg);
+				    failed = true;
+			    } else {
+				    info(msg);
+				    cont();
+			    }
+		    }
+		    scheduledTaskDone();
+	    },
+	    tenant,
+	    transactional,
+	    maxTxTimeoutMs > 0);
 }
 
 void WorkloadBase::info(const std::string& msg) {
@@ -143,11 +176,13 @@ void WorkloadBase::error(const std::string& msg) {
 
 void WorkloadBase::scheduledTaskDone() {
 	if (--tasksScheduled == 0) {
+		inProgress = false;
 		if (numErrors > 0) {
 			error(fmt::format("Workload failed with {} errors", numErrors.load()));
 		} else {
 			info("Workload successfully completed");
 		}
+		ASSERT(numTxStarted == numTxCompleted);
 		manager->workloadDone(this, numErrors > 0);
 	}
 }

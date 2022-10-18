@@ -27,6 +27,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchAndWaitWorkload : TestWorkload {
+	static constexpr auto NAME = "WatchAndWait";
+
 	uint64_t nodeCount, watchCount;
 	int64_t nodePrefix;
 	int keyBytes;
@@ -36,12 +38,12 @@ struct WatchAndWaitWorkload : TestWorkload {
 	PerfIntCounter triggers, retries;
 
 	WatchAndWaitWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), triggers("Triggers"), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		watchCount = getOption(options, LiteralStringRef("watchCount"), (uint64_t)10000);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)100000);
-		nodePrefix = getOption(options, LiteralStringRef("nodePrefix"), (int64_t)-1);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 4);
-		triggerWatches = getOption(options, LiteralStringRef("triggerWatches"), false);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		watchCount = getOption(options, "watchCount"_sr, (uint64_t)10000);
+		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
+		nodePrefix = getOption(options, "nodePrefix"_sr, (int64_t)-1);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
+		triggerWatches = getOption(options, "triggerWatches"_sr, false);
 
 		if (watchCount > nodeCount) {
 			watchCount = nodeCount;
@@ -54,8 +56,6 @@ struct WatchAndWaitWorkload : TestWorkload {
 			keyBytes++; // watches are on different keys than the ones being modified by the workload
 		}
 	}
-
-	std::string description() const override { return "WatchAndWait"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -130,4 +130,4 @@ struct WatchAndWaitWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<WatchAndWaitWorkload> WatchAndWaitWorkloadFactory("WatchAndWait");
+WorkloadFactory<WatchAndWaitWorkload> WatchAndWaitWorkloadFactory;

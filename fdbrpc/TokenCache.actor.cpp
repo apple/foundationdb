@@ -8,6 +8,7 @@
 #include "flow/network.h"
 
 #include <boost/unordered_map.hpp>
+#include <boost/unordered_set.hpp>
 
 #include <fmt/format.h>
 #include <list>
@@ -123,19 +124,69 @@ TEST_CASE("/fdbrpc/authz/LRUCache") {
 	return Void();
 }
 
-struct TokenCacheImpl {
-	struct CacheEntry {
-		Arena arena;
-		VectorRef<TenantNameRef> tenants;
-		double expirationTime = 0.0;
-	};
+struct CacheEntry {
+	Arena arena;
+	VectorRef<TenantNameRef> tenants;
+	Optional<StringRef> tokenId;
+	double expirationTime = 0.0;
+};
 
+struct AuditEntry {
+	NetworkAddress address;
+	Optional<Standalone<StringRef>> tokenId;
+	explicit AuditEntry(NetworkAddress const& address, CacheEntry const& cacheEntry)
+	  : address(address),
+	    tokenId(cacheEntry.tokenId.present() ? Standalone<StringRef>(cacheEntry.tokenId.get(), cacheEntry.arena)
+	                                         : Optional<Standalone<StringRef>>()) {}
+};
+
+bool operator==(AuditEntry const& lhs, AuditEntry const& rhs) {
+	return (lhs.address == rhs.address) && (lhs.tokenId.present() == rhs.tokenId.present()) &&
+	       (!lhs.tokenId.present() || lhs.tokenId.get() == rhs.tokenId.get());
+}
+
+std::size_t hash_value(AuditEntry const& value) {
+	std::size_t seed = 0;
+	boost::hash_combine(seed, value.address);
+	if (value.tokenId.present()) {
+		boost::hash_combine(seed, value.tokenId.get());
+	}
+	return seed;
+}
+
+struct TokenCacheImpl {
 	LRUCache<StringRef, CacheEntry> cache;
-	TokenCacheImpl() : cache(FLOW_KNOBS->TOKEN_CACHE_SIZE) {}
+	boost::unordered_set<AuditEntry> usedTokens;
+	Future<Void> auditor;
+	TokenCacheImpl();
 
 	bool validate(TenantNameRef tenant, StringRef token);
 	bool validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer);
 };
+
+ACTOR Future<Void> tokenCacheAudit(TokenCacheImpl* self) {
+	state boost::unordered_set<AuditEntry> audits;
+	state boost::unordered_set<AuditEntry>::iterator iter;
+	state double lastLoggedTime = 0;
+	loop {
+		auto const timeSinceLog = g_network->timer() - lastLoggedTime;
+		if (timeSinceLog < FLOW_KNOBS->AUDIT_TIME_WINDOW) {
+			wait(delay(FLOW_KNOBS->AUDIT_TIME_WINDOW - timeSinceLog));
+		}
+		lastLoggedTime = g_network->timer();
+		audits.swap(self->usedTokens);
+		for (iter = audits.begin(); iter != audits.end(); ++iter) {
+			CODE_PROBE(true, "Audit Logging Running");
+			TraceEvent("AuditTokenUsed").detail("Client", iter->address).detail("TokenId", iter->tokenId).log();
+			wait(yield());
+		}
+		audits.clear();
+	}
+}
+
+TokenCacheImpl::TokenCacheImpl() : cache(FLOW_KNOBS->TOKEN_CACHE_SIZE) {
+	auditor = tokenCacheAudit(this);
+}
 
 TokenCache::TokenCache() : impl(new TokenCacheImpl()) {}
 TokenCache::~TokenCache() {
@@ -177,6 +228,10 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		CODE_PROBE(true, "Token referencing non-existing key");
 		TRACE_INVALID_PARSED_TOKEN("UnknownKey", t);
 		return false;
+	} else if (!t.issuedAtUnixTime.present()) {
+		CODE_PROBE(true, "Token has no issued-at field");
+		TRACE_INVALID_PARSED_TOKEN("NoIssuedAt", t);
+		return false;
 	} else if (!t.expiresAtUnixTime.present()) {
 		CODE_PROBE(true, "Token has no expiration time");
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
@@ -203,10 +258,13 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		return false;
 	} else {
 		CacheEntry c;
-		c.expirationTime = double(t.expiresAtUnixTime.get());
+		c.expirationTime = t.expiresAtUnixTime.get();
 		c.tenants.reserve(c.arena, t.tenants.get().size());
 		for (auto tenant : t.tenants.get()) {
 			c.tenants.push_back_deep(c.arena, tenant);
+		}
+		if (t.tokenId.present()) {
+			c.tokenId = StringRef(c.arena, t.tokenId.get());
 		}
 		cache.insert(StringRef(c.arena, token), c);
 		return true;
@@ -246,6 +304,8 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
 	}
+	// audit logging
+	usedTokens.insert(AuditEntry(peer, *cachedEntry.get()));
 	return true;
 }
 
@@ -265,7 +325,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
-		        token.expiresAtUnixTime = uint64_t(std::max<double>(g_network->timer() - 10 - rng.random01() * 50, 0));
+		        token.expiresAtUnixTime = std::max<double>(g_network->timer() - 10 - rng.random01() * 50, 0);
 		    },
 		    "ExpiredToken",
 		},
@@ -275,13 +335,25 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
-		        token.notBeforeUnixTime = uint64_t(g_network->timer() + 10 + rng.random01() * 50);
+		        token.notBeforeUnixTime = g_network->timer() + 10 + rng.random01() * 50;
 		    },
 		    "TokenNotYetValid",
 		},
 		{
+		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.issuedAtUnixTime.reset(); },
+		    "NoIssuedAt",
+		},
+		{
 		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.tenants.reset(); },
 		    "NoTenants",
+		},
+		{
+		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) {
+		        StringRef* newTenants = new (arena) StringRef[1];
+		        *newTenants = token.tenants.get()[0].substr(1);
+		        token.tenants = VectorRef<StringRef>(newTenants, 1);
+		    },
+		    "UnmatchedTenant",
 		},
 	};
 	auto const pubKeyName = "somePublicKey"_sr;
@@ -292,20 +364,31 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		auto& rng = *deterministicRandom();
 		auto validTokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 		validTokenSpec.keyId = pubKeyName;
-		for (auto i = 0; i < numBadMutations; i++) {
+		for (auto i = 0; i <= numBadMutations; i++) {
 			FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
 			auto publicKeyClearGuard =
 			    ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
-			auto [mutationFn, mutationDesc] = badMutations[i];
+			auto signedToken = StringRef();
 			auto tmpArena = Arena();
-			auto mutatedTokenSpec = validTokenSpec;
-			mutationFn(tmpArena, rng, mutatedTokenSpec);
-			auto signedToken = authz::jwt::signToken(tmpArena, mutatedTokenSpec, privateKey);
-			if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
-				fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
-				           mutationDesc,
-				           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
-				ASSERT(false);
+			if (i < numBadMutations) {
+				auto [mutationFn, mutationDesc] = badMutations[i];
+				auto mutatedTokenSpec = validTokenSpec;
+				mutationFn(tmpArena, rng, mutatedTokenSpec);
+				signedToken = authz::jwt::signToken(tmpArena, mutatedTokenSpec, privateKey);
+				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
+					fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
+					           mutationDesc,
+					           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
+					ASSERT(false);
+				}
+			} else {
+				// squeeze in a bad signature case that does not fit into mutation interface
+				signedToken = authz::jwt::signToken(tmpArena, validTokenSpec, privateKey);
+				signedToken = signedToken.substr(0, signedToken.size() - 1);
+				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
+					fmt::print("Unexpected successful validation with a token with truncated signature part\n");
+					ASSERT(false);
+				}
 			}
 		}
 	}
@@ -336,7 +419,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	    authz::jwt::makeRandomTokenSpec(arena, *deterministicRandom(), authz::Algorithm::ES256);
 	state StringRef signedToken;
 	FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
-	tokenSpec.expiresAtUnixTime = static_cast<uint64_t>(g_network->timer() + 2.0);
+	tokenSpec.expiresAtUnixTime = g_network->timer() + 2.0;
 	tokenSpec.keyId = pubKeyName;
 	signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
 	if (!TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {

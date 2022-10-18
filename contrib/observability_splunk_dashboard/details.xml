@@ -1,0 +1,431 @@
+<form theme="light">
+  <label>FoundationDB - Details</label>
+  <description>Details for FoundationDB Cluster</description>
+  <fieldset submitButton="false">
+    <input type="text" token="Index" searchWhenChanged="true">
+      <label>Index</label>
+      <default>*</default>
+    </input>
+    <input type="text" token="LogGroup" searchWhenChanged="true">
+      <label>LogGroup</label>
+      <default>*</default>
+    </input>
+    <input type="time" token="TimeRange" searchWhenChanged="true">
+      <label>Time Range</label>
+      <default>
+        <earliest>-60m@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="Span" searchWhenChanged="true">
+      <label>Timechart Resolution</label>
+      <choice value="bins=100">Default</choice>
+      <choice value="span=5s">5 seconds</choice>
+      <choice value="span=1m">1 minute</choice>
+      <choice value="span=10m">10 minutes</choice>
+      <choice value="span=1h">1 hour</choice>
+      <choice value="span=1d">1 day</choice>
+      <default>bins=100</default>
+      <initialValue>bins=100</initialValue>
+    </input>
+    <input type="dropdown" token="Roles" searchWhenChanged="true">
+      <label>Roles</label>
+      <choice value="">All</choice>
+      <choice value="Roles=*SS*">Storage Server</choice>
+      <choice value="Roles=*TL*">Transaction Log</choice>
+      <choice value="Roles=*MP*">Proxy</choice>
+      <choice value="Roles=*RV*">Resolver</choice>
+      <choice value="Roles=*MS*">Master</choice>
+      <choice value="Roles=*CC*">Cluster Controller</choice>
+      <choice value="Roles=*LR*">Log Router</choice>
+      <choice value="Roles=*DD*">Data Distributor</choice>
+      <choice value="Roles=*RK*">Ratekeeper</choice>
+      <choice value="Roles=*TS*">Tester</choice>
+      <default></default>
+    </input>
+    <input type="text" token="Host" searchWhenChanged="true">
+      <label>Host</label>
+      <default>*</default>
+    </input>
+    <input type="text" token="Machine" searchWhenChanged="true">
+      <label>Machine</label>
+      <default>*</default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <chart>
+        <title>Storage Queue Size</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | rex field=BytesInput "(?&lt;InputRate&gt;.*) (?&lt;InputRoughness&gt;.*) (?&lt;InputCounter&gt;.*)" | rex field=BytesDurable "(?&lt;DurableRate&gt;.*) (?&lt;DurableRoughness&gt;.*) (?&lt;DurableCounter&gt;.*)" | eval QueueSize=InputCounter-DurableCounter | timechart $Span$ avg(QueueSize) by Machine</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Storage Input Rate</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | rex field=BytesInput "(?&lt;InputRate&gt;.*) (?&lt;InputRoughness&gt;.*) (?&lt;InputCounter&gt;.*)" | timechart $Span$ avg(InputRate) by Machine</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Storage Bytes Queried</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | rex field=BytesQueried "(?&lt;Rate&gt;.*) (?&lt;Roughness&gt;.*) (?&lt;Counter&gt;.*)" | timechart $Span$ avg(Rate) by Machine</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Average Process CPU by Role (capped at 2; beware kernel bug)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | eval Cpu=CPUSeconds/Elapsed | timechart $Span$ avg(Cpu) by Roles</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.axisY.maximumNumber">2</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Max Process CPU by Role (capped at 2; beware kernel bug)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | eval Cpu=CPUSeconds/Elapsed | timechart $Span$ max(Cpu) by Roles</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.axisY.maximumNumber">2</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Disk Busyness</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ $Roles$ host=$Host$ Machine=$Machine$ Type=ProcessMetrics TrackLatestType=Original | eval DiskBusyPercentage=(Elapsed-DiskIdleSeconds)/Elapsed | timechart $Span$ avg(DiskBusyPercentage) by Machine</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Max Run Loop Busyness by Role (for &lt;=6.1, S2Pri1)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ $Roles$ host=$Host$ Machine=$Machine$ Type=NetworkMetrics NOT TrackLatestType=Rolled | eval Busyness=if(isnull(PriorityStarvedBelow1), if(isnull(PriorityBusy1), S2Pri1, PriorityBusy1/Elapsed), PriorityStarvedBelow1/Elapsed) | timechart $Span$ max(Busyness) by Roles</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Max Run Loop Busyness by Priority (6.2+ only)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ $Roles$ host=$Host$ Machine=$Machine$ Type=NetworkMetrics TrackLatestType=Original | foreach PriorityBusy* [eval Busyness&lt;&lt;MATCHSTR&gt;&gt;=PriorityBusy&lt;&lt;MATCHSTR&gt;&gt;/Elapsed] | timechart $Span$ max(Busyness*)</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>TLog Queue Size</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=TLogMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | eval QueueSize=SharedBytesInput-SharedBytesDurable | timechart $Span$ avg(QueueSize) by Machine</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Connection Timeouts (counted on both sides of connection)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type=ConnectionTimeout OR Type=ConnectionTimedOut) $Roles$ host=$Host$ | eval WithAddr=if(Type=="ConnectionTimedOut", PeerAddr, WithAddr) | rex field=WithAddr "(?&lt;OtherAddr&gt;[^:]*:[^:]*).*" | eval Machine=Machine+","+OtherAddr | makemv delim="," Machine | search Machine=$Machine$ | eval Count=1+SuppressedEventCount | timechart sum(Count) by Machine useother=f</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Pairwise Connection Timeouts Between Datacenters</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type=ConnectionTimeout OR Type=ConnectionTimedOut)  host=* Machine=* NOT TrackLatestType=Rolled 
+| eval WithAddr=if(Type=="ConnectionTimedOut", PeerAddr, WithAddr) 
+| rex field=host "(?&lt;Datacenter&gt;..).*" 
+| eval Datacenter=if(isnotnull(pie_work_unit), pie_work_unit, Datacenter) 
+| rex field=WithAddr "(?&lt;OtherIP&gt;[^:]*):.*" 
+| join OtherIP 
+    [search index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics NOT TrackLatestType=Rolled 
+    | rex field=Machine "(?&lt;OtherIP&gt;[^:]*):.*" 
+    | rex field=host "(?&lt;OtherDatacenter&gt;..).*"
+    | eval OtherDatacenter=if(isnotnull(pie_work_unit), pie_work_unit, OtherDatacenter)]
+| eval DC1=if(Datacenter&gt;OtherDatacenter, Datacenter, OtherDatacenter), DC2=if(Datacenter&gt;OtherDatacenter, OtherDatacenter, Datacenter) 
+| eval Connection=DC1+" &lt;-&gt; " + DC2 
+| eval Count=1+SuppressedEventCount 
+| timechart count by Connection</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <table>
+        <title>Pairwise Connection Timeouts Between Known Server Processes (Sorted by Count, descending)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type=ConnectionTimeout OR Type=ConnectionTimedOut OR Type=ProcessMetrics) $Roles$ host=$Host$ Machine=$Machine$ NOT TrackLatestType=Rolled | eval WithAddr=if(Type=="ConnectionTimedOut", PeerAddr, WithAddr), Reason=if(Type=="ConnectionTimedOut", "Timed out trying to connect", "Established connection timed out") | rex field=Machine "(?&lt;IP&gt;[^:]*):.*" | rex field=host "(?&lt;Datacenter&gt;..).*" | rex field=WithAddr "(?&lt;OtherIP&gt;[^:]*):.*" | eventstats values(Roles) as Roles by IP | join OtherIP [search index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics NOT TrackLatestType=Rolled | rex field=Machine "(?&lt;OtherIP&gt;[^:]*):.*" | rex field=host "(?&lt;OtherDatacenter&gt;..).*" | stats values(Roles) as OtherRoles by OtherIP, OtherDatacenter | eval OtherRoles="("+mvjoin(OtherRoles,",")+")"] | eval Roles="("+mvjoin(Roles,",")+")" | eval IP=Datacenter+": "+IP+" "+Roles, OtherIP=OtherDatacenter+": "+OtherIP+" "+OtherRoles | eval Addr1=if(IP&gt;OtherIP, IP, OtherIP), Addr2=if(IP&gt;OtherIP, OtherIP, IP) | eval Connection=Addr1+" &lt;-&gt; " + Addr2 | eval Count=1+SuppressedEventCount | stats sum(Count) as Count, values(Reason) as Reasons by Connection | sort -Count</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Lazy Deletion Rate (making space available for reuse)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ $Roles$ host=$Host$ Machine=$Machine$ Type=SpringCleaningMetrics | eval Metric=LazyDeletePages | streamstats current=f global=f window=1 first(Metric) as NextMetric, first(Time), as NextTime by ID | eval Rate=4096*(NextMetric-Metric)/(NextTime-Time) | timechart $Span$ avg(Rate) by Machine</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Vacuuming Rate (shrinking file)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ $Roles$ host=$Host$ Machine=$Machine$ Type=SpringCleaningMetrics | eval Metric=VacuumedPages | streamstats current=f global=f window=1 first(Metric) as NextMetric, first(Time), as NextTime by ID | eval Rate=4096*(NextMetric-Metric)/(NextTime-Time) | timechart $Span$ avg(Rate) by Machine</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Roles</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ $Roles$ host=$Host$ Machine=$Machine$ NOT TrackLatestType=Rolled | makemv delim="," Roles | mvexpand Roles | timechart $Span$ distinct_count(Machine) by Roles</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Slow Tasks (Sorted by Duration, Descending)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=SlowTask $Roles$ host=$Host$ Machine=$Machine$ | sort -Duration | table _time, Duration, Machine, TaskID, Roles</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Event Counts (Sorted by Severity and Count, Descending)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ $Roles$ host=$Host$ Machine=$Machine$ NOT TrackLatestType=Rolled | stats count as Count by Type, Severity | sort -Severity, -Count</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Errors</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Severity=40 $Roles$ host=$Host$ Machine=$Machine$ NOT TrackLatestType=Rolled | table _time, Type, Machine, Roles</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Recoveries (Ignores Filters)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=MasterRecoveryState TrackLatestType=Original (StatusCode=0 OR StatusCode=11) | eval RecoveryResetInterval=10 | sort _time | streamstats earliest(_time) as RecoveryStart, count as EventCount reset_after="(StatusCode=11)" | where StatusCode=11 | eval EventCount=if(EventCount==1, 2, EventCount), RecoveryStart=if(RecoveryStart==_time, _time-RecoveryDuration, RecoveryStart) | sort -_time | streamstats current=f global=f window=1 first(RecoveryStart) as NextRecoveryStart | eval RecoverySpan=NextRecoveryStart-_time, FailedRecoveries=EventCount-2, SuccessfulRecoveries=1 | eval AvailableSeconds=if(RecoverySpan&lt;RecoveryResetInterval, RecoverySpan, 0) | sort _time | streamstats earliest(RecoveryStart) as RecoveryStart, sum(FailedRecoveries) as FailedRecoveryCount, sum(SuccessfulRecoveries) as SuccessfulRecoveryCount, sum(AvailableSeconds) as AvailableSeconds reset_after="(NOT RecoverySpan &lt; RecoveryResetInterval)"  | where NOT RecoverySpan &lt; RecoveryResetInterval | eval Duration=_time-RecoveryStart, StartTime=strftime(RecoveryStart, "%F %X.%Q"), ShortLivedRecoveryCount=SuccessfulRecoveryCount-1 | table StartTime, Duration, FailedRecoveryCount, ShortLivedRecoveryCount, AvailableSeconds | sort -StartTime</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Process (Re)starts</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProgramStart TrackLatestType=Original $Roles$ host=$Host$ Machine=$Machine$ | table _time, Machine | sort -_time</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <chart>
+        <title>Failure Detection (Machine Filter Only)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=FailureDetectionStatus System=$Machine$ | sort _time | eval Failed=if(Status=="Failed", 1, 0) | streamstats current=t global=f window=2 first(Failed) as PrevFailed by System | where PrevFailed=1 OR Failed=1 | eval Failed=PrevFailed + "," + Failed | makemv delim="," Failed | mvexpand Failed | timechart $Span$ max(Failed) by System</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.axisY.maximumNumber">1</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Storage Server Space Usage (Sorted by Available Space Percentage, Ascending)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | eval AvailableSpacePercent=KvstoreBytesAvailable/KvstoreBytesTotal, FreeSpacePercent=KvstoreBytesFree/KvstoreBytesTotal, GBUsed=KvstoreBytesUsed/1e9, GBStored=BytesStored/1e9, Overhead=KvstoreBytesUsed/BytesStored, GBTotalSpace=KvstoreBytesTotal/1e9 | stats latest(AvailableSpacePercent) as AvailableSpacePercent, latest(FreeSpacePercent) as FreeSpacePercent, latest(GBStored) as GBStored, latest(GBUsed) as GBUsed, latest(Overhead) as OverheadFactor, latest(GBTotalSpace) as GBTotalSpace by Machine | sort AvailableSpacePercent</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>TLog Server Space Usage (Sorted by Available Space Percentage, Ascending)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$  Type=TLogMetrics  host=* Machine=* TrackLatestType=Original Roles=TL | eval AvailableSpacePercent=KvstoreBytesAvailable/KvstoreBytesTotal, FreeDiskSpacePercent=KvstoreBytesFree/KvstoreBytesTotal, GBUsed=KvstoreBytesUsed/1e9,  GBTotalSpace=KvstoreBytesTotal/1e9  | stats latest(AvailableSpacePercent) as AvailableSpacePercent, latest(FreeDiskSpacePercent) as FreeDiskSpacePercent,  latest(GBUsed) as GBUsed, latest(GBTotalSpace) as GBTotalSpace by Machine | sort AvailableSpacePercent</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Data Movement by Type (Log Scale, Ignores Filters)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=MovingData TrackLatestType=Original | timechart avg(Priority*) as *</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Storage Server Max Bytes Stored by Host</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics $Roles$ host=$Host$ Machine=$Machine$ TrackLatestType=Original | eval GBStored=BytesStored/1e9 | timechart max(GBStored) by host limit=100</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Master Failed Clients</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$  Type=WaitFailureClient 
+| stats count by FailedEndpoint</query>
+          <earliest>$TimeRange.earliest$</earliest>
+          <latest>$TimeRange.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+</form>

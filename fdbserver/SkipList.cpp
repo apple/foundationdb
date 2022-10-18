@@ -816,14 +816,14 @@ struct TransactionInfo {
 	bool reportConflictingKeys;
 };
 
-void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
+void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOldestVersion) {
 	const int t = transactionCount++;
 
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
 	info->reportConflictingKeys = tr.report_conflicting_keys;
 
-	if (tr.read_snapshot < cs->oldestVersion && tr.read_conflict_ranges.size()) {
+	if (tr.read_snapshot < newOldestVersion && tr.read_conflict_ranges.size()) {
 		info->tooOld = true;
 	} else {
 		info->tooOld = false;
@@ -1046,32 +1046,32 @@ void miniConflictSetTest() {
 
 void operatorLessThanTest() {
 	{ // Longer strings before shorter strings.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello\0"), /*begin=*/false, /*write=*/false, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b("hello\0"_sr, /*begin=*/false, /*write=*/false, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
 	}
 
 	{ // Reads before writes.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/false, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/false, 0, nullptr);
+		KeyInfo b("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
 	}
 
 	{ // Begin reads after writes.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/false, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b("hello"_sr, /*begin=*/true, /*write=*/false, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
 	}
 
 	{ // Begin writes after writes.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/true, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b("hello"_sr, /*begin=*/true, /*write=*/true, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
@@ -1143,7 +1143,7 @@ void skipListTest() {
 		t = timer();
 		ConflictBatch batch(cs);
 		for (const auto& tr : trs) {
-			batch.addTransaction(tr);
+			batch.addTransaction(tr, version);
 		}
 		g_add += timer() - t;
 

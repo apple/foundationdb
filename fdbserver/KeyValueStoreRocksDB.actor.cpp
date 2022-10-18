@@ -79,7 +79,11 @@ using rocksdb::BackgroundErrorReason;
 
 class SharedRocksDBState {
 public:
-	SharedRocksDBState();
+	SharedRocksDBState(UID id);
+
+	LatencySample commitLatency;
+	LatencySample commitQueueLatency;
+	LatencySample dbWriteLatency;
 
 	void setClosing() { this->closing = true; }
 	bool isClosing() const { return this->closing; }
@@ -90,6 +94,7 @@ public:
 	rocksdb::ReadOptions& getReadOptions() { return this->readOptions; }
 
 private:
+	const UID id;
 	rocksdb::ColumnFamilyOptions initialCfOptions();
 	rocksdb::DBOptions initialDbOptions();
 	rocksdb::ReadOptions initialReadOptions();
@@ -100,13 +105,33 @@ private:
 	rocksdb::ReadOptions readOptions;
 };
 
-SharedRocksDBState::SharedRocksDBState()
-  : closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()), readOptions(initialReadOptions()) {}
+SharedRocksDBState::SharedRocksDBState(UID id)
+  : id(id), closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()),
+    readOptions(initialReadOptions()), commitLatency(LatencySample("RocksDBCommitLatency",
+                                                                   id,
+                                                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+    commitQueueLatency(LatencySample("RocksDBCommitQueueLatency",
+                                     id,
+                                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+    dbWriteLatency(LatencySample("RocksDBWriteLatency",
+                                 id,
+                                 SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                 SERVER_KNOBS->LATENCY_SAMPLE_SIZE)) {}
 
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;
-	options.level_compaction_dynamic_level_bytes = true;
-	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+	if (SERVER_KNOBS->ROCKSDB_LEVEL_STYLE_COMPACTION) {
+		options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	} else {
+		options.OptimizeUniversalStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS) {
+		options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	}
 
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
@@ -258,25 +283,25 @@ using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
 
 #define PERSIST_PREFIX "\xff\xff"
-const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
-const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = LiteralStringRef("RocksDBStorage");
-const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = LiteralStringRef("RocksDBCommitLatency");
-const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = LiteralStringRef("RocksDBCommitAction");
-const StringRef ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM = LiteralStringRef("RocksDBCommitQueueWait");
-const StringRef ROCKSDB_WRITE_HISTOGRAM = LiteralStringRef("RocksDBWrite");
-const StringRef ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM = LiteralStringRef("RocksDBDeleteCompactRange");
-const StringRef ROCKSDB_READRANGE_LATENCY_HISTOGRAM = LiteralStringRef("RocksDBReadRangeLatency");
-const StringRef ROCKSDB_READVALUE_LATENCY_HISTOGRAM = LiteralStringRef("RocksDBReadValueLatency");
-const StringRef ROCKSDB_READPREFIX_LATENCY_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixLatency");
-const StringRef ROCKSDB_READRANGE_ACTION_HISTOGRAM = LiteralStringRef("RocksDBReadRangeAction");
-const StringRef ROCKSDB_READVALUE_ACTION_HISTOGRAM = LiteralStringRef("RocksDBReadValueAction");
-const StringRef ROCKSDB_READPREFIX_ACTION_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixAction");
-const StringRef ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM = LiteralStringRef("RocksDBReadRangeQueueWait");
-const StringRef ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM = LiteralStringRef("RocksDBReadValueQueueWait");
-const StringRef ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixQueueWait");
-const StringRef ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM = LiteralStringRef("RocksDBReadRangeNewIterator");
-const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = LiteralStringRef("RocksDBReadValueGet");
-const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixGet");
+const KeyRef persistVersion = PERSIST_PREFIX "Version"_sr;
+const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = "RocksDBStorage"_sr;
+const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = "RocksDBCommitLatency"_sr;
+const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = "RocksDBCommitAction"_sr;
+const StringRef ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM = "RocksDBCommitQueueWait"_sr;
+const StringRef ROCKSDB_WRITE_HISTOGRAM = "RocksDBWrite"_sr;
+const StringRef ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM = "RocksDBDeleteCompactRange"_sr;
+const StringRef ROCKSDB_READRANGE_LATENCY_HISTOGRAM = "RocksDBReadRangeLatency"_sr;
+const StringRef ROCKSDB_READVALUE_LATENCY_HISTOGRAM = "RocksDBReadValueLatency"_sr;
+const StringRef ROCKSDB_READPREFIX_LATENCY_HISTOGRAM = "RocksDBReadPrefixLatency"_sr;
+const StringRef ROCKSDB_READRANGE_ACTION_HISTOGRAM = "RocksDBReadRangeAction"_sr;
+const StringRef ROCKSDB_READVALUE_ACTION_HISTOGRAM = "RocksDBReadValueAction"_sr;
+const StringRef ROCKSDB_READPREFIX_ACTION_HISTOGRAM = "RocksDBReadPrefixAction"_sr;
+const StringRef ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM = "RocksDBReadRangeQueueWait"_sr;
+const StringRef ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM = "RocksDBReadValueQueueWait"_sr;
+const StringRef ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM = "RocksDBReadPrefixQueueWait"_sr;
+const StringRef ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM = "RocksDBReadRangeNewIterator"_sr;
+const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = "RocksDBReadValueGet"_sr;
+const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = "RocksDBReadPrefixGet"_sr;
 
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
@@ -793,14 +818,29 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "CountWalFileSyncs", rocksdb::WAL_FILE_SYNCED, 0 },
 		{ "CountWalFileBytes", rocksdb::WAL_FILE_BYTES, 0 },
 		{ "CompactReadBytes", rocksdb::COMPACT_READ_BYTES, 0 },
+		{ "CompactReadBytesMarked", rocksdb::COMPACT_READ_BYTES_MARKED, 0 },
+		{ "CompactReadBytesPeriodic", rocksdb::COMPACT_READ_BYTES_PERIODIC, 0 },
+		{ "CompactReadBytesTtl", rocksdb::COMPACT_READ_BYTES_TTL, 0 },
 		{ "CompactWriteBytes", rocksdb::COMPACT_WRITE_BYTES, 0 },
+		{ "CompactWriteBytesMarked", rocksdb::COMPACT_WRITE_BYTES_MARKED, 0 },
+		{ "CompactWriteBytesPeriodic", rocksdb::COMPACT_WRITE_BYTES_PERIODIC, 0 },
+		{ "CompactWriteBytesTtl", rocksdb::COMPACT_WRITE_BYTES_TTL, 0 },
 		{ "FlushWriteBytes", rocksdb::FLUSH_WRITE_BYTES, 0 },
 		{ "CountBlocksCompressed", rocksdb::NUMBER_BLOCK_COMPRESSED, 0 },
 		{ "CountBlocksDecompressed", rocksdb::NUMBER_BLOCK_DECOMPRESSED, 0 },
 		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
 		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+	};
 
+	state std::vector<std::pair<const char*, uint32_t>> histogramStats = {
+		{ "CompactionTime", rocksdb::COMPACTION_TIME },
+		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME },
+		{ "CompressionTimeNanos", rocksdb::COMPRESSION_TIMES_NANOS },
+		{ "DecompressionTimeNanos", rocksdb::DECOMPRESSION_TIMES_NANOS },
+		{ "HardRateLimitDelayCount", rocksdb::HARD_RATE_LIMIT_DELAY_COUNT },
+		{ "SoftRateLimitDelayCount", rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT },
+		{ "WriteStall", rocksdb::WRITE_STALL },
 	};
 
 	state std::vector<std::pair<const char*, std::string>> intPropertyStats = {
@@ -855,6 +895,13 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 			stat = statistics->getTickerCount(ticker);
 			e.detail(name, stat - cum);
 			cum = stat;
+		}
+
+		for (auto& [name, histogram] : histogramStats) {
+			rocksdb::HistogramData histogram_data;
+			statistics->histogramData(histogram, &histogram_data);
+			e.detail(format("%s%d", name, "P95"), histogram_data.percentile95);
+			e.detail(format("%s%d", name, "P99"), histogram_data.percentile99);
 		}
 
 		for (const auto& [name, property] : intPropertyStats) {
@@ -1113,14 +1160,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double startTime;
 			bool getHistograms;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
-			CommitAction() {
-				if (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {
-					getHistograms = true;
-					startTime = timer_monotonic();
-				} else {
-					getHistograms = false;
-				}
-			}
+			CommitAction()
+			  : startTime(timer_monotonic()),
+			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 		};
 		void action(CommitAction& a) {
 			bool doPerfContextMetrics =
@@ -1129,9 +1171,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (doPerfContextMetrics) {
 				perfContextMetrics->reset();
 			}
-			double commitBeginTime;
+			double commitBeginTime = timer_monotonic();
+			sharedState->commitQueueLatency.addMeasurement(commitBeginTime - a.startTime);
 			if (a.getHistograms) {
-				commitBeginTime = timer_monotonic();
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM.toString(), commitBeginTime - a.startTime));
 			}
@@ -1147,8 +1189,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+			if (SERVER_KNOBS->ROCKSDB_DISABLE_WAL_EXPERIMENTAL) {
+				options.disableWAL = true;
+				options.sync = false;
+			}
 
-			double writeBeginTime = a.getHistograms ? timer_monotonic() : 0;
+			double writeBeginTime = timer_monotonic();
 			if (rateLimiter) {
 				// Controls the total write rate of compaction and flush in bytes per second.
 				// Request for batchToCommit bytes. If this request cannot be satisfied, the call is blocked.
@@ -1156,9 +1202,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
+			double currTime = timer_monotonic();
+			sharedState->dbWriteLatency.addMeasurement(currTime - writeBeginTime);
 			if (a.getHistograms) {
 				metricPromiseStream->send(
-				    std::make_pair(ROCKSDB_WRITE_HISTOGRAM.toString(), timer_monotonic() - writeBeginTime));
+				    std::make_pair(ROCKSDB_WRITE_HISTOGRAM.toString(), currTime - writeBeginTime));
 			}
 
 			if (!s.ok()) {
@@ -1167,19 +1215,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			} else {
 				a.done.send(Void());
 
-				double compactRangeBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				for (const auto& keyRange : deletes) {
-					auto begin = toSlice(keyRange.begin);
-					auto end = toSlice(keyRange.end);
-					ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
-				}
-				if (a.getHistograms) {
-					metricPromiseStream->send(std::make_pair(ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM.toString(),
-					                                         timer_monotonic() - compactRangeBeginTime));
+				if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+					double compactRangeBeginTime = a.getHistograms ? timer_monotonic() : 0;
+					for (const auto& keyRange : deletes) {
+						auto begin = toSlice(keyRange.begin);
+						auto end = toSlice(keyRange.end);
+
+						ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
+					}
+					if (a.getHistograms) {
+						metricPromiseStream->send(std::make_pair(ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM.toString(),
+						                                         timer_monotonic() - compactRangeBeginTime));
+					}
 				}
 			}
+			currTime = timer_monotonic();
+			sharedState->commitLatency.addMeasurement(currTime - a.startTime);
 			if (a.getHistograms) {
-				double currTime = timer_monotonic();
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_COMMIT_ACTION_HISTOGRAM.toString(), currTime - commitBeginTime));
 				metricPromiseStream->send(
@@ -1303,9 +1355,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValueAction(KeyRef key, Optional<UID> debugID)
 			  : key(key), debugID(debugID), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
-			}
+			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -1389,9 +1439,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
 			  : key(key), maxLength(maxLength), debugID(debugID), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
-			}
+			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
@@ -1471,9 +1519,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
-			}
+			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
@@ -1591,7 +1637,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	};
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-	  : sharedState(std::make_shared<SharedRocksDBState>()), path(path), id(id),
+	  : id(id), sharedState(std::make_shared<SharedRocksDBState>(id)), path(path),
 	    perfContextMetrics(new PerfContextMetrics()),
 	    readIterPool(new ReadIteratorPool(id, db, defaultFdbCF, sharedState->getReadOptions())),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
@@ -1613,8 +1659,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
-			writeThread = createGenericThreadPool();
-			readThreads = createGenericThreadPool();
+			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
 		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
 			collection = actorCollection(addActor.getFuture());
@@ -1858,8 +1904,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	// We don't throttle eager reads and reads to the FF keyspace because FDB struggles when those reads fail.
 	// Thus far, they have been low enough volume to not cause an issue.
-	static bool shouldThrottle(IKeyValueStore::ReadType type, KeyRef key) {
-		return type != IKeyValueStore::ReadType::EAGER && !(key.startsWith(systemKeys.begin));
+	static bool shouldThrottle(ReadType type, KeyRef key) {
+		return type != ReadType::EAGER && !(key.startsWith(systemKeys.begin));
 	}
 
 	ACTOR template <class Action>
@@ -1880,7 +1926,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return result;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
+		ReadType type = ReadType::NORMAL;
+		Optional<UID> debugID;
+
+		if (options.present()) {
+			type = options.get().type;
+			debugID = options.get().debugID;
+		}
+
 		if (!shouldThrottle(type, key)) {
 			auto a = new Reader::ReadValueAction(key, debugID);
 			auto res = a->result.getFuture();
@@ -1888,18 +1942,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return res;
 		}
 
-		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadValueAction>(key, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadType type,
-	                                        Optional<UID> debugID) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
+		ReadType type = ReadType::NORMAL;
+		Optional<UID> debugID;
+
+		if (options.present()) {
+			type = options.get().type;
+			debugID = options.get().debugID;
+		}
+
 		if (!shouldThrottle(type, key)) {
 			auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 			auto res = a->result.getFuture();
@@ -1907,8 +1966,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return res;
 		}
 
-		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, debugID);
@@ -1938,7 +1997,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              IKeyValueStore::ReadType type) override {
+	                              Optional<ReadOptions> options) override {
+		ReadType type = ReadType::NORMAL;
+
+		if (options.present()) {
+			type = options.get().type;
+		}
+
 		if (!shouldThrottle(type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 			auto res = a->result.getFuture();
@@ -1946,8 +2011,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return res;
 		}
 
-		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit);
@@ -2295,11 +2360,11 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+	kvStore->set({ "foo"_sr, "bar"_sr });
 	wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	Optional<Value> val = wait(kvStore->readValue("foo"_sr));
+	ASSERT(Optional<Value>("bar"_sr) == val);
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->close();
@@ -2310,12 +2375,16 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	// Confirm that `init()` is idempotent.
 	wait(kvStore->init());
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	{
+		Optional<Value> val = wait(kvStore->readValue("foo"_sr));
+		ASSERT(Optional<Value>("bar"_sr) == val);
+	}
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->dispose();
+		wait(closed);
+	}
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 	return Void();
@@ -2329,11 +2398,11 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+	kvStore->set({ "foo"_sr, "bar"_sr });
 	wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	Optional<Value> val = wait(kvStore->readValue("foo"_sr));
+	ASSERT(Optional<Value>("bar"_sr) == val);
 
 	state std::string rocksDBRestoreDir = "rocksdb-kvstore-br-restore-db";
 	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
@@ -2353,8 +2422,10 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	checkpoints.push_back(metaData);
 	wait(kvStoreCopy->restore(checkpoints));
 
-	Optional<Value> val = wait(kvStoreCopy->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	{
+		Optional<Value> val = wait(kvStoreCopy->readValue("foo"_sr));
+		ASSERT(Optional<Value>("bar"_sr) == val);
+	}
 
 	std::vector<Future<Void>> closes;
 	closes.push_back(kvStore->onClosed());
@@ -2376,10 +2447,10 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+	kvStore->set({ "foo"_sr, "bar"_sr });
 	wait(kvStore->commit(false));
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	Optional<Value> val = wait(kvStore->readValue("foo"_sr));
+	ASSERT(Optional<Value>("bar"_sr) == val);
 
 	platform::eraseDirectoryRecursive("checkpoint");
 	std::string checkpointDir = cwd + "checkpoint";

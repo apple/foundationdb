@@ -98,7 +98,7 @@ struct SimGetEncryptKeysByKeyIdsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptKeyDetails);
+		serializer(ar, encryptKeyDetails, arena);
 	}
 };
 
@@ -127,7 +127,7 @@ struct SimGetEncryptKeyByDomainIdReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptKeyDetails);
+		serializer(ar, encryptKeyDetails, arena);
 	}
 };
 

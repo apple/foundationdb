@@ -185,7 +185,7 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	const Tag tag1(tagLocalityLogRouter, 0);
 	epochInfos.insert({ epoch1, ILogSystem::EpochTagsVersionsInfo(1, begin1, end1) });
 	BackupProgress progress(UID(0, 0), epochInfos);
-	progress.setBackupStartedValue(Optional<Value>(LiteralStringRef("1")));
+	progress.setBackupStartedValue(Optional<Value>("1"_sr));
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
 

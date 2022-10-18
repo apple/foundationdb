@@ -20,8 +20,11 @@
 
 #pragma once
 
+#include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
-#include "fdbserver/DDTeamCollection.h"
+#include "fdbrpc/ReplicationTypes.h"
+#include "fdbserver/DataDistributionTeam.h"
+
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 
@@ -29,6 +32,7 @@ class TCTeamInfo;
 class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
+class DDTeamCollection;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
@@ -257,8 +261,8 @@ public:
 	TCTenantInfo(TenantInfo tinfo, Key prefix) : m_tenantInfo(tinfo), m_prefix(prefix) {}
 	std::vector<Reference<TCTeamInfo>>& teams() { return m_tenantTeams; }
 
-	TenantName name() { return m_tenantInfo.name.get(); }
-	std::string prefixDesc() { return m_prefix.printable(); }
+	TenantName name() const { return m_tenantInfo.name.get(); }
+	std::string prefixDesc() const { return m_prefix.printable(); }
 
 	void addTeam(TCTeamInfo team);
 	void removeTeam(TCTeamInfo team);

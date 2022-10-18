@@ -48,7 +48,7 @@ ACTOR Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process,
 ACTOR template <class T>
 Future<T> sendErrorOnShutdown(Future<T> in) {
 	choose {
-		when(wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()))) {
+		when(wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()))) {
 			throw io_error().asInjectedFault();
 		}
 		when(T rep = wait(in)) { return rep; }
@@ -64,14 +64,14 @@ public:
 	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file) { shutdown = doShutdown(this); }
 
 	ACTOR Future<Void> doShutdown(AsyncFileDetachable* self) {
-		wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()));
+		wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()));
 		self->file = Reference<IAsyncFile>();
 		return Void();
 	}
 
 	ACTOR static Future<Reference<IAsyncFile>> open(Future<Reference<IAsyncFile>> wrappedFile) {
 		choose {
-			when(wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()))) {
+			when(wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()))) {
 				throw io_error().asInjectedFault();
 			}
 			when(Reference<IAsyncFile> f = wait(wrappedFile)) { return makeReference<AsyncFileDetachable>(f); }
@@ -82,31 +82,31 @@ public:
 	void delref() override { ReferenceCounted<AsyncFileDetachable>::delref(); }
 
 	Future<int> read(void* data, int length, int64_t offset) override {
-		if (!file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady())
+		if (!file.getPtr() || g_simulator->getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown(file->read(data, length, offset));
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
-		if (!file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady())
+		if (!file.getPtr() || g_simulator->getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown(file->write(data, length, offset));
 	}
 
 	Future<Void> truncate(int64_t size) override {
-		if (!file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady())
+		if (!file.getPtr() || g_simulator->getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown(file->truncate(size));
 	}
 
 	Future<Void> sync() override {
-		if (!file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady())
+		if (!file.getPtr() || g_simulator->getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown(file->sync());
 	}
 
 	Future<int64_t> size() const override {
-		if (!file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady())
+		if (!file.getPtr() || g_simulator->getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown(file->size());
 	}
@@ -214,12 +214,12 @@ public:
 	                                                Future<Reference<IAsyncFile>> wrappedFile,
 	                                                Reference<DiskParameters> diskParameters,
 	                                                bool aio) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		state Future<Void> shutdown = success(currentProcess->shutdownSignal.getFuture());
 
-		//TraceEvent("AsyncFileNonDurableOpenBegin").detail("Filename", filename).detail("Addr", g_simulator.getCurrentProcess()->address);
-		wait(g_simulator.onMachine(currentProcess));
+		//TraceEvent("AsyncFileNonDurableOpenBegin").detail("Filename", filename).detail("Addr", g_simulator->getCurrentProcess()->address);
+		wait(g_simulator->onMachine(currentProcess));
 		try {
 			wait(success(wrappedFile) || shutdown);
 
@@ -237,7 +237,7 @@ public:
 				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete2").detail("Filename", filename);
 				if (shutdown.isReady())
 					throw io_error().asInjectedFault();
-				wait(g_simulator.onProcess(currentProcess, currentTaskID));
+				wait(g_simulator->onProcess(currentProcess, currentTaskID));
 			}
 
 			state Reference<AsyncFileNonDurable> nonDurableFile(
@@ -252,7 +252,7 @@ public:
 
 			//TraceEvent("AsyncFileNonDurableOpenComplete").detail("Filename", filename);
 
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 
 			return nonDurableFile;
 		} catch (Error& e) {
@@ -260,8 +260,8 @@ public:
 			std::string currentFilename =
 			    (wrappedFile.isReady() && !wrappedFile.isError()) ? wrappedFile.get()->getFilename() : actualFilename;
 			currentProcess->machine->openFiles.erase(currentFilename);
-			//TraceEvent("AsyncFileNonDurableOpenError").errorUnsuppressed(e).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator.getCurrentProcess()->address);
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			//TraceEvent("AsyncFileNonDurableOpenError").errorUnsuppressed(e).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator->getCurrentProcess()->address);
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 			throw err;
 		}
 	}
@@ -290,7 +290,7 @@ public:
 
 	// Removes a file from the openFiles map
 	static void removeOpenFile(std::string filename, AsyncFileNonDurable* file) {
-		auto& openFiles = g_simulator.getCurrentProcess()->machine->openFiles;
+		auto& openFiles = g_simulator->getCurrentProcess()->machine->openFiles;
 
 		auto iter = openFiles.find(filename);
 
@@ -360,7 +360,7 @@ public:
 	//(e.g. to simulate power failure)
 	Future<Void> kill() {
 		TraceEvent("AsyncFileNonDurable_Kill", id).detail("Filename", filename);
-		CODE_PROBE(true, "AsyncFileNonDurable was killed");
+		CODE_PROBE(true, "AsyncFileNonDurable was killed", probe::decoration::rare);
 		return sync(this, false);
 	}
 
@@ -404,7 +404,7 @@ private:
 			TraceEvent("AsyncFileNonDurable_KilledFileOperation", self->id)
 			    .detail("In", context)
 			    .detail("Filename", self->filename);
-			CODE_PROBE(true, "AsyncFileNonDurable operation killed");
+			CODE_PROBE(true, "AsyncFileNonDurable operation killed", probe::decoration::rare);
 			throw io_error().asInjectedFault();
 		}
 
@@ -425,24 +425,24 @@ private:
 
 		debugFileCheck("AsyncFileNonDurableRead", self->filename, data, offset, length);
 
-		// if(g_simulator.getCurrentProcess()->rebooting)
+		// if(g_simulator->getCurrentProcess()->rebooting)
 		//TraceEvent("AsyncFileNonDurable_ReadEnd", self->id).detail("Filename", self->filename);
 
 		return readFuture.get();
 	}
 
 	ACTOR Future<int> read(AsyncFileNonDurable* self, void* data, int length, int64_t offset) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		wait(g_simulator.onMachine(currentProcess));
+		wait(g_simulator->onMachine(currentProcess));
 
 		try {
 			state int rep = wait(self->onRead(self, data, length, offset));
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 			return rep;
 		} catch (Error& e) {
 			state Error err = e;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 			throw err;
 		}
 	}
@@ -457,12 +457,12 @@ private:
 	                         int length,
 	                         int64_t offset) {
 		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		wait(g_simulator.onMachine(currentProcess));
+		wait(g_simulator->onMachine(currentProcess));
 
 		state double delayDuration =
-		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
+		    g_simulator->speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
@@ -475,7 +475,7 @@ private:
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
 
-			if (BUGGIFY_WITH_PROB(0.001) && !g_simulator.speedUpSimulation)
+			if (BUGGIFY_WITH_PROB(0.001) && !g_simulator->speedUpSimulation)
 				priorModifications.push_back(
 				    delay(deterministicRandom()->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) ||
 				    self->killed.getFuture());
@@ -603,13 +603,13 @@ private:
 					    .detail("HasGarbage", garbage)
 					    .detail("Side", side)
 					    .detail("Filename", self->filename);
-					CODE_PROBE(true, "AsyncFileNonDurable bad write");
+					CODE_PROBE(true, "AsyncFileNonDurable bad write", probe::decoration::rare);
 				} else {
 					TraceEvent("AsyncFileNonDurable_DroppedWrite", self->id)
 					    .detail("Offset", offset + writeOffset + pageOffset)
 					    .detail("Length", sectorLength)
 					    .detail("Filename", self->filename);
-					CODE_PROBE(true, "AsyncFileNonDurable dropped write");
+					CODE_PROBE(true, "AsyncFileNonDurable dropped write", probe::decoration::rare);
 				}
 
 				pageOffset += sectorLength;
@@ -629,12 +629,12 @@ private:
 	                            Promise<Void> truncateStarted,
 	                            Future<Future<Void>> ownFuture,
 	                            int64_t size) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		wait(g_simulator.onMachine(currentProcess));
+		wait(g_simulator->onMachine(currentProcess));
 
 		state double delayDuration =
-		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
+		    g_simulator->speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
 		try {
@@ -689,7 +689,7 @@ private:
 			wait(self->file->truncate(size));
 		else {
 			TraceEvent("AsyncFileNonDurable_DroppedTruncate", self->id).detail("Size", size);
-			CODE_PROBE(true, "AsyncFileNonDurable dropped truncate");
+			CODE_PROBE(true, "AsyncFileNonDurable dropped truncate", probe::decoration::rare);
 		}
 
 		return Void();
@@ -753,7 +753,7 @@ private:
 			// temporary file and then renamed to the correct location once sync is called.  By not calling sync, we
 			// simulate a failure to fsync the directory storing the file
 			if (self->hasBeenSynced && writeDurable && deterministicRandom()->random01() < 0.5) {
-				CODE_PROBE(true, "AsyncFileNonDurable kill was durable and synced");
+				CODE_PROBE(true, "AsyncFileNonDurable kill was durable and synced", probe::decoration::rare);
 				wait(success(errorOr(self->file->sync())));
 			}
 
@@ -773,18 +773,18 @@ private:
 	}
 
 	ACTOR Future<Void> sync(AsyncFileNonDurable* self, bool durable) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		wait(g_simulator.onMachine(currentProcess));
+		wait(g_simulator->onMachine(currentProcess));
 
 		try {
 			wait(self->onSync(self, durable));
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 
 			return Void();
 		} catch (Error& e) {
 			state Error err = e;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 			throw err;
 		}
 	}
@@ -806,32 +806,33 @@ private:
 	}
 
 	ACTOR static Future<int64_t> size(AsyncFileNonDurable const* self) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
-		wait(g_simulator.onMachine(currentProcess));
+		wait(g_simulator->onMachine(currentProcess));
 
 		try {
 			state int64_t rep = wait(onSize(self));
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 
 			return rep;
 		} catch (Error& e) {
 			state Error err = e;
-			wait(g_simulator.onProcess(currentProcess, currentTaskID));
+			wait(g_simulator->onProcess(currentProcess, currentTaskID));
 			throw err;
 		}
 	}
 
 	// Finishes all outstanding actors on an AsyncFileNonDurable and then deletes it
 	ACTOR Future<Void> closeFile(AsyncFileNonDurable* self) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		state std::string filename = self->filename;
 
-		g_simulator.getMachineByNetworkAddress(self->openedAddress)->deletingOrClosingFiles.insert(self->getFilename());
+		g_simulator->getMachineByNetworkAddress(self->openedAddress)
+		    ->deletingOrClosingFiles.insert(self->getFilename());
 
-		wait(g_simulator.onMachine(currentProcess));
+		wait(g_simulator->onMachine(currentProcess));
 		try {
 			// Make sure all writes have gone through.
 			Promise<bool> startSyncPromise = self->startSyncPromise;
@@ -854,8 +855,8 @@ private:
 				wait(self->killComplete.getFuture());
 
 			// Remove this file from the filesBeingDeleted map so that new files can be created with this filename
-			g_simulator.getMachineByNetworkAddress(self->openedAddress)->closingFiles.erase(self->getFilename());
-			g_simulator.getMachineByNetworkAddress(self->openedAddress)
+			g_simulator->getMachineByNetworkAddress(self->openedAddress)->closingFiles.erase(self->getFilename());
+			g_simulator->getMachineByNetworkAddress(self->openedAddress)
 			    ->deletingOrClosingFiles.erase(self->getFilename());
 			AsyncFileNonDurable::filesBeingDeleted.erase(self->filename);
 			//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);

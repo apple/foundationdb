@@ -27,16 +27,15 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct UnreadableWorkload : TestWorkload {
+	static constexpr auto NAME = "Unreadable";
 	uint64_t nodeCount;
 	double testDuration;
 	std::vector<Future<Void>> clients;
 
 	UnreadableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)100000);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
 	}
-
-	std::string description() const override { return "Unreadable"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -476,4 +475,4 @@ struct UnreadableWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<UnreadableWorkload> UnreadableWorkloadFactory("Unreadable");
+WorkloadFactory<UnreadableWorkload> UnreadableWorkloadFactory;

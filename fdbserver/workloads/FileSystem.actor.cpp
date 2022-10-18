@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FileSystemWorkload : TestWorkload {
+	static constexpr auto NAME = "FileSystem";
 	int actorCount, writeActorCount, fileCount, pathMinChars, pathCharRange, serverCount, userIDCount;
 	double testDuration, transactionsPerSecond, deletedFilesRatio;
 	bool discardEdgeMeasurements, performingWrites, loggingQueries;
@@ -44,26 +45,22 @@ struct FileSystemWorkload : TestWorkload {
 
 	FileSystemWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), queries("Queries"), writes("Latency"), latencies(2500), writeLatencies(1000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
-		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		double allowedLatency = getOption(options, "allowedLatency"_sr, 0.250);
 		actorCount = transactionsPerSecond * allowedLatency;
-		fileCount = getOption(options, LiteralStringRef("fileCount"), 100000);
-		pathMinChars = std::max(getOption(options, LiteralStringRef("pathMinChars"), 32), 8);
-		pathCharRange =
-		    std::max(getOption(options, LiteralStringRef("pathMaxChars"), 128), pathMinChars) - pathMinChars;
-		discardEdgeMeasurements = getOption(options, LiteralStringRef("discardEdgeMeasurements"), true);
-		deletedFilesRatio = getOption(options, LiteralStringRef("deletedFilesRatio"), 0.01);
-		serverCount = getOption(options, LiteralStringRef("serverCount"), 32);
-		userIDCount = getOption(options, LiteralStringRef("userIDCount"), std::max(100, fileCount / 3000));
-		operationName =
-		    getOption(options, LiteralStringRef("operationName"), LiteralStringRef("modificationQuery")).toString();
-		performingWrites = getOption(options, LiteralStringRef("performingWrites"), false);
-		writeActorCount = getOption(options, LiteralStringRef("writeActorCount"), 4);
-		loggingQueries = getOption(options, LiteralStringRef("loggingQueries"), false);
+		fileCount = getOption(options, "fileCount"_sr, 100000);
+		pathMinChars = std::max(getOption(options, "pathMinChars"_sr, 32), 8);
+		pathCharRange = std::max(getOption(options, "pathMaxChars"_sr, 128), pathMinChars) - pathMinChars;
+		discardEdgeMeasurements = getOption(options, "discardEdgeMeasurements"_sr, true);
+		deletedFilesRatio = getOption(options, "deletedFilesRatio"_sr, 0.01);
+		serverCount = getOption(options, "serverCount"_sr, 32);
+		userIDCount = getOption(options, "userIDCount"_sr, std::max(100, fileCount / 3000));
+		operationName = getOption(options, "operationName"_sr, "modificationQuery"_sr).toString();
+		performingWrites = getOption(options, "performingWrites"_sr, false);
+		writeActorCount = getOption(options, "writeActorCount"_sr, 4);
+		loggingQueries = getOption(options, "loggingQueries"_sr, false);
 	}
-
-	std::string description() const override { return "ReadWrite"; }
 
 	Future<Void> setup(Database const& cx) override { return nodeSetup(cx, this); }
 
@@ -105,7 +102,7 @@ struct FileSystemWorkload : TestWorkload {
 		std::string keyStr(key.toString());
 		tr->set(keyStr + "/size", format("%d", deterministicRandom()->randomInt(0, std::numeric_limits<int>::max())));
 		tr->set(keyStr + "/server", format("%d", deterministicRandom()->randomInt(0, self->serverCount)));
-		tr->set(keyStr + "/deleted", deleted ? LiteralStringRef("1") : LiteralStringRef("0"));
+		tr->set(keyStr + "/deleted", deleted ? "1"_sr : "0"_sr);
 		tr->set(keyStr + "/server", format("%d", serverID));
 		tr->set(keyStr + "/created", doubleToTestKey(time));
 		tr->set(keyStr + "/lastupdated", doubleToTestKey(time));
@@ -250,10 +247,10 @@ struct FileSystemWorkload : TestWorkload {
 						ASSERT(serverStr.present());
 						int serverID = testKeyToInt(serverStr.get());
 						if (deleted.get().toString() == "1") {
-							tr.set(keyStr + "/deleted", LiteralStringRef("0"));
+							tr.set(keyStr + "/deleted", "0"_sr);
 							tr.clear(format("/files/server/%08x/deleted/%016llx", serverID, fileID));
 						} else {
-							tr.set(keyStr + "/deleted", LiteralStringRef("1"));
+							tr.set(keyStr + "/deleted", "1"_sr);
 							tr.set(format("/files/server/%08x/deleted/%016llx", serverID, fileID),
 							       doubleToTestKey(time));
 						}
@@ -336,4 +333,4 @@ struct FileSystemWorkload : TestWorkload {
 	};
 };
 
-WorkloadFactory<FileSystemWorkload> FileSystemWorkloadFactory("FileSystem");
+WorkloadFactory<FileSystemWorkload> FileSystemWorkloadFactory;

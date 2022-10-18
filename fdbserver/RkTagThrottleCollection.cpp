@@ -99,7 +99,7 @@ Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
 		itr = autoThrottledTags.try_emplace(tag).first;
 		initializeTag(tag);
 	} else if (itr->second.limits.expiration <= now()) {
-		CODE_PROBE(true, "Re-throttling expired tag that hasn't been cleaned up");
+		CODE_PROBE(true, "Re-throttling expired tag that hasn't been cleaned up", probe::decoration::rare);
 		present = false;
 		itr->second = RkTagThrottleData();
 	}
@@ -353,6 +353,8 @@ void RkTagThrottleCollection::incrementBusyTagCount(TagThrottledReason reason) {
 	} else if (reason == TagThrottledReason::BUSY_WRITE) {
 		++busyWriteTagCount;
 	} else {
-		ASSERT(false);
+		ASSERT(reason == TagThrottledReason::UNSET);
+		// Tag throttled reason is unset, probably because of upgrading
+		TraceEvent(SevWarn, "UnsetTagThrottledReason");
 	}
 }

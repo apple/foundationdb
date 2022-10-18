@@ -21,6 +21,7 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "fdbclient/Notified.h"
+#include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -168,10 +169,11 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	Future<Void> updater;
 	NotifiedVersion version;
 	NotifiedVersion desired;
-	Promise<Void> destroyed;
 	UID interfToken;
+	DatabaseContext* context;
+	double created;
 
-	~ChangeFeedStorageData() { destroyed.send(Void()); }
+	~ChangeFeedStorageData();
 };
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
@@ -191,6 +193,7 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version endVersion = invalidVersion;
 	Version popVersion =
 	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
+	double created = 0;
 
 	explicit ChangeFeedData(DatabaseContext* context = nullptr);
 	~ChangeFeedData();
@@ -235,7 +238,7 @@ public:
 	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
 	                       LockAware = LockAware::False,
-	                       int apiVersion = Database::API_VERSION_LATEST,
+	                       int _apiVersion = ApiVersion::LATEST_VERSION,
 	                       IsSwitchable = IsSwitchable::False);
 
 	~DatabaseContext();
@@ -251,7 +254,7 @@ public:
 		                                           enableLocalityLoadBalance,
 		                                           lockAware,
 		                                           internal,
-		                                           apiVersion,
+		                                           apiVersion.version(),
 		                                           switchable,
 		                                           defaultTenant));
 		cx->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(cx->clientInfo),
@@ -295,13 +298,19 @@ public:
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
-	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
-	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
-	                                                                    StorageMetrics const& min,
-	                                                                    StorageMetrics const& max,
-	                                                                    StorageMetrics const& permittedError,
-	                                                                    int shardLimit,
-	                                                                    int expectedShardCount);
+	// Pass a valid `trState` with `hasTenant() == true` to make the function tenant-aware.
+	Future<StorageMetrics> getStorageMetrics(
+	    KeyRange const& keys,
+	    int shardLimit,
+	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
+	    KeyRange const& keys,
+	    StorageMetrics const& min,
+	    StorageMetrics const& max,
+	    StorageMetrics const& permittedError,
+	    int shardLimit,
+	    int expectedShardCount,
+	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
 	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
 	                                       KeyRange const& keys,
 	                                       StorageMetrics const& limit,
@@ -342,7 +351,7 @@ public:
 		}
 	}
 
-	int apiVersionAtLeast(int minVersion) const { return apiVersion < 0 || apiVersion >= minVersion; }
+	int apiVersionAtLeast(int minVersion) const { return apiVersion.version() >= minVersion; }
 
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
 	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
@@ -385,10 +394,14 @@ public:
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
-	Future<bool> blobbifyRange(KeyRange range);
-	Future<bool> unblobbifyRange(KeyRange range);
-	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
-	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
+	Future<bool> blobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
+	Future<bool> unblobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
+	                                                                int rangeLimit,
+	                                                                Optional<TenantName> tenantName = {});
+	Future<Version> verifyBlobRange(const KeyRange& range,
+	                                Optional<Version> version,
+	                                Optional<TenantName> tenantName = {});
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -400,7 +413,7 @@ public:
 	                         EnableLocalityLoadBalance,
 	                         LockAware,
 	                         IsInternal = IsInternal::True,
-	                         int apiVersion = Database::API_VERSION_LATEST,
+	                         int _apiVersion = ApiVersion::LATEST_VERSION,
 	                         IsSwitchable = IsSwitchable::False,
 	                         Optional<TenantName> defaultTenant = Optional<TenantName>());
 
@@ -477,7 +490,7 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
-	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
 	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
@@ -542,8 +555,29 @@ public:
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
 
+	// Blob Granule Read metrics. Omit from logging if not used.
+	bool anyBGReads;
+	CounterCollection ccBG;
+	Counter bgReadInputBytes;
+	Counter bgReadOutputBytes;
+	Counter bgReadSnapshotRows;
+	Counter bgReadRowsCleared;
+	Counter bgReadRowsInserted;
+	Counter bgReadRowsUpdated;
+	ContinuousSample<double> bgLatencies, bgGranulesPerRequest;
+
+	// Change Feed metrics. Omit change feed metrics from logging if not used
+	bool usedAnyChangeFeeds;
+	CounterCollection ccFeed;
+	Counter feedStreamStarts;
+	Counter feedMergeStreamStarts;
+	Counter feedErrors;
+	Counter feedNonRetriableErrors;
+	Counter feedPops;
+	Counter feedPopsFallback;
+
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
+	    bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
@@ -572,7 +606,6 @@ public:
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 	bool blobGranuleNoMaterialize = false;
-	bool anyBlobGranuleRequests = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
@@ -593,7 +626,7 @@ public:
 	Future<Void> statusLeaderMon;
 	double lastStatusFetch;
 
-	int apiVersion;
+	ApiVersion apiVersion;
 
 	int mvCacheInsertLocation;
 	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;
@@ -640,6 +673,12 @@ public:
 	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
 	void addSSIdTagMapping(const UID& uid, const Tag& tag);
 
+	// Returns the latest commit version that mutated the specified storage server.
+	// @in ssid id of the storage server interface
+	// @out tag storage server's tag, if an entry exists for "ssid" in "ssidTagMapping"
+	// @out commitVersion latest commit version that mutated the storage server
+	void getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion);
+
 	// Returns the latest commit versions that mutated the specified storage servers
 	/// @note returns the latest commit version for a storage server only if the latest
 	// commit version of that storage server is below the specified "readVersion".
@@ -647,6 +686,14 @@ public:
 	                             Version readVersion,
 	                             Reference<TransactionState> info,
 	                             VersionVector& latestCommitVersions);
+
+	// Returns the latest commit version that mutated the specified storage server.
+	// @note this is a lightweight version of "getLatestCommitVersions()", to be used
+	// when the state ("TransactionState") of the transaction that fetched the read
+	// version is not available.
+	void getLatestCommitVersion(const StorageServerInterface& ssi,
+	                            Version readVersion,
+	                            VersionVector& latestCommitVersion);
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;

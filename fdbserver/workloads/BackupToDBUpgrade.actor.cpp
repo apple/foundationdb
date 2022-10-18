@@ -18,16 +18,20 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of upgrading DR from 5.1 to 5.2
 struct BackupToDBUpgradeWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupToDBUpgrade";
 	double backupAfter, stopDifferentialAfter;
 	Key backupTag, restoreTag, backupPrefix, extraPrefix;
 	int backupRangesCount, backupRangeLengthMax;
@@ -35,15 +39,15 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Database extraDB;
 
 	BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupAfter = getOption(options, LiteralStringRef("backupAfter"), deterministicRandom()->random01() * 10.0);
-		backupPrefix = getOption(options, LiteralStringRef("backupPrefix"), StringRef());
-		backupRangeLengthMax = getOption(options, LiteralStringRef("backupRangeLengthMax"), 1);
-		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"), 60.0);
-		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		restoreTag = getOption(options, LiteralStringRef("restoreTag"), LiteralStringRef("restore"));
-		backupRangesCount = getOption(options, LiteralStringRef("backupRangesCount"), 5);
-		extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
-		backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
+		backupAfter = getOption(options, "backupAfter"_sr, deterministicRandom()->random01() * 10.0);
+		backupPrefix = getOption(options, "backupPrefix"_sr, StringRef());
+		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
+		stopDifferentialAfter = getOption(options, "stopDifferentialAfter"_sr, 60.0);
+		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
+		restoreTag = getOption(options, "restoreTag"_sr, "restore"_sr);
+		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
+		extraPrefix = backupPrefix.withPrefix("\xfe\xff\xfe"_sr);
+		backupPrefix = backupPrefix.withPrefix("\xfe\xff\xff"_sr);
 
 		ASSERT(backupPrefix != StringRef());
 
@@ -76,15 +80,11 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		ASSERT(g_simulator.extraDatabases.size() == 1);
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, -1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 
 		TraceEvent("DRU_Start").log();
 	}
-
-	std::string description() const override { return "BackupToDBUpgrade"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
@@ -161,9 +161,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent("DRU_CheckLeftoverkeys").detail("BackupTag", printable(tag));
 
 			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 				// Check the left over tasks
 				// We have to wait for the list to empty since an abort and get status
 				// can leave extra tasks in the queue
@@ -177,10 +174,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					    .detail("TaskCount", taskCount)
 					    .detail("WaitCycles", waitCycles);
 					printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
-					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+					wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 				}
 
-				loop {
+				while (taskCount > 0) {
 					waitCycles++;
 
 					TraceEvent("DRU_NonzeroTaskWait")
@@ -191,21 +188,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 					wait(delay(20.0));
 					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
-					int64_t _taskCount = wait(backupAgent->getTaskCount(tr));
-					taskCount = _taskCount;
-
-					if (!taskCount) {
-						break;
-					}
-				}
-
-				if (taskCount) {
-					displaySystemKeys++;
-					TraceEvent(SevError, "DRU_NonzeroTaskCount")
-					    .detail("BackupTag", printable(tag))
-					    .detail("TaskCount", taskCount)
-					    .detail("WaitCycles", waitCycles);
-					printf("BackupCorrectnessLeftoverLogTasks: %ld\n", (long)taskCount);
+					wait(store(taskCount, backupAgent->getTaskCount(tr)));
 				}
 
 				RangeResult agentValues =
@@ -281,7 +264,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 
 		if (displaySystemKeys) {
-			wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+			wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 		}
 
 		return Void();
@@ -289,6 +272,28 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
+
+		if (cx->defaultTenant.present() || BUGGIFY) {
+			if (cx->defaultTenant.present()) {
+				TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+
+				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
+				// to the tenant
+				if (self->backupRanges.size() != 1 || self->backupRanges[0] != normalKeys ||
+				    deterministicRandom()->coinflip()) {
+					Standalone<VectorRef<KeyRangeRef>> modifiedBackupRanges;
+					for (int i = 0; i < self->backupRanges.size(); ++i) {
+						modifiedBackupRanges.push_back_deep(
+						    modifiedBackupRanges.arena(),
+						    self->backupRanges[i].withPrefix(entry.prefix, self->backupRanges.arena()));
+					}
+					self->backupRanges = modifiedBackupRanges;
+				}
+			}
+			for (auto r : getSystemBackupRanges()) {
+				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
+			}
+		}
 
 		try {
 			wait(delay(self->backupAfter));
@@ -300,7 +305,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			wait(b);
 			TraceEvent("DRU_DoBackupWaitEnd").detail("BackupTag", printable(self->backupTag));
 		} catch (Error& e) {
-			TraceEvent(SevError, "BackupToDBUpgradeSetuEerror").error(e);
+			TraceEvent(SevError, "BackupToDBUpgradeSetupError").error(e);
 			throw;
 		}
 
@@ -324,7 +329,9 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				try {
 					loop {
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr2.setOption(FDBTransactionOptions::RAW_ACCESS);
 						state Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
 						state Future<RangeResult> bkpFuture =
 						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
@@ -519,8 +526,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
 
-			if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-				g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+			if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);
@@ -531,4 +538,4 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BackupToDBUpgradeWorkload> BackupToDBUpgradeWorkloadFactory("BackupToDBUpgrade");
+WorkloadFactory<BackupToDBUpgradeWorkload> BackupToDBUpgradeWorkloadFactory;

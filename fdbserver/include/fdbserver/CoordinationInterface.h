@@ -224,7 +224,9 @@ class ConfigNode;
 
 class ServerCoordinators : public ClientCoordinators {
 public:
-	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr);
+	ServerCoordinators() {}
+	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr,
+	                            ConfigDBType configDBType = ConfigDBType::PAXOS);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;
 	std::vector<GenerationRegInterface> stateServers;

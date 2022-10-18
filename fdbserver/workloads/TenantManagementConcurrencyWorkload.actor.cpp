@@ -38,6 +38,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantManagementConcurrencyWorkload : TestWorkload {
+	static constexpr auto NAME = "TenantManagementConcurrency";
+
 	const TenantName tenantNamePrefix = "tenant_management_concurrency_workload_"_sr;
 	const Key testParametersKey = "test_parameters"_sr;
 
@@ -62,7 +64,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "TenantManagementConcurrency"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	struct TestParameters {
 		constexpr static FileIdentifier file_identifier = 14350843;
@@ -92,11 +94,10 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		return _setup(cx, this);
 	}
 	ACTOR static Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
-		state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
@@ -104,7 +105,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
-			wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, connectionString, entry));
+			wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, g_simulator->extraDatabases[0], entry));
 		}
 
 		state Transaction tr(cx);
@@ -141,9 +142,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 
 		if (self->useMetacluster) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(connectionString);
-			self->dataDb = Database::createDatabase(extraFile, -1);
+			ASSERT(g_simulator->extraDatabases.size() == 1);
+			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		} else {
 			self->dataDb = cx;
 		}
@@ -271,19 +271,52 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> renameTenant(TenantManagementConcurrencyWorkload* self) {
+		state TenantName oldTenant = self->chooseTenantName();
+		state TenantName newTenant = self->chooseTenantName();
+
+		try {
+			loop {
+				Future<Void> renameFuture =
+				    self->useMetacluster ? MetaclusterAPI::renameTenant(self->mvDb, oldTenant, newTenant)
+				                         : TenantAPI::renameTenant(self->dataDb.getReference(), oldTenant, newTenant);
+				Optional<Void> result = wait(timeout(renameFuture, 30));
+
+				if (result.present()) {
+					break;
+				}
+			}
+
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_invalid_tenant_state || e.code() == error_code_tenant_removed ||
+			    e.code() == error_code_cluster_no_capacity) {
+				ASSERT(self->useMetacluster);
+			} else if (e.code() != error_code_tenant_not_found && e.code() != error_code_tenant_already_exists) {
+				TraceEvent(SevError, "RenameTenantFailure")
+				    .error(e)
+				    .detail("OldTenant", oldTenant)
+				    .detail("NewTenant", newTenant);
+			}
+			return Void();
+		}
+	}
+
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state double start = now();
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 3);
+			state int operation = deterministicRandom()->randomInt(0, 4);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
 				wait(deleteTenant(self));
 			} else if (operation == 2) {
 				wait(configureTenant(self));
+			} else if (operation == 3) {
+				wait(renameTenant(self));
 			}
 		}
 
@@ -308,5 +341,4 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TenantManagementConcurrencyWorkload> TenantManagementConcurrencyWorkloadFactory(
-    "TenantManagementConcurrency");
+WorkloadFactory<TenantManagementConcurrencyWorkload> TenantManagementConcurrencyWorkloadFactory;

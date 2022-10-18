@@ -254,19 +254,19 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 		StringRef name;
 		serializer(ar, name);
 
-		if (name == LiteralStringRef("One")) {
+		if (name == "One"_sr) {
 			PolicyOne* pointer = new PolicyOne();
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
-		} else if (name == LiteralStringRef("Across")) {
+		} else if (name == "Across"_sr) {
 			PolicyAcross* pointer = new PolicyAcross(0, "", Reference<IReplicationPolicy>());
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
-		} else if (name == LiteralStringRef("And")) {
+		} else if (name == "And"_sr) {
 			PolicyAnd* pointer = new PolicyAnd{};
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
-		} else if (name == LiteralStringRef("None")) {
+		} else if (name == "None"_sr) {
 			policy = Reference<IReplicationPolicy>();
 		} else {
 			TraceEvent(SevError, "SerializingInvalidPolicyType").detail("PolicyName", name);

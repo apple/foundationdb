@@ -22,6 +22,8 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include <utility>
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
@@ -31,6 +33,7 @@
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/Knobs.h"
@@ -50,7 +53,9 @@ struct WorkerInfo : NonCopyable {
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
 	Future<Void> haltBlobManager;
+	Future<Void> haltBlobMigrator;
 	Future<Void> haltEncryptKeyProxy;
+	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo()
@@ -73,7 +78,7 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), haltBlobManager(r.haltBlobManager),
-	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), issues(r.issues) {}
+	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -141,6 +146,8 @@ public:
 		AsyncVar<bool> blobGranulesEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
+		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
+		MetaclusterMetrics metaclusterMetrics;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -180,17 +187,40 @@ public:
 			serverInfo->set(newInfo);
 		}
 
-		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
+		void setBlobMigrator(const BlobMigratorInterface& interf) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
+			newInfo.blobMigrator = interf;
+			serverInfo->set(newInfo);
+		}
+
+		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
+			auto newInfo = serverInfo->get();
+			auto newClientInfo = clientInfo->get();
+			newClientInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.encryptKeyProxy = interf;
+			newInfo.client.encryptKeyProxy = interf;
+			newClientInfo.encryptKeyProxy = interf;
+			serverInfo->set(newInfo);
+			clientInfo->set(newClientInfo);
+		}
+
+		void setConsistencyScan(const ConsistencyScanInterface& interf) {
+			auto newInfo = serverInfo->get();
+			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
+			newInfo.consistencyScan = interf;
 			serverInfo->set(newInfo);
 		}
 
 		void clearInterf(ProcessClass::ClassType t) {
 			auto newInfo = serverInfo->get();
+			auto newClientInfo = clientInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
+			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
@@ -198,10 +228,17 @@ public:
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			} else if (t == ProcessClass::BlobManagerClass) {
 				newInfo.blobManager = Optional<BlobManagerInterface>();
+			} else if (t == ProcessClass::BlobMigratorClass) {
+				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+			} else if (t == ProcessClass::ConsistencyScanClass) {
+				newInfo.consistencyScan = Optional<ConsistencyScanInterface>();
 			}
 			serverInfo->set(newInfo);
+			clientInfo->set(newClientInfo);
 		}
 
 		ACTOR static Future<Void> countClients(DBInfo* self) {
@@ -293,8 +330,12 @@ public:
 		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().blobManager.present() &&
 		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().blobMigrator.present() &&
+		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().encryptKeyProxy.present() &&
-		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId);
+		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().consistencyScan.present() &&
+		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 	}
 
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
@@ -2880,7 +2921,8 @@ public:
 		ASSERT(masterProcessId.present());
 		const auto& pid = worker.interf.locality.processId();
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
-		     role != ProcessClass::BlobManager && role != ProcessClass::EncryptKeyProxy) ||
+		     role != ProcessClass::BlobManager && role != ProcessClass::EncryptKeyProxy &&
+		     role != ProcessClass::ConsistencyScan) ||
 		    pid == masterProcessId.get()) {
 			return false;
 		}
@@ -2922,9 +2964,14 @@ public:
 		for (int i = 0; i < req.degradedPeers.size(); ++i) {
 			degradedPeersString += (i == 0 ? "" : " ") + req.degradedPeers[i].toString();
 		}
+		std::string disconnectedPeersString;
+		for (int i = 0; i < req.disconnectedPeers.size(); ++i) {
+			disconnectedPeersString += (i == 0 ? "" : " ") + req.disconnectedPeers[i].toString();
+		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", req.address)
-		    .detail("DegradedPeers", degradedPeersString);
+		    .detail("DegradedPeers", degradedPeersString)
+		    .detail("DisconnectedPeers", disconnectedPeersString);
 
 		double currentTime = now();
 
@@ -2934,6 +2981,10 @@ public:
 			workerHealth[req.address] = {};
 			for (const auto& degradedPeer : req.degradedPeers) {
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
+			}
+
+			for (const auto& degradedPeer : req.disconnectedPeers) {
+				workerHealth[req.address].disconnectedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
 			return;
@@ -2952,6 +3003,16 @@ public:
 			}
 			it->second.lastRefreshTime = currentTime;
 		}
+
+		// Update the worker's disconnectedPeers.
+		for (const auto& peer : req.disconnectedPeers) {
+			auto it = health.disconnectedPeers.find(peer);
+			if (it == health.disconnectedPeers.end()) {
+				health.disconnectedPeers[peer] = { currentTime, currentTime };
+				continue;
+			}
+			it->second.lastRefreshTime = currentTime;
+		}
 	}
 
 	// Checks that if any worker or their degraded peers have recovered. If so, remove them from `workerHealth`.
@@ -2966,10 +3027,18 @@ public:
 					++it;
 				}
 			}
+			for (auto it = health.disconnectedPeers.begin(); it != health.disconnectedPeers.end();) {
+				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
+					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
+					health.disconnectedPeers.erase(it++);
+				} else {
+					++it;
+				}
+			}
 		}
 
 		for (auto it = workerHealth.begin(); it != workerHealth.end();) {
-			if (it->second.degradedPeers.empty()) {
+			if (it->second.degradedPeers.empty() && it->second.disconnectedPeers.empty()) {
 				TraceEvent("WorkerAllPeerHealthRecovered").detail("Worker", it->first);
 				workerHealth.erase(it++);
 			} else {
@@ -2982,6 +3051,8 @@ public:
 		std::unordered_set<NetworkAddress>
 		    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this
 		                     // list are not excluded unless they are added to `excludedDegradedServers`.
+		std::unordered_set<NetworkAddress>
+		    disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
@@ -2992,6 +3063,7 @@ public:
 
 		// Build a map keyed by measured degraded peer. This map gives the info that who complains a particular server.
 		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> degradedLinkDst2Src;
+		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> disconnectedLinkDst2Src;
 		double currentTime = now();
 		for (const auto& [server, health] : workerHealth) {
 			for (const auto& [degradedPeer, times] : health.degradedPeers) {
@@ -3001,6 +3073,13 @@ public:
 				}
 				degradedLinkDst2Src[degradedPeer].insert(server);
 			}
+			for (const auto& [disconnectedPeer, times] : health.disconnectedPeers) {
+				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
+					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				disconnectedLinkDst2Src[disconnectedPeer].insert(server);
+			}
 		}
 
 		// Sort degraded peers based on the number of workers complaining about it.
@@ -3009,6 +3088,12 @@ public:
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
 		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), std::greater<>());
+
+		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
+		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
+			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
+		}
+		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), std::greater<>());
 
 		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
 		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded
@@ -3038,9 +3123,25 @@ public:
 			}
 		}
 
+		DegradationInfo currentDegradationInfo;
+		for (const auto& [complainerCount, badServer] : count2DisconnectedPeer) {
+			for (const auto& complainer : disconnectedLinkDst2Src[badServer]) {
+				if (currentDegradationInfo.disconnectedServers.find(complainer) ==
+				    currentDegradationInfo.disconnectedServers.end()) {
+					currentDegradationInfo.disconnectedServers.insert(badServer);
+					break;
+				}
+			}
+
+			if (SERVER_KNOBS->CC_ENABLE_ENTIRE_SATELLITE_MONITORING &&
+			    addressInDbAndPrimarySatelliteDc(badServer, db.serverInfo) &&
+			    complainerCount >= SERVER_KNOBS->CC_SATELLITE_DEGRADATION_MIN_COMPLAINER) {
+				++satelliteBadServerCount;
+			}
+		}
+
 		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
 		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
-		DegradationInfo currentDegradationInfo;
 		for (const auto& badServer : currentDegradedServers) {
 			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
 				currentDegradationInfo.degradedServers.insert(badServer);
@@ -3058,43 +3159,48 @@ public:
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers() {
-		const ServerDBInfo dbi = db.serverInfo->get();
-		for (const auto& excludedServer : degradationInfo.degradedServers) {
-			if (dbi.master.addresses().contains(excludedServer)) {
-				return true;
-			}
-
-			for (auto& logSet : dbi.logSystemConfig.tLogs) {
-				if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
-					continue;
+		const ServerDBInfo& dbi = db.serverInfo->get();
+		auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList) -> bool {
+			for (const auto& server : serverList) {
+				if (dbi.master.addresses().contains(server)) {
+					return true;
 				}
-				for (const auto& tlog : logSet.tLogs) {
-					if (tlog.present() && tlog.interf().addresses().contains(excludedServer)) {
+
+				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+					if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+						continue;
+					}
+					for (const auto& tlog : logSet.tLogs) {
+						if (tlog.present() && tlog.interf().addresses().contains(server)) {
+							return true;
+						}
+					}
+				}
+
+				for (const auto& proxy : dbi.client.grvProxies) {
+					if (proxy.addresses().contains(server)) {
+						return true;
+					}
+				}
+
+				for (const auto& proxy : dbi.client.commitProxies) {
+					if (proxy.addresses().contains(server)) {
+						return true;
+					}
+				}
+
+				for (const auto& resolver : dbi.resolvers) {
+					if (resolver.addresses().contains(server)) {
 						return true;
 					}
 				}
 			}
 
-			for (auto& proxy : dbi.client.grvProxies) {
-				if (proxy.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
+			return false;
+		};
 
-			for (auto& proxy : dbi.client.commitProxies) {
-				if (proxy.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-
-			for (auto& resolver : dbi.resolvers) {
-				if (resolver.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-		}
-
-		return false;
+		return transactionWorkerInList(degradationInfo.degradedServers) ||
+		       transactionWorkerInList(degradationInfo.disconnectedServers);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
@@ -3105,6 +3211,12 @@ public:
 		}
 
 		for (const auto& excludedServer : degradationInfo.degradedServers) {
+			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+				return true;
+			}
+		}
+
+		for (const auto& excludedServer : degradationInfo.disconnectedServers) {
 			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
 				return true;
 			}
@@ -3142,7 +3254,8 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
-		if (degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
+		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
 		}
 
@@ -3181,8 +3294,9 @@ public:
 			return true;
 		}
 
-		if (degradationInfo.degradedServers.size() < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
-		    degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+		int degradedServerSize = degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size();
+		if (degradedServerSize < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
+		    degradedServerSize > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
 			return false;
 		}
 
@@ -3261,8 +3375,12 @@ public:
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitBlobManager;
 	Optional<UID> recruitingBlobManagerID;
+	AsyncVar<bool> recruitBlobMigrator;
+	Optional<UID> recruitingBlobMigratorID;
 	AsyncVar<bool> recruitEncryptKeyProxy;
 	Optional<UID> recruitingEncryptKeyProxyID;
+	AsyncVar<bool> recruitConsistencyScan;
+	Optional<UID> recruitingConsistencyScanID;
 
 	// Stores the health information from a particular worker's perspective.
 	struct WorkerHealth {
@@ -3271,6 +3389,7 @@ public:
 			double lastRefreshTime = 0;
 		};
 		std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
+		std::unordered_map<NetworkAddress, DegradedTimes> disconnectedPeers;
 
 		// TODO(zhewu): Include disk and CPU signals.
 	};
@@ -3299,7 +3418,8 @@ public:
 	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
 	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
 	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitEncryptKeyProxy(false),
+	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitBlobMigrator(false),
+	    recruitEncryptKeyProxy(false), recruitConsistencyScan(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),

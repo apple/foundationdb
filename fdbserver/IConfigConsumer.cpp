@@ -36,6 +36,8 @@ std::unique_ptr<IConfigConsumer> IConfigConsumer::createSimple(ServerCoordinator
 
 std::unique_ptr<IConfigConsumer> IConfigConsumer::createPaxos(ServerCoordinators const& coordinators,
                                                               double pollingInterval,
-                                                              Optional<double> compactionInterval) {
-	return std::make_unique<PaxosConfigConsumer>(coordinators, pollingInterval, compactionInterval);
+                                                              Optional<double> compactionInterval,
+                                                              bool readPreviousCoordinators) {
+	return std::make_unique<PaxosConfigConsumer>(
+	    coordinators, pollingInterval, compactionInterval, readPreviousCoordinators);
 }

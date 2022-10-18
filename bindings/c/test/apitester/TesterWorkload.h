@@ -82,6 +82,9 @@ struct WorkloadConfig {
 	// Total number of clients
 	int numClients;
 
+	// Number of Tenants
+	int numTenants;
+
 	// Selected FDB API version
 	int apiVersion;
 
@@ -116,12 +119,13 @@ protected:
 	void schedule(TTaskFct task);
 
 	// Execute a transaction within the workload
-	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError = true);
+	void execTransaction(TOpStartFct startFct,
+	                     TTaskFct cont,
+	                     std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
+	                     bool failOnError = true);
 
-	// Execute a transaction within the workload, a convenience method for a tranasaction defined by a lambda function
-	void execTransaction(TTxStartFct start, TTaskFct cont, bool failOnError = true) {
-		execTransaction(std::make_shared<TransactionFct>(start), cont, failOnError);
-	}
+	// Execute a non-transactional database operation within the workload
+	void execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError = true);
 
 	// Log an error message, increase error counter
 	void error(const std::string& msg);
@@ -134,6 +138,12 @@ protected:
 
 private:
 	WorkloadManager* manager;
+
+	void doExecute(TOpStartFct startFct,
+	               TTaskFct cont,
+	               std::optional<fdb::BytesRef> tenant,
+	               bool failOnError,
+	               bool transactional);
 
 	// Decrease scheduled task counter, notify the workload manager
 	// that the task is done if no more tasks schedule
@@ -156,6 +166,12 @@ protected:
 	// The maximum number of errors before stoppoing the workload
 	int maxErrors;
 
+	// The timeout (in ms) automatically set for all transactions to a random value
+	// in the range [minTxTimeoutMs, maxTxTimeoutMs]
+	// If maxTxTimeoutMs <= 0, no timeout is set
+	int minTxTimeoutMs;
+	int maxTxTimeoutMs;
+
 	// Workload identifier, consisting of workload name and client ID
 	std::string workloadId;
 
@@ -164,6 +180,12 @@ protected:
 
 	// Number of completed transactions
 	std::atomic<int> numTxCompleted;
+
+	// Number of started transactions
+	std::atomic<int> numTxStarted;
+
+	// Workload is in progress (intialized, but not completed)
+	std::atomic<bool> inProgress;
 };
 
 // Workload manager

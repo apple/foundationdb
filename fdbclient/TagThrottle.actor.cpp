@@ -136,12 +136,11 @@ Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
 }
 
 bool ThrottleApi::TagQuotaValue::isValid() const {
-	return reservedReadQuota <= totalReadQuota && reservedWriteQuota <= totalWriteQuota && reservedReadQuota >= 0 &&
-	       reservedWriteQuota >= 0;
+	return reservedQuota <= totalQuota && reservedQuota >= 0;
 }
 
 Value ThrottleApi::TagQuotaValue::toValue() const {
-	return Tuple::makeTuple(reservedReadQuota, totalReadQuota, reservedWriteQuota, totalWriteQuota).pack();
+	return Tuple::makeTuple(reservedQuota, totalQuota).pack();
 }
 
 ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
@@ -151,20 +150,16 @@ ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value)
 	}
 	TagQuotaValue result;
 	try {
-		result.reservedReadQuota = tuple.getDouble(0);
-		result.totalReadQuota = tuple.getDouble(1);
-		result.reservedWriteQuota = tuple.getDouble(2);
-		result.totalWriteQuota = tuple.getDouble(3);
+		result.reservedQuota = tuple.getDouble(0);
+		result.totalQuota = tuple.getDouble(1);
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
 		throw invalid_throttle_quota_value();
 	}
 	if (!result.isValid()) {
 		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
-		    .detail("ReservedReadQuota", result.reservedReadQuota)
-		    .detail("TotalReadQuota", result.totalReadQuota)
-		    .detail("ReservedWriteQuota", result.reservedWriteQuota)
-		    .detail("TotalWriteQuota", result.totalWriteQuota);
+		    .detail("ReservedQuota", result.reservedQuota)
+		    .detail("TotalQuota", result.totalQuota);
 		throw invalid_throttle_quota_value();
 	}
 	return result;

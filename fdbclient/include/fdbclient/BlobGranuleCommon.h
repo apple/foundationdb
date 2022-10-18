@@ -22,10 +22,10 @@
 #define FDBCLIENT_BLOBGRANULECOMMON_H
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 
-#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
@@ -35,7 +35,6 @@
 #define BG_ENCRYPT_COMPRESS_DEBUG false
 
 // file format of actual blob files
-// FIXME: use VecSerStrategy::String serialization for this
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
 	constexpr static FileIdentifier file_identifier = 1300395;
@@ -54,6 +53,21 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	void serialize(Ar& ar) {
 		serializer(ar, ((VectorRef<MutationsAndVersionRef>&)*this));
 	}
+};
+
+struct GranuleMaterializeStats {
+	// file-level stats
+	int64_t inputBytes;
+	int64_t outputBytes;
+
+	// merge stats
+	int32_t snapshotRows;
+	int32_t rowsCleared;
+	int32_t rowsInserted;
+	int32_t rowsUpdated;
+
+	GranuleMaterializeStats()
+	  : inputBytes(0), outputBytes(0), snapshotRows(0), rowsCleared(0), rowsInserted(0), rowsUpdated(0) {}
 };
 
 struct BlobGranuleCipherKeysMeta {
@@ -234,6 +248,22 @@ struct BlobGranuleChunkRef {
 	}
 };
 
+struct BlobGranuleSummaryRef {
+	constexpr static FileIdentifier file_identifier = 9774587;
+	KeyRangeRef keyRange;
+	Version snapshotVersion;
+	int64_t snapshotSize;
+	Version deltaVersion;
+	int64_t deltaSize;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keyRange, snapshotVersion, snapshotSize, deltaVersion, deltaSize);
+	}
+};
+
+BlobGranuleSummaryRef summarizeGranuleChunk(Arena& ar, const BlobGranuleChunkRef& chunk);
+
 enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 3 };
 
 // Boundary metadata for each range indexed by the beginning of the range.
@@ -258,6 +288,28 @@ struct BlobGranuleHistoryValue {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, granuleID, parentBoundaries, parentVersions);
+	}
+};
+
+struct GranuleHistory {
+	KeyRange range;
+	Version version;
+	Standalone<BlobGranuleHistoryValue> value;
+
+	GranuleHistory() {}
+
+	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
+	  : range(range), version(version), value(value) {}
+};
+
+// A manifest to assist full fdb restore from blob granule files
+struct BlobManifest {
+	constexpr static FileIdentifier file_identifier = 298872;
+	VectorRef<KeyValueRef> rows;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rows);
 	}
 };
 

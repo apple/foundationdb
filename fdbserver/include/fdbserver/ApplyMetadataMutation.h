@@ -25,6 +25,7 @@
 #include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -33,7 +34,6 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
-#include "flow/BlobCipher.h"
 #include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.
@@ -103,8 +103,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore,
-                            Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+                            IKeyValueStore* txnStateStore);
 
 inline bool isSystemKey(KeyRef key) {
 	return key.size() && key[0] == systemKeys.begin[0];
@@ -131,10 +130,10 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
 			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||
 			    (range.intersects(logRangesRange)) || (tssMappingKeys.intersects(range)) ||
-			    (tssQuarantineKeys.intersects(range)) || (range.contains(coordinatorsKey)) ||
-			    (range.contains(databaseLockedKey)) || (range.contains(metadataVersionKey)) ||
-			    (range.contains(mustContainSystemMutationsKey)) || (range.contains(writeRecoveryKey)) ||
-			    (range.intersects(testOnlyTxnStateStorePrefixRange))) {
+			    (tssQuarantineKeys.intersects(range)) || (range.contains(previousCoordinatorsKey)) ||
+			    (range.contains(coordinatorsKey)) || (range.contains(databaseLockedKey)) ||
+			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
+			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange))) {
 				return true;
 			}
 		}
@@ -145,7 +144,6 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 // Resolver's version
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations,
-                            Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+                            const VectorRef<MutationRef>& mutations);
 
 #endif

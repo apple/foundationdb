@@ -271,6 +271,50 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> markTenantTombstones(Transaction tr, int64_t tenantId) {
+	// In data clusters, we store a tombstone
+	state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
+	    TenantMetadata::tenantTombstones().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
+	state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
+	state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+
+	// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
+	if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
+		state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().nextTombstoneEraseId : -1;
+		// Delete all tombstones up through the one currently marked in the cleanup data
+		if (deleteThroughId >= 0) {
+			TenantMetadata::tenantTombstones().erase(tr, 0, deleteThroughId + 1);
+		}
+
+		KeyBackedRangeResult<int64_t> latestTombstone = wait(latestTombstoneFuture);
+		int64_t nextDeleteThroughId = std::max(deleteThroughId, tenantId);
+		if (!latestTombstone.results.empty()) {
+			nextDeleteThroughId = std::max(nextDeleteThroughId, latestTombstone.results[0]);
+		}
+
+		// The next cleanup will happen at or after TENANT_TOMBSTONE_CLEANUP_INTERVAL seconds have elapsed and
+		// will clean up tombstones through the most recently allocated ID.
+		TenantTombstoneCleanupData updatedCleanupData;
+		updatedCleanupData.tombstonesErasedThrough = deleteThroughId;
+		updatedCleanupData.nextTombstoneEraseId = nextDeleteThroughId;
+		updatedCleanupData.nextTombstoneEraseVersion =
+		    transactionReadVersion +
+		    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+
+		TenantMetadata::tombstoneCleanupData().set(tr, updatedCleanupData);
+
+		// If the tenant being deleted is within the tombstone window, record the tombstone
+		if (tenantId > updatedCleanupData.tombstonesErasedThrough) {
+			TenantMetadata::tenantTombstones().insert(tr, tenantId);
+		}
+	} else if (tenantId > cleanupData.get().tombstonesErasedThrough) {
+		// If the tenant being deleted is within the tombstone window, record the tombstone
+		TenantMetadata::tenantTombstones().insert(tr, tenantId);
+	}
+	return Void();
+}
+
 // Deletes the tenant with the given name. If tenantId is specified, the tenant being deleted must also have the same
 // ID. If no matching tenant is found, this function returns without deleting anything. This behavior allows the
 // function to be used idempotently: if the transaction is retried after having succeeded, it will see that the tenant
@@ -320,45 +364,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	}
 
 	if (clusterType == ClusterType::METACLUSTER_DATA) {
-		// In data clusters, we store a tombstone
-		state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
-		    TenantMetadata::tenantTombstones().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
-		state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
-		state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
-
-		// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
-		if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
-			state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().nextTombstoneEraseId : -1;
-			// Delete all tombstones up through the one currently marked in the cleanup data
-			if (deleteThroughId >= 0) {
-				TenantMetadata::tenantTombstones().erase(tr, 0, deleteThroughId + 1);
-			}
-
-			KeyBackedRangeResult<int64_t> latestTombstone = wait(latestTombstoneFuture);
-			int64_t nextDeleteThroughId = std::max(deleteThroughId, tenantId.get());
-			if (!latestTombstone.results.empty()) {
-				nextDeleteThroughId = std::max(nextDeleteThroughId, latestTombstone.results[0]);
-			}
-
-			// The next cleanup will happen at or after TENANT_TOMBSTONE_CLEANUP_INTERVAL seconds have elapsed and
-			// will clean up tombstones through the most recently allocated ID.
-			TenantTombstoneCleanupData updatedCleanupData;
-			updatedCleanupData.tombstonesErasedThrough = deleteThroughId;
-			updatedCleanupData.nextTombstoneEraseId = nextDeleteThroughId;
-			updatedCleanupData.nextTombstoneEraseVersion =
-			    transactionReadVersion +
-			    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
-
-			TenantMetadata::tombstoneCleanupData().set(tr, updatedCleanupData);
-
-			// If the tenant being deleted is within the tombstone window, record the tombstone
-			if (tenantId.get() > updatedCleanupData.tombstonesErasedThrough) {
-				TenantMetadata::tenantTombstones().insert(tr, tenantId.get());
-			}
-		} else if (tenantId.get() > cleanupData.get().tombstonesErasedThrough) {
-			// If the tenant being deleted is within the tombstone window, record the tombstone
-			TenantMetadata::tenantTombstones().insert(tr, tenantId.get());
-		}
+		wait(markTenantTombstones(tr, tenantId.get()));
 	}
 
 	return Void();
@@ -456,8 +462,8 @@ Future<Void> configureTenantTransaction(Transaction tr,
 
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
-                                                                                  TenantNameRef begin,
-                                                                                  TenantNameRef end,
+                                                                                  TenantName begin,
+                                                                                  TenantName end,
                                                                                   int limit) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -488,17 +494,31 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
 }
 
 ACTOR template <class Transaction>
-Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, TenantNameRef newName) {
+Future<Void> renameTenantTransaction(Transaction tr,
+                                     TenantName oldName,
+                                     TenantName newName,
+                                     Optional<int64_t> tenantId = Optional<int64_t>(),
+                                     ClusterType clusterType = ClusterType::STANDALONE,
+                                     Optional<int64_t> configureSequenceNum = Optional<int64_t>()) {
+	ASSERT(clusterType == ClusterType::STANDALONE || (tenantId.present() && configureSequenceNum.present()));
+	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
+	wait(checkTenantMode(tr, clusterType));
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	state Optional<TenantMapEntry> oldEntry;
 	state Optional<TenantMapEntry> newEntry;
 	wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
 	     store(newEntry, tryGetTenantTransaction(tr, newName)));
-	if (!oldEntry.present()) {
+	if (!oldEntry.present() || (tenantId.present() && tenantId.get() != oldEntry.get().id)) {
 		throw tenant_not_found();
 	}
 	if (newEntry.present()) {
 		throw tenant_already_exists();
+	}
+	if (configureSequenceNum.present()) {
+		if (oldEntry.get().configurationSequenceNum >= configureSequenceNum.get()) {
+			return Void();
+		}
+		oldEntry.get().configurationSequenceNum = configureSequenceNum.get();
 	}
 	TenantMetadata::tenantMap().erase(tr, oldName);
 	TenantMetadata::tenantMap().set(tr, newName, oldEntry.get());
@@ -511,12 +531,21 @@ Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, Tena
 		                                                Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
 	}
 
+	if (clusterType == ClusterType::METACLUSTER_DATA) {
+		wait(markTenantTombstones(tr, tenantId.get()));
+	}
+
 	return Void();
 }
 
 ACTOR template <class DB>
-Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
+Future<Void> renameTenant(Reference<DB> db,
+                          TenantName oldName,
+                          TenantName newName,
+                          Optional<int64_t> tenantId = Optional<int64_t>(),
+                          ClusterType clusterType = ClusterType::STANDALONE) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	ASSERT(clusterType == ClusterType::STANDALONE || tenantId.present());
 
 	state bool firstTry = true;
 	state int64_t id;
@@ -560,7 +589,7 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 					throw tenant_not_found();
 				}
 			}
-			wait(renameTenantTransaction(tr, oldName, newName));
+			wait(renameTenantTransaction(tr, oldName, newName, tenantId, clusterType));
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
 			return Void();
@@ -569,6 +598,62 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 		}
 	}
 }
+
+template <class Transaction>
+Future<Optional<TenantGroupEntry>> tryGetTenantGroupTransaction(Transaction tr, TenantGroupName name) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	return TenantMetadata::tenantGroupMap().get(tr, name);
+}
+
+ACTOR template <class DB>
+Future<Optional<TenantGroupEntry>> tryGetTenantGroup(Reference<DB> db, TenantGroupName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			Optional<TenantGroupEntry> entry = wait(tryGetTenantGroupTransaction(tr, name));
+			return entry;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGroupsTransaction(Transaction tr,
+                                                                                              TenantGroupName begin,
+                                                                                              TenantGroupName end,
+                                                                                              int limit) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+
+	KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> results =
+	    wait(TenantMetadata::tenantGroupMap().getRange(tr, begin, end, limit));
+
+	return results.results;
+}
+
+ACTOR template <class DB>
+Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGroups(Reference<DB> db,
+                                                                                   TenantGroupName begin,
+                                                                                   TenantGroupName end,
+                                                                                   int limit) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
+			    wait(listTenantGroupsTransaction(tr, begin, end, limit));
+			return tenantGroups;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 } // namespace TenantAPI
 
 #include "flow/unactorcompiler.h"

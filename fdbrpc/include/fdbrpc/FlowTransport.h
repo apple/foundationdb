@@ -298,6 +298,12 @@ public:
 	void removePublicKey(StringRef name);
 	void removeAllPublicKeys();
 
+	// Synchronously load and apply JWKS (RFC 7517) public key file with which to verify authorization tokens.
+	void loadPublicKeyFile(const std::string& publicKeyFilePath);
+
+	// Periodically read JWKS (RFC 7517) public key file to refresh public key set.
+	void watchPublicKeyFile(const std::string& publicKeyFilePath);
+
 private:
 	class TransportData* self;
 };

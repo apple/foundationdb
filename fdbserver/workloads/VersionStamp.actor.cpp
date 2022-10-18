@@ -25,9 +25,12 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct VersionStampWorkload : TestWorkload {
+	static constexpr auto NAME = "VersionStamp";
+
 	uint64_t nodeCount;
 	double testDuration;
 	double transactionsPerSecond;
@@ -45,19 +48,17 @@ struct VersionStampWorkload : TestWorkload {
 	bool allowMetadataVersionKey;
 
 	VersionStampWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)10000);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 4);
-		failIfDataLost = getOption(options, LiteralStringRef("failIfDataLost"), true);
-		const Key prefix = getOption(options, LiteralStringRef("prefix"), LiteralStringRef("VS_"));
-		vsKeyPrefix = LiteralStringRef("K_").withPrefix(prefix);
-		vsValuePrefix = LiteralStringRef("V_").withPrefix(prefix);
-		validateExtraDB = getOption(options, LiteralStringRef("validateExtraDB"), false);
-		soleOwnerOfMetadataVersionKey = getOption(options, LiteralStringRef("soleOwnerOfMetadataVersionKey"), false);
+		testDuration = getOption(options, "testDuration"_sr, 60.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0);
+		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)10000);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
+		failIfDataLost = getOption(options, "failIfDataLost"_sr, true);
+		const Key prefix = getOption(options, "prefix"_sr, "VS_"_sr);
+		vsKeyPrefix = "K_"_sr.withPrefix(prefix);
+		vsValuePrefix = "V_"_sr.withPrefix(prefix);
+		validateExtraDB = getOption(options, "validateExtraDB"_sr, false);
+		soleOwnerOfMetadataVersionKey = getOption(options, "soleOwnerOfMetadataVersionKey"_sr, false);
 	}
-
-	std::string description() const override { return "VersionStamp"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -72,13 +73,13 @@ struct VersionStampWorkload : TestWorkload {
 		} else if (choice < 0.3) {
 			apiVersion = 520;
 		} else {
-			apiVersion = Database::API_VERSION_LATEST;
+			apiVersion = ApiVersion::LATEST_VERSION;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
 
-		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST;
+		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == ApiVersion::LATEST_VERSION;
 
-		cx->apiVersion = apiVersion;
+		cx->apiVersion = ApiVersion(apiVersion);
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();
@@ -155,10 +156,8 @@ struct VersionStampWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
-			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-			cx = Database::createDatabase(extraFile, -1);
+			ASSERT(g_simulator->extraDatabases.size() == 1);
+			cx = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		}
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
@@ -314,11 +313,9 @@ struct VersionStampWorkload : TestWorkload {
 		state double lastTime = now();
 		state Database extraDB;
 
-		if (!g_simulator.extraDatabases.empty()) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
-			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-			extraDB = Database::createDatabase(extraFile, -1);
+		if (!g_simulator->extraDatabases.empty()) {
+			ASSERT(g_simulator->extraDatabases.size() == 1);
+			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		}
 
 		state Future<Void> metadataWatch = Void();
@@ -346,7 +343,7 @@ struct VersionStampWorkload : TestWorkload {
 			} else if (oldVSFormat) {
 				versionStampValue = value;
 			} else {
-				versionStampValue = value.withSuffix(LiteralStringRef("\x00\x00\x00\x00"));
+				versionStampValue = value.withSuffix("\x00\x00\x00\x00"_sr);
 			}
 
 			state bool ryw = deterministicRandom()->coinflip();
@@ -384,7 +381,7 @@ struct VersionStampWorkload : TestWorkload {
 
 				} catch (Error& e) {
 					err = e;
-					if (err.code() == error_code_database_locked && !g_simulator.extraDatabases.empty()) {
+					if (err.code() == error_code_database_locked && !g_simulator->extraDatabases.empty()) {
 						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);
@@ -455,4 +452,4 @@ struct VersionStampWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<VersionStampWorkload> VersionStampWorkloadFactory("VersionStamp");
+WorkloadFactory<VersionStampWorkload> VersionStampWorkloadFactory;
