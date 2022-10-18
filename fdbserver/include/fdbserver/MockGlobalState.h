@@ -25,6 +25,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/KeyLocationService.h"
 #include "SimulatedCluster.h"
 #include "ShardsAffectedByTeamFailure.h"
 
@@ -112,7 +113,7 @@ protected:
 	void twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize, bool restrictSize);
 };
 
-class MockGlobalState {
+class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
 
 public:
@@ -163,6 +164,30 @@ public:
 	 * * mgs.allServer[X] is existed
 	 */
 	bool allShardRemovedFromServer(const UID& serverId);
+
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount);
+
+	Future<KeyRangeLocationInfo> getKeyLocation(TenantInfo tenant,
+	                                                               Key key,
+	                                                               SpanContext spanContext,
+	                                                               Optional<UID> debugID,
+	                                                               UseProvisionalProxies useProvisionalProxies,
+	                                                               Reverse isBackward,
+	                                                               Version version) override;
+
+	Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(TenantInfo tenant,
+	                                                                        KeyRange keys,
+	                                                                        int limit,
+	                                                                        Reverse reverse,
+	                                                                        SpanContext spanContext,
+	                                                                        Optional<UID> debugID,
+	                                                                        UseProvisionalProxies useProvisionalProxies,
+	                                                                        Version version) override;
 };
 
 #endif // FOUNDATIONDB_MOCKGLOBALSTATE_H

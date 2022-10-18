@@ -871,7 +871,6 @@ Future<Standalone<VectorRef<KeyRef>>> DDMockTxnProcessor::splitStorageMetrics(
 	return Future<Standalone<VectorRef<KeyRef>>>();
 }
 
-// FIXME: finish implementation
 Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorageMetrics(
     const KeyRange& keys,
     const StorageMetrics& min,
@@ -879,7 +878,7 @@ Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorage
     const StorageMetrics& permittedError,
     int shardLimit,
     int expectedShardCount) const {
-	return Future<std::pair<Optional<StorageMetrics>, int>>();
+	return mgs->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
 }
 
 // FIXME: finish implementation

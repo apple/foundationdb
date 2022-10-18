@@ -190,6 +190,52 @@ bool MockGlobalState::allShardRemovedFromServer(const UID& serverId) {
 	return allServers.count(serverId) && shardMapping->getNumberOfShards(serverId) == 0;
 }
 
+Future<std::pair<Optional<StorageMetrics>, int>> MockGlobalState::waitStorageMetrics(
+    const KeyRange& keys,
+    const StorageMetrics& min,
+    const StorageMetrics& max,
+    const StorageMetrics& permittedError,
+    int shardLimit,
+    int expectedShardCount) {
+	return Future<std::pair<Optional<StorageMetrics>, int>>();
+}
+
+Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(TenantInfo tenant,
+                                                             Key key,
+                                                             SpanContext spanContext,
+                                                             Optional<UID> debugID,
+                                                             UseProvisionalProxies useProvisionalProxies,
+                                                             Reverse isBackward,
+                                                             Version version) {
+	GetKeyServerLocationsReply rep;
+
+	// construct the location info with the servers
+	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> serverRefs;
+	auto& servers = rep.results[0].second;
+	serverRefs.reserve(servers.size());
+	for (const auto& interf : servers) {
+		serverRefs.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(interf));
+	}
+
+	auto locationInfo = makeReference<LocationInfo>(serverRefs);
+
+	return KeyRangeLocationInfo(
+	    rep.tenantEntry,
+	    KeyRange(toPrefixRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
+	    locationInfo);
+}
+Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
+    TenantInfo tenant,
+    KeyRange keys,
+    int limit,
+    Reverse reverse,
+    SpanContext spanContext,
+    Optional<UID> debugID,
+    UseProvisionalProxies useProvisionalProxies,
+    Version version) {
+	return Future<std::vector<KeyRangeLocationInfo>>();
+}
+
 TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {
 	BasicTestConfig testConfig;
 	testConfig.simpleConfig = true;

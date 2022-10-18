@@ -1479,16 +1479,6 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
-KeyRangeRef toRelativeRange(KeyRangeRef range, KeyRef prefix) {
-	if (prefix.empty()) {
-		return range;
-	} else {
-		KeyRef begin = range.begin.startsWith(prefix) ? range.begin.removePrefix(prefix) : allKeys.begin;
-		KeyRef end = range.end.startsWith(prefix) ? range.end.removePrefix(prefix) : allKeys.end;
-		return KeyRangeRef(begin, end);
-	}
-}
-
 ACTOR Future<UID> getClusterId(Database db) {
 	while (!db->clientInfo->get().clusterId.isValid()) {
 		wait(db->clientInfo->onChange());
@@ -1925,7 +1915,7 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional
 	auto range =
 	    isBackward ? locationCache.rangeContainingKeyBefore(resolvedKey) : locationCache.rangeContaining(resolvedKey);
 	if (range->value()) {
-		return KeyRangeLocationInfo(tenantEntry, toRelativeRange(range->range(), tenantEntry.prefix), range->value());
+		return KeyRangeLocationInfo(tenantEntry, toPrefixRelativeRange(range->range(), tenantEntry.prefix), range->value());
 	}
 
 	return Optional<KeyRangeLocationInfo>();
@@ -1962,7 +1952,7 @@ bool DatabaseContext::getCachedLocations(const Optional<TenantNameRef>& tenantNa
 			result.clear();
 			return false;
 		}
-		result.emplace_back(tenantEntry, toRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
+		result.emplace_back(tenantEntry, toPrefixRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
 		}
@@ -2978,7 +2968,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 
 					return KeyRangeLocationInfo(
 					    rep.tenantEntry,
-					    KeyRange(toRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
+					    KeyRange(toPrefixRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
 					    locationInfo);
 				}
 			}
@@ -3123,7 +3113,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 						// efficient to save the map pairs and insert them all at once.
 						results.emplace_back(
 						    rep.tenantEntry,
-						    (toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+						    (toPrefixRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
 						    cx->setCachedLocation(
 						        tenant.name, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
 						wait(yield());
@@ -7779,7 +7769,8 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 		} else {
 			TraceEvent(SevWarn, "WaitStorageMetricsPenalty")
 			    .detail("Keys", keys)
-			    .detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
+			    .detail("Limit", shardLimit)
+			    .detail("LocationSize", locations.size())
 			    .detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
