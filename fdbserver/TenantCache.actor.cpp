@@ -18,15 +18,16 @@
  * limitations under the License.
  */
 
+#include <limits>
+#include <string>
+
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/TenantCache.h"
 #include "flow/flow.h"
-#include <limits>
-#include <string>
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 class TenantCacheImpl {
 

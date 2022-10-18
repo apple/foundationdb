@@ -356,10 +356,6 @@ struct KeyRangeRef {
 		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
 	}
 
-	static KeyRangeRef entireRangeWithPrefix(const StringRef& prefix) {
-		return KeyRangeRef("/"_sr, "0"_sr).withPrefix(prefix);
-	}
-
 	KeyRangeRef removePrefix(const StringRef& prefix) const {
 		return KeyRangeRef(begin.removePrefix(prefix), end.removePrefix(prefix));
 	}

@@ -62,7 +62,7 @@ private:
 	// return count of tenants that were found to be stale and removed from the cache
 	int cleanup();
 
-	// return a list of all tenant names stored in the tenant cache
+	// return the mapping from prefix -> tenant name for all tenants stored in the cache
 	std::vector<std::pair<KeyRef, TenantName>> getTenantList() const;
 
 	// update the size for a tenant; do nothing if the tenant doesn't exist in the map
