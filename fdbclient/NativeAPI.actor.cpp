@@ -10662,9 +10662,7 @@ Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }
 
-ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Reference<ReadYourWritesTransaction> tr,
-                                                               KeyRange range,
-                                                               int batchLimit) {
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, KeyRange range, int batchLimit) {
 	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
 	state Key beginKey = range.begin;
 
@@ -10716,7 +10714,7 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 				range = range.withPrefix(tenantEntry.prefix);
 			}
 
-			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 1));
+			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(&tr->getTransaction(), range, 1));
 
 			if (active) {
 				// Idempotent request.
@@ -10765,22 +10763,22 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Refer
                                                                            int rangeLimit,
                                                                            Optional<TenantName> tenantName) {
 	state Database db(cx);
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state Transaction tr(db);
 	state TenantMapEntry tme;
 
 	loop {
 		try {
 			if (tenantName.present()) {
-				wait(store(tme, blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName)));
+				wait(store(tme, blobGranuleGetTenantEntry(&tr, range.begin, tenantName)));
 				range = range.withPrefix(tme.prefix);
 			}
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			wait(tr.onError(e));
 		}
 	}
 
-	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(&tr, range, rangeLimit));
 	if (!tenantName.present()) {
 		return blobRanges;
 	}
