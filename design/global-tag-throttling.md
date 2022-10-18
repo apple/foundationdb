@@ -47,6 +47,12 @@ Note that the quotas are specified in terms of bytes/second, and internally conv
 page_cost_quota = ceiling(byte_quota / CLIENT_KNOBS->READ_COST_BYTE_FACTOR)
 ```
 
+To clear a both reserved and total throughput quotas for a tag, run:
+
+```
+fdbcli> quota clear <tag>
+```
+
 ### Limit Calculation
 The transaction budget that ratekeeper calculates and distributes to clients (via GRV proxies) for each tag is calculated based on several intermediate rate calculations, outlined in this section.
 
