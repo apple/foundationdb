@@ -29,31 +29,39 @@ from pathlib import Path
 import glob
 import random
 import string
+import toml
+
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "tests", "TestRunner")]
+
+# fmt: off
+from tmp_cluster import TempCluster
+from local_cluster import TLSConfig
+# fmt: on
 
 TESTER_STATS_INTERVAL_SEC = 5
 
 
 def random_string(len):
-    return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(len))
+    return "".join(random.choice(string.ascii_letters + string.digits) for i in range(len))
 
 
 def get_logger():
-    return logging.getLogger('foundationdb.run_c_api_tests')
+    return logging.getLogger("foundationdb.run_c_api_tests")
 
 
 def initialize_logger_level(logging_level):
     logger = get_logger()
 
-    assert logging_level in ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+    assert logging_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
 
-    logging.basicConfig(format='%(message)s')
-    if logging_level == 'DEBUG':
+    logging.basicConfig(format="%(message)s")
+    if logging_level == "DEBUG":
         logger.setLevel(logging.DEBUG)
-    elif logging_level == 'INFO':
+    elif logging_level == "INFO":
         logger.setLevel(logging.INFO)
-    elif logging_level == 'WARNING':
+    elif logging_level == "WARNING":
         logger.setLevel(logging.WARNING)
-    elif logging_level == 'ERROR':
+    elif logging_level == "ERROR":
         logger.setLevel(logging.ERROR)
 
 
@@ -65,35 +73,46 @@ def dump_client_logs(log_dir):
         print(">>>>>>>>>>>>>>>>>>>> End of {}:".format(log_file))
 
 
-def run_tester(args, test_file):
-    cmd = [args.tester_binary,
-           "--cluster-file", args.cluster_file,
-           "--test-file", test_file,
-           "--stats-interval", str(TESTER_STATS_INTERVAL_SEC*1000)]
-    if args.external_client_library is not None:
-        cmd += ["--external-client-library", args.external_client_library]
-    if args.tmp_dir is not None:
-        cmd += ["--tmp-dir", args.tmp_dir]
-    log_dir = None
-    if args.log_dir is not None:
-        log_dir = Path(args.log_dir).joinpath(random_string(8))
-        log_dir.mkdir(exist_ok=True)
-        cmd += ['--log', "--log-dir", str(log_dir)]
+def run_tester(args, cluster, test_file):
+    build_dir = Path(args.build_dir).resolve()
+    tester_binary = build_dir.joinpath("bin", "fdb_c_api_tester")
+    external_client_library = build_dir.joinpath("bindings", "c", "libfdb_c_external.so")
+    log_dir = Path(cluster.log).joinpath("client")
+    log_dir.mkdir(exist_ok=True)
+    cmd = [
+        tester_binary,
+        "--cluster-file",
+        cluster.cluster_file,
+        "--test-file",
+        test_file,
+        "--stats-interval",
+        str(TESTER_STATS_INTERVAL_SEC * 1000),
+        "--external-client-library",
+        external_client_library,
+        "--tmp-dir",
+        cluster.tmp_dir,
+        "--log",
+        "--log-dir",
+        str(log_dir),
+    ]
 
-    if args.blob_granule_local_file_path is not None:
-        cmd += ["--blob-granule-local-file-path",
-                args.blob_granule_local_file_path]
+    if cluster.blob_granules_enabled:
+        cmd += [
+            "--blob-granule-local-file-path",
+            str(cluster.data.joinpath("fdbblob")) + os.sep,
+        ]
 
-    if args.tls_ca_file is not None:
-        cmd += ["--tls-ca-file", args.tls_ca_file]
+    if cluster.tls_config is not None:
+        cmd += [
+            "--tls-ca-file",
+            cluster.server_ca_file,
+            "--tls-key-file",
+            cluster.client_key_file,
+            "--tls-cert-file",
+            cluster.client_cert_file,
+        ]
 
-    if args.tls_key_file is not None:
-        cmd += ["--tls-key-file", args.tls_key_file]
-
-    if args.tls_cert_file is not None:
-        cmd += ["--tls-cert-file", args.tls_cert_file]
-
-    get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
+    get_logger().info("\nRunning tester '%s'..." % " ".join(map(str, cmd)))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
     ret_code = 1
@@ -103,34 +122,72 @@ def run_tester(args, test_file):
         proc.kill()
         timed_out = True
     except Exception as e:
-        raise Exception('Unable to run tester (%s)' % e)
+        raise Exception("Unable to run tester (%s)" % e)
 
     if ret_code != 0:
         if timed_out:
-            reason = 'timed out after %d seconds' % args.timeout
+            reason = "timed out after %d seconds" % args.timeout
         elif ret_code < 0:
             reason = signal.Signals(-ret_code).name
         else:
-            reason = 'exit code: %d' % ret_code
-        get_logger().error('\n\'%s\' did not complete succesfully (%s)' %
-                           (cmd[0], reason))
-        if (log_dir is not None):
+            reason = "exit code: %d" % ret_code
+        get_logger().error("\n'%s' did not complete succesfully (%s)" % (cmd[0], reason))
+        if log_dir is not None:
             dump_client_logs(log_dir)
 
-    get_logger().info('')
+    get_logger().info("")
     return ret_code
+
+
+class TestConfig:
+    def __init__(self, test_file):
+        config = toml.load(test_file)
+        server_config = config.get("server", [{}])[0]
+        self.tenants_enabled = server_config.get("tenants_enabled", True)
+        self.blob_granules_enabled = server_config.get("blob_granules_enabled", False)
+        self.tls_enabled = server_config.get("tls_enabled", False)
+        self.client_chain_len = server_config.get("tls_client_chain_len", 2)
+        self.server_chain_len = server_config.get("tls_server_chain_len", 3)
+
+
+def run_test(args, test_file):
+    config = TestConfig(test_file)
+
+    tls_config = None
+    if config.tls_enabled:
+        tls_config = TLSConfig(
+            server_chain_len=config.client_chain_len,
+            client_chain_len=config.server_chain_len,
+        )
+
+    with TempCluster(
+        args.build_dir,
+        enable_tenants=config.tenants_enabled,
+        blob_granules_enabled=config.blob_granules_enabled,
+        tls_config=tls_config,
+    ) as cluster:
+        ret_code = run_tester(args, cluster, test_file)
+        if not cluster.check_cluster_logs():
+            ret_code = 1 if ret_code == 0 else ret_code
+        return ret_code
 
 
 def run_tests(args):
     num_failed = 0
-    test_files = [f for f in os.listdir(args.test_dir) if os.path.isfile(
-        os.path.join(args.test_dir, f)) and f.endswith(".toml")]
+    if args.test_file is not None:
+        test_files = [Path(args.test_file).resolve()]
+    else:
+        test_files = [
+            f
+            for f in os.listdir(args.test_dir)
+            if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml")
+        ]
 
     for test_file in test_files:
-        get_logger().info('=========================================================')
-        get_logger().info('Running test %s' % test_file)
-        get_logger().info('=========================================================')
-        ret_code = run_tester(args, os.path.join(args.test_dir, test_file))
+        get_logger().info("=========================================================")
+        get_logger().info("Running test %s" % test_file)
+        get_logger().info("=========================================================")
+        ret_code = run_test(args, os.path.join(args.test_dir, test_file))
         if ret_code != 0:
             num_failed += 1
 
@@ -138,32 +195,40 @@ def run_tests(args):
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description='FoundationDB C API Tester')
+    parser = argparse.ArgumentParser(description="FoundationDB C API Tester")
 
-    parser.add_argument('--cluster-file', type=str, default="fdb.cluster",
-                        help='The cluster file for the cluster being connected to. (default: fdb.cluster)')
-    parser.add_argument('--tester-binary', type=str, default="fdb_c_api_tester",
-                        help='Path to the fdb_c_api_tester executable. (default: fdb_c_api_tester)')
-    parser.add_argument('--external-client-library', type=str, default=None,
-                        help='Path to the external client library. (default: None)')
-    parser.add_argument('--test-dir', type=str, default="./",
-                        help='Path to a directory with test definitions. (default: ./)')
-    parser.add_argument('--timeout', type=int, default=300,
-                        help='The timeout in seconds for running each individual test. (default 300)')
-    parser.add_argument('--log-dir', type=str, default=None,
-                        help='The directory for storing logs (default: None)')
-    parser.add_argument('--logging-level', type=str, default='INFO',
-                        choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
-    parser.add_argument('--tmp-dir', type=str, default=None,
-                        help='The directory for storing temporary files (default: None)')
-    parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
-                        help='Enable blob granule tests if set, value is path to local blob granule files')
-    parser.add_argument('--tls-ca-file', type=str, default=None,
-                        help='Path to client\'s TLS CA file: i.e. certificate of CA that signed the server certificate')
-    parser.add_argument('--tls-cert-file', type=str, default=None,
-                        help='Path to client\'s TLS certificate file')
-    parser.add_argument('--tls-key-file', type=str, default=None,
-                        help='Path to client\'s TLS private key file')
+    parser.add_argument("--build-dir", "-b", type=str, required=True, help="FDB build directory")
+    parser.add_argument(
+        "--cluster-file",
+        type=str,
+        default="fdb.cluster",
+        help="The cluster file for the cluster being connected to. (default: fdb.cluster)",
+    )
+    parser.add_argument(
+        "--test-dir",
+        type=str,
+        default="./",
+        help="Path to a directory with test definitions. (default: ./)",
+    )
+    parser.add_argument(
+        "--test-file",
+        type=str,
+        default=None,
+        help="Path to a single test definition to be executed, overrides --test-dir if set.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="The timeout in seconds for running each individual test. (default 300)",
+    )
+    parser.add_argument(
+        "--logging-level",
+        type=str,
+        default="INFO",
+        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Specifies the level of detail in the tester output (default='INFO').",
+    )
 
     return parser.parse_args(argv)
 
@@ -174,5 +239,5 @@ def main(argv):
     return run_tests(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

@@ -274,84 +274,11 @@ if(NOT WIN32)
       @CLUSTER_FILE@
       ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
     )
-    add_fdbclient_test(
-      NAME fdb_c_api_tests
-      DISABLE_LOG_DUMP
-      COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-      --cluster-file
-      @CLUSTER_FILE@
-      --tester-binary
-      $<TARGET_FILE:fdb_c_api_tester>
-      --external-client-library
-      ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-      --test-dir
-      ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-      --tmp-dir
-      @TMP_DIR@
-      --log-dir
-      @LOG_DIR@
-    )
 
-    add_fdbclient_test(
-      NAME fdb_c_api_tests_local_only
-      DISABLE_LOG_DUMP
-      COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-      --cluster-file
-      @CLUSTER_FILE@
-      --tester-binary
-      $<TARGET_FILE:fdb_c_api_tester>
-      --test-dir
-      ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/local_tests
-      --tmp-dir
-      @TMP_DIR@
-      --log-dir
-      @LOG_DIR@
-    )
-
-    add_fdbclient_test(
-      NAME fdb_c_api_tests_blob_granule
-      DISABLE_LOG_DUMP
-      API_TEST_BLOB_GRANULES_ENABLED
-      COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-      --cluster-file
-      @CLUSTER_FILE@
-      --tester-binary
-      $<TARGET_FILE:fdb_c_api_tester>
-      --external-client-library
-      ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-      --test-dir
-      ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/blobgranuletests
-      --blob-granule-local-file-path
-      @DATA_DIR@/fdbblob/
-      --tmp-dir
-      @TMP_DIR@
-      --log-dir
-      @LOG_DIR@
-    )
-
-    add_fdbclient_test(
-      NAME fdb_c_api_tests_with_tls
-      DISABLE_LOG_DUMP
-      TLS_ENABLED
-      COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-      --cluster-file
-      @CLUSTER_FILE@
-      --tester-binary
-      $<TARGET_FILE:fdb_c_api_tester>
-      --external-client-library
-      ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-      --test-dir
-      ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-      --tmp-dir
-      @TMP_DIR@
-      --log-dir
-      @LOG_DIR@
-      --tls-cert-file
-      @CLIENT_CERT_FILE@
-      --tls-key-file
-      @CLIENT_KEY_FILE@
-      --tls-ca-file
-      @SERVER_CA_FILE@
+    add_test(NAME fdb_c_api_tests
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+      --build-dir ${CMAKE_BINARY_DIR}
+      --test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
     )
 
     add_test(NAME fdb_c_upgrade_to_future_version

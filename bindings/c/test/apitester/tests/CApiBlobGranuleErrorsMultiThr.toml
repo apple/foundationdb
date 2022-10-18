@@ -1,8 +1,7 @@
 [[test]]
-title = 'Blob GranuleAPI Correctness Blocking'
+title = 'Blob Granule Errors Multi Threaded'
 multiThreaded = true
 buggify = true
-blockOnFutures = true
 minFdbThreads = 2
 maxFdbThreads = 8
 minDatabases = 2
@@ -12,9 +11,11 @@ maxClientThreads = 8
 minClients = 2
 maxClients = 8
 
+[[server]]
+blob_granules_enabled = true
 
-    [[test.workload]]
-    name = 'ApiBlobGranuleCorrectness'
+	[[test.workload]]
+    name = 'BlobGranuleErrors'
     minKeyLength = 1
 	maxKeyLength = 64
 	minValueLength = 1
