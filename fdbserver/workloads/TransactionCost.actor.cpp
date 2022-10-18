@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
@@ -26,15 +27,26 @@ class TransactionCostWorkload : public TestWorkload {
 	Key prefix;
 	bool debugTransactions{ false };
 
+	Key getKey(uint64_t testNumber, uint64_t index = 0) const {
+		BinaryWriter bw(Unversioned());
+		bw << bigEndian64(testNumber);
+		bw << bigEndian64(index);
+		return bw.toValue().withPrefix(prefix);
+	}
+
+	static Value getValue(uint32_t size) { return makeString(size); }
+
+	static UID getDebugID(uint64_t testNumber) { return UID(testNumber << 32, testNumber << 32); }
+
 	class ITest {
 	protected:
 		uint64_t testNumber;
 		explicit ITest(uint64_t testNumber) : testNumber(testNumber) {}
 
 	public:
-		void debugTransaction(Transaction& tr) { tr.debugTransaction(getDebugID(testNumber)); }
+		void debugTransaction(ReadYourWritesTransaction& tr) { tr.debugTransaction(getDebugID(testNumber)); }
 		virtual Future<Void> setup(TransactionCostWorkload const& workload, Database const&) { return Void(); }
-		virtual Future<Void> exec(TransactionCostWorkload const& workload, Transaction&) = 0;
+		virtual Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction>) = 0;
 		virtual int64_t expectedFinalCost() const = 0;
 		virtual ~ITest() = default;
 	};
@@ -43,8 +55,8 @@ class TransactionCostWorkload : public TestWorkload {
 	public:
 		explicit ReadEmptyTest(uint64_t testNumber) : ITest(testNumber) {}
 
-		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			return success(tr.get(workload.getKey(20, testNumber)));
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			return success(tr->get(workload.getKey(testNumber)));
 		}
 
 		int64_t expectedFinalCost() const override { return 1; }
@@ -57,7 +69,7 @@ class TransactionCostWorkload : public TestWorkload {
 			state Transaction tr(cx);
 			loop {
 				try {
-					tr.set(workload->getKey(20, self->testNumber), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
+					tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
 					wait(tr.commit());
 					return Void();
 				} catch (Error& e) {
@@ -73,8 +85,8 @@ class TransactionCostWorkload : public TestWorkload {
 			return setup(&workload, this, cx);
 		}
 
-		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			return success(tr.get(workload.getKey(20, testNumber)));
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			return success(tr->get(workload.getKey(testNumber)));
 		}
 
 		int64_t expectedFinalCost() const override { return 2; }
@@ -84,8 +96,8 @@ class TransactionCostWorkload : public TestWorkload {
 	public:
 		explicit WriteTest(int64_t testNumber) : ITest(testNumber) {}
 
-		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			tr.set(workload.getKey(20, testNumber), getValue(20));
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			tr->set(workload.getKey(testNumber), getValue(20));
 			return Void();
 		}
 
@@ -96,8 +108,8 @@ class TransactionCostWorkload : public TestWorkload {
 	public:
 		explicit WriteLargeValueTest(int64_t testNumber) : ITest(testNumber) {}
 
-		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			tr.set(workload.getKey(20, testNumber), getValue(CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR));
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			tr->set(workload.getKey(testNumber), getValue(CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR));
 			return Void();
 		}
 
@@ -106,12 +118,28 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 	};
 
+	class WriteMultipleValuesTest : public ITest {
+	public:
+		explicit WriteMultipleValuesTest(int64_t testNumber) : ITest(testNumber) {}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			for (int i = 0; i < 10; ++i) {
+				tr->set(workload.getKey(testNumber, i), getValue(20));
+			}
+			return Void();
+		}
+
+		int64_t expectedFinalCost() const override {
+			return 10 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+		}
+	};
+
 	class ClearTest : public ITest {
 	public:
 		explicit ClearTest(int64_t testNumber) : ITest(testNumber) {}
 
-		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			tr.clear(singleKeyRange(workload.getKey(20, testNumber)));
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			tr->clear(singleKeyRange(workload.getKey(testNumber)));
 			return Void();
 		}
 
@@ -124,7 +152,7 @@ class TransactionCostWorkload : public TestWorkload {
 			loop {
 				try {
 					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(20, self->testNumber, i), workload->getValue(20));
+						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
 					}
 					wait(tr.commit());
 					return Void();
@@ -141,12 +169,48 @@ class TransactionCostWorkload : public TestWorkload {
 			return setup(this, &workload, cx);
 		}
 
-		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			KeyRange const keys = KeyRangeRef(workload.getKey(20, testNumber, 0), workload.getKey(20, testNumber, 10));
-			return success(tr.getRange(keys, 10));
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			KeyRange const keys = KeyRangeRef(workload.getKey(testNumber, 0), workload.getKey(testNumber, 10));
+			return success(tr->getRange(keys, 10));
 		}
 
 		int64_t expectedFinalCost() const override { return 1; }
+	};
+
+	class ReadMultipleValuesTest : public ITest {
+		ACTOR static Future<Void> setup(ReadMultipleValuesTest* self,
+		                                TransactionCostWorkload const* workload,
+		                                Database cx) {
+			state Transaction tr(cx);
+			loop {
+				try {
+					for (int i = 0; i < 10; ++i) {
+						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
+					}
+					wait(tr.commit());
+					return Void();
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+
+	public:
+		explicit ReadMultipleValuesTest(int64_t testNumber) : ITest(testNumber) {}
+
+		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
+			return setup(this, &workload, cx);
+		}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			std::vector<Future<Void>> futures;
+			for (int i = 0; i < 10; ++i) {
+				futures.push_back(success(tr->get(workload.getKey(testNumber, i))));
+			}
+			return waitForAll(futures);
+		}
+
+		int64_t expectedFinalCost() const override { return 10; }
 	};
 
 	class LargeReadRangeTest : public ITest {
@@ -157,7 +221,7 @@ class TransactionCostWorkload : public TestWorkload {
 			loop {
 				try {
 					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(20, self->testNumber, i),
+						tr.set(workload->getKey(self->testNumber, i),
 						       workload->getValue(CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR));
 					}
 					wait(tr.commit());
@@ -175,58 +239,51 @@ class TransactionCostWorkload : public TestWorkload {
 			return setup(this, &workload, cx);
 		}
 
-		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			KeyRange const keys = KeyRangeRef(workload.getKey(20, testNumber, 0), workload.getKey(20, testNumber, 10));
-			return success(tr.getRange(keys, 10));
+		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
+			KeyRange const keys = KeyRangeRef(workload.getKey(testNumber, 0), workload.getKey(testNumber, 10));
+			return success(tr->getRange(keys, 10));
 		}
 
 		int64_t expectedFinalCost() const override { return 11; }
 	};
 
 	static std::unique_ptr<ITest> createRandomTest(int64_t testNumber) {
-		auto const rand = deterministicRandom()->randomInt(0, 7);
+		auto const rand = deterministicRandom()->randomInt(0, 9);
 		if (rand == 0) {
 			return std::make_unique<ReadEmptyTest>(testNumber);
 		} else if (rand == 1) {
 			return std::make_unique<ReadLargeValueTest>(testNumber);
 		} else if (rand == 2) {
-			return std::make_unique<WriteTest>(testNumber);
+			return std::make_unique<ReadMultipleValuesTest>(testNumber);
 		} else if (rand == 3) {
-			return std::make_unique<WriteLargeValueTest>(testNumber);
+			return std::make_unique<WriteTest>(testNumber);
 		} else if (rand == 4) {
-			return std::make_unique<ClearTest>(testNumber);
+			return std::make_unique<WriteLargeValueTest>(testNumber);
 		} else if (rand == 5) {
+			return std::make_unique<WriteMultipleValuesTest>(testNumber);
+		} else if (rand == 6) {
+			return std::make_unique<ClearTest>(testNumber);
+		} else if (rand == 7) {
 			return std::make_unique<ReadRangeTest>(testNumber);
 		} else {
 			return std::make_unique<LargeReadRangeTest>(testNumber);
 		}
 	}
 
-	Key getKey(uint32_t size, uint64_t testNumber, uint64_t index = 0) const {
-		BinaryWriter bw(Unversioned());
-		bw << bigEndian64(testNumber);
-		bw << bigEndian64(index);
-		return bw.toValue().withPrefix(prefix);
-	}
-
-	static Value getValue(uint32_t size) { return makeString(size); }
-
-	static UID getDebugID(uint64_t testNumber) { return UID(testNumber << 32, testNumber << 32); }
-
 	ACTOR static Future<Void> runTest(TransactionCostWorkload* self, Database cx, ITest* test) {
 		wait(test->setup(*self, cx));
-		state Transaction tr(cx);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		if (self->debugTransactions) {
-			test->debugTransaction(tr);
+			test->debugTransaction(*tr);
 		}
 		loop {
 			try {
 				wait(test->exec(*self, tr));
-				wait(tr.commit());
-				ASSERT_EQ(tr.getTotalCost(), test->expectedFinalCost());
+				wait(tr->commit());
+				ASSERT_EQ(tr->getTotalCost(), test->expectedFinalCost());
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
