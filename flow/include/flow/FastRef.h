@@ -197,4 +197,9 @@ bool operator!=(const Reference<P>& lhs, const Reference<P>& rhs) {
 	return !(lhs == rhs);
 }
 
+#define SWIFT_CXX_REF   \
+    __attribute__((swift_attr("import_as_ref")))   \
+    __attribute__((swift_attr("retain:addref")))   \
+    __attribute__((swift_attr("release:delref")))
+
 #endif

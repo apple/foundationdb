@@ -63,39 +63,13 @@ Version figureVersion(Version current,
 ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
   using namespace fdbserver_swift;
 
-  auto masterDataActor = MasterDataActor::init(MasterDataSwiftReference(*self.getPtr()));
+  auto masterDataActor = MasterDataActor::init(self.getPtr());
 
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
   masterDataActor.getVersion(req, /*result=*/promise);
   wait(promise.getFuture());
   return Void();
-}
-
-// FIXME: remove once MasterData is an FRT (rdar://101092361)
-MasterDataSwiftReference::MasterDataSwiftReference(MasterData &myself) : myself(myself) {}
-Counter &MasterDataSwiftReference::getGetCommitVersionRequests() const __attribute__((swift_attr("import_unsafe"))) {
-    return myself.getGetCommitVersionRequests();
-}
-Version MasterDataSwiftReference::getVersion() const { return myself.version; }
-void MasterDataSwiftReference::setVersion(Version v) { myself.version = v; }
-double MasterDataSwiftReference::getLastVersionTime() const { return myself.lastVersionTime; }
-void  MasterDataSwiftReference::setLastVersionTime(double v) { myself.lastVersionTime = v; }
-Version  MasterDataSwiftReference::getRecoveryTransactionVersion() const { return myself.recoveryTransactionVersion; }
-Version MasterDataSwiftReference::getLastEpochEnd() const { return myself.lastEpochEnd; }
-Optional<Version> MasterDataSwiftReference::getReferenceVersion() const { return myself.referenceVersion; }
-ResolutionBalancer &MasterDataSwiftReference::getResolutionBalancer() const __attribute__((swift_attr("import_unsafe"))) {
-    return myself.getResolutionBalancer();
-}
-
-// FIXME: remove once runtime issue #1 is fixed (rdar://101092612).
-CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterDataSwiftReference rd, UID value) {
-    auto &map = rd.myself.lastCommitProxyVersionReplies;
-    auto it = map.find(value);
-    if (it == map.end())
-        return nullptr;
-    CommitProxyVersionReplies *pret = &(*it).second;
-    return pret;
 }
 
 // FIXME: remove once linker issue is fixed (rdar://101092732).
