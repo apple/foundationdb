@@ -47,7 +47,7 @@ import org.opentest4j.TestAbortedException;
  * be running a server and you don't want to deal with spurious test failures.
  */
 public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	public static boolean canRunIntegrationTest() {
 		String prop = System.getProperty("run.integration.tests");

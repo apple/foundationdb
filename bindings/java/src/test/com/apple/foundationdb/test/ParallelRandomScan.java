@@ -36,7 +36,7 @@ import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 public class ParallelRandomScan {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	private static final int ROWS = 1000000;
 	private static final int DURATION_MS = 2000;

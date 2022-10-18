@@ -30,7 +30,7 @@ import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 
 public class ConcurrentGetSetGet {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	public static final Charset UTF8 = Charset.forName("UTF-8");
 

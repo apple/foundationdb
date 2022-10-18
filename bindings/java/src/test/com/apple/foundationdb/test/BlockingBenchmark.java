@@ -29,7 +29,7 @@ import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.Transaction;
 
 public class BlockingBenchmark {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	private static final int REPS = 100000;
 	private static final int PARALLEL = 100;

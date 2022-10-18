@@ -29,7 +29,7 @@ import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.Transaction;
 
 public class SerialInsertion {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	private static final int THREAD_COUNT = 10;
 	private static final int BATCH_SIZE = 1000;

@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Assertions;
  * This test is to verify the causal consistency of transactions for mutli-threaded client. 
  */
 public class SidebandMultiThreadClientTest {
-    public static final int API_VERSION = 720;
+    public static final int API_VERSION = 710300;
 
     public static final MultiClientHelper clientHelper = new MultiClientHelper();
 

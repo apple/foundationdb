@@ -27,7 +27,7 @@ import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 
 public abstract class AbstractTester {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 	protected static final int NUM_RUNS = 25;
 	protected static final Charset ASCII = Charset.forName("ASCII");
 

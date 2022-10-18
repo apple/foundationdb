@@ -32,7 +32,7 @@ import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.Transaction;
 
 public class WatchTest {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	public static void main(String[] args) {
 		FDB fdb = FDB.selectAPIVersion(API_VERSION);

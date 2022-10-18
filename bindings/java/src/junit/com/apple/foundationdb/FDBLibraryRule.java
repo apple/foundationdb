@@ -29,7 +29,7 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * are not available for any reason.
  */
 public class FDBLibraryRule implements BeforeAllCallback {
-	public static final int CURRENT_API_VERSION = 720;
+	public static final int CURRENT_API_VERSION = 710300;
 
 	private final int apiVersion;
 

@@ -20,7 +20,7 @@
 
 import os
 
-MAX_API_VERSION = 720
+MAX_API_VERSION = 710300
 COMMON_TYPES = ['null', 'bytes', 'string', 'int', 'uuid', 'bool', 'float', 'double', 'tuple']
 ALL_TYPES = COMMON_TYPES + ['versionstamp']
 

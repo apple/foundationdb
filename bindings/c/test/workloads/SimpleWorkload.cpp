@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 730
+#define FDB_API_VERSION 710300
 #include "foundationdb/fdb_c.h"
 #undef DLLEXPORT
 #include "workloads.h"

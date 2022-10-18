@@ -32,7 +32,7 @@ import com.apple.foundationdb.tuple.Tuple;
 import com.apple.foundationdb.tuple.Versionstamp;
 
 public class TupleTest {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	private static final byte FF = (byte)0xff;
 

@@ -34,7 +34,7 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 
 public class SerialIteration {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	private static final int ROWS = 1000000;
 	private static final int RUNS = 25;

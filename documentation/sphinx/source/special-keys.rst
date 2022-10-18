@@ -9,7 +9,6 @@ As of api version 630, additional features have been exposed as special keys and
 
 Read-only modules
 =================
-
 A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
 By default, users will see a ``special_keys_no_module_found`` error if they read from a range not contained in a module.
 The error indicates the read would always return an empty set of keys if it proceeded. This could be caused by typo in the keys to read.

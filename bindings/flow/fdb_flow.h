@@ -23,7 +23,7 @@
 
 #include <flow/flow.h>
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710300
 #include <bindings/c/foundationdb/fdb_c.h>
 #undef DLLEXPORT
 

@@ -29,7 +29,7 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
-const API_VERSION int = 720
+const API_VERSION int = 710300
 
 const CHUNK_SIZE int = 5
 

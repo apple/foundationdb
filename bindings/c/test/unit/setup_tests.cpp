@@ -20,7 +20,7 @@
 
 // Unit tests for API setup, network initialization functions from the FDB C API.
 
-#define FDB_API_VERSION 730
+#define FDB_API_VERSION 710300
 #include <foundationdb/fdb_c.h>
 #include <iostream>
 #include <thread>

@@ -32,7 +32,7 @@ import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 public class LocalityTests {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	public static void main(String[] args) {
 		FDB fdb = FDB.selectAPIVersion(API_VERSION);

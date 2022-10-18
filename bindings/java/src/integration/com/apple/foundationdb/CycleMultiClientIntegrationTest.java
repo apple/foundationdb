@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Assertions;
  * This test is to verify the atomicity of transactions. 
  */
 public class CycleMultiClientIntegrationTest {
-    public static final int API_VERSION = 720;
+    public static final int API_VERSION = 710300;
 
     public static final MultiClientHelper clientHelper = new MultiClientHelper();
 

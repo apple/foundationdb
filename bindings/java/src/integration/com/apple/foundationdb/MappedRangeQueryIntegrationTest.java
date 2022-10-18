@@ -41,7 +41,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 @ExtendWith(RequiresDatabase.class)
 class MappedRangeQueryIntegrationTest {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 	private static final FDB fdb = FDB.selectAPIVersion(API_VERSION);
 	public String databaseArg = null;
 	private Database openFDB() { return fdb.open(databaseArg); }

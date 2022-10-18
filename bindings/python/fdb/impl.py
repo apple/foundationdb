@@ -280,7 +280,7 @@ def transactional(*tr_args, **tr_kwargs):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 # We can't throw this from the decorator, as when a user runs
-                # >>> import fdb ; fdb.api_version(720)
+                # >>> import fdb ; fdb.api_version(710300)
                 # the code above uses @transactional before the API version is set
                 if fdb.get_api_version() >= 630 and inspect.isgeneratorfunction(func):
                     raise ValueError(

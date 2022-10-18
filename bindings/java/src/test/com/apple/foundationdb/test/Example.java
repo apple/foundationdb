@@ -25,7 +25,7 @@ import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.tuple.Tuple;
 
 public class Example {
-	public static final int API_VERSION = 720;
+	public static final int API_VERSION = 710300;
 
 	public static void main(String[] args) {
 		FDB fdb = FDB.selectAPIVersion(API_VERSION);
