@@ -9955,10 +9955,13 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			}
 
 			// must be aligned to blob range(s)
-			state Future<Optional<Value>> beginPresent = tr.get(purgeRange.begin.withPrefix(blobRangeKeys.begin));
-			state Future<Optional<Value>> endPresent = tr.get(purgeRange.end.withPrefix(blobRangeKeys.begin));
-			wait(success(beginPresent) && success(endPresent));
-			if (!beginPresent.get().present() || !endPresent.get().present()) {
+			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedBegin =
+			    getBlobRanges(&tr, KeyRangeRef(purgeRange.begin, purgeRange.begin), 2);
+			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedEnd =
+			    getBlobRanges(&tr, KeyRangeRef(purgeRange.end, purgeRange.end), 2);
+			wait(success(blobbifiedBegin) && success(blobbifiedEnd));
+			if ((!blobbifiedBegin.get().empty() && blobbifiedBegin.get().front().begin < purgeRange.begin) ||
+			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().back().end > purgeRange.end)) {
 				TraceEvent("UnalignedPurge")
 				    .detail("Range", range)
 				    .detail("Version", purgeVersion)
