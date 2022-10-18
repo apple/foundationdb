@@ -275,11 +275,17 @@ if(NOT WIN32)
       ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
     )
 
-    add_test(NAME fdb_c_api_tests
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-    )
+    file(GLOB API_TEST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/test/apitester/tests/*.toml")
+    foreach(test_file ${API_TEST_FILES})
+      get_filename_component(file_name "${test_file}" NAME_WE)
+      set(test_name "fdb_c_api_test_${file_name}")
+      add_test(NAME "${test_name}"
+        COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --test-file ${test_file}
+      )
+      set_tests_properties("${test_name}" PROPERTIES TIMEOUT 300)
+    endforeach()
 
     add_test(NAME fdb_c_upgrade_to_future_version
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
