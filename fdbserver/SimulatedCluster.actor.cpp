@@ -324,8 +324,14 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "injectSSTargetedRestart") {
 				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "tenantMode") {
-				tenantMode = TenantMode::fromValue(value);
+			if (attrib == "tenantModes") {
+				std::stringstream ss(value);
+				for (int i; ss >> i;) {
+					tenantModes.push_back(i);
+					if (ss.peek() == ',') {
+						ss.ignore();
+					}
+				}
 			}
 			if (attrib == "defaultTenant") {
 				defaultTenant = value;
@@ -383,7 +389,7 @@ public:
 	// By default, tenant mode is set randomly
 	// If provided, set using TenantMode::fromValue
 	// Verify match with TenantMode::fromValue in FDBTypes.h
-	int tenantMode = -1;
+	std::vector<int> tenantModes;
 	Optional<std::string> defaultTenant;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
@@ -452,7 +458,7 @@ public:
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay)
-		    .add("tenantMode", &tenantMode)
+		    .add("tenantModes", &tenantModes)
 		    .add("defaultTenant", &defaultTenant);
 		try {
 			auto file = toml::parse(testFile);
@@ -1164,7 +1170,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		auto tssModeStr = ini.GetValue("META", "tssMode");
 		auto tenantMode = ini.GetValue("META", "tenantMode");
 		if (tenantMode != nullptr) {
-			testConfig->tenantMode = atoi(tenantMode);
+			testConfig->tenantModes.push_back(atoi(tenantMode));
 		}
 		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
 		if (!defaultTenant.empty()) {
@@ -2541,8 +2547,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// where we update the defaultTenant and tenantMode in the testConfig
 	// Defer setting tenant mode and default tenant until later
 	if (!rebooting) {
-		if (testConfig.tenantMode >= 0) {
-			tenantMode = TenantMode::fromValue(StringRef(std::to_string(testConfig.tenantMode)));
+		if (testConfig.tenantModes.size()) {
+			auto randomPick = deterministicRandom()->randomChoice(testConfig.tenantModes);
+			tenantMode = TenantMode::fromValue(StringRef(std::to_string(randomPick)));
 			if (tenantMode == TenantMode::REQUIRED) {
 				allowDefaultTenant = true;
 				defaultTenant = "SimulatedDefaultTenant"_sr;
@@ -2592,8 +2599,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
 		// so set/overwrite those options if necessary here
-		if (rebooting) {
-			tenantMode = TenantMode::fromValue(StringRef(std::to_string(testConfig.tenantMode)));
+		if (rebooting && testConfig.tenantModes.size()) {
+			tenantMode = TenantMode::fromValue(StringRef(std::to_string(testConfig.tenantModes[0])));
 		}
 		if (testConfig.defaultTenant.present() && tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
 			// Default tenant set by testConfig or restarting data in restartInfo.ini
