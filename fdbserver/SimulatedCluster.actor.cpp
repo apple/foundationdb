@@ -625,7 +625,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
                                                          AgentMode runBackupAgents,
                                                          std::string whitelistBinPaths,
                                                          ProtocolVersion protocolVersion,
-                                                         ConfigDBType configDBType) {
+                                                         ConfigDBType configDBType,
+                                                         bool isDr) {
 	state ISimulator::ProcessInfo* simProcess = g_simulator->getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
@@ -645,7 +646,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 		    .detail("Address", NetworkAddress(ip, port, true, false))
 		    .detail("ZoneId", localities.zoneId())
 		    .detail("WaitTime", waitTime)
-		    .detail("Port", port);
+		    .detail("Port", port)
+		    .detail("IsDr", isDr);
 
 		wait(delay(waitTime));
 
@@ -658,7 +660,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 		                                                                 processClass,
 		                                                                 dataFolder->c_str(),
 		                                                                 coordFolder->c_str(),
-		                                                                 protocolVersion);
+		                                                                 protocolVersion,
+		                                                                 isDr);
 		wait(g_simulator->onProcess(
 		    process,
 		    TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
@@ -725,6 +728,16 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				}
 
 				futures.push_back(success(onShutdown));
+				if (!g_simulator->globalHasSwitchedCluster() && g_simulator->hasSwitchedCluster(process->address)) {
+					// When switching machines between clusters, a simultaneous
+					// reboot followed by a reboot and switch can cause the
+					// reboot and switch to be ignored. Handle this case by
+					// sending the reboot and switch kill type when the process
+					// comes back online.
+					TraceEvent("RebootProcessAndSwitchLateReboot").detail("Address", process->address);
+					g_simulator->switchCluster(process->address);
+					process->shutdownSignal.send(ISimulator::KillType::RebootProcessAndSwitch);
+				}
 				wait(waitForAny(futures));
 			} catch (Error& e) {
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set
@@ -840,7 +853,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("KillType", shutdownResult)
 			    .detail("ConnectionString", connStr.toString())
 			    .detail("OtherConnectionString", otherConnStr.toString())
-			    .detail("SwitchingTo", g_simulator->hasSwitchedCluster(process->address));
+			    .detail("SwitchingTo", g_simulator->hasSwitchedCluster(process->address))
+			    .detail("MachineId", process->machine->machineId);
 
 			// Handle the case where otherConnStr is '@'.
 			if (otherConnStr.toString().size() > 1) {
@@ -876,7 +890,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
                                     bool sslOnly,
                                     std::string whitelistBinPaths,
                                     ProtocolVersion protocolVersion,
-                                    ConfigDBType configDBType) {
+                                    ConfigDBType configDBType,
+                                    bool isDr) {
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
@@ -948,7 +963,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          agentMode,
 					                                          whitelistBinPaths,
 					                                          protocolVersion,
-					                                          configDBType));
+					                                          configDBType,
+					                                          isDr));
 					g_simulator->setDiffProtocol = true;
 				} else {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
@@ -967,7 +983,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          agentMode,
 					                                          whitelistBinPaths,
 					                                          g_network->protocolVersion(),
-					                                          configDBType));
+					                                          configDBType,
+					                                          isDr));
 				}
 				TraceEvent("SimulatedMachineProcess", randomId)
 				    .detail("Address", NetworkAddress(ips[i], listenPort, true, false))
@@ -1344,7 +1361,8 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
 			                     protocolVersion,
-			                     configDBType),
+			                     configDBType,
+			                     false),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 
@@ -2383,7 +2401,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			                     sslOnly,
 			                     whitelistBinPaths,
 			                     protocolVersion,
-			                     configDBType),
+			                     configDBType,
+			                     false),
 			    "SimulatedMachine"));
 
 			if (requiresExtraDBMachines) {
@@ -2413,7 +2432,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					                                                      sslOnly,
 					                                                      whitelistBinPaths,
 					                                                      protocolVersion,
-					                                                      configDBType),
+					                                                      configDBType,
+					                                                      true),
 					                                     "SimulatedMachine"));
 					++cluster;
 				}
@@ -2460,7 +2480,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
-		                                  configDBType),
+		                                  configDBType,
+		                                  false),
 		                 "SimulatedTesterMachine"));
 	}
 
@@ -2584,7 +2605,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                            ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 	                            "",
 	                            "",
-	                            currentProtocolVersion());
+	                            currentProtocolVersion(),
+	                            false);
 	testSystem->excludeFromRestarts = true;
 	wait(g_simulator->onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();

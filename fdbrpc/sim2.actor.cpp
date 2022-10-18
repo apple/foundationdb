@@ -1261,7 +1261,8 @@ public:
 	                        ProcessClass startingClass,
 	                        const char* dataFolder,
 	                        const char* coordinationFolder,
-	                        ProtocolVersion protocol) override {
+	                        ProtocolVersion protocol,
+	                        bool drProcess) override {
 		ASSERT(locality.machineId().present());
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
@@ -1311,6 +1312,7 @@ public:
 		m->excluded = g_simulator->isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator->isCleared(addresses.address);
 		m->protocolVersion = protocol;
+		m->drProcess = drProcess;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType)&m->tdmetrics);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
@@ -1324,7 +1326,8 @@ public:
 		    .detail("Address", m->address)
 		    .detail("MachineId", m->locality.machineId())
 		    .detail("Excluded", m->excluded)
-		    .detail("Cleared", m->cleared);
+		    .detail("Cleared", m->cleared)
+		    .detail("DrProcess", m->drProcess);
 
 		if (std::string(name) == "remote flow process") {
 			protectedAddresses.insert(m->address);
@@ -1825,6 +1828,7 @@ public:
 		}
 
 		int processesOnMachine = 0;
+		bool isMainCluster = true; // false for machines running DR processes
 
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
@@ -1833,6 +1837,9 @@ public:
 				kt = Reboot;
 			if (!process->rebooting)
 				processesOnMachine++;
+			if (process->drProcess) {
+				isMainCluster = false;
+			}
 		}
 
 		// Do nothing, if no processes to kill
@@ -1959,14 +1966,12 @@ public:
 		           probe::context::sim2,
 		           probe::assert::simOnly);
 
-		if (processesOnMachine == processesPerMachine + 1 && originalKt == KillType::RebootProcessAndSwitch) {
-			// Simulation runs which test DR add an extra process to each
-			// machine in the original cluster. When killing processes with the
-			// RebootProcessAndSwitch kill type, processes in the original
-			// cluster should be rebooted in order to kill any zombie
-			// processes.
+		if (isMainCluster && originalKt == RebootProcessAndSwitch) {
+			// When killing processes with the RebootProcessAndSwitch kill
+			// type, processes in the original cluster should be rebooted in
+			// order to kill any zombie processes.
 			kt = KillType::Reboot;
-		} else if (processesOnMachine != processesPerMachine) {
+		} else if (processesOnMachine != processesPerMachine && kt != RebootProcessAndSwitch) {
 			// Check if any processes on machine are rebooting
 			CODE_PROBE(true,
 			           "Attempted reboot, but the target did not have all of its processes running",
