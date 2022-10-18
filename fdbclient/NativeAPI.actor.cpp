@@ -10540,6 +10540,76 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 }
 
 // BlobGranule API.
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, KeyRange range, int batchLimit) {
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
+	state Key beginKey = range.begin;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			state RangeResult results = wait(
+			    krmGetRangesUnaligned(tr, blobRangeKeys.begin, KeyRangeRef(beginKey, range.end), 2 * batchLimit + 2));
+
+			blobRanges.arena().dependsOn(results.arena());
+			for (int i = 0; i < results.size() - 1; i++) {
+				if (results[i].value == blobRangeActive) {
+					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
+				}
+				if (blobRanges.size() == batchLimit) {
+					return blobRanges;
+				}
+			}
+
+			if (!results.more) {
+				return blobRanges;
+			}
+			beginKey = results.back().key;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobbifiedRanges(Transaction* tr,
+                                                                     KeyRange range,
+                                                                     int rangeLimit,
+                                                                     Optional<TenantName> tenantName) {
+	state TenantMapEntry tme;
+
+	loop {
+		try {
+			if (tenantName.present()) {
+				wait(store(tme, blobGranuleGetTenantEntry(tr, range.begin, tenantName)));
+				range = range.withPrefix(tme.prefix);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
+	if (!tenantName.present()) {
+		return blobRanges;
+	}
+
+	// Strip tenant prefix out.
+	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
+	for (auto& blobRange : blobRanges) {
+		// Filter out blob ranges that span tenants for some reason.
+		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
+			TraceEvent("ListBlobbifiedRangeSpansTenants")
+			    .suppressFor(/*seconds=*/5)
+			    .detail("Tenant", tenantName.get())
+			    .detail("Range", blobRange);
+			continue;
+		}
+		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
+	}
+	return tenantBlobRanges;
+}
+
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,
@@ -10662,37 +10732,6 @@ Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }
 
-ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, KeyRange range, int batchLimit) {
-	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
-	state Key beginKey = range.begin;
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-			state RangeResult results = wait(
-			    krmGetRangesUnaligned(tr, blobRangeKeys.begin, KeyRangeRef(beginKey, range.end), 2 * batchLimit + 2));
-
-			blobRanges.arena().dependsOn(results.arena());
-			for (int i = 0; i < results.size() - 1; i++) {
-				if (results[i].value == blobRangeActive) {
-					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
-				}
-				if (blobRanges.size() == batchLimit) {
-					return blobRanges;
-				}
-			}
-
-			if (!results.more) {
-				return blobRanges;
-			}
-			beginKey = results.back().key;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
 ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
                                      KeyRange range,
                                      bool active,
@@ -10762,41 +10801,13 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Refer
                                                                            KeyRange range,
                                                                            int rangeLimit,
                                                                            Optional<TenantName> tenantName) {
+
 	state Database db(cx);
 	state Transaction tr(db);
-	state TenantMapEntry tme;
 
-	loop {
-		try {
-			if (tenantName.present()) {
-				wait(store(tme, blobGranuleGetTenantEntry(&tr, range.begin, tenantName)));
-				range = range.withPrefix(tme.prefix);
-			}
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
+	Standalone<VectorRef<KeyRangeRef>> blobbifiedRanges = wait(getBlobbifiedRanges(&tr, range, rangeLimit, tenantName));
 
-	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(&tr, range, rangeLimit));
-	if (!tenantName.present()) {
-		return blobRanges;
-	}
-
-	// Strip tenant prefix out.
-	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
-	for (auto& blobRange : blobRanges) {
-		// Filter out blob ranges that span tenants for some reason.
-		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
-			TraceEvent("ListBlobbifiedRangeSpansTenants")
-			    .suppressFor(/*seconds=*/5)
-			    .detail("Tenant", tenantName.get())
-			    .detail("Range", blobRange);
-			continue;
-		}
-		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
-	}
-	return tenantBlobRanges;
+	return blobbifiedRanges;
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range,
