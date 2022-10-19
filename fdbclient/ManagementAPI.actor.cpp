@@ -1010,7 +1010,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	choose {
 		when(wait(waitForAll(leaderServers))) {}
-		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+		when(wait(delay(5.0))) {
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+		}
 	}
 	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
 	    .detail("CurrentCoordinators", old.toString())
@@ -1112,7 +1114,9 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				                                           TaskPriority::CoordinationReply));
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
-				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+				when(wait(delay(5.0))) {
+					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+				}
 			}
 
 			tr.set(coordinatorsKey, newClusterConnectionString.toString());
@@ -2145,6 +2149,9 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 
 ACTOR Future<Void> lockDatabase(Database cx, UID id) {
 	state Transaction tr(cx);
+	UID debugID = deterministicRandom()->randomUniqueID();
+	TraceEvent("LockDatabaseTransaction", debugID).log();
+	tr.debugTransaction(debugID);
 	loop {
 		try {
 			wait(lockDatabase(&tr, id));

@@ -149,7 +149,14 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				if (g_simulator->corruptedBlocks.count(std::make_pair(filename, pageNumber - 1))) {
+					// this corruption was caused by failure injection
+					severity = SevWarnAlways;
+				}
+			}
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)
@@ -706,7 +713,7 @@ struct IntKeyCursor {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 };
@@ -744,7 +751,7 @@ struct RawCursor {
 			} catch (...) {
 				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 	void moveFirst() {
