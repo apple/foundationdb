@@ -1172,7 +1172,7 @@ void usage() {
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "    --async_xacts", "Specify number of concurrent transactions to be run in async mode");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
-	printf("%-24s %s\n", "-r, --rows=LOAD_FACTOR", "Specify load factor");
+	printf("%-24s %s\n", "-l, --load_factor=LOAD_FACTOR", "Specify load factor");
 	printf("%-24s %s\n", "-s, --seconds=SECONDS", "Specify the test duration in seconds\n");
 	printf("%-24s %s\n", "", "This option cannot be specified with --iteration.");
 	printf("%-24s %s\n", "-i, --iteration=ITERS", "Specify the number of iterations.\n");
