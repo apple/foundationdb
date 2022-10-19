@@ -3556,9 +3556,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 						forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 					}
 				}
-				when(wait(error)) {
-					throw internal_error();
-				}
+				when(wait(error)) { throw internal_error(); }
 				when(wait(activeSharedChange)) {
 					if (activeSharedTLog->get() == tlogId) {
 						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
