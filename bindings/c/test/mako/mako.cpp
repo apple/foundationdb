@@ -323,9 +323,9 @@ int populate(Database db,
 		auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 		double required_keys = (key_end - key_begin + 1) * args.load_factor;
 		for (auto i = key_begin; i <= key_end; i++) {
-			// Choose required_keys out of (key_end -i + 1) randomly, so the probability is required_keys / (key_end - i + 1).
-			// Generate a random number in range [0, 1), if the generated number is smaller or equal to required_keys / (key_end - i + 1),
-			// then choose this key.
+			// Choose required_keys out of (key_end -i + 1) randomly, so the probability is required_keys / (key_end - i
+			// + 1). Generate a random number in range [0, 1), if the generated number is smaller or equal to
+			// required_keys / (key_end - i + 1), then choose this key.
 			double r = rand() / (1.0 + RAND_MAX);
 			if (r > required_keys / (key_end - i + 1)) {
 				continue;
@@ -993,7 +993,7 @@ int initArguments(Arguments& args) {
 	args.async_xacts = 0;
 	args.mode = MODE_INVALID;
 	args.rows = 100000;
-        args.load_factor = 1.0;
+	args.load_factor = 1.0;
 	args.row_digits = digits(args.rows);
 	args.seconds = 30;
 	args.iteration = 0;
@@ -1239,7 +1239,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "threads", required_argument, NULL, 't' },
 			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
 			{ "rows", required_argument, NULL, 'r' },
-                        { "load_factor", required_argument, NULL, 'l'},
+			{ "load_factor", required_argument, NULL, 'l' },
 			{ "seconds", required_argument, NULL, 's' },
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
@@ -1316,9 +1316,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.rows = atoi(optarg);
 			args.row_digits = digits(args.rows);
 			break;
-                case 'l':
-                        args.load_factor = atof(optarg);
-                        break;
+		case 'l':
+			args.load_factor = atof(optarg);
+			break;
 		case 's':
 			args.seconds = atoi(optarg);
 			break;
@@ -1538,8 +1538,8 @@ int validateArguments(Arguments const& args) {
 		logr.error("--rows must be a positive integer");
 		return -1;
 	}
-        if (args.load_factor <= 0 || args.load_factor > 1) {
-	        logr.error("--load_factor must be in range (0, 1]");
+	if (args.load_factor <= 0 || args.load_factor > 1) {
+		logr.error("--load_factor must be in range (0, 1]");
 		return -1;
 	}
 	if (args.key_length < 0) {
