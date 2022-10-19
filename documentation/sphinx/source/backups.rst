@@ -527,7 +527,7 @@ The ``start`` command will start a new restore on the specified (or default) tag
 ``--user-data``
   Restore only the user keyspace. This option should NOT be used alongside --system-metadata (below) and CANNOT be used alongside other specified key ranges.
 
-``--system_data``
+``--system-metadata``
   Restore only the relevant system keyspace (currently only tenant metadata). This option should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.
 
 .. program:: fdbrestore abort
