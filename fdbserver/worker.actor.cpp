@@ -1686,6 +1686,16 @@ ACTOR Future<Void> createClusterIdFile(std::string folder, UID clusterId) {
 	}
 }
 
+// Updates this processes cluster ID based off the cluster ID received in the
+// ServerDBInfo. Persists the cluster ID to disk if it does not already exist.
+ACTOR Future<Void> updateClusterId(UID ccClusterId, Reference<AsyncVar<Optional<UID>>> clusterId, std::string folder) {
+	if (!clusterId->get().present() && ccClusterId.isValid()) {
+		wait(createClusterIdFile(folder, ccClusterId));
+		clusterId->set(ccClusterId);
+	}
+	return Void();
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -1752,6 +1762,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	interf.initEndpoints();
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
+
+	state Future<Void> updateClusterIdFuture;
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
@@ -2097,10 +2109,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					errorForwarders.add(
 					    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
 
-					if (!clusterId->get().present() && localInfo.client.clusterId.isValid()) {
-						state UID tmpClusterId = localInfo.client.clusterId;
-						wait(createClusterIdFile(folder, tmpClusterId));
-						clusterId->set(tmpClusterId);
+					if (!updateClusterIdFuture.isValid() && !clusterId->get().present() &&
+					    localInfo.client.clusterId.isValid()) {
+						updateClusterIdFuture = updateClusterId(localInfo.client.clusterId, clusterId, folder);
 					}
 				}
 			}
