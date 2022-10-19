@@ -149,6 +149,13 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				if (g_simulator->corruptedBlocks.count(std::make_pair(filename, pageNumber - 1))) {
+					// this corruption was caused by failure injection
+					severity = SevWarnAlways;
+				}
+			}
 			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)

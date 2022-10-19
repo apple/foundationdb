@@ -116,6 +116,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool shouldInject(DeterministicRandom& random,
 	                  const WorkloadRequest& work,
 	                  const unsigned alreadyAdded) const override {
+		if (g_network->isSimulated() && !g_simulator->extraDatabases.empty()) {
+			// Remove this as soon as we track extra databases properly
+			return false;
+		}
 		return work.useDatabase && random.random01() < 1.0 / (2.0 + alreadyAdded);
 	}
 
