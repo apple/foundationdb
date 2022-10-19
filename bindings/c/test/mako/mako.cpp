@@ -321,9 +321,14 @@ int populate(Database db,
 		const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 		const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 		auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
+		double required_keys = (key_end - key_begin + 1) * args.load_factor;
 		for (auto i = key_begin; i <= key_end; i++) {
+			double r = rand() / (1.0 + RAND_MAX);
+			if (r > required_keys / (key_end - i + 1)) continue;
+			--required_keys;
 			/* sequential keys */
 			genKey(keystr.data(), KEY_PREFIX, args, i);
+			printf("Gen key : %s\n", keystr.c_str());
 			/* random values */
 			randomString(valstr.data(), args.value_length);
 
@@ -984,6 +989,7 @@ int initArguments(Arguments& args) {
 	args.async_xacts = 0;
 	args.mode = MODE_INVALID;
 	args.rows = 100000;
+        args.load_factor = 1.0;
 	args.row_digits = digits(args.rows);
 	args.seconds = 30;
 	args.iteration = 0;
@@ -1166,6 +1172,7 @@ void usage() {
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "    --async_xacts", "Specify number of concurrent transactions to be run in async mode");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
+	printf("%-24s %s\n", "-r, --rows=LOAD_FACTOR", "Specify load factor");
 	printf("%-24s %s\n", "-s, --seconds=SECONDS", "Specify the test duration in seconds\n");
 	printf("%-24s %s\n", "", "This option cannot be specified with --iteration.");
 	printf("%-24s %s\n", "-i, --iteration=ITERS", "Specify the number of iterations.\n");
@@ -1228,6 +1235,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "threads", required_argument, NULL, 't' },
 			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
 			{ "rows", required_argument, NULL, 'r' },
+                        { "load_factor", required_argument, NULL, 'l'},
 			{ "seconds", required_argument, NULL, 's' },
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
@@ -1304,6 +1312,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.rows = atoi(optarg);
 			args.row_digits = digits(args.rows);
 			break;
+                case 'l':
+                        args.load_factor = atof(optarg);
+                        break;
 		case 's':
 			args.seconds = atoi(optarg);
 			break;
@@ -1521,6 +1532,10 @@ int validateArguments(Arguments const& args) {
 	}
 	if (args.rows <= 0) {
 		logr.error("--rows must be a positive integer");
+		return -1;
+	}
+        if (args.load_factor <= 0 || args.load_factor > 1) {
+	        logr.error("--load_factor must be in range (0, 1]");
 		return -1;
 	}
 	if (args.key_length < 0) {
@@ -2118,6 +2133,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"async_xacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"mode\": %d,", args.mode);
 		fmt::fprintf(fp, "\"rows\": %d,", args.rows);
+		fmt::fprintf(fp, "\"load_factor\": %lf,", args.load_factor);
 		fmt::fprintf(fp, "\"seconds\": %d,", args.seconds);
 		fmt::fprintf(fp, "\"iteration\": %d,", args.iteration);
 		fmt::fprintf(fp, "\"tpsmax\": %d,", args.tpsmax);
