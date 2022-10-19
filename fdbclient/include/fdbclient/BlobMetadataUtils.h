@@ -62,8 +62,8 @@ struct BlobMetadataDetailsRef {
 	                                BlobMetadataDomainNameRef domainName,
 	                                Optional<StringRef> base,
 	                                VectorRef<StringRef> partitions,
-	                                int64_t refreshAt,
-	                                int64_t expireAt)
+	                                double refreshAt,
+	                                double expireAt)
 	  : domainId(domainId), domainName(ar, domainName), partitions(ar, partitions), refreshAt(refreshAt),
 	    expireAt(expireAt) {
 		if (base.present()) {
