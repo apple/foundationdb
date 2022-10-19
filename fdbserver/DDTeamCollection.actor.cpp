@@ -595,7 +595,7 @@ public:
 				// addTeamsBestOf() will not add more teams than needed.
 				// If the team number is more than the desired, the extra teams are added in the code path when
 				// a team is added as an initial team
-				int addedTeams = self->addTeamsBestOf(teamsToBuild, desiredTeams, maxTeams);
+				int addedTeams = wait(self->addTeamsBestOf(teamsToBuild, desiredTeams, maxTeams));
 
 				if (addedTeams <= 0 && self->teams.size() == 0) {
 					TraceEvent(SevWarn, "NoTeamAfterBuildTeam", self->distributorId)
@@ -3197,6 +3197,164 @@ public:
 		}
 	}
 
+	ACTOR static Future<int> addTeamsBestOf(DDTeamCollection* self, int teamsToBuild, int desiredTeams, int maxTeams) {
+		ASSERT_GE(teamsToBuild, 0);
+		ASSERT_WE_THINK(self->machine_info.size() > 0 || self->server_info.size() == 0);
+		ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && self->configuration.storageTeamSize >= 1);
+
+		// Exclude machine teams who have members in the wrong configuration.
+		// When we change configuration, we may have machine teams with storageTeamSize in the old configuration.
+		int healthyMachineTeamCount = self->getHealthyMachineTeamCount();
+		int totalMachineTeamCount = self->machineTeams.size();
+		state int totalHealthyMachineCount = self->calculateHealthyMachineCount();
+
+		state int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
+		state int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
+		// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
+		int machineTeamsToBuild = std::max(
+		    0, std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount));
+
+		{
+			TraceEvent te("BuildMachineTeams");
+			te.detail("TotalHealthyMachine", totalHealthyMachineCount)
+			    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
+			    .detail("DesiredMachineTeams", desiredMachineTeams)
+			    .detail("MaxMachineTeams", maxMachineTeams)
+			    .detail("MachineTeamsToBuild", machineTeamsToBuild);
+			// Pre-build all machine teams until we have the desired number of machine teams
+			if (machineTeamsToBuild > 0 || self->notEnoughMachineTeamsForAMachine()) {
+				auto addedMachineTeams = self->addBestMachineTeams(machineTeamsToBuild);
+				te.detail("MachineTeamsAdded", addedMachineTeams);
+			}
+		}
+
+		state int addedTeams = 0;
+		state int teamsSize = self->teams.size();
+		while (addedTeams < teamsToBuild || self->notEnoughTeamsForAServer()) {
+			// Step 1: Create 1 best machine team
+			std::vector<UID> bestServerTeam;
+			int bestScore = std::numeric_limits<int>::max();
+			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
+			bool earlyQuitBuild = false;
+			for (int i = 0; i < maxAttempts && i < 100; ++i) {
+				// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
+				Reference<TCServerInfo> chosenServer = self->findOneLeastUsedServer();
+				if (!chosenServer.isValid()) {
+					TraceEvent(SevWarn, "NoValidServer").detail("Primary", self->primary);
+					earlyQuitBuild = true;
+					break;
+				}
+				// Note: To avoid creating correlation of picked machine teams, we simply choose a random machine team
+				// instead of choosing the least used machine team.
+				// The correlation happens, for example, when we add two new machines, we may always choose the machine
+				// team with these two new machines because they are typically less used.
+				Reference<TCMachineTeamInfo> chosenMachineTeam = self->findOneRandomMachineTeam(*chosenServer);
+
+				if (!chosenMachineTeam.isValid()) {
+					// We may face the situation that temporarily we have no healthy machine.
+					TraceEvent(SevWarn, "MachineTeamNotFound")
+					    .detail("Primary", self->primary)
+					    .detail("MachineTeams", self->machineTeams.size());
+					continue; // try randomly to find another least used server
+				}
+
+				// From here, chosenMachineTeam must have a healthy server team
+				// Step 3: Randomly pick 1 server from each machine in the chosen machine team to form a server team
+				std::vector<UID> serverTeam;
+				int chosenServerCount = 0;
+				for (auto& machine : chosenMachineTeam->getMachines()) {
+					UID serverID;
+					if (machine == chosenServer->machine) {
+						serverID = chosenServer->getId();
+						++chosenServerCount;
+					} else {
+						std::vector<Reference<TCServerInfo>> healthyProcesses;
+						for (auto it : machine->serversOnMachine) {
+							if (!self->server_status.get(it->getId()).isUnhealthy()) {
+								healthyProcesses.push_back(it);
+							}
+						}
+						serverID = deterministicRandom()->randomChoice(healthyProcesses)->getId();
+					}
+					serverTeam.push_back(serverID);
+				}
+
+				ASSERT_EQ(chosenServerCount, 1); // chosenServer should be used exactly once
+				ASSERT_EQ(serverTeam.size(), self->configuration.storageTeamSize);
+
+				std::sort(serverTeam.begin(), serverTeam.end());
+				int overlap = self->overlappingMembers(serverTeam);
+				if (overlap == serverTeam.size()) {
+					maxAttempts += 1;
+					continue;
+				}
+
+				// Pick the server team with smallest score in all attempts
+				// If we use different metric here, DD may oscillate infinitely in creating and removing teams.
+				// SOMEDAY: Improve the code efficiency by using reservoir algorithm
+				int score = SERVER_KNOBS->DD_OVERLAP_PENALTY * overlap;
+				for (auto& server : serverTeam) {
+					score += self->server_info[server]->getTeams().size();
+				}
+				TraceEvent(SevDebug, "BuildServerTeams")
+				    .detail("Score", score)
+				    .detail("BestScore", bestScore)
+				    .detail("TeamSize", serverTeam.size())
+				    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+				if (score < bestScore) {
+					bestScore = score;
+					bestServerTeam = serverTeam;
+				}
+			}
+
+			if (earlyQuitBuild) {
+				break;
+			}
+			if (bestServerTeam.size() != self->configuration.storageTeamSize) {
+				// Not find any team and will unlikely find a team
+				self->lastBuildTeamsFailed = true;
+				break;
+			}
+
+			// Step 4: Add the server team
+			self->addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
+			addedTeams++;
+			teamsSize = self->teams.size();
+
+			// Yield to higher priority tasks; prevents this from becoming a slow task
+			if (addedTeams != 0 && (addedTeams % (g_network->isSimulated() ? 2 : 100) == 0)) {
+				wait(yield());
+			}
+			ASSERT_EQ(teamsSize, self->teams.size());
+		}
+
+		int currentHealthyMachineTeamCount = self->getHealthyMachineTeamCount();
+
+		auto [minTeamsOnServer, maxTeamsOnServer] = self->calculateMinMaxServerTeamsOnServer();
+		auto [minMachineTeamsOnMachine, maxMachineTeamsOnMachine] = self->calculateMinMaxMachineTeamsOnMachine();
+
+		TraceEvent("TeamCollectionInfo", self->distributorId)
+		    .detail("Primary", self->primary)
+		    .detail("AddedTeams", addedTeams)
+		    .detail("TeamsToBuild", teamsToBuild)
+		    .detail("CurrentServerTeams", self->teams.size())
+		    .detail("DesiredTeams", desiredTeams)
+		    .detail("MaxTeams", maxTeams)
+		    .detail("StorageTeamSize", self->configuration.storageTeamSize)
+		    .detail("CurrentMachineTeams", self->machineTeams.size())
+		    .detail("CurrentHealthyMachineTeams", currentHealthyMachineTeamCount)
+		    .detail("DesiredMachineTeams", desiredMachineTeams)
+		    .detail("MaxMachineTeams", maxMachineTeams)
+		    .detail("TotalHealthyMachines", totalHealthyMachineCount)
+		    .detail("MinTeamsOnServer", minTeamsOnServer)
+		    .detail("MaxTeamsOnServer", maxTeamsOnServer)
+		    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+		    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
+		    .detail("DoBuildTeams", self->doBuildTeams)
+		    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
+
+		return addedTeams;
+	}
 }; // class DDTeamCollectionImpl
 
 int32_t DDTeamCollection::getTargetTSSInDC() const {
@@ -4448,156 +4606,8 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	return false;
 }
 
-int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams) {
-	ASSERT_GE(teamsToBuild, 0);
-	ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
-	ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
-
-	int addedTeams = 0;
-
-	// Exclude machine teams who have members in the wrong configuration.
-	// When we change configuration, we may have machine teams with storageTeamSize in the old configuration.
-	int healthyMachineTeamCount = getHealthyMachineTeamCount();
-	int totalMachineTeamCount = machineTeams.size();
-	int totalHealthyMachineCount = calculateHealthyMachineCount();
-
-	int desiredMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
-	int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
-	// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
-	int machineTeamsToBuild =
-	    std::max(0, std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount));
-
-	{
-		TraceEvent te("BuildMachineTeams");
-		te.detail("TotalHealthyMachine", totalHealthyMachineCount)
-		    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
-		    .detail("DesiredMachineTeams", desiredMachineTeams)
-		    .detail("MaxMachineTeams", maxMachineTeams)
-		    .detail("MachineTeamsToBuild", machineTeamsToBuild);
-		// Pre-build all machine teams until we have the desired number of machine teams
-		if (machineTeamsToBuild > 0 || notEnoughMachineTeamsForAMachine()) {
-			auto addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
-			te.detail("MachineTeamsAdded", addedMachineTeams);
-		}
-	}
-
-	while (addedTeams < teamsToBuild || notEnoughTeamsForAServer()) {
-		// Step 1: Create 1 best machine team
-		std::vector<UID> bestServerTeam;
-		int bestScore = std::numeric_limits<int>::max();
-		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
-		bool earlyQuitBuild = false;
-		for (int i = 0; i < maxAttempts && i < 100; ++i) {
-			// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
-			Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
-			if (!chosenServer.isValid()) {
-				TraceEvent(SevWarn, "NoValidServer").detail("Primary", primary);
-				earlyQuitBuild = true;
-				break;
-			}
-			// Note: To avoid creating correlation of picked machine teams, we simply choose a random machine team
-			// instead of choosing the least used machine team.
-			// The correlation happens, for example, when we add two new machines, we may always choose the machine
-			// team with these two new machines because they are typically less used.
-			Reference<TCMachineTeamInfo> chosenMachineTeam = findOneRandomMachineTeam(*chosenServer);
-
-			if (!chosenMachineTeam.isValid()) {
-				// We may face the situation that temporarily we have no healthy machine.
-				TraceEvent(SevWarn, "MachineTeamNotFound")
-				    .detail("Primary", primary)
-				    .detail("MachineTeams", machineTeams.size());
-				continue; // try randomly to find another least used server
-			}
-
-			// From here, chosenMachineTeam must have a healthy server team
-			// Step 3: Randomly pick 1 server from each machine in the chosen machine team to form a server team
-			std::vector<UID> serverTeam;
-			int chosenServerCount = 0;
-			for (auto& machine : chosenMachineTeam->getMachines()) {
-				UID serverID;
-				if (machine == chosenServer->machine) {
-					serverID = chosenServer->getId();
-					++chosenServerCount;
-				} else {
-					std::vector<Reference<TCServerInfo>> healthyProcesses;
-					for (auto it : machine->serversOnMachine) {
-						if (!server_status.get(it->getId()).isUnhealthy()) {
-							healthyProcesses.push_back(it);
-						}
-					}
-					serverID = deterministicRandom()->randomChoice(healthyProcesses)->getId();
-				}
-				serverTeam.push_back(serverID);
-			}
-
-			ASSERT_EQ(chosenServerCount, 1); // chosenServer should be used exactly once
-			ASSERT_EQ(serverTeam.size(), configuration.storageTeamSize);
-
-			std::sort(serverTeam.begin(), serverTeam.end());
-			int overlap = overlappingMembers(serverTeam);
-			if (overlap == serverTeam.size()) {
-				maxAttempts += 1;
-				continue;
-			}
-
-			// Pick the server team with smallest score in all attempts
-			// If we use different metric here, DD may oscillate infinitely in creating and removing teams.
-			// SOMEDAY: Improve the code efficiency by using reservoir algorithm
-			int score = SERVER_KNOBS->DD_OVERLAP_PENALTY * overlap;
-			for (auto& server : serverTeam) {
-				score += server_info[server]->getTeams().size();
-			}
-			TraceEvent(SevDebug, "BuildServerTeams")
-			    .detail("Score", score)
-			    .detail("BestScore", bestScore)
-			    .detail("TeamSize", serverTeam.size())
-			    .detail("StorageTeamSize", configuration.storageTeamSize);
-			if (score < bestScore) {
-				bestScore = score;
-				bestServerTeam = serverTeam;
-			}
-		}
-
-		if (earlyQuitBuild) {
-			break;
-		}
-		if (bestServerTeam.size() != configuration.storageTeamSize) {
-			// Not find any team and will unlikely find a team
-			lastBuildTeamsFailed = true;
-			break;
-		}
-
-		// Step 4: Add the server team
-		addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
-		addedTeams++;
-	}
-
-	healthyMachineTeamCount = getHealthyMachineTeamCount();
-
-	auto [minTeamsOnServer, maxTeamsOnServer] = calculateMinMaxServerTeamsOnServer();
-	auto [minMachineTeamsOnMachine, maxMachineTeamsOnMachine] = calculateMinMaxMachineTeamsOnMachine();
-
-	TraceEvent("TeamCollectionInfo", distributorId)
-	    .detail("Primary", primary)
-	    .detail("AddedTeams", addedTeams)
-	    .detail("TeamsToBuild", teamsToBuild)
-	    .detail("CurrentServerTeams", teams.size())
-	    .detail("DesiredTeams", desiredTeams)
-	    .detail("MaxTeams", maxTeams)
-	    .detail("StorageTeamSize", configuration.storageTeamSize)
-	    .detail("CurrentMachineTeams", machineTeams.size())
-	    .detail("CurrentHealthyMachineTeams", healthyMachineTeamCount)
-	    .detail("DesiredMachineTeams", desiredMachineTeams)
-	    .detail("MaxMachineTeams", maxMachineTeams)
-	    .detail("TotalHealthyMachines", totalHealthyMachineCount)
-	    .detail("MinTeamsOnServer", minTeamsOnServer)
-	    .detail("MaxTeamsOnServer", maxTeamsOnServer)
-	    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
-	    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
-	    .detail("DoBuildTeams", doBuildTeams)
-	    .trackLatest(teamCollectionInfoEventHolder->trackingKey);
-
-	return addedTeams;
+Future<int> DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams) {
+	return DDTeamCollectionImpl::addTeamsBestOf(this, teamsToBuild, desiredTeams, maxTeams);
 }
 
 void DDTeamCollection::traceTeamCollectionInfo() const {
@@ -5236,22 +5246,23 @@ public:
 		return Void();
 	}
 
-	static void AddAllTeams_isExhaustive() {
+	ACTOR static Future<Void> AddAllTeams_isExhaustive() {
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		int processSize = 10;
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
-		int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
+		int result = wait(collection->addTeamsBestOf(200, desiredTeams, maxTeams));
 
 		// The maximum number of available server teams without considering machine locality is 120
 		// The maximum number of available server teams with machine locality constraint is 120 - 40, because
 		// the 40 (5*4*2) server teams whose servers come from the same machine are invalid.
 		ASSERT(result == 80);
+		return Void();
 	}
 
-	static void AddAllTeams_withLimit() {
+	ACTOR static Future<Void> AddAllTeams_withLimit() {
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		int processSize = 10;
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
@@ -5259,9 +5270,10 @@ public:
 
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
-		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
+		int result = wait(collection->addTeamsBestOf(10, desiredTeams, maxTeams));
 
 		ASSERT(result >= 10);
+		return Void();
 	}
 
 	ACTOR static Future<Void> AddTeamsBestOf_SkippingBusyServers() {
@@ -5277,7 +5289,7 @@ public:
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 
-		state int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams);
+		state int result = wait(collection->addTeamsBestOf(8, desiredTeams, maxTeams));
 
 		ASSERT(result >= 8);
 
@@ -5306,7 +5318,7 @@ public:
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 
 		collection->addBestMachineTeams(10);
-		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
+		int result = wait(collection->addTeamsBestOf(10, desiredTeams, maxTeams));
 
 		if (collection->machineTeams.size() != 10 || result != 8) {
 			collection->traceAllInfo(true); // Debug message
@@ -5769,12 +5781,12 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 }
 
 TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
-	DDTeamCollectionUnitTest::AddAllTeams_isExhaustive();
+	wait(DDTeamCollectionUnitTest::AddAllTeams_isExhaustive());
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
-	DDTeamCollectionUnitTest::AddAllTeams_withLimit();
+	wait(DDTeamCollectionUnitTest::AddAllTeams_withLimit());
 	return Void();
 }
 

@@ -597,7 +597,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
 	// build an extra machine team and record the event in trace
-	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
+	Future<int> addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
 public:
 	Reference<IDDTxnProcessor> db;
