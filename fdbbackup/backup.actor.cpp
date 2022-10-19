@@ -1200,7 +1200,7 @@ static void printRestoreUsage(bool devhelp) {
 	       "--system-metadata (below) and CANNOT be used alongside other specified key ranges.\n");
 	printf(
 	    "  --system-metadata\n"
-	    "                 Restore only the relevant system keyspace (currently only tenant metadata). This option "
+	    "                 Restore only the relevant system keyspace. This option "
 	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
 	if (devhelp) {
@@ -3978,6 +3978,20 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
+		if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
+			fprintf(stderr,
+			        "ERROR: Cannot specify additional ranges when using --user-data or --system-metadata "
+			        "options\n");
+			return FDB_EXIT_ERROR;
+		}
+		if (restoreUserKeys) {
+			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
+		} else if (restoreSystemKeys) {
+			for (const auto& r : getSystemBackupRanges()) {
+				backupKeys.push_back_deep(backupKeys.arena(), r);
+			}
+		}
+
 		switch (programExe) {
 		case ProgramExe::AGENT:
 			if (!initCluster())
@@ -4171,19 +4185,6 @@ int main(int argc, char* argv[]) {
 
 			switch (restoreType) {
 			case RestoreType::START:
-				if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
-					fprintf(stderr,
-					        "ERROR: Cannot specify additional ranges when using --user-data or --system-metadata "
-					        "options\n");
-					return FDB_EXIT_ERROR;
-				}
-				if (restoreUserKeys) {
-					backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
-				} else if (restoreSystemKeys) {
-					for (const auto& r : getSystemBackupRanges()) {
-						backupKeys.push_back_deep(backupKeys.arena(), r);
-					}
-				}
 				f = stopAfter(runRestore(db,
 				                         restoreClusterFileOrig,
 				                         tagName,
