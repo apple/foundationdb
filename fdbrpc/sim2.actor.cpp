@@ -46,7 +46,7 @@
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
 #include "flow/swift.h"
-#include "flow/swift_net2_hooks.h"
+#include "flow/swift_concurrency_hooks.h"
 #include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
@@ -910,13 +910,28 @@ public:
 		return delay(seconds, taskID, currentProcess, true);
 	}
 	void _swiftEnqueue(void* _swiftJob) override {
+		ASSERT(getCurrentProcess());
 		swift::Job* swiftJob = (swift::Job*)_swiftJob;
 
-		auto machine = currentProcess;
-		auto taskID = TaskPriority::DefaultOnMainThread; // FIXME(swift): make a conversion
+		ISimulator::ProcessInfo* machine = currentProcess;
+		auto taskID = TaskPriority::DefaultDelay; // FIXME(swift): make a conversion
+
+		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
+
+		printf("[c++][%s:%d](%s) Enqueue SIMULATOR swift TASK @ [machine:'%s'] @ TIME = %f\n",
+			   __FILE_NAME__, __LINE__, __FUNCTION__,
+		       machine ? machine->address.toString().c_str() : "x",
+		       time);
 
 		mutex.enter();
-		auto task = Sim2::Task(time, taskID, taskCount++, machine, swiftJob);
+		this->TEST = true;
+		auto taskTime = time + 0.01;
+		auto task = Sim2::Task(taskTime, taskID, taskCount++, machine, swiftJob);
+		printf("[c++][%s:%d](%s) Enqueue SIMULATOR swift TASK: job=%p @ [machine:'%s'] time=%f task-time=%f\n",
+			  __FILE_NAME__, __LINE__, __FUNCTION__,
+		       task.swiftJob, machine ? machine->address.toString().c_str() : "x",
+		       time,
+		       task.time);
 		tasks.push(task);
 		mutex.leave();
 	}
@@ -932,7 +947,10 @@ public:
 		}
 
 		mutex.enter();
-    	auto task = Sim2::Task(time + seconds, taskID, taskCount++, machine, f);
+		auto task = Sim2::Task(time + seconds, taskID, taskCount++, machine, f);
+		printf("[c++][%s:%d](%s) Enqueue SIMULATOR delay TASK: job=%p time=%f, task-time=%f\n",
+		       __FILE_NAME__, __LINE__, __FUNCTION__,
+		       task.swiftJob, time, time + seconds);
 		tasks.push(task);
 		mutex.leave();
 
@@ -1229,12 +1247,16 @@ public:
 	}
 
 	static void runLoop(Sim2* self) {
-    printf("[c++][sim2:%p][%s:%d](%s) runLoop ...\n", self, __FILE_NAME__, __LINE__, __FUNCTION__);
+		printf("[c++][sim2:%p][%s:%d](%s) runLoop ...\n", self, __FILE_NAME__, __LINE__, __FUNCTION__);
 
-    ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
+			printf("[c++][sim2:%p][%s:%d](%s) runLoop spin @ machine:%p...\n",
+			       self, __FILE_NAME__, __LINE__, __FUNCTION__,
+			       callingMachine);
 			self->mutex.enter();
-			if (self->tasks.size() == 0) {
+			auto tasksSize = self->tasks.size();
+			if (tasksSize == 0) {
 				self->mutex.leave();
 				ASSERT(false);
 			}
@@ -1243,10 +1265,29 @@ public:
 			Task t = std::move(self->tasks.top()); // Unfortunately still a copy under gcc where .top() returns const&
 			self->currentTaskID = t.taskID;
 			self->tasks.pop();
+
+//			if (self->TEST) {
+//				while (true) {
+//					Task t = std::move(self->tasks.top());
+//					printf("[c++][sim2:%p][%s:%d](%s) runLoop(queue:%d) TEST, POP: machine:'%s' task-time=%f swift-job=%p\n",
+//					       self, __FILE_NAME__, __LINE__, __FUNCTION__,
+//					       self->tasks.size(),
+//					       t.machine->address.toString().c_str(),
+//					       t.time,
+//					       t.swiftJob);
+//					self->tasks.pop();
+//				}
+//			}
+
 			self->mutex.leave();
 
-      // printf("[c++][sim2:%p][%s:%d](%s) self->execTask ...\n", self, __FILE_NAME__, __LINE__, __FUNCTION__);
-      self->execTask(t);
+			printf("[c++][sim2:%p][%s:%d](%s) self->execTask (queue:%d): machine='%s' swift-job=%p @ t.time=%f\n",
+			       self, __FILE_NAME__, __LINE__, __FUNCTION__,
+			       tasksSize,
+			       callingMachine ? callingMachine->address.toString().c_str() : "x",
+			       t.swiftJob,
+			       t.time);
+			self->execTask(t);
 			self->yielded = false;
 		}
 		self->currentProcess = callingMachine;
@@ -1267,9 +1308,6 @@ public:
 	                        const char* dataFolder,
 	                        const char* coordinationFolder,
 	                        ProtocolVersion protocol) override {
-
-		printf("[c++][sim2:%p][%s:%d](%s) NEW PROCESS! ip = %s\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__, ip.toString().c_str());
-
 
 		ASSERT(locality.machineId().present());
 		MachineInfo& machine = machines[locality.machineId().get()];
@@ -2243,7 +2281,7 @@ public:
 		Task(Task&& rhs) noexcept
 		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
 		    action(std::move(rhs.action)),
-		    swiftJob(nullptr) {
+		    swiftJob(rhs.swiftJob) { // <<<<<<<<< forgot this line
 		}
 		void operator=(Task const& rhs) {
 			taskID = rhs.taskID;
@@ -2283,6 +2321,7 @@ public:
 			if (printSimTime && (int)this->time < (int)t.time) {
 				printf("Time: %d\n", (int)t.time);
 			}
+			printf("[c++][%s:%d](%s) Task time [%f] prev self time: [%f]\n", __FILE_NAME__, __LINE__, __FUNCTION__, t.time, this->time);
 			this->time = t.time;
 			this->timerTime = std::max(this->timerTime, this->time);
 			mutex.leave();
@@ -2291,6 +2330,8 @@ public:
 			try {
 				// TODO(swift): I wonder if there
 				if (t.swiftJob) {
+					printf("[c++][%s:%d](%s) Run swift job: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, t.swiftJob);
+
 					swift_job_run(t.swiftJob, ExecutorRef::generic());
 				} else {
 					t.action.send(Void());
@@ -2318,7 +2359,8 @@ public:
 
 		mutex.enter();
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		tasks.push(Task(time, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
+	    auto task = Task(time, taskID, taskCount++, getCurrentProcess(), std::move(signal));
+		tasks.push(task);
 		mutex.leave();
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
@@ -2338,6 +2380,7 @@ public:
 	double time;
 	double timerTime;
 	TaskPriority currentTaskID;
+	bool TEST = false;
 
 	// taskCount is guarded by ISimulator::mutex
 	uint64_t taskCount;
@@ -2570,6 +2613,8 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 }
 
 void startNewSimulator(bool printSimTime) {
+	printf("[c++] Start NEW SIMULATOR!\n");
+
 	ASSERT(!g_network);
 	g_network = g_pSimulator = new Sim2(printSimTime);
 	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;

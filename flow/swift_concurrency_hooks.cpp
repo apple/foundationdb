@@ -1,5 +1,5 @@
 /*
- * swift_net2_hooks.cpp
+ * swift_concurrency_hooks.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/swift_net2_hooks.h"
+#include "flow/swift_concurrency_hooks.h"
 #include "flow/swift.h"
 #include "flow/swift/ABI/Task.h"
 #include "flow/TLSConfig.actor.h"

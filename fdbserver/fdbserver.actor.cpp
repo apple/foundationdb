@@ -86,7 +86,7 @@
 #include "flow/network.h"
 
 #include "flow/swift.h"
-#include "flow/swift_net2_hooks.h"
+#include "flow/swift_concurrency_hooks.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>

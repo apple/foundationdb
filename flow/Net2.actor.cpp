@@ -25,7 +25,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/swift.h"
-#include "flow/swift_net2_hooks.h"
+#include "flow/swift_concurrency_hooks.h"
 #include <algorithm>
 #include <memory>
 #define BOOST_SYSTEM_NO_LIB
@@ -1421,6 +1421,9 @@ ActorLineageSet& Net2::getActorLineageSet() {
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
+	printf("[c++][%s:%d](%s) Running NET2! %s\n", __FILE_NAME__, __LINE__, __FUNCTION__,
+	       getLocalAddress().toString().c_str());
+
 
 	thread_network = this;
 
@@ -1809,6 +1812,9 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 }
 
 void Net2::_swiftEnqueue(void* task) {
+	printf("[c++][%s:%d](%s) Enqueue NET2 [%s]\n", __FILE_NAME__, __LINE__, __FUNCTION__,
+	       this->getLocalAddress().toString().c_str());
+
 	N2::OrderedTask* orderedTask = (OrderedTask*)task;
 	this->ready.push(*orderedTask);
 }

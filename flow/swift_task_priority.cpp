@@ -1,5 +1,5 @@
 /*
- * swift_net2_hooks.cpp
+ * swift_concurrency_hooks.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,13 +19,13 @@
  */
 
 #include "flow/swift.h"
-#include "flow/swift_net2_hooks.h"
+#include "flow/swift_concurrency_hooks.h"
 #include "flow/swift/ABI/Task.h"
 #include "flow/TLSConfig.actor.h"
 
 // FIXME: surely there must be some more automatic way to maintain the mappings with Swift/C++ interop.
 int64_t swift_priority_to_net2(swift::JobPriority p) {
-	printf("[c++][%s:%d](%s) converting a priority (priority: %zu)\n", __FILE_NAME__, __LINE__, __FUNCTION__, p);
+	// printf("[c++][%s:%d](%s) converting a priority (priority: %zu)\n", __FILE_NAME__, __LINE__, __FUNCTION__, p);
 
 	TaskPriority fp = TaskPriority::Zero;
 	switch (static_cast<std::underlying_type<swift::JobPriority>::type>(p)) {
@@ -261,7 +261,8 @@ int64_t swift_priority_to_net2(swift::JobPriority p) {
 		fp = TaskPriority::Zero;
 		break;
 	default: {
-		assert(false && "Unknown swift priority!");
+	 	printf("[c++][%s:%d](%s) Unknown priority: %zu\n", __FILE_NAME__, __LINE__, __FUNCTION__, p);
+		abort();
 	}
 	}
 	return static_cast<std::underlying_type<TaskPriority>::type>(fp);

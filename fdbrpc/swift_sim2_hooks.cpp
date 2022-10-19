@@ -1,5 +1,5 @@
 /*
- * sim2.actor.cpp
+ * swift_sim2_hooks.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,7 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/swift_net2_hooks.h"
+#include "flow/swift_concurrency_hooks.h"
 #include "flow/swift.h"
 #include "flow/swift/ABI/Task.h"
 
@@ -35,5 +35,6 @@ void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
   ISimulator* sim = g_pSimulator;
   ASSERT(sim);
 
+  printf("[c++][%s:%d](%s) Enqueue swift task to SIMULATOR: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, job);
   sim->_swiftEnqueue(job);
 }
