@@ -524,7 +524,7 @@ The ``start`` command will start a new restore on the specified (or default) tag
 ``--inconsistent-snapshot-only``
   Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.
 
-``--user_data``
+``--user-data``
   Restore only the user keyspace. This option should NOT be used alongside --system-metadata (below) and CANNOT be used alongside other specified key ranges.
 
 ``--system_data``
