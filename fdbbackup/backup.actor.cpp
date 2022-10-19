@@ -3864,7 +3864,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (restoreSystemKeys && restoreUserKeys) {
-			fprintf(stderr, "ERROR: Please only specify one of: --user-data or --system-metadata not both\n");
+			fprintf(stderr, "ERROR: Please only specify one of --user-data or --system-metadata, not both\n");
 			return FDB_EXIT_ERROR;
 		}
 
