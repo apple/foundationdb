@@ -87,6 +87,19 @@ void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
     latestRequestNum.set(v);
 }
 
+CounterValue::CounterValue(std::string const& name, CounterCollection& collection) : value(std::make_shared<Counter>(name, collection)) {}
+
+void CounterValue::operator+=(Value delta) {
+    value->operator +=(delta);
+}
+
+void CounterValue::operator++() {
+    value->operator ++();
+}
+void CounterValue::clear() {
+    value->clear();
+}
+
 ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =

@@ -49,6 +49,21 @@
     __attribute__((swift_attr("retain:addrefMasterData")))   \
     __attribute__((swift_attr("release:delrefMasterData")))
 
+// A type with Swift value semantics for working with `Counter` types.
+class CounterValue {
+// FIXME: Delete immortal annotation from `Counter`.
+public:
+    using Value = Counter::Value;
+
+    CounterValue(std::string const& name, CounterCollection& collection);
+
+    void operator+=(Value delta);
+    void operator++();
+    void clear();
+private:
+    std::shared_ptr<Counter> value;
+};
+
 // FIXME (after the one below): Use SWIFT_CXX_REF once https://github.com/apple/swift/issues/61620 is fixed.
 // FIXME (before one above): Use SWIFT_CXX_REF_MASTERDATA once https://github.com/apple/swift/issues/61627 is fixed.
 struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterData> {
@@ -86,7 +101,7 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
     int8_t locality; // sequencer locality
 
     CounterCollection cc;
-    Counter getCommitVersionRequests;
+    CounterValue getCommitVersionRequests;
     Counter getLiveCommittedVersionRequests;
     Counter reportLiveCommittedVersionRequests;
     // This counter gives an estimate of the number of non-empty peeks that storage servers
@@ -153,9 +168,6 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
 
     inline ResolutionBalancer &getResolutionBalancer() {
         return resolutionBalancer;
-    }
-    inline Counter &getGetCommitVersionRequests() {
-        return getCommitVersionRequests;
     }
 };
 

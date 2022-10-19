@@ -49,7 +49,7 @@ public actor MasterDataActor {
     func getVersion(req: GetCommitVersionRequest) async {
         print("[swift] getVersion impl, requestNum: \(req.requestNum) -> ")
         let requestingProxyUID: UID = req.requestingProxy
-        myself.getGetCommitVersionRequests() += 1
+        myself.getCommitVersionRequests += 1
 
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
         guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
