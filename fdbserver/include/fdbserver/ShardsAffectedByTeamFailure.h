@@ -80,8 +80,12 @@ public:
 	bool hasShards(Team team) const;
 
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
-	// shards The second element of the pair is all previous sources for in-flight shards
-	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRangeRef keys);
+	// shards The second element of the pair is all previous sources for in-flight shards. This function only return the
+	// teams for the first shard in [keys.begin, keys.end)
+	std::pair<std::vector<Team>, std::vector<Team>> getTeamsForFirstShard(KeyRangeRef keys);
+
+	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRef key);
+
 	// Shard boundaries are modified in defineShard and the content of what servers correspond to each shard is a copy
 	// or union of the shards already there
 	void defineShard(KeyRangeRef keys);
@@ -124,6 +128,7 @@ private:
 public:
 	// return the iterator that traversing all ranges
 	auto getAllRanges() const -> decltype(shard_teams)::ConstRanges;
+	auto intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges;
 	// get total shards count
 	size_t getNumberOfShards() const;
 	void removeFailedServerForRange(KeyRangeRef keys, const UID& serverID);

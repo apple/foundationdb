@@ -763,7 +763,7 @@ std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 		KeyRangeRef curRange = it->range();
 		DDShardInfo info(curRange.begin);
 
-		auto teams = mgs->shardMapping->getTeamsFor(curRange);
+		auto teams = mgs->shardMapping->getTeamsForFirstShard(curRange);
 		if (!teams.first.empty() && !teams.second.empty()) {
 			CODE_PROBE(true, "Mock InitialDataDistribution In-Flight shard");
 			info.hasDest = true;
@@ -909,7 +909,7 @@ void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 	ASSERT(params.finishMoveKeysParallelismLock->take().isReady());
 
 	// get source and dest teams
-	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsFor(params.keys);
+	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(params.keys);
 
 	ASSERT_EQ(destTeams.size(), 0);
 	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {

@@ -116,6 +116,8 @@ protected:
 class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
 
+	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
+
 public:
 	typedef ShardsAffectedByTeamFailure::Team Team;
 	// In-memory counterpart of the `keyServers` in system keyspace
