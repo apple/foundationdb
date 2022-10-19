@@ -35,6 +35,6 @@ void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
   ISimulator* sim = g_pSimulator;
   ASSERT(sim);
 
-  printf("[c++][%s:%d](%s) Enqueue swift task to SIMULATOR: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, job);
+  // printf("[c++][%s:%d](%s) Enqueue swift task to SIMULATOR: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, job);
   sim->_swiftEnqueue(job);
 }

@@ -28,7 +28,7 @@ extension FutureCInt: _FlowFutureOps {
     public var waitValue: _T {
         mutating get async throws {
             if self.isReady() {
-                print("[swift][\(#fileID):\(#line)](\(#function)) future was ready, return immediately.")
+                // print("[swift][\(#fileID):\(#line)](\(#function)) future was ready, return immediately.")
                 // FIXME(swift): we'd need that technically to be:
                 //               return get().pointee
                 return __getUnsafe().pointee
@@ -64,7 +64,7 @@ extension FutureVoid: _FlowFutureOps {
     public var waitValue: _T {
         mutating get async throws {
             if self.isReady() {
-                print("[swift][\(#fileID):\(#line)](\(#function)) future was ready, return immediately.")
+                // print("[swift][\(#fileID):\(#line)](\(#function)) future was ready, return immediately.")
                 // FIXME(swift): we'd need that technically to be:
                 //               return get().pointee
                 return __getUnsafe().pointee

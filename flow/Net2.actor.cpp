@@ -1812,9 +1812,6 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 }
 
 void Net2::_swiftEnqueue(void* task) {
-	printf("[c++][%s:%d](%s) Enqueue NET2 [%s]\n", __FILE_NAME__, __LINE__, __FUNCTION__,
-	       this->getLocalAddress().toString().c_str());
-
 	N2::OrderedTask* orderedTask = (OrderedTask*)task;
 	this->ready.push(*orderedTask);
 }

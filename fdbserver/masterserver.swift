@@ -52,7 +52,6 @@ public actor MasterDataActor {
 
     /// Reply still done via req.reply
     func getVersion(req: GetCommitVersionRequest) async {
-        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) handle request")
         // NOTE: the `req` is inout since `req.reply.sendNever()` imports as `mutating`
         var req = req
 
@@ -129,7 +128,7 @@ public actor MasterDataActor {
 
         rep.version = myself.version
         rep.requestNum = req.requestNum
-        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
+        // print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
 
         //  FIXME: figure out how to map:
         //            // lastVersionReplies.replies.erase(
@@ -162,17 +161,17 @@ public struct MasterDataActorCxx {
     /// Promise type must match result type of the target function.
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
     public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
-        print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+        // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
         swift_workaround_retainMasterData(myself.myself)
         Task {
-            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
             await myself.getVersion(req: req)
             var result = Flow.Void()
             promise.send(&result)
             // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
             swift_workaround_releaseMasterData(myself.myself)
-            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
     }
 }
