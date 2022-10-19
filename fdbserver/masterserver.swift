@@ -103,7 +103,7 @@ public actor MasterDataActor {
 
             let toAdd = max(Version(1), min(
                           getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS,
-                          Version(getServerKnobs().VERSIONS_PER_SECOND) * Version(t1 - myself.lastVersionTime)))
+                          Version(Double(getServerKnobs().VERSIONS_PER_SECOND) * (t1 - myself.lastVersionTime))))
             rep.prevVersion = myself.version
             if myself.referenceVersion.present() {
                 // FIXME: myself.referenceVersion.get()
