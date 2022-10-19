@@ -1,6 +1,6 @@
 [configuration]
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = [1]
 
 [[test]]
 testTitle = 'TenantEntryCacheTest'

@@ -1,5 +1,5 @@
 [configuration]
-allowDisablingTenants = false
+tenantModes = [1]
 
 [[test]]
 testTitle = 'SpecialKeySpaceCorrectnessTest'

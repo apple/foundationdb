@@ -1,7 +1,7 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = [1]
 injectTargetedSSRestart = true
 injectSSDelay = true
 # FIXME: re-enable rocks at some point

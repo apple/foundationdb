@@ -1,40 +1,36 @@
 [configuration]
-allowDefaultTenant = false
-tenantModes = [1]
-allowCreatingTenants = false
-extraDatabaseMode = 'Single'
+maxTLogVersion = 6
+disableTss = true
 
 [[test]]
-testTitle = 'TenantManagementTest'
-clearAfterTest = true
-timeout = 2100
-runSetup = true
+testTitle = 'Clogged'
+runSetup = false
 
     [[test.workload]]
-    testName = 'TenantManagement'
-    maxTenants = 1000
-    testDuration = 120
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    nodeCount = 2500
+    testDuration = 10.0
+    expectedRate = 0
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 180.0
-    swizzle = 1
+    testDuration = 10.0
 
     [[test.workload]]
     testName = 'Rollback'
-    testDuration = 180.0
     meanDelay = 10.0
+    testDuration = 10.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 180.0
+    testDuration = 10.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 180.0

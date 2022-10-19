@@ -315,9 +315,6 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "allowDefaultTenant") {
 				allowDefaultTenant = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "allowDisablingTenants") {
-				allowDisablingTenants = strcmp(value.c_str(), "true") == 0;
-			}
 			if (attrib == "allowCreatingTenants") {
 				allowCreatingTenants = strcmp(value.c_str(), "true") == 0;
 			}
@@ -382,7 +379,6 @@ public:
 	bool randomlyRenameZoneId = false;
 
 	bool allowDefaultTenant = true;
-	bool allowDisablingTenants = true;
 	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
@@ -453,7 +449,6 @@ public:
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
-		    .add("allowDisablingTenants", &allowDisablingTenants)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
@@ -2481,7 +2476,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
 	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
-	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -2550,21 +2544,18 @@ ACTOR void setupAndRun(std::string dataFolder,
 		if (testConfig.tenantModes.size()) {
 			auto randomPick = deterministicRandom()->randomChoice(testConfig.tenantModes);
 			tenantMode = TenantMode::fromValue(StringRef(std::to_string(randomPick)));
-			if (tenantMode == TenantMode::REQUIRED) {
-				allowDefaultTenant = true;
+			if (allowDefaultTenant) {
 				defaultTenant = "SimulatedDefaultTenant"_sr;
 			}
-		} else {
-			if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
-				defaultTenant = "SimulatedDefaultTenant"_sr;
-				if (deterministicRandom()->random01() < 0.9) {
-					tenantMode = TenantMode::REQUIRED;
-				} else {
-					tenantMode = TenantMode::OPTIONAL_TENANT;
-				}
-			} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
+		} else if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
+			defaultTenant = "SimulatedDefaultTenant"_sr;
+			if (deterministicRandom()->random01() < 0.9) {
+				tenantMode = TenantMode::REQUIRED;
+			} else {
 				tenantMode = TenantMode::OPTIONAL_TENANT;
 			}
+		} else if (deterministicRandom()->random01() < 0.5) {
+			tenantMode = TenantMode::OPTIONAL_TENANT;
 		}
 	}
 
@@ -2620,7 +2611,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 		TraceEvent("SimulatedClusterTenantMode")
 		    .detail("UsingTenant", defaultTenant)
-		    .detail("TenantRequired", tenantMode.toString())
+		    .detail("TenantMode", tenantMode.toString())
 		    .detail("TotalTenants", tenantsToCreate.size());
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);

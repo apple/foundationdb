@@ -1,6 +1,6 @@
 [configuration]
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = [1]
 
 [[knobs]]
 allow_tokenless_tenant_access = true
