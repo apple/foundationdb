@@ -308,6 +308,8 @@ if(NOT WIN32)
       @TMP_DIR@
       --log-dir
       @LOG_DIR@
+      --knob
+      delete-native-lib-after-loading=false # for properly symbolizing xSAN errors
     )
 
     add_fdbclient_test(
@@ -329,6 +331,8 @@ if(NOT WIN32)
       @TMP_DIR@
       --log-dir
       @LOG_DIR@
+      --knob
+      delete-native-lib-after-loading=false # for properly symbolizing xSAN errors
     )
 
     add_fdbclient_test(
