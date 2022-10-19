@@ -38,6 +38,8 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from kubernetes import client as k8s_client, config as k8s_config
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
@@ -166,6 +168,11 @@ class Config(object):
             help=("A file that must be present and non-empty in the input directory"),
             action="append",
         )
+        parser.add_argument(
+            "--read-zone-topology-label",
+            help=("Read kubernetes zone topology labels from the node"),
+            action="store_true"
+        )
         args = parser.parse_args()
 
         self.bind_address = args.bind_address
@@ -180,6 +187,7 @@ class Config(object):
         self.init_mode = args.init_mode
         self.main_container_version = args.main_container_version
         self.require_not_empty = args.require_not_empty
+        self.read_zone_topology_label = args.read_zone_topology_label
 
         with open("/var/fdb/version") as version_file:
             self.primary_version = version_file.read().strip()
@@ -226,7 +234,7 @@ class Config(object):
             self.substitutions["FDB_MACHINE_ID"] = os.getenv("HOSTNAME", "")
 
         if self.substitutions["FDB_ZONE_ID"] == "":
-            self.substitutions["FDB_ZONE_ID"] = self.substitutions["FDB_MACHINE_ID"]
+            self.substitutions["FDB_ZONE_ID"] = self.read_node_zone_topology_label(self.substitutions["FDB_MACHINE_ID"]) if self.read_zone_topology_labels else self.substitutions["FDB_MACHINE_ID"]
         if self.substitutions["FDB_PUBLIC_IP"] == "":
             # As long as the public IP is not set fallback to the
             # Pod IP address.
@@ -335,6 +343,35 @@ class Config(object):
         if version == 6:
             ip = f"[{ip}]"
         return ip
+
+    def read_node_zone_topology_label(hostname):
+        try:
+            k8s_config.load_incluster_config()
+        except k8s_config.ConfigException:
+            raise Exception("Could not configure kubernetes python client")
+
+        client=k8s_client.CoreV1Api()
+
+        # RBAC configuration may be required to access node resources.
+        # ref: https://github.com/kubernetes-client/python/blob/master/examples/in_cluster_config.py
+        api_response = client.read_node(hostname)
+
+        labels = api_response.metadata.labels
+
+        if not labels:
+            log.error("The node does not have any labels")
+
+        # failure-domain.beta is deprecated, with topology being the new value. This can vary between clusters/versions.
+        # https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints
+        if 'failure-domain.beta.kubernetes.io/zone' in labels:
+            topology_label = labels['failure-domain.beta.kubernetes.io/zone']
+        if 'topology.kubernetes.io/zone' in labels:
+            topology_label = labels['topology.kubernetes.io/zone']
+        if not topology_label:
+            topology_label = hostname
+            log.error("The node does not have zone topology labels")
+
+        return topology_label
 
 
 class ThreadingHTTPServerV6(ThreadingHTTPServer):

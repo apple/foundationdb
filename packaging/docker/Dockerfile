@@ -134,7 +134,8 @@ RUN yum -y install \
     yum clean all && \
     rm -rf /var/cache/yum && \
     source /opt/rh/rh-python38/enable && \
-    pip3 install watchdog==0.9.0
+    pip3 install watchdog==0.9.0 && \
+    pip3 install --upgrade kubernetes==23.6.0
 
 WORKDIR /
 ADD entrypoint.bash sidecar.py /

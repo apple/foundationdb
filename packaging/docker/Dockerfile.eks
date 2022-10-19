@@ -142,7 +142,8 @@ RUN yum -y install \
     python3-pip-20.2.2-1.amzn2.0.3 && \
     yum clean all && \
     rm -rf /var/cache/yum && \
-    pip3 install watchdog==0.9.0
+    pip3 install watchdog==0.9.0 && \
+    pip3 install --upgrade kubernetes==23.6.0
 
 WORKDIR /
 ADD entrypoint.bash sidecar.py /
