@@ -25,15 +25,18 @@
 #include "flow/IAsyncFile.h"
 #include "flow/network.h"
 #include "flow/ActorCollection.h"
+#include "fdbrpc/simulator.h"
 
 // template <class AsyncFileType>
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:
 	Reference<IAsyncFile> file;
+	// since we have to read this often, we cache the filename here
+	std::string filename;
 	bool enabled;
 
 public:
-	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {
+	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file), filename(file->getFilename()) {
 		// We only allow chaos events on storage files
 		enabled = (file->getFilename().find("storage-") != std::string::npos);
 	}
@@ -78,6 +81,7 @@ public:
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		Arena arena;
 		char* pdata = nullptr;
+		unsigned corruptedBlock = 0;
 
 		// Check if a bit flip event was injected, if so, copy the buffer contents
 		// with a random bit flipped in a new buffer and use that for the write
@@ -90,7 +94,10 @@ public:
 					pdata = (char*)arena.allocate4kAlignedBuffer(length);
 					memcpy(pdata, data, length);
 					// flip a random bit in the copied buffer
-					pdata[deterministicRandom()->randomInt(0, length)] ^= (1 << deterministicRandom()->randomInt(0, 8));
+					auto corruptedPos = deterministicRandom()->randomInt(0, length);
+					pdata[corruptedPos] ^= (1 << deterministicRandom()->randomInt(0, 8));
+					// mark the block as corrupted
+					corruptedBlock = offset + corruptedPos / (4 * 1024);
 
 					// increment the metric for bit flips
 					auto res = g_network->global(INetwork::enChaosMetrics);
@@ -102,20 +109,27 @@ public:
 			}
 		}
 
-		double diskDelay = getDelay();
-		if (diskDelay == 0.0) {
-			if (pdata)
-				return holdWhile(arena, file->write(pdata, length, offset));
-
-			return file->write(data, length, offset);
-		}
-
 		// Wait for diskDelay before submitting the I/O
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(diskDelay), [=](Void _) -> Future<Void> {
-			if (pdata)
-				return holdWhile(arena, file->write(pdata, length, offset));
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(getDelay()), [=](Void _) -> Future<Void> {
+			if (pdata) {
+				// if (g_network->isSimulated())
+				return map(holdWhile(arena, file->write(pdata, length, offset)), [corruptedBlock, this](auto res) {
+					if (g_network->isSimulated()) {
+						g_simulator->corruptedBlocks.template emplace(filename, corruptedBlock);
+					}
+					return res;
+				});
+			}
 
-			return file->write(data, length, offset);
+			return map(file->write(data, length, offset), [this, pdata, offset, length](auto res) {
+				if (pdata != nullptr || !g_network->isSimulated()) {
+					return res;
+				}
+				g_simulator->corruptedBlocks.erase(
+				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, offset / 4096)),
+				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(filename, (offset + length) / 4096)));
+				return res;
+			});
 		});
 	}
 

@@ -26,6 +26,8 @@
 #include <random>
 #include <limits>
 
+#include <boost/unordered_set.hpp>
+
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include "flow/ProtocolVersion.h"
@@ -507,6 +509,8 @@ public:
 	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
+
+	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
