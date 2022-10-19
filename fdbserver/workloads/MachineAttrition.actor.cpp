@@ -74,6 +74,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool killProcess = false;
 	bool killZone = false;
 	bool killSelf = false;
+	bool killAll = false;
 	std::vector<std::string> targetIds;
 	bool replacement = false;
 	bool waitForVersion = false;
@@ -107,6 +108,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		killProcess = getOption(options, "killProcess"_sr, killProcess);
 		killZone = getOption(options, "killZone"_sr, killZone);
 		killSelf = getOption(options, "killSelf"_sr, killSelf);
+		killAll =
+		    getOption(options,
+		              "killAll"_sr,
+		              g_network->isSimulated() && !g_simulator->extraDatabases.empty() && BUGGIFY_WITH_PROB(0.01));
 		targetIds = getOption(options, "targetIds"_sr, std::vector<std::string>());
 		replacement = getOption(options, "replacement"_sr, reboot && deterministicRandom()->random01() < 0.5);
 		waitForVersion = getOption(options, "waitForVersion"_sr, waitForVersion);
@@ -357,7 +362,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
 
 				g_simulator->killDataHall(target, kt);
-			} else if (!g_simulator->extraDatabases.empty() && deterministicRandom()->random01() < 0.1) {
+			} else if (self->killAll) {
 				state ISimulator::KillType kt = ISimulator::RebootProcessAndSwitch;
 				TraceEvent("Assassination").detail("KillType", kt);
 				g_simulator->killAll(kt, true);
