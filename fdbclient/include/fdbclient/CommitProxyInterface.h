@@ -30,6 +30,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/IdempotencyId.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
@@ -186,6 +187,7 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
+	IdempotencyIdRef idempotencyId;
 
 	TenantInfo tenantInfo;
 
@@ -196,8 +198,17 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
+		serializer(ar,
+		           transaction,
+		           reply,
+		           flags,
+		           debugID,
+		           commitCostEstimation,
+		           tagSet,
+		           spanContext,
+		           tenantInfo,
+		           idempotencyId,
+		           arena);
 	}
 };
 

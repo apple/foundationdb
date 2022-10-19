@@ -23,6 +23,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -42,6 +43,7 @@
 // A workload specifically designed to stress the blob range management of the blob manager + blob worker, and test the
 // blob database api functions
 struct BlobGranuleRangesWorkload : TestWorkload {
+	static constexpr auto NAME = "BlobGranuleRanges";
 	// test settings
 	double testDuration;
 	int operationsPerSecond;
@@ -52,6 +54,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	Future<Void> client;
 	Future<Void> unitClient;
 	bool stopUnitClient;
+	Optional<TenantName> tenantName;
 
 	int32_t nextKey;
 
@@ -84,11 +87,13 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		nextKey = 10000000 * clientId;
 
 		stopUnitClient = false;
+		if (deterministicRandom()->coinflip()) {
+			tenantName = StringRef("bgrwTenant" + std::to_string(clientId));
+		}
 
 		TraceEvent("BlobGranuleRangesWorkloadInit").detail("TargetRanges", targetRanges);
 	}
 
-	std::string description() const override { return "BlobGranuleRangesWorkload"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	std::string newKey() {
@@ -100,17 +105,17 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<bool> setRange(Database cx, KeyRange range, bool active) {
+	ACTOR Future<bool> setRange(Database cx, KeyRange range, bool active, Optional<TenantName> tenantName) {
 		if (active) {
-			bool success = wait(cx->blobbifyRange(range));
+			bool success = wait(cx->blobbifyRange(range, tenantName));
 			return success;
 		} else {
-			bool success = wait(cx->unblobbifyRange(range));
+			bool success = wait(cx->unblobbifyRange(range, tenantName));
 			return success;
 		}
 	}
 
-	ACTOR Future<Void> registerNewRange(Database cx, BlobGranuleRangesWorkload* self) {
+	ACTOR Future<Void> registerNewRange(Database cx, BlobGranuleRangesWorkload* self, Optional<TenantName> tenantName) {
 		std::string nextRangeKey = "R_" + self->newKey();
 		state KeyRange range(KeyRangeRef(StringRef(nextRangeKey), strinc(StringRef(nextRangeKey))));
 		if (BGRW_DEBUG) {
@@ -119,7 +124,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		// don't put in active ranges until AFTER set range command succeeds, to avoid checking a range that maybe
 		// wasn't initialized
-		bool success = wait(self->setRange(cx, range, true));
+		bool success =
+		    wait(self->setRange(cx, range, true, tenantName.present() ? tenantName.get() : self->tenantName));
 		ASSERT(success);
 
 		if (BGRW_DEBUG) {
@@ -154,10 +160,10 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 				           range.begin.printable(),
 				           range.end.printable());
 			}
-			Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
+			Key purgeKey = wait(self->versionedForcePurge(cx, range, self->tenantName));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 		}
-		bool success = wait(self->setRange(cx, range, false));
+		bool success = wait(self->setRange(cx, range, false, self->tenantName));
 		ASSERT(success);
 
 		if (BGRW_DEBUG) {
@@ -169,16 +175,45 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<TenantMapEntry> setupTenant(Database cx, TenantName name) {
+		if (BGRW_DEBUG) {
+			fmt::print("Creating tenant: {0}\n", name.printable());
+		}
+
+		Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		ASSERT(entry.present());
+
+		if (BGRW_DEBUG) {
+			fmt::print("Created tenant {0}: {1}\n", name.printable(), entry.get().prefix.printable());
+		}
+
+		return entry.get();
+	}
+
 	ACTOR Future<Void> _setup(Database cx, BlobGranuleRangesWorkload* self) {
 		// create initial target ranges
 		TraceEvent("BlobGranuleRangesSetup").detail("InitialRanges", self->targetRanges).log();
 		// set up blob granules
 		wait(success(ManagementAPI::changeConfig(cx.getReference(), "blob_granules_enabled=1", true)));
 
+		if (self->tenantName.present()) {
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=optional_experimental", true)));
+			wait(success(self->setupTenant(cx, self->tenantName.get())));
+
+			try {
+				wait(self->registerNewRange(cx, self, "BogusTenant"_sr));
+				ASSERT(false);
+			} catch (Error& e) {
+				if (e.code() != error_code_tenant_not_found) {
+					throw e;
+				}
+			}
+		}
+
 		state int i;
 		std::vector<Future<Void>> createInitialRanges;
 		for (i = 0; i < self->targetRanges; i++) {
-			wait(self->registerNewRange(cx, self));
+			wait(self->registerNewRange(cx, self, {}));
 		}
 		TraceEvent("BlobGranuleRangesSetupComplete");
 		return Void();
@@ -200,19 +235,19 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		return _check(cx, this);
 	}
 
-	ACTOR Future<bool> isRangeActive(Database cx, KeyRange range) {
+	ACTOR Future<bool> isRangeActive(Database cx, KeyRange range, Optional<TenantName> tenantName) {
 		Optional<Version> rv;
 		if (deterministicRandom()->coinflip()) {
 			rv = latestVersion;
 		}
-		state Version v = wait(cx->verifyBlobRange(range, rv));
+		state Version v = wait(cx->verifyBlobRange(range, rv, tenantName));
 		return v != invalidVersion;
 	}
 
 	ACTOR Future<Void> checkRange(Database cx, BlobGranuleRangesWorkload* self, KeyRange range, bool isActive) {
 		// Check that a read completes for the range. If not loop around and try again
 		loop {
-			bool completed = wait(self->isRangeActive(cx, range));
+			bool completed = wait(self->isRangeActive(cx, range, self->tenantName));
 
 			if (completed == isActive) {
 				break;
@@ -228,7 +263,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			wait(delay(1.0));
 		}
 
-		Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(range, 1000000));
+		Standalone<VectorRef<KeyRangeRef>> blobRanges =
+		    wait(cx->listBlobbifiedRanges(range, 1000000, self->tenantName));
 		if (isActive) {
 			ASSERT(blobRanges.size() == 1);
 			ASSERT(blobRanges[0].begin <= range.begin);
@@ -237,7 +273,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			ASSERT(blobRanges.empty());
 		}
 
-		state Transaction tr(cx);
+		state Transaction tr(cx, self->tenantName);
 		loop {
 			try {
 				Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000000));
@@ -303,7 +339,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			state Future<Void> waitNextOp = poisson(&last, 1.0 / self->operationsPerSecond);
 
 			if (self->activeRanges.empty() || deterministicRandom()->coinflip()) {
-				wait(self->registerNewRange(cx, self));
+				wait(self->registerNewRange(cx, self, {}));
 			} else {
 				wait(self->unregisterRandomRange(cx, self));
 			}
@@ -318,9 +354,9 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 
 		// tear down range at end
-		Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
+		Key purgeKey = wait(self->versionedForcePurge(cx, range, self->tenantName));
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
-		bool success = wait(self->setRange(cx, range, false));
+		bool success = wait(self->setRange(cx, range, false, self->tenantName));
 		ASSERT(success);
 
 		if (BGRW_DEBUG) {
@@ -337,35 +373,35 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		if (BGRW_DEBUG) {
 			fmt::print("VerifyRangeUnit: [{0} - {1})\n", range.begin.printable(), range.end.printable());
 		}
-		bool setSuccess = wait(self->setRange(cx, activeRange, true));
+		bool setSuccess = wait(self->setRange(cx, activeRange, true, self->tenantName));
 		ASSERT(setSuccess);
 		wait(self->checkRange(cx, self, activeRange, true));
 
-		bool success1 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.begin, middleKey)));
+		bool success1 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.begin, middleKey), self->tenantName));
 		ASSERT(success1);
 
-		bool success2 = wait(self->isRangeActive(cx, KeyRangeRef(middleKey, activeRange.end)));
+		bool success2 = wait(self->isRangeActive(cx, KeyRangeRef(middleKey, activeRange.end), self->tenantName));
 		ASSERT(success2);
 
-		bool fail1 = wait(self->isRangeActive(cx, range));
+		bool fail1 = wait(self->isRangeActive(cx, range, self->tenantName));
 		ASSERT(!fail1);
 
-		bool fail2 = wait(self->isRangeActive(cx, KeyRangeRef(range.begin, activeRange.begin)));
+		bool fail2 = wait(self->isRangeActive(cx, KeyRangeRef(range.begin, activeRange.begin), self->tenantName));
 		ASSERT(!fail2);
 
-		bool fail3 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.end, range.end)));
+		bool fail3 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.end, range.end), self->tenantName));
 		ASSERT(!fail3);
 
-		bool fail4 = wait(self->isRangeActive(cx, KeyRangeRef(range.begin, middleKey)));
+		bool fail4 = wait(self->isRangeActive(cx, KeyRangeRef(range.begin, middleKey), self->tenantName));
 		ASSERT(!fail4);
 
-		bool fail5 = wait(self->isRangeActive(cx, KeyRangeRef(middleKey, range.end)));
+		bool fail5 = wait(self->isRangeActive(cx, KeyRangeRef(middleKey, range.end), self->tenantName));
 		ASSERT(!fail5);
 
-		bool fail6 = wait(self->isRangeActive(cx, KeyRangeRef(range.begin, activeRange.end)));
+		bool fail6 = wait(self->isRangeActive(cx, KeyRangeRef(range.begin, activeRange.end), self->tenantName));
 		ASSERT(!fail6);
 
-		bool fail7 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.begin, range.end)));
+		bool fail7 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.begin, range.end), self->tenantName));
 		ASSERT(!fail7);
 
 		wait(self->tearDownRangeAfterUnit(cx, self, activeRange));
@@ -390,7 +426,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		for (i = 0; i < rangeCount; i++) {
 			state KeyRange subRange(KeyRangeRef(boundaries[i], boundaries[i + 1]));
 			if (i != rangeToNotBlobbify) {
-				bool setSuccess = wait(self->setRange(cx, subRange, true));
+				bool setSuccess = wait(self->setRange(cx, subRange, true, self->tenantName));
 				ASSERT(setSuccess);
 				wait(self->checkRange(cx, self, subRange, true));
 			} else {
@@ -398,7 +434,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			}
 		}
 
-		bool success = wait(self->isRangeActive(cx, range));
+		bool success = wait(self->isRangeActive(cx, range, self->tenantName));
 		ASSERT(!success);
 
 		if (rangeToNotBlobbify != 0) {
@@ -416,11 +452,12 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	                                         BlobGranuleRangesWorkload* self,
 	                                         KeyRange expectedRange,
 	                                         KeyRange queryRange) {
-		Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(queryRange, 1000000));
+		Standalone<VectorRef<KeyRangeRef>> blobRanges =
+		    wait(cx->listBlobbifiedRanges(queryRange, 1000000, self->tenantName));
 		ASSERT(blobRanges.size() == 1);
 		ASSERT(blobRanges[0] == expectedRange);
 
-		state Transaction tr(cx);
+		state Transaction tr(cx, self->tenantName);
 		loop {
 			try {
 				Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(queryRange, 1000000));
@@ -436,7 +473,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> rangesMisalignedUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
-		bool setSuccess = wait(self->setRange(cx, range, true));
+		bool setSuccess = wait(self->setRange(cx, range, true, self->tenantName));
 		ASSERT(setSuccess);
 		state KeyRange subRange(KeyRangeRef(range.begin.withSuffix("A"_sr), range.begin.withSuffix("B"_sr)));
 
@@ -451,7 +488,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		wait(self->checkRangesMisaligned(cx, self, range, KeyRangeRef(subRange.begin, range.end)));
 
 		try {
-			wait(success(cx->purgeBlobGranules(subRange, 1, {}, false)));
+			wait(success(cx->purgeBlobGranules(subRange, 1, self->tenantName, false)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -461,7 +498,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 
 		try {
-			wait(success(cx->purgeBlobGranules(subRange, 1, {}, true)));
+			wait(success(cx->purgeBlobGranules(subRange, 1, self->tenantName, true)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -489,50 +526,51 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		// unblobbifying range that already doesn't exist should be no-op
 		if (deterministicRandom()->coinflip()) {
-			bool unblobbifyStartSuccess = wait(self->setRange(cx, activeRange, false));
+			bool unblobbifyStartSuccess = wait(self->setRange(cx, activeRange, false, self->tenantName));
 			ASSERT(unblobbifyStartSuccess);
 		}
 
-		bool success = wait(self->setRange(cx, activeRange, true));
+		bool success = wait(self->setRange(cx, activeRange, true, self->tenantName));
 		ASSERT(success);
 		wait(self->checkRange(cx, self, activeRange, true));
 
 		// check that re-blobbifying same range is successful
-		bool retrySuccess = wait(self->setRange(cx, activeRange, true));
+		bool retrySuccess = wait(self->setRange(cx, activeRange, true, self->tenantName));
 		ASSERT(retrySuccess);
 		wait(self->checkRange(cx, self, activeRange, true));
 
 		// check that blobbifying range that overlaps but does not match existing blob range fails
-		bool fail1 = wait(self->setRange(cx, range, true));
+		bool fail1 = wait(self->setRange(cx, range, true, self->tenantName));
 		ASSERT(!fail1);
 
-		bool fail2 = wait(self->setRange(cx, KeyRangeRef(range.begin, activeRange.end), true));
+		bool fail2 = wait(self->setRange(cx, KeyRangeRef(range.begin, activeRange.end), true, self->tenantName));
 		ASSERT(!fail2);
 
-		bool fail3 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, range.end), true));
+		bool fail3 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, range.end), true, self->tenantName));
 		ASSERT(!fail3);
 
-		bool fail4 = wait(self->setRange(cx, KeyRangeRef(range.begin, middleKey), true));
+		bool fail4 = wait(self->setRange(cx, KeyRangeRef(range.begin, middleKey), true, self->tenantName));
 		ASSERT(!fail4);
 
-		bool fail5 = wait(self->setRange(cx, KeyRangeRef(middleKey, range.end), true));
+		bool fail5 = wait(self->setRange(cx, KeyRangeRef(middleKey, range.end), true, self->tenantName));
 		ASSERT(!fail5);
 
-		bool fail6 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), true));
+		bool fail6 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), true, self->tenantName));
 		ASSERT(!fail6);
 
-		bool fail7 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), true));
+		bool fail7 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), true, self->tenantName));
 		ASSERT(!fail7);
 
-		bool fail8 = wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), true));
+		bool fail8 = wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), true, self->tenantName));
 		ASSERT(!fail8);
 
 		{
-			Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(range, 1000000));
+			Standalone<VectorRef<KeyRangeRef>> blobRanges =
+			    wait(cx->listBlobbifiedRanges(range, 1000000, self->tenantName));
 			ASSERT(blobRanges.size() == 1);
 			ASSERT(blobRanges[0] == activeRange);
 
-			state Transaction tr(cx);
+			state Transaction tr(cx, self->tenantName);
 			loop {
 				try {
 					Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000000));
@@ -545,50 +583,58 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			}
 
 			// tear down + check that un-blobbifying at a non-aligned range also doesn't work
-			Key purgeKey = wait(self->versionedForcePurge(cx, activeRange, {}));
+			Key purgeKey = wait(self->versionedForcePurge(cx, activeRange, self->tenantName));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 
 			if (deterministicRandom()->coinflip()) {
 				// force purge again and ensure it is idempotent
-				Key purgeKeyAgain = wait(cx->purgeBlobGranules(activeRange, 1, {}, true));
+				Key purgeKeyAgain = wait(cx->purgeBlobGranules(activeRange, 1, self->tenantName, true));
 				wait(cx->waitPurgeGranulesComplete(purgeKeyAgain));
 			}
 		}
 
 		// Check that the blob range is still listed
 		{
-			Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(range, 1000000));
+			Standalone<VectorRef<KeyRangeRef>> blobRanges =
+			    wait(cx->listBlobbifiedRanges(range, 1000000, self->tenantName));
 			ASSERT(blobRanges.size() == 1);
 			ASSERT(blobRanges[0] == activeRange);
 
-			bool unblobbifyFail1 = wait(self->setRange(cx, range, false));
+			bool unblobbifyFail1 = wait(self->setRange(cx, range, false, self->tenantName));
 			ASSERT(!unblobbifyFail1);
 
-			bool unblobbifyFail2 = wait(self->setRange(cx, KeyRangeRef(range.begin, activeRange.end), false));
+			bool unblobbifyFail2 =
+			    wait(self->setRange(cx, KeyRangeRef(range.begin, activeRange.end), false, self->tenantName));
 			ASSERT(!unblobbifyFail2);
 
-			bool unblobbifyFail3 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, range.end), false));
+			bool unblobbifyFail3 =
+			    wait(self->setRange(cx, KeyRangeRef(activeRange.begin, range.end), false, self->tenantName));
 			ASSERT(!unblobbifyFail3);
 
-			bool unblobbifyFail4 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false));
+			bool unblobbifyFail4 =
+			    wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false, self->tenantName));
 			ASSERT(!unblobbifyFail4);
 
-			bool unblobbifyFail5 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false));
+			bool unblobbifyFail5 =
+			    wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false, self->tenantName));
 			ASSERT(!unblobbifyFail5);
 
-			bool unblobbifyFail6 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false));
+			bool unblobbifyFail6 =
+			    wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false, self->tenantName));
 			ASSERT(!unblobbifyFail6);
 
-			bool unblobbifyFail7 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false));
+			bool unblobbifyFail7 =
+			    wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false, self->tenantName));
 			ASSERT(!unblobbifyFail7);
 
-			bool unblobbifyFail8 = wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), false));
+			bool unblobbifyFail8 =
+			    wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), false, self->tenantName));
 			ASSERT(!unblobbifyFail8);
 
-			bool unblobbifySuccess = wait(self->setRange(cx, activeRange, true));
+			bool unblobbifySuccess = wait(self->setRange(cx, activeRange, true, self->tenantName));
 			ASSERT(unblobbifySuccess);
 
-			bool unblobbifySuccessAgain = wait(self->setRange(cx, activeRange, true));
+			bool unblobbifySuccessAgain = wait(self->setRange(cx, activeRange, true, self->tenantName));
 			ASSERT(unblobbifySuccessAgain);
 		}
 
@@ -596,20 +642,20 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> reBlobbifyUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
-		bool setSuccess = wait(self->setRange(cx, range, true));
+		bool setSuccess = wait(self->setRange(cx, range, true, self->tenantName));
 		ASSERT(setSuccess);
 		wait(self->checkRange(cx, self, range, true));
 
 		// force purge range
-		Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
+		Key purgeKey = wait(self->versionedForcePurge(cx, range, self->tenantName));
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
 		wait(self->checkRange(cx, self, range, false));
 
-		bool unsetSuccess = wait(self->setRange(cx, range, false));
+		bool unsetSuccess = wait(self->setRange(cx, range, false, self->tenantName));
 		ASSERT(unsetSuccess);
 		wait(self->checkRange(cx, self, range, false));
 
-		bool reSetSuccess = wait(self->setRange(cx, range, true));
+		bool reSetSuccess = wait(self->setRange(cx, range, true, self->tenantName));
 		ASSERT(reSetSuccess);
 		wait(self->checkRange(cx, self, range, true));
 
@@ -675,4 +721,4 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BlobGranuleRangesWorkload> BlobGranuleRangesWorkloadFactory("BlobGranuleRanges");
+WorkloadFactory<BlobGranuleRangesWorkload> BlobGranuleRangesWorkloadFactory;

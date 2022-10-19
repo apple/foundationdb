@@ -32,6 +32,8 @@ std::string describe(uint32_t const& item) {
 }
 
 struct RemoveServersSafelyWorkload : TestWorkload {
+	static constexpr auto NAME = "RemoveServersSafely";
+
 	bool enabled, killProcesses;
 	int minMachinesToKill, maxMachinesToKill, maxSafetyCheckRetries;
 	double minDelay, maxDelay;
@@ -58,7 +60,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "RemoveServersSafelyWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (!enabled)
 			return Void();
@@ -807,4 +808,4 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RemoveServersSafelyWorkload> RemoveServersSafelyWorkloadFactory("RemoveServersSafely");
+WorkloadFactory<RemoveServersSafelyWorkload> RemoveServersSafelyWorkloadFactory;

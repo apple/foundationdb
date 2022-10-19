@@ -429,7 +429,7 @@ bool runWorkloads(TesterOptions& options) {
 		}
 		workloadMgr.run();
 		return !workloadMgr.failed();
-	} catch (const std::runtime_error& err) {
+	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		return false;
 	}
@@ -461,7 +461,7 @@ int main(int argc, char** argv) {
 
 		fdb_check(fdb::network::stop());
 		network_thread.join();
-	} catch (const std::runtime_error& err) {
+	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		retCode = 1;
 	}

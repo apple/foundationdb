@@ -33,6 +33,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SaveAndKillWorkload : TestWorkload {
+	static constexpr auto NAME = "SaveAndKill";
 
 	std::string restartInfo;
 	double testDuration;
@@ -44,7 +45,6 @@ struct SaveAndKillWorkload : TestWorkload {
 		isRestoring = getOption(options, "isRestoring"_sr, 0);
 	}
 
-	std::string description() const override { return "SaveAndKillWorkload"; }
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 	Future<Void> setup(Database const& cx) override {
 		g_simulator->disableSwapsToAll();
@@ -161,4 +161,4 @@ struct SaveAndKillWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>&) override {}
 };
 
-WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory("SaveAndKill");
+WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory;

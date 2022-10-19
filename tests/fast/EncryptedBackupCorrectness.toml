@@ -4,6 +4,9 @@ tenantModes = [2]
 
 [[knobs]]
 enable_encryption = true
+enable_tlog_encryption = true
+enable_storage_server_encryption = false
+enable_blob_granule_encryption = true
 
 [[test]]
 testTitle = 'TenantCreation'

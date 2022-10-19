@@ -2356,6 +2356,21 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	loop {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+
+		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(TriggerAuditRequest(type, range)));
+		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
+		return auditId;
+	}
+}
+
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 	state ReadYourWritesTransaction tr(cx);
 
@@ -2624,7 +2639,8 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
 			                        "",
 			                        "",
-			                        currentProtocolVersion());
+			                        currentProtocolVersion(),
+			                        false);
 		}
 
 		workers.push_back(data);

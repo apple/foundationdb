@@ -27,7 +27,8 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct SubmitBackupWorkload final : TestWorkload {
+struct SubmitBackupWorkload : TestWorkload {
+	static constexpr auto NAME = "SubmitBackup";
 
 	FileBackupAgent backupAgent;
 
@@ -48,8 +49,6 @@ struct SubmitBackupWorkload final : TestWorkload {
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
 		incremental.set(getOption(options, "incremental"_sr, false));
 	}
-
-	static constexpr const char* DESCRIPTION = "SubmitBackup";
 
 	ACTOR static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
 		wait(delay(self->delayFor));
@@ -76,11 +75,10 @@ struct SubmitBackupWorkload final : TestWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return DESCRIPTION; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory(SubmitBackupWorkload::DESCRIPTION);
+WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory;

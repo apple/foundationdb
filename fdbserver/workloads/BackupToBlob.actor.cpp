@@ -33,7 +33,7 @@ struct BackupToBlobWorkload : TestWorkload {
 	int initSnapshotInterval = 0;
 	int snapshotInterval = 100000;
 
-	static constexpr const char* DESCRIPTION = "BackupToBlob";
+	static constexpr auto NAME = "BackupToBlob";
 
 	BackupToBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
@@ -47,8 +47,6 @@ struct BackupToBlobWorkload : TestWorkload {
 		}
 		backupURL = backupURLString;
 	}
-
-	std::string description() const override { return DESCRIPTION; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -79,4 +77,4 @@ struct BackupToBlobWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<BackupToBlobWorkload> BackupToBlobWorkloadFactory(BackupToBlobWorkload::DESCRIPTION);
+WorkloadFactory<BackupToBlobWorkload> BackupToBlobWorkloadFactory;

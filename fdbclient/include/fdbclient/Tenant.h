@@ -181,6 +181,7 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
+	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
@@ -188,7 +189,8 @@ struct TenantMetadataSpecification {
 	    tenantCount(subspace.withSuffix("count"_sr)), tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
-	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()) {}
+	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()),
+	    lastTenantModification(subspace.withSuffix("lastModification"_sr)) {}
 };
 
 struct TenantMetadata {
@@ -203,6 +205,7 @@ struct TenantMetadata {
 	static inline auto& tombstoneCleanupData() { return instance().tombstoneCleanupData; }
 	static inline auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
 	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
+	static inline auto& lastTenantModification() { return instance().lastTenantModification; }
 
 	static Key tenantMapPrivatePrefix();
 };

@@ -31,6 +31,7 @@
 // database must be idle after the restore completes, and this workload checks
 // that the restore range does not change post restore.
 struct BackupToDBCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupToDBCorrectness";
 	double backupAfter, abortAndRestartAfter, restoreAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag, restoreTag;
@@ -143,8 +144,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}
-
-	std::string description() const override { return "BackupToDBCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0) {
@@ -773,4 +772,4 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 int BackupToDBCorrectnessWorkload::drAgentRequests = 0;
 
-WorkloadFactory<BackupToDBCorrectnessWorkload> BackupToDBCorrectnessWorkloadFactory("BackupToDBCorrectness");
+WorkloadFactory<BackupToDBCorrectnessWorkload> BackupToDBCorrectnessWorkloadFactory;

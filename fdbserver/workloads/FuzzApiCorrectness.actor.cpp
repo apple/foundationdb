@@ -106,6 +106,7 @@ struct ExceptionContract {
 };
 
 struct FuzzApiCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "FuzzApiCorrectness";
 	static std::once_flag onceFlag;
 	static std::vector<std::function<
 	    Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&, Reference<ITransaction> const&)>>
@@ -207,8 +208,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		    .detail("OriginalSeverity", SevWarnAlways)
 		    .detail("NewSeverity", SevInfo);
 	}
-
-	std::string description() const override { return "FuzzApiCorrectness"; }
 
 	static TenantName getTenant(int num) { return TenantNameRef(format("tenant_%d", num)); }
 	Optional<TenantGroupName> getTenantGroup(int num) {
@@ -1475,4 +1474,4 @@ std::once_flag FuzzApiCorrectnessWorkload::onceFlag;
 std::vector<std::function<
     Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&, Reference<ITransaction> const&)>>
     FuzzApiCorrectnessWorkload::testCases;
-WorkloadFactory<FuzzApiCorrectnessWorkload> FuzzApiCorrectnessWorkloadFactory("FuzzApiCorrectness");
+WorkloadFactory<FuzzApiCorrectnessWorkload> FuzzApiCorrectnessWorkloadFactory;

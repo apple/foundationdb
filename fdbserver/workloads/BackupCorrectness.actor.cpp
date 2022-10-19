@@ -32,6 +32,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupAndRestoreCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
 	double minBackupAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
@@ -167,8 +168,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			    .detail("RangeEnd", printable(range.end));
 		}
 	}
-
-	std::string description() const override { return "BackupAndRestoreCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0) {
@@ -947,5 +946,4 @@ std::string getTestEncryptionFileName() {
 	return "test_encryption_key_file";
 }
 
-WorkloadFactory<BackupAndRestoreCorrectnessWorkload> BackupAndRestoreCorrectnessWorkloadFactory(
-    "BackupAndRestoreCorrectness");
+WorkloadFactory<BackupAndRestoreCorrectnessWorkload> BackupAndRestoreCorrectnessWorkloadFactory;

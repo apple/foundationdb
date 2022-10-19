@@ -29,6 +29,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct AtomicRestoreWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicRestore";
 	double startAfter, restoreAfter;
 	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -72,8 +73,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 		// otherwise, test will fail because fast restore will simply add the removePrefix to every key in the end.
 		ASSERT(removePrefix.size() == 0);
 	}
-
-	std::string description() const override { return "AtomicRestore"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -146,4 +145,4 @@ struct AtomicRestoreWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<AtomicRestoreWorkload> AtomicRestoreWorkloadFactory("AtomicRestore");
+WorkloadFactory<AtomicRestoreWorkload> AtomicRestoreWorkloadFactory;
