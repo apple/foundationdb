@@ -686,9 +686,7 @@ ACTOR Future<Void> registrationClient(
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
 			when(wait(recovered)) { break; }
-			when(wait(clusterId->onChange())) {
-				break;
-			}
+			when(wait(clusterId->onChange())) { break; }
 		}
 	}
 }
