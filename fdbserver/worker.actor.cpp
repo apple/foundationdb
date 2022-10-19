@@ -2060,7 +2060,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		}
 
 		loop choose {
-			when(state UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
+			when(UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
 				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(
 				    req.serializedDbInfo, AssumeVersion(g_network->protocolVersion()));
 				localInfo.myLocality = locality;
@@ -2464,7 +2464,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                 runningStorages.end(),
 				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
 				     req.seedTag != invalidTag)) {
-					ASSERT(req.clusterId.isValid());
 					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
@@ -2531,7 +2530,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
-					                               req.clusterId,
 					                               req.initialClusterVersion,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,

@@ -136,8 +136,6 @@ public:
 
 	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
 
-	virtual Future<UID> getClusterId() const { return {}; }
-
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
 	virtual Future<std::vector<ProcessData>> getWorkers() const = 0;
@@ -220,8 +218,6 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
 
 	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
-
-	Future<UID> getClusterId() const override;
 
 	Future<Void> waitDDTeamInfoPrintSignal() const override;
 

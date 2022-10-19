@@ -1060,8 +1060,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    .detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
-	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch)
-	    .detail("ClusterId", req.clusterId);
+	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
 
 	// make sure the request comes from an active database
 	auto db = &self->db;
@@ -1120,7 +1119,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
-	    db->clientInfo->get().tenantMode != db->config.tenantMode || db->clientInfo->get().clusterId != req.clusterId ||
+	    db->clientInfo->get().tenantMode != db->config.tenantMode ||
 	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
 	    db->clientInfo->get().clusterType != db->clusterType ||
 	    db->clientInfo->get().metaclusterName != db->metaclusterName ||
@@ -1133,8 +1132,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("ReqCPs", req.commitProxies)
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
 		    .detail("ReqTenantMode", db->config.tenantMode.toString())
-		    .detail("ClusterId", db->clientInfo->get().clusterId)
-		    .detail("ReqClusterId", req.clusterId)
 		    .detail("EncryptionEnabled", SERVER_KNOBS->ENABLE_ENCRYPTION)
 		    .detail("ClusterType", db->clientInfo->get().clusterType)
 		    .detail("ReqClusterType", db->clusterType)
@@ -1149,7 +1146,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
-		clientInfo.clusterId = req.clusterId;
 		clientInfo.clusterType = db->clusterType;
 		clientInfo.metaclusterName = db->metaclusterName;
 		db->clientInfo->set(clientInfo);
@@ -1230,7 +1226,6 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	const WorkerInterface& w = req.wi;
 	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
 	    req.processClass != ProcessClass::TesterClass) {
-		// TODO: Track invalid processes separately, report status in status json
 		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "WorkerBelongsToExistingCluster", self->id)
 		    .detail("WorkerClusterId", req.clusterId)
 		    .detail("ClusterControllerClusterId", self->clusterId->get())
