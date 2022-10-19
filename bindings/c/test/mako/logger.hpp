@@ -79,7 +79,10 @@ public:
 	}
 
 	template <typename... Args>
-	void printWithLogLevel(int log_level, std::string_view header, fmt::format_string<Args...> fmt_str, Args&&... args) {
+	void printWithLogLevel(int log_level,
+	                       std::string_view header,
+	                       fmt::format_string<Args...> fmt_str,
+	                       Args&&... args) {
 		assert(log_level >= VERBOSE_NONE && log_level <= VERBOSE_DEBUG);
 		if (log_level <= verbosity) {
 			const auto fp = log_level == VERBOSE_NONE ? stderr : stdout;

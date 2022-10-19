@@ -30,6 +30,7 @@ ACTOR static Future<Void> BM_RingActor(benchmark::State* benchState) {
 
 		p.send(1);
 		int result = wait(futures.back());
+		benchmark::DoNotOptimize(result);
 	}
 
 	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()) * benchState->range(0));
@@ -60,6 +61,7 @@ static Future<Void> BM_RingActor_Coro(benchmark::State* benchState) {
 
 		p.send(1);
 		int result = co_await(futures.back());
+		benchmark::DoNotOptimize(result);
 	}
 
 	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()) * benchState->range(0));
