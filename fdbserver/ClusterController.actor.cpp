@@ -2975,6 +2975,51 @@ ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
 	}
 }
 
+// Update the DBInfo state with this processes cluster ID. If this process does
+// not have a cluster ID and one does not exist in the database, generate one.
+ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	loop {
+		try {
+			state Optional<UID> durableClusterId = self->clusterId->get();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+
+			if (clusterIdVal.present()) {
+				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
+				if (durableClusterId.present()) {
+					// If this process has an on disk file for the cluster ID,
+					// verify it matches the value in the database.
+					ASSERT(clusterId == durableClusterId.get());
+				} else {
+					// Otherwise, write the cluster ID in the database to the
+					// DbInfo object so all clients will learn of the cluster
+					// ID.
+					durableClusterId = clusterId;
+				}
+			} else if (!durableClusterId.present()) {
+				// No cluster ID exists in the database or on the machine. Generate and set one.
+				ASSERT(!durableClusterId.present());
+				durableClusterId = deterministicRandom()->randomUniqueID();
+				tr->set(clusterIdKey, BinaryWriter::toValue(durableClusterId.get(), IncludeVersion()));
+				wait(tr->commit());
+			}
+			auto serverInfo = self->db.serverInfo->get();
+			if (!serverInfo.client.clusterId.isValid()) {
+				ASSERT(durableClusterId.present());
+				serverInfo.id = deterministicRandom()->randomUniqueID();
+				serverInfo.client.clusterId = durableClusterId.get();
+				self->db.serverInfo->set(serverInfo);
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -3019,6 +3064,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorConsistencyScan(&self));
 	self.addActor.send(metaclusterMetricsUpdater(&self));
 	self.addActor.send(dbInfoUpdater(&self));
+	self.addActor.send(updateClusterId(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
 	                                 self.id,
 	                                 SERVER_KNOBS->STORAGE_LOGGING_DELAY,

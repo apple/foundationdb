@@ -2097,13 +2097,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					errorForwarders.add(
 					    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
 
-					if (!clusterId->get().present() && localInfo.recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-					    localInfo.client.clusterId.isValid()) {
-						// Persist the cluster ID as a file in the data
-						// directory once recovery has made the transaction
-						// state store durable. The txnStateStore also stores
-						// the cluster ID.
-						// TODO: Does the txnStateStore need to store the cluster ID?
+					if (!clusterId->get().present() && localInfo.client.clusterId.isValid()) {
 						state UID tmpClusterId = localInfo.client.clusterId;
 						wait(createClusterIdFile(folder, tmpClusterId));
 						clusterId->set(tmpClusterId);
