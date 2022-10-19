@@ -43,9 +43,7 @@ func figureVersion(current: Version,
 
 
 public actor MasterDataActor {
-    // FIXME: Make 'let' after resolving FRT layout issue (rdar://101092361).
-    // let myself: MasterData
-    var myself: MasterData
+    let myself: MasterData
 
     init(data: MasterData) {
         self.myself = data
@@ -61,10 +59,8 @@ public actor MasterDataActor {
         let requestingProxyUID: UID = req.requestingProxy
         myself.getGetCommitVersionRequests() += 1
 
-        // FIXME: workaround for first runtime issue.
-        let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        guard let lastVersionReplies = lp/* FIXME: (workaround for first runtime issue (rdar://101092612)): lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
+        guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
@@ -162,7 +158,7 @@ public struct MasterDataActorCxx {
     let myself: MasterDataActor
 
     /// Mirror actor initializer, and initialize `myself`.
-    public init(data: MasterDataSwiftReference) {
+    public init(data: MasterData) {
         myself = MasterDataActor(data: data)
     }
 
@@ -179,32 +175,3 @@ public struct MasterDataActorCxx {
         }
     }
 }
-
-// FIXME: remove once MasterData is FRT (rdar://101092361).
-extension MasterDataSwiftReference {
-    var version: Version {
-        get {
-            getVersion()
-        }
-        set {
-            setVersion(newValue)
-        }
-    }
-
-    var lastVersionTime: Double {
-        get {
-            getLastVersionTime()
-        }
-        set {
-            setLastVersionTime(newValue)
-        }
-    }
-
-    var recoveryTransactionVersion: Version { getRecoveryTransactionVersion() }
-
-    var lastEpochEnd: Version { getLastEpochEnd() }
-
-    var referenceVersion: MasterDataSwiftReference.OptionalVersion { getReferenceVersion() }
-}
-
-typealias MasterData = MasterDataSwiftReference

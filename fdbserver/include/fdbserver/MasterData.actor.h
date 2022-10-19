@@ -43,7 +43,15 @@
 #define FDBSERVER_MASTERDATA_ACTOR_H
 #include "flow/actorcompiler.h" // This must be the last #include
 
-struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
+// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+#define SWIFT_CXX_REF_MASTERDATA   \
+    __attribute__((swift_attr("import_as_ref")))   \
+    __attribute__((swift_attr("retain:addrefMasterData")))   \
+    __attribute__((swift_attr("release:delrefMasterData")))
+
+// FIXME (after the one below): Use SWIFT_CXX_REF once https://github.com/apple/swift/issues/61620 is fixed.
+// FIXME (before one above): Use SWIFT_CXX_REF_MASTERDATA once https://github.com/apple/swift/issues/61627 is fixed.
+struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterData> {
     UID dbgid;
 
     Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
@@ -151,38 +159,21 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
     }
 };
 
+// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+inline void addrefMasterData(MasterData* ptr) {
+    addref(ptr);
+}
+
+// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+inline void delrefMasterData(MasterData* ptr) {
+    delref(ptr);
+}
+
 using ReferenceMasterData = Reference<MasterData>;
 
 // FIXME: Workaround for linker issue (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
-
-// FIXME: Workaround for issue with FRT type layout (rdar://101092361).
-struct MasterDataSwiftReference {
-    MasterData &myself;
-
-    MasterDataSwiftReference(MasterData &myself);
-
-    Counter &getGetCommitVersionRequests() const __attribute__((swift_attr("import_unsafe")));
-
-    Version getVersion() const;
-    void setVersion(Version v);
-
-    double getLastVersionTime() const;
-    void setLastVersionTime(double v);
-
-    Version getRecoveryTransactionVersion() const;
-
-    Version getLastEpochEnd() const;
-
-    using OptionalVersion = Optional<Version>;
-    Optional<Version> getReferenceVersion() const;
-
-    ResolutionBalancer &getResolutionBalancer() const __attribute__((swift_attr("import_unsafe")));
-};
-
-// FIXME: Workaround for runtime issue #1 (rdar://101092612).
-CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterDataSwiftReference rd, UID value);
 
 #include "flow/unactorcompiler.h"
 #endif
