@@ -323,12 +323,16 @@ int populate(Database db,
 		auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 		double required_keys = (key_end - key_begin + 1) * args.load_factor;
 		for (auto i = key_begin; i <= key_end; i++) {
+			// Choose required_keys out of (key_end -i + 1) randomly, so the probability is required_keys / (key_end - i + 1).
+			// Generate a random number in range [0, 1), if the generated number is smaller or equal to required_keys / (key_end - i + 1),
+			// then choose this key.
 			double r = rand() / (1.0 + RAND_MAX);
-			if (r > required_keys / (key_end - i + 1)) continue;
+			if (r > required_keys / (key_end - i + 1)) {
+				continue;
+			}
 			--required_keys;
 			/* sequential keys */
 			genKey(keystr.data(), KEY_PREFIX, args, i);
-			printf("Gen key : %s\n", keystr.c_str());
 			/* random values */
 			randomString(valstr.data(), args.value_length);
 
