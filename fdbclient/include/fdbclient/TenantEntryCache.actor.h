@@ -182,6 +182,10 @@ private:
 				state Future<Void> tenantModifiedWatch = TenantMetadata::lastTenantModification().watch(tr);
 				wait(tr->commit());
 				TraceEvent(SevDebug, "TenantEntryCacheRefreshWatchSet", cache->id());
+				// setInitialWatch is set to indicate that an inital watch has been set for the lastTenantModification
+				// key. Currently this is only used in simulation to avoid a race condition where a tenant is created
+				// before the inital watch is set. However, it can be enabled by passing waitForInitalWatch = true to
+				// the init() method.
 				if (cache->setInitialWatch.canBeSet()) {
 					cache->setInitialWatch.send(Void());
 				}
@@ -205,6 +209,10 @@ private:
 	}
 
 	static bool tenantsEnabled(TenantEntryCache<T>* cache) {
+		// Avoid using the cache if the tenant mode is disabled. However since we use clientInfo, sometimes it may not
+		// be fully up to date (i.e it may indicate the tenantMode is disabled when in fact it is required). Thus if
+		// there is at least one tenant that has been created on the cluster then use the cache to avoid an incorrect
+		// miss.
 		if (cache->getDatabase()->clientInfo->get().tenantMode == TenantMode::DISABLED) {
 			if (!cache->lastTenantId.present()) {
 				return false;
@@ -298,7 +306,6 @@ private:
 
 		if (!tenantsEnabled(cache)) {
 			// If tenants are disabled on the cluster avoid using the cache
-			cache->misses += 1;
 			return Optional<TenantEntryCachePayload<T>>();
 		}
 
@@ -328,7 +335,6 @@ private:
 
 		if (!tenantsEnabled(cache)) {
 			// If tenants are disabled on the cluster avoid using the cache
-			cache->misses += 1;
 			return Optional<TenantEntryCachePayload<T>>();
 		}
 
