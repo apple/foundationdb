@@ -288,9 +288,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
     restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.1.0/CycleTestRestart-1.toml
-    restarting/to_7.1.0/CycleTestRestart-2.toml)
-  add_fdb_test(
     TEST_FILES restarting/from_7.1.0/SnapTestAttrition-1.txt
     restarting/from_7.1.0/SnapTestAttrition-2.txt)
   add_fdb_test(
@@ -303,9 +300,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0/SnapCycleRestart-1.txt
     restarting/from_7.1.0/SnapCycleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
-  add_fdb_test(
     TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
@@ -315,12 +309,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
     restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.txt
-    restarting/from_7.2.0/DrUpgradeRestart-2.txt)
+    TEST_FILES restarting/from_71.2.0/DrUpgradeRestart-1.txt
+    restarting/from_71.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/to_7.2.0/CycleTestRestart-1.toml
-    restarting/to_7.2.0/CycleTestRestart-2.toml)
-
+    TEST_FILES restarting/from_71.3.0/DrUpgradeRestart-1.txt
+    restarting/from_71.3.0/DrUpgradeRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.2.0/CycleTestRestart-1.toml
+    restarting/to_71.2.0/CycleTestRestart-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
