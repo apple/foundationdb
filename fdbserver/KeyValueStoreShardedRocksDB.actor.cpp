@@ -1023,6 +1023,10 @@ public:
 		writeBatch->Put(metadataShard->cf,
 		                getShardMappingKey(lastKey, shardMappingPrefix),
 		                nextShard == nullptr ? "" : nextShard->physicalShard->id);
+		TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
+		    .detail("Action", "PersistRangeMappingEnd")
+		    .detail("NextShardKey", lastKey)
+		    .detail("Value", nextShard == nullptr ? "" : nextShard->physicalShard->id);
 		dirtyShards->insert(metadataShard.get());
 	}
 

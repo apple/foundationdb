@@ -23,5 +23,5 @@ function(compile_zstd)
     endif()
   endif()
 
-  set(ZSTD_LIB_INCLUDE_DIR ${zstd_SOURCE_DIR}/lib PARENT_SCOPE)
+  set(ZSTD_LIB_INCLUDE_DIR ${zstd_SOURCE_DIR}/lib CACHE INTERNAL ZSTD_LIB_INCLUDE_DIR)
 endfunction(compile_zstd)

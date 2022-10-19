@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbserver/SimKmsConnector.h"
-
-#include "fmt/format.h"
-#include "fdbrpc/sim_validation.h"
 #include "fdbclient/BlobCipher.h"
+
+#include "fdbrpc/sim_validation.h"
+
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/SimKmsConnector.h"
+
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
@@ -38,6 +39,9 @@
 #include "flow/network.h"
 #include "flow/UnitTest.h"
 
+#include "fmt/format.h"
+
+#include <limits>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -115,7 +119,7 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	const int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
 	Optional<int64_t> refAtTS = getRefreshInterval(currTS, defaultTtl);
 	Optional<int64_t> expAtTS = getExpireInterval(refAtTS, defaultTtl);
-	TraceEvent("SimKms.EKLookupById").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
+	TraceEvent("SimKmsEKLookupById").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
 	for (const auto& item : req.encryptKeyInfos) {
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
@@ -135,9 +139,7 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	}
 
 	wait(delayJittered(1.0)); // simulate network delay
-
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
-
 	return Void();
 }
 
@@ -161,8 +163,14 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 	const int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
 	Optional<int64_t> refAtTS = getRefreshInterval(currTS, defaultTtl);
 	Optional<int64_t> expAtTS = getExpireInterval(refAtTS, defaultTtl);
-	TraceEvent("SimKms.EKLookupByDomainId").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
+	TraceEvent("SimKmsEKLookupByDomainId").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
 	for (const auto& info : req.encryptDomainInfos) {
+		// Ensure domainIds are acceptable
+		if (info.domainId < FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+			success = false;
+			break;
+		}
+
 		EncryptCipherBaseKeyId keyId = 1 + abs(info.domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 		const auto& itr = ctx->simEncryptKeyStore.find(keyId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
@@ -174,21 +182,24 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, info.domainId, info.domainName, keyId), "");
 			}
 		} else {
+			TraceEvent("SimKmsEKLookupByDomainIdKeyNotFound").detail("DomId", info.domainId);
 			success = false;
 			break;
 		}
 	}
 
 	wait(delayJittered(1.0)); // simulate network delay
-
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
-
 	return Void();
 }
-
-static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainId domainId) {
+// TODO: switch this to use bg_url instead of hardcoding file://fdbblob, so it works as FDBPerfKmsConnector
+// FIXME: make this (more) deterministic outside of simulation for FDBPerfKmsConnector
+static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainId domainId,
+                                                             BlobMetadataDomainName domainName) {
 	Standalone<BlobMetadataDetailsRef> metadata;
 	metadata.domainId = domainId;
+	metadata.arena().dependsOn(domainName.arena());
+	metadata.domainName = domainName;
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type = deterministicRandom()->randomInt(0, 3);
 	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
@@ -223,6 +234,17 @@ static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainI
 			ev.detail("P" + std::to_string(i), metadata.partitions.back());
 		}
 	}
+
+	// set random refresh + expire time
+	if (deterministicRandom()->coinflip()) {
+		metadata.refreshAt = now() + deterministicRandom()->random01() * SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+		metadata.expireAt =
+		    metadata.refreshAt + deterministicRandom()->random01() * SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+	} else {
+		metadata.refreshAt = std::numeric_limits<double>::max();
+		metadata.expireAt = metadata.refreshAt;
+	}
+
 	return metadata;
 }
 
@@ -234,25 +256,31 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 		dbgDIdTrace.get().detail("DbgId", req.debugId.get());
 	}
 
-	for (BlobMetadataDomainId domainId : req.domainIds) {
-		auto it = simBlobMetadataStore.find(domainId);
+	for (auto const& domainInfo : req.domainInfos) {
+		auto it = simBlobMetadataStore.find(domainInfo.domainId);
 		if (it == simBlobMetadataStore.end()) {
 			// construct new blob metadata
-			it = simBlobMetadataStore.insert({ domainId, createBlobMetadata(domainId) }).first;
+			it = simBlobMetadataStore
+			         .insert({ domainInfo.domainId, createBlobMetadata(domainInfo.domainId, domainInfo.domainName) })
+			         .first;
+		} else if (now() >= it->second.expireAt) {
+			// update random refresh and expire time
+			it->second.refreshAt = now() + deterministicRandom()->random01() * 30;
+			it->second.expireAt = it->second.refreshAt + deterministicRandom()->random01() * 10;
 		}
 		rep.metadataDetails.arena().dependsOn(it->second.arena());
 		rep.metadataDetails.push_back(rep.metadataDetails.arena(), it->second);
 	}
 
-	wait(delayJittered(1.0)); // simulate network delay
+	wait(delay(deterministicRandom()->random01())); // simulate network delay
 
 	req.reply.send(rep);
 
 	return Void();
 }
 
-ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
-	TraceEvent("SimEncryptKmsProxy_Init", interf.id()).detail("MaxEncryptKeys", SERVER_KNOBS->SIM_KMS_MAX_KEYS);
+ACTOR Future<Void> simconnectorCoreImpl(KmsConnectorInterface interf) {
+	TraceEvent("SimEncryptKmsProxyInit", interf.id()).detail("MaxEncryptKeys", SERVER_KNOBS->SIM_KMS_MAX_KEYS);
 
 	state Reference<SimKmsConnectorContext> ctx = makeReference<SimKmsConnectorContext>(SERVER_KNOBS->SIM_KMS_MAX_KEYS);
 
@@ -260,7 +288,6 @@ ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(addActor.getFuture());
-
 	loop {
 		choose {
 			when(KmsConnLookupEKsByKeyIdsReq req = waitNext(interf.ekLookupByIds.getFuture())) {
@@ -272,12 +299,16 @@ ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
 				addActor.send(blobMetadataLookup(interf, req));
 			}
+			when(wait(collection)) {
+				// this should throw an error, not complete
+				ASSERT(false);
+			}
 		}
 	}
 }
 
 Future<Void> SimKmsConnector::connectorCore(KmsConnectorInterface interf) {
-	return simKmsConnectorCore_impl(interf);
+	return simconnectorCoreImpl(interf);
 }
 void forceLinkSimKmsConnectorTests() {}
 
@@ -355,7 +386,7 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 TEST_CASE("fdbserver/SimKmsConnector") {
 	state KmsConnectorInterface inf;
 	state uint32_t maxEncryptKeys = 64;
-	state SimKmsConnector connector;
+	state SimKmsConnector connector("SimKmsConnector");
 
 	loop choose {
 		when(wait(connector.connectorCore(inf))) { throw internal_error(); }

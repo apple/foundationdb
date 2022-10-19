@@ -48,17 +48,17 @@ class GlobalTagThrottlingWorkload : public TestWorkload {
 	}
 
 public:
+	static constexpr auto NAME = "GlobalTagThrottling";
 	explicit GlobalTagThrottlingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
 		reservedQuota = getOption(options, "reservedQuota"_sr, 0.0);
 		totalQuota = getOption(options, "totalQuota"_sr, 0.0);
 	}
 
-	std::string description() const override { return "GlobalTagThrottling"; }
 	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<GlobalTagThrottlingWorkload> GlobalTagThrottlingWorkloadFactory("GlobalTagThrottling");
+WorkloadFactory<GlobalTagThrottlingWorkload> GlobalTagThrottlingWorkloadFactory;

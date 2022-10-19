@@ -364,6 +364,7 @@ static Future<Version> getInconsistentReadVersion(Database const& db) {
 }
 
 struct ReadWriteWorkload : ReadWriteCommon {
+	static constexpr auto NAME = "ReadWrite";
 	// use ReadWrite as a ramp up workload
 	bool rampUpLoad; // indicate this is a ramp up workload
 	int rampSweepCount; // how many times of ramp up
@@ -438,8 +439,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		options.cacheResult = cacheResult;
 		tr.getTransaction().trState->readOptions = options;
 	}
-
-	std::string description() const override { return descriptionString.toString(); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		ReadWriteCommon::getMetrics(m);
@@ -781,4 +780,4 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 	return countInsertionRates;
 }
 
-WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory("ReadWrite");
+WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory;

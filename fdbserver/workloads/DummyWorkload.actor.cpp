@@ -23,6 +23,7 @@
 
 // The workload that do nothing. It can be used for waiting for quiescence
 struct DummyWorkload : TestWorkload {
+	static constexpr auto NAME = "DummyWorkload";
 	bool displayWorkers;
 	double displayDelay;
 
@@ -30,8 +31,6 @@ struct DummyWorkload : TestWorkload {
 		displayWorkers = getOption(options, "displayWorkers"_sr, true);
 		displayDelay = getOption(options, "displayDelay"_sr, 0.0);
 	}
-
-	std::string description() const override { return "DummyWorkload"; }
 
 	Future<Void> start(Database const& cx) override {
 		if ((clientId == 0) && (displayWorkers)) {
@@ -52,4 +51,4 @@ struct DummyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<DummyWorkload> DummyWorkloadFactory("DummyWorkload");
+WorkloadFactory<DummyWorkload> DummyWorkloadFactory;

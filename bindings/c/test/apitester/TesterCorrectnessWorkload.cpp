@@ -50,6 +50,7 @@ private:
 		execTransaction(
 		    [kvPairs](auto ctx) {
 			    for (const fdb::KeyValue& kv : *kvPairs) {
+				    ctx->tx().addReadConflictRange(kv.key, kv.key + fdb::Key(1, '\x00'));
 				    ctx->tx().set(kv.key, kv.value);
 			    }
 			    ctx->commit();

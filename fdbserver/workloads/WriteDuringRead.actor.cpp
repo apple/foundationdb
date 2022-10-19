@@ -31,6 +31,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
+	static constexpr auto NAME = "WriteDuringRead";
+
 	double testDuration, slowModeStart;
 	int numOps;
 	bool rarelyCommit, adjacentKeys;
@@ -112,8 +114,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    .detail("ValueSizeMax", valueSizeRange.second)
 			    .detail("MaxClearSize", maxClearSize);
 	}
-
-	std::string description() const override { return "WriteDuringRead"; }
 
 	ACTOR Future<Void> setupImpl(WriteDuringReadWorkload* self, Database cx) {
 		// If we are operating in the default tenant but enable raw access, we should only write keys
@@ -1101,4 +1101,4 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<WriteDuringReadWorkload> WriteDuringReadWorkloadFactory("WriteDuringRead");
+WorkloadFactory<WriteDuringReadWorkload> WriteDuringReadWorkloadFactory;

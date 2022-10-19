@@ -29,6 +29,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteBandwidthWorkload : KVWorkload {
+	static constexpr auto NAME = "WriteBandwidth";
+
 	int keysPerTransaction;
 	double testDuration, warmingDelay, loadTime, maxInsertRate;
 	std::string valueString;
@@ -48,7 +50,6 @@ struct WriteBandwidthWorkload : KVWorkload {
 		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
 	}
 
-	std::string description() const override { return "WriteBandwidth"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -139,4 +140,4 @@ struct WriteBandwidthWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<WriteBandwidthWorkload> WriteBandwidthWorkloadFactory("WriteBandwidth");
+WorkloadFactory<WriteBandwidthWorkload> WriteBandwidthWorkloadFactory;

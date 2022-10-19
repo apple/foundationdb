@@ -25,6 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LockDatabaseFrequentlyWorkload : TestWorkload {
+	static constexpr auto NAME = "LockDatabaseFrequently";
+
 	double delayBetweenLocks;
 	double testDuration;
 	PerfIntCounter lockCount{ "LockCount" };
@@ -33,8 +35,6 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 		delayBetweenLocks = getOption(options, "delayBetweenLocks"_sr, 0.1);
 		testDuration = getOption(options, "testDuration"_sr, 60);
 	}
-
-	std::string description() const override { return "LockDatabaseFrequently"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -72,4 +72,4 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<LockDatabaseFrequentlyWorkload> LockDatabaseFrequentlyWorkloadFactory("LockDatabaseFrequently");
+WorkloadFactory<LockDatabaseFrequentlyWorkload> LockDatabaseFrequentlyWorkloadFactory;

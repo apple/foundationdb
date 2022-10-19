@@ -44,8 +44,14 @@
 using TenantNameEntryPair = std::pair<TenantName, TenantMapEntry>;
 using TenantNameEntryPairVec = std::vector<TenantNameEntryPair>;
 
-enum class TenantEntryCacheRefreshReason { INIT = 1, PERIODIC_TASK = 2, CACHE_MISS = 3, REMOVE_ENTRY = 4 };
-enum class TenantEntryCacheRefreshMode { PERIODIC_TASK = 1, NONE = 2 };
+enum class TenantEntryCacheRefreshReason {
+	INIT = 1,
+	PERIODIC_TASK = 2,
+	CACHE_MISS = 3,
+	REMOVE_ENTRY = 4,
+	WATCH_TRIGGER = 5
+};
+enum class TenantEntryCacheRefreshMode { PERIODIC_TASK = 1, WATCH = 2, NONE = 3 };
 
 template <class T>
 struct TenantEntryCachePayload {
@@ -62,12 +68,6 @@ using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(con
 // 1. Lookup by 'TenantId'
 // 2. Lookup by 'TenantPrefix'
 // 3. Lookup by 'TenantName'
-//
-// TODO:
-// ----
-// The cache allows user to construct the 'cached object' by supplying a callback. The cache implements a periodic
-// refresh mechanism, polling underlying database for updates (add/remove tenants), in future we might want to implement
-// database range-watch to monitor such updates
 
 template <class T>
 class TenantEntryCache : public ReferenceCounted<TenantEntryCache<T>>, NonCopyable {
@@ -78,6 +78,10 @@ private:
 	TenantEntryCacheRefreshMode refreshMode;
 
 	Future<Void> refresher;
+	Future<Void> watchRefresher;
+	Future<Void> lastTenantIdRefresher;
+	Promise<Void> setInitialWatch;
+	Optional<int64_t> lastTenantId;
 	Map<int64_t, TenantEntryCachePayload<T>> mapByTenantId;
 	Map<TenantName, TenantEntryCachePayload<T>> mapByTenantName;
 
@@ -87,6 +91,7 @@ private:
 	Counter refreshByCacheInit;
 	Counter refreshByCacheMiss;
 	Counter numRefreshes;
+	Counter refreshByWatchTrigger;
 
 	ACTOR static Future<TenantNameEntryPairVec> getTenantList(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -102,14 +107,164 @@ private:
 		return tenantList.results;
 	}
 
+	ACTOR static Future<Void> refreshCacheById(int64_t tenantId,
+	                                           TenantEntryCache<T>* cache,
+	                                           TenantEntryCacheRefreshReason reason) {
+		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				state Optional<TenantName> name = wait(TenantMetadata::tenantIdIndex().get(tr, tenantId));
+				if (name.present()) {
+					Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name.get()));
+					if (entry.present()) {
+						cache->put(std::make_pair(name.get(), entry.get()));
+						updateCacheRefreshMetrics(cache, reason);
+					}
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		return Void();
+	}
+
+	ACTOR static Future<Void> refreshCacheByName(TenantName name,
+	                                             TenantEntryCache<T>* cache,
+	                                             TenantEntryCacheRefreshReason reason) {
+		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshStart", cache->id())
+		    .detail("Reason", static_cast<int>(reason));
+		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name));
+				if (entry.present()) {
+					cache->put(std::make_pair(name, entry.get()));
+					updateCacheRefreshMetrics(cache, reason);
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		return Void();
+	}
+
 	static void updateCacheRefreshMetrics(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
 		if (reason == TenantEntryCacheRefreshReason::INIT) {
 			cache->refreshByCacheInit += 1;
 		} else if (reason == TenantEntryCacheRefreshReason::CACHE_MISS) {
 			cache->refreshByCacheMiss += 1;
+		} else if (reason == TenantEntryCacheRefreshReason::WATCH_TRIGGER) {
+			cache->refreshByWatchTrigger += 1;
 		}
 
 		cache->numRefreshes += 1;
+	}
+
+	ACTOR static Future<Void> refreshCacheUsingWatch(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
+		TraceEvent(SevDebug, "TenantEntryCacheRefreshUsingWatchStart", cache->id())
+		    .detail("Reason", static_cast<int>(reason));
+
+		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state Future<Void> tenantModifiedWatch = TenantMetadata::lastTenantModification().watch(tr);
+				wait(tr->commit());
+				TraceEvent(SevDebug, "TenantEntryCacheRefreshWatchSet", cache->id());
+				// setInitialWatch is set to indicate that an inital watch has been set for the lastTenantModification
+				// key. Currently this is only used in simulation to avoid a race condition where a tenant is created
+				// before the inital watch is set. However, it can be enabled by passing waitForInitalWatch = true to
+				// the init() method.
+				if (cache->setInitialWatch.canBeSet()) {
+					cache->setInitialWatch.send(Void());
+				}
+				wait(tenantModifiedWatch);
+				// If watch triggered then refresh the cache as tenant metadata was updated
+				TraceEvent(SevDebug, "TenantEntryCacheRefreshUsingWatchTriggered", cache->id())
+				    .detail("Reason", static_cast<int>(reason));
+				wait(refreshImpl(cache, reason));
+				tr->reset();
+			} catch (Error& e) {
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent("TenantEntryCacheRefreshUsingWatchError", cache->id())
+					    .errorUnsuppressed(e)
+					    .suppressFor(1.0);
+				}
+				wait(tr->onError(e));
+				// In case the watch threw an error then refresh the cache just in case it was updated
+				wait(refreshImpl(cache, reason));
+			}
+		}
+	}
+
+	static bool tenantsEnabled(TenantEntryCache<T>* cache) {
+		// Avoid using the cache if the tenant mode is disabled. However since we use clientInfo, sometimes it may not
+		// be fully up to date (i.e it may indicate the tenantMode is disabled when in fact it is required). Thus if
+		// there is at least one tenant that has been created on the cluster then use the cache to avoid an incorrect
+		// miss.
+		if (cache->getDatabase()->clientInfo->get().tenantMode == TenantMode::DISABLED) {
+			if (!cache->lastTenantId.present()) {
+				return false;
+			}
+			return cache->lastTenantId.get() > 0;
+		}
+		return true;
+	}
+
+	ACTOR static Future<Void> setLastTenantId(TenantEntryCache<T>* cache) {
+		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<int64_t> lastTenantId = wait(TenantMetadata::lastTenantId().get(tr));
+				cache->lastTenantId = lastTenantId;
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> lastTenantIdWatch(TenantEntryCache<T>* cache) {
+		TraceEvent(SevDebug, "TenantEntryCacheLastTenantIdWatchStart", cache->id());
+		// monitor for any changes on the last tenant id and update it as necessary
+		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state Future<Void> lastTenantIdWatch = tr->watch(TenantMetadata::lastTenantId().key);
+				wait(tr->commit());
+				wait(lastTenantIdWatch);
+				wait(setLastTenantId(cache));
+				tr->reset();
+			} catch (Error& e) {
+				state Error err(e);
+				if (err.code() != error_code_actor_cancelled) {
+					TraceEvent("TenantEntryCacheLastTenantIdWatchError", cache->id())
+					    .errorUnsuppressed(err)
+					    .suppressFor(1.0);
+					// In case watch errors out refresh the lastTenantId in case it has changed or we would have missed
+					// an update
+					wait(setLastTenantId(cache));
+				}
+				wait(tr->onError(err));
+			}
+		}
 	}
 
 	ACTOR static Future<Void> refreshImpl(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
@@ -130,9 +285,7 @@ private:
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "TenantEntryCacheRefreshError", cache->id())
-					    .errorUnsuppressed(e)
-					    .suppressFor(1.0);
+					TraceEvent("TenantEntryCacheRefreshError", cache->id()).errorUnsuppressed(e).suppressFor(1.0);
 				}
 				wait(tr->onError(e));
 			}
@@ -151,12 +304,22 @@ private:
 			return ret;
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCacheGetByIdRefresh").detail("TenantId", tenantId);
+		if (!tenantsEnabled(cache)) {
+			// If tenants are disabled on the cluster avoid using the cache
+			return Optional<TenantEntryCachePayload<T>>();
+		}
 
-		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
-		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
-		// existing entry gets updated within the KeyRange of interest. Hence, misses would be very rare
-		wait(refreshImpl(cache, TenantEntryCacheRefreshReason::CACHE_MISS));
+		TraceEvent("TenantEntryCacheGetByIdRefresh").detail("TenantId", tenantId);
+
+		if (cache->refreshMode == TenantEntryCacheRefreshMode::WATCH) {
+			// Entry not found. Do a point refresh
+			// TODO: Don't initiate refresh if tenantId < maxTenantId (stored as a system key currently) as we know that
+			// such a tenant does not exist (it has either never existed or has been deleted)
+			wait(refreshCacheById(tenantId, cache, TenantEntryCacheRefreshReason::CACHE_MISS));
+		} else {
+			// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
+			wait(refreshImpl(cache, TenantEntryCacheRefreshReason::CACHE_MISS));
+		}
 
 		cache->misses += 1;
 		return cache->lookupById(tenantId);
@@ -170,12 +333,20 @@ private:
 			return ret;
 		}
 
+		if (!tenantsEnabled(cache)) {
+			// If tenants are disabled on the cluster avoid using the cache
+			return Optional<TenantEntryCachePayload<T>>();
+		}
+
 		TraceEvent("TenantEntryCacheGetByNameRefresh").detail("TenantName", name);
 
-		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
-		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
-		// existing entry gets updated within the KeyRange of interest. Hence, misses would be very rare
-		wait(refreshImpl(cache, TenantEntryCacheRefreshReason::CACHE_MISS));
+		if (cache->refreshMode == TenantEntryCacheRefreshMode::WATCH) {
+			// Entry not found. Do a point refresh
+			wait(refreshCacheByName(name, cache, TenantEntryCacheRefreshReason::CACHE_MISS));
+		} else {
+			// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
+			wait(refreshImpl(cache, TenantEntryCacheRefreshReason::CACHE_MISS));
+		}
 
 		cache->misses += 1;
 		return cache->lookupByName(name);
@@ -272,7 +443,18 @@ public:
 	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
 	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
-	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics),
+	    refreshByWatchTrigger("TenantEntryCacheRefreshWatchTrigger", metrics) {
+		TraceEvent("TenantEntryCacheCreatedDefaultFunc", uid);
+	}
+
+	TenantEntryCache(Database db, TenantEntryCacheRefreshMode mode)
+	  : uid(deterministicRandom()->randomUniqueID()), db(db), createPayloadFunc(defaultCreatePayload),
+	    refreshMode(mode), metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
+	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics),
+	    refreshByWatchTrigger("TenantEntryCacheRefreshWatchTrigger", metrics) {
 		TraceEvent("TenantEntryCacheCreatedDefaultFunc", uid);
 	}
 
@@ -282,7 +464,8 @@ public:
 	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
 	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
-	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics),
+	    refreshByWatchTrigger("TenantEntryCacheRefreshWatchTrigger", metrics) {
 		TraceEvent("TenantEntryCacheCreated", uid);
 	}
 
@@ -291,7 +474,8 @@ public:
 	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
 	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
-	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics),
+	    refreshByWatchTrigger("TenantEntryCacheRefreshWatchTrigger", metrics) {
 		TraceEvent("TenantEntryCacheCreated", uid);
 	}
 
@@ -300,26 +484,36 @@ public:
 	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
 	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
-	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics),
+	    refreshByWatchTrigger("TenantEntryCacheRefreshWatchTrigger", metrics) {
 		TraceEvent("TenantEntryCacheCreated", uid);
 	}
 
-	Future<Void> init() {
+	Future<Void> init(bool waitForInitalWatch = false) {
 		TraceEvent("TenantEntryCacheInit", uid);
 
 		Future<Void> f = refreshImpl(this, TenantEntryCacheRefreshReason::INIT);
 
 		// Launch reaper task to periodically refresh cache by scanning database KeyRange
 		TenantEntryCacheRefreshReason reason = TenantEntryCacheRefreshReason::PERIODIC_TASK;
+		Future<Void> initalWatchFuture = Void();
+		lastTenantIdRefresher = lastTenantIdWatch(this);
 		if (refreshMode == TenantEntryCacheRefreshMode::PERIODIC_TASK) {
 			refresher = recurringAsync([&, reason]() { return refresh(reason); },
 			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* interval */
 			                           true, /* absoluteIntervalDelay */
 			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* intialDelay */
 			                           TaskPriority::Worker);
+		} else if (refreshMode == TenantEntryCacheRefreshMode::WATCH) {
+			if (waitForInitalWatch) {
+				initalWatchFuture = setInitialWatch.getFuture();
+			}
+			watchRefresher = refreshCacheUsingWatch(this, TenantEntryCacheRefreshReason::WATCH_TRIGGER);
 		}
 
-		return f;
+		Future<Void> setLastTenant = setLastTenantId(this);
+
+		return f && initalWatchFuture && setLastTenant;
 	}
 
 	Database getDatabase() const { return db; }
@@ -384,6 +578,7 @@ public:
 	Counter::Value numCacheRefreshes() const { return numRefreshes.getValue(); }
 	Counter::Value numRefreshByMisses() const { return refreshByCacheMiss.getValue(); }
 	Counter::Value numRefreshByInit() const { return refreshByCacheInit.getValue(); }
+	Counter::Value numWatchRefreshes() const { return refreshByWatchTrigger.getValue(); }
 };
 
 #include "flow/unactorcompiler.h"

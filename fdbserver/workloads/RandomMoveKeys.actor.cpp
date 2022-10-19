@@ -31,6 +31,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MoveKeysWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "RandomMoveKeys";
+
 	bool enabled;
 	double testDuration = 10.0, meanDelay = 0.05;
 	double maxKeyspace = 0.1;
@@ -47,7 +49,6 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		maxKeyspace = getOption(options, "maxKeyspace"_sr, maxKeyspace);
 	}
 
-	std::string description() const override { return "MoveKeysWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -243,5 +244,5 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 	}
 };
 
-WorkloadFactory<MoveKeysWorkload> MoveKeysWorkloadFactory("RandomMoveKeys");
+WorkloadFactory<MoveKeysWorkload> MoveKeysWorkloadFactory;
 FailureInjectorFactory<MoveKeysWorkload> MoveKeysFailureInjectionFactory;

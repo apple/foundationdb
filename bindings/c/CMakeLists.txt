@@ -290,6 +290,8 @@ if(NOT WIN32)
       @TMP_DIR@
       --log-dir
       @LOG_DIR@
+      --knob
+      delete-native-lib-after-loading=false # for properly symbolizing xSAN errors
     )
 
     add_fdbclient_test(
@@ -306,6 +308,8 @@ if(NOT WIN32)
       @TMP_DIR@
       --log-dir
       @LOG_DIR@
+      --knob
+      delete-native-lib-after-loading=false # for properly symbolizing xSAN errors
     )
 
     add_fdbclient_test(
@@ -327,6 +331,8 @@ if(NOT WIN32)
       @TMP_DIR@
       --log-dir
       @LOG_DIR@
+      --knob
+      delete-native-lib-after-loading=false # for properly symbolizing xSAN errors
     )
 
     add_fdbclient_test(
@@ -352,6 +358,8 @@ if(NOT WIN32)
       @CLIENT_KEY_FILE@
       --tls-ca-file
       @SERVER_CA_FILE@
+      --knob
+      delete-native-lib-after-loading=false # for properly symbolizing xSAN errors
     )
 
     add_test(NAME fdb_c_upgrade_to_future_version

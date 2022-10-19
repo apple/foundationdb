@@ -1,9 +1,13 @@
 [configuration]
 allowDefaultTenant = false
 allowDisablingTenants = false
+tenantModeRequired = true
 
 [[knobs]]
 enable_encryption = true
+enable_tlog_encryption = true
+enable_storage_server_encryption = false
+enable_blob_granule_encryption = true
 
 [[test]]
 testTitle = 'TenantCreation'
@@ -32,7 +36,6 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'BackupAndRestoreCorrectness'
-    enableBackupEncryption = true
     defaultBackup = true
     backupAfter = 10.0
     restoreAfter = 60.0
