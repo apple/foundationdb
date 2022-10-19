@@ -525,7 +525,7 @@ The ``start`` command will start a new restore on the specified (or default) tag
   Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.
 
 ``--user_data``
-  Restore only the user keyspace. This option should NOT be used alongside --system_metadata (below) and CANNOT be used alongside other specified key ranges
+  Restore only the user keyspace. This option should NOT be used alongside --system-metadata (below) and CANNOT be used alongside other specified key ranges.
 
 ``--system_data``
   Restore only the relevant system keyspace (currently only tenant metadata). This option should NOT be used alongside --user_data (above) and CANNOT be used alongside other specified key ranges
