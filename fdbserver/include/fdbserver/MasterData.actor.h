@@ -64,6 +64,14 @@ private:
     std::shared_ptr<Counter> value;
 };
 
+// A concrete Optional<Version> type that can be referenced in Swift.
+using OptionalVersion = Optional<Version>;
+
+// Forward declare the Swift actor.
+namespace fdbserver_swift {
+class MasterDataActor;
+}
+
 // FIXME (after the one below): Use SWIFT_CXX_REF once https://github.com/apple/swift/issues/61620 is fixed.
 // FIXME (before one above): Use SWIFT_CXX_REF_MASTERDATA once https://github.com/apple/swift/issues/61627 is fixed.
 struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterData> {
@@ -84,9 +92,6 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
     Version version; // The last version assigned to a proxy by getVersion()
     double lastVersionTime;
     Optional<Version> referenceVersion;
-
-    std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
-
     MasterInterface myInterface;
 
     ResolutionBalancer resolutionBalancer;
@@ -116,6 +121,8 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
 
     Future<Void> logger;
     Future<Void> balancer;
+    
+    std::unique_ptr<fdbserver_swift::MasterDataActor> swiftImpl;
 
     MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                MasterInterface const& myInterface,
@@ -123,48 +130,9 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
                ClusterControllerFullInterface const& clusterController,
                Standalone<StringRef> const& dbId,
                PromiseStream<Future<Void>> addActor,
-               bool forceRecovery)
-      : dbgid(myInterface.id()),
-      lastEpochEnd(invalidVersion),
-      recoveryTransactionVersion(invalidVersion),
-        liveCommittedVersion(invalidVersion),
-      databaseLocked(false),
-      minKnownCommittedVersion(invalidVersion),
-        coordinators(coordinators),
-      version(invalidVersion),
-      lastVersionTime(0),
-      myInterface(myInterface),
-        resolutionBalancer(&version),
-      forceRecovery(forceRecovery),
-      cc("Master", dbgid.toString()),
-        getCommitVersionRequests("GetCommitVersionRequests", cc),
-        getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-        reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-        versionVectorTagUpdates("VersionVectorTagUpdates",
-                                dbgid,
-                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-        waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
-        nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
-        versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
-                                   dbgid,
-                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-        waitForPrevLatencies("WaitForPrevLatencies",
-                             dbgid,
-                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-        addActor(addActor) {
-        logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
-        if (forceRecovery && !myInterface.locality.dcId().present()) {
-            TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
-            forceRecovery = false;
-        }
-        balancer = resolutionBalancer.resolutionBalancing();
-        locality = tagLocalityInvalid;
-    }
+               bool forceRecovery);
 
-    ~MasterData() = default;
+    ~MasterData();
 
     inline ResolutionBalancer &getResolutionBalancer() {
         return resolutionBalancer;

@@ -70,13 +70,9 @@ void swift_workaround_releaseMasterData(MasterData* _Nonnull rd) {
 }
 
 ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
-  using namespace fdbserver_swift;
-
-  auto masterDataActor = MasterDataActor::init(self.getPtr());
-
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
-  masterDataActor.getVersion(req, /*result=*/promise);
+  self->swiftImpl->getVersion(self.getPtr(), req, /*result=*/promise);
   wait(promise.getFuture());
   return Void();
 }
@@ -100,6 +96,58 @@ void CounterValue::clear() {
     value->clear();
 }
 
+MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
+           MasterInterface const& myInterface,
+           ServerCoordinators const& coordinators,
+           ClusterControllerFullInterface const& clusterController,
+           Standalone<StringRef> const& dbId,
+           PromiseStream<Future<Void>> addActor,
+           bool forceRecovery)
+  : dbgid(myInterface.id()),
+  lastEpochEnd(invalidVersion),
+  recoveryTransactionVersion(invalidVersion),
+    liveCommittedVersion(invalidVersion),
+  databaseLocked(false),
+  minKnownCommittedVersion(invalidVersion),
+    coordinators(coordinators),
+  version(invalidVersion),
+  lastVersionTime(0),
+  myInterface(myInterface),
+    resolutionBalancer(&version),
+  forceRecovery(forceRecovery),
+  cc("Master", dbgid.toString()),
+    getCommitVersionRequests("GetCommitVersionRequests", cc),
+    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
+    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+    versionVectorTagUpdates("VersionVectorTagUpdates",
+                            dbgid,
+                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
+    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
+    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
+                               dbgid,
+                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+    waitForPrevLatencies("WaitForPrevLatencies",
+                         dbgid,
+                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+    addActor(addActor) {
+    logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
+    if (forceRecovery && !myInterface.locality.dcId().present()) {
+        TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
+        forceRecovery = false;
+    }
+    balancer = resolutionBalancer.resolutionBalancing();
+    locality = tagLocalityInvalid;
+    // FIXME: can we make a cleaner init?
+    swiftImpl.reset(new fdbserver_swift::MasterDataActor((const fdbserver_swift::MasterDataActor&)fdbserver_swift::MasterDataActor::init()));
+}
+
+MasterData::~MasterData() {}
+
+#if ENABLE_ORIG_CXX
 ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
@@ -183,6 +231,7 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 
 	return Void();
 }
+#endif
 
 #define getVersion getVersionSwift
 
@@ -274,7 +323,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	loop {
-		UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
+		state UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
 		TraceEvent("UpdateRecoveryData", self->dbgid)
 		    .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
 		    .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
@@ -288,11 +337,16 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		self->lastEpochEnd = req.lastEpochEnd;
 
 		if (req.commitProxies.size() > 0) {
-			self->lastCommitProxyVersionReplies.clear();
+            auto promise = Promise<Void>();
+			self->swiftImpl->clearLastCommitProxyVersionReplies(promise);
+            wait(promise.getFuture());
 
-			for (auto& p : req.commitProxies) {
-				self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
-			}
+            // FIXME: Get this working:
+			/*for (auto& p : req.commitProxies) {
+                auto promise = Promise<Void>();
+                self->swiftImpl->registerLastCommitProxyVersionReply(p.id(), promise);
+                wait(promise.getFuture());
+			}*/
 		}
 		if (req.versionEpoch.present()) {
 			self->referenceVersion = req.versionEpoch.get();
