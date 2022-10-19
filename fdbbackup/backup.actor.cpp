@@ -4173,7 +4173,7 @@ int main(int argc, char* argv[]) {
 			case RestoreType::START:
 				if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
 					fprintf(stderr,
-					        "ERROR: Cannot specify additional ranges when using: --user-data or --system-metadata "
+					        "ERROR: Cannot specify additional ranges when using --user-data or --system-metadata "
 					        "options\n");
 					return FDB_EXIT_ERROR;
 				}
