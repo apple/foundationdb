@@ -2315,54 +2315,6 @@ Database Database::createDatabase(std::string connFileName,
 	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
 }
 
-Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
-	const auto it = watchMap.find(std::make_pair(tenantId, key));
-	if (it == watchMap.end())
-		return Reference<WatchMetadata>();
-	return it->second;
-}
-
-void DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
-	const WatchMapKey key(metadata->parameters->tenant.tenantId, metadata->parameters->key);
-	watchMap[key] = metadata;
-	// NOTE Here we do *NOT* update/reset the reference count for the key, see the source code in getWatchFuture
-}
-
-int32_t DatabaseContext::increaseWatchRefCount(const int64_t tenantID, KeyRef key) {
-	const WatchMapKey mapKey(tenantID, key);
-	if (watchCounterMap.count(mapKey) == 0) {
-		watchCounterMap[mapKey] = 0;
-	}
-	const auto count = ++watchCounterMap[mapKey];
-	return count;
-}
-
-int32_t DatabaseContext::decreaseWatchRefCount(const int64_t tenantID, KeyRef key) {
-	const WatchMapKey mapKey(tenantID, key);
-	if (watchCounterMap.count(mapKey) == 0) {
-		// Key does not exist. The metadata might be removed by deleteWatchMetadata already.
-		return 0;
-	}
-	const auto count = --watchCounterMap[mapKey];
-	ASSERT(watchCounterMap[mapKey] >= 0);
-	if (watchCounterMap[mapKey] == 0) {
-		getWatchMetadata(tenantID, key)->watchFutureSS.cancel();
-		deleteWatchMetadata(tenantID, key);
-	}
-	return count;
-}
-
-void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key) {
-	const WatchMapKey mapKey(tenantId, key);
-	watchMap.erase(mapKey);
-	watchCounterMap.erase(mapKey);
-}
-
-void DatabaseContext::clearWatchMetadata() {
-	watchMap.clear();
-	watchCounterMap.clear();
-}
-
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
 	ASSERT(db);
 	return db->transactionDefaults;
@@ -3874,41 +3826,35 @@ class WatchRefCountUpdater {
 	Database cx;
 	int64_t tenantID;
 	KeyRef key;
-
-	void tryAddRefCount() {
-		if (cx.getReference()) {
-			cx->increaseWatchRefCount(tenantID, key);
-		}
-	}
-
-	void tryDelRefCount() {
-		if (cx.getReference()) {
-			cx->decreaseWatchRefCount(tenantID, key);
-		}
-	}
+	Version version;
 
 public:
 	WatchRefCountUpdater() {}
 
-	WatchRefCountUpdater(const Database& cx_, const int64_t tenantID_, KeyRef key_)
-	  : cx(cx_), tenantID(tenantID_), key(key_) {
-		tryAddRefCount();
-	}
+	WatchRefCountUpdater(const Database& cx_, const int64_t tenantID_, KeyRef key_, const Version& ver)
+	  : cx(cx_), tenantID(tenantID_), key(key_), version(ver) {}
 
 	WatchRefCountUpdater& operator=(WatchRefCountUpdater&& other) {
-		tryDelRefCount();
+		// Since this class is only used by watchValueMap, and it is used *AFTER* a wait statement, this class is first
+		// initialized by default constructor, then, after the wait, this function is called to assign the actual
+		// database, key, etc., to re-initialize this object. At this stage, the reference count can be increased. And
+		// since the database object is moved, the rvalue will have null reference to the DatabaseContext and will not
+		// reduce the reference count.
+		cx = std::move(other.cx);
+		tenantID = std::move(other.tenantID);
+		key = std::move(other.key);
+		version = std::move(other.version);
 
-		// NOTE: Do not use move semantic, this copy allows other delete the reference count properly.
-		cx = other.cx;
-		tenantID = other.tenantID;
-		key = other.key;
-
-		tryAddRefCount();
+		cx->increaseWatchRefCount(tenantID, key, version);
 
 		return *this;
 	}
 
-	~WatchRefCountUpdater() { tryDelRefCount(); }
+	~WatchRefCountUpdater() {
+		if (cx.getReference()) {
+			cx->decreaseWatchRefCount(tenantID, key, version);
+		}
+	}
 };
 
 } // namespace
@@ -3924,7 +3870,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<UID> debugID,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
-	state WatchRefCountUpdater watchRefCountUpdater(cx, tenant.tenantId, key);
+	state WatchRefCountUpdater watchRefCountUpdater(cx, tenant.tenantId, key, ver);
 
 	wait(getWatchFuture(cx,
 	                    makeReference<WatchParameters>(
@@ -5376,6 +5322,53 @@ Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key
 	} else {
 		return getTenantMetadata(trState, key, version);
 	}
+}
+
+// Restarts a watch after a database switch
+ACTOR Future<Void> restartWatch(Database cx,
+                                TenantInfo tenantInfo,
+                                Key key,
+                                Optional<Value> value,
+                                TagSet tags,
+                                SpanContext spanContext,
+                                TaskPriority taskID,
+                                Optional<UID> debugID,
+                                UseProvisionalProxies useProvisionalProxies) {
+	// The ID of the tenant may be different on the cluster that we switched to, so obtain the new ID
+	if (tenantInfo.name.present()) {
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
+		                                                              tenantInfo,
+		                                                              key,
+		                                                              &StorageServerInterface::watchValue,
+		                                                              spanContext,
+		                                                              debugID,
+		                                                              useProvisionalProxies,
+		                                                              Reverse::False,
+		                                                              latestVersion));
+		tenantInfo.tenantId = locationInfo.tenantEntry.id;
+	}
+
+	if (key == "anotherKey"_sr)
+		std::cout << cx->dbId.toString() << " restartWatch" << std::endl;
+
+	try {
+		wait(watchValueMap(cx->minAcceptableReadVersion,
+		                   tenantInfo,
+		                   key,
+		                   value,
+		                   cx,
+		                   tags,
+		                   spanContext,
+		                   taskID,
+		                   debugID,
+		                   useProvisionalProxies));
+	} catch (Error& err) {
+		std::cout << cx->dbId.toString() << " restartWatch fail " << err.code() << std::endl;
+		return Void();
+	}
+
+	std::cout << cx->dbId.toString() << " restartWatch pass" << std::endl;
+	return Void();
 }
 
 // FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
