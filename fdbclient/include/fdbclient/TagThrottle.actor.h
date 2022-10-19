@@ -597,8 +597,8 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 
 class TagQuotaValue {
 public:
-	double reservedQuota{ 0.0 };
-	double totalQuota{ 0.0 };
+	int64_t reservedQuota{ 0 };
+	int64_t totalQuota{ 0 };
 	bool isValid() const;
 	Value toValue() const;
 	static TagQuotaValue fromValue(ValueRef);

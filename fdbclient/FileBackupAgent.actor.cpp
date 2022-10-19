@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/simulator.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -548,14 +549,13 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	};
 
 	EncryptedRangeFileWriter(Database cx,
-	                         DatabaseConfiguration dbConfig,
 	                         Arena* arena,
 	                         Reference<TenantEntryCache<Void>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options())
-	  : cx(cx), dbConfig(dbConfig), arena(arena), tenantCache(tenantCache), file(file), blockSize(blockSize),
-	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
+	  : cx(cx), arena(arena), tenantCache(tenantCache), file(file), blockSize(blockSize), blockEnd(0),
+	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
@@ -653,8 +653,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
-		state std::pair<int64_t, TenantName> curTenantInfo =
-		    wait(getEncryptionDomainDetails(key, self->dbConfig, self->tenantCache));
+		state std::pair<int64_t, TenantName> curTenantInfo = wait(getEncryptionDomainDetails(key, self->tenantCache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -696,12 +695,13 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	ACTOR static Future<std::pair<int64_t, TenantName>>
-	getEncryptionDomainDetailsImpl(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache, bool useTenantCache) {
+	ACTOR static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetailsImpl(
+	    KeyRef key,
+	    Reference<TenantEntryCache<Void>> tenantCache) {
 		if (isSystemKey(key)) {
 			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
 		}
-		if (key.size() < TENANT_PREFIX_SIZE || !useTenantCache) {
+		if (key.size() < TENANT_PREFIX_SIZE) {
 			return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), TENANT_PREFIX_SIZE);
@@ -715,15 +715,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(
 	    KeyRef key,
-	    DatabaseConfiguration dbConfig,
 	    Reference<TenantEntryCache<Void>> tenantCache) {
-		// If tenants are disabled on a cluster then don't use the TenantEntryCache as it will result in alot of
-		// unnecessary cache misses. For a cluster configured in TenantMode::Optional, the backup performance may
-		// degrade if most of the mutations belong to an invalid tenant
-		TenantMode mode = dbConfig.tenantMode;
-		bool useTenantCache = mode != TenantMode::DISABLED;
-		CODE_PROBE(useTenantCache, "using tenant cache");
-		return getEncryptionDomainDetailsImpl(key, tenantCache, useTenantCache);
+		return getEncryptionDomainDetailsImpl(key, tenantCache);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -834,10 +827,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state std::pair<int64_t, TenantName> curKeyTenantInfo =
-		    wait(getEncryptionDomainDetails(k, self->dbConfig, self->tenantCache));
+		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getEncryptionDomainDetails(k, self->tenantCache));
 		state std::pair<int64_t, TenantName> prevKeyTenantInfo =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->dbConfig, self->tenantCache));
+		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
 		if (curKeyTenantInfo.first != prevKeyTenantInfo.first) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			wait(handleTenantBondary(self, k, v, writeValue, curKeyTenantInfo));
@@ -900,7 +892,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	Future<Void> finish() { return finish_impl(this); }
 
 	Database cx;
-	DatabaseConfiguration dbConfig;
 	Arena* arena;
 	Reference<TenantEntryCache<Void>> tenantCache;
 	Reference<IBackupFile> file;
@@ -1045,7 +1036,6 @@ private:
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
-                                        Optional<DatabaseConfiguration> dbConfig,
                                         Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
@@ -1063,13 +1053,12 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
 		if (encryptedBlock && g_network && g_network->isSimulated()) {
-			ASSERT(dbConfig.present());
 			ASSERT(tenantCache.present());
 			state KeyRef curKey = KeyRef(k, kLen);
 			state std::pair<int64_t, TenantName> prevTenantInfo =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, dbConfig.get(), tenantCache.get()));
+			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, tenantCache.get()));
 			std::pair<int64_t, TenantName> curTenantInfo =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, dbConfig.get(), tenantCache.get()));
+			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, tenantCache.get()));
 			if (curKey.size() > 0 && prevKey.size() > 0 && prevTenantInfo.first != curTenantInfo.first) {
 				ASSERT(!done);
 				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
@@ -1124,11 +1113,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader,
-			                   &results,
-			                   false,
-			                   Optional<DatabaseConfiguration>(),
-			                   Optional<Reference<TenantEntryCache<Void>>>()));
+			wait(decodeKVPairs(&reader, &results, false, Optional<Reference<TenantEntryCache<Void>>>()));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			ASSERT(cx.present());
@@ -1151,27 +1136,12 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx.get());
-			state Optional<DatabaseConfiguration> configuration = DatabaseConfiguration();
-			// get db config
-			if (g_network->isSimulated()) {
-				wait(tenantCache->init());
-				state Transaction tr = Transaction(cx.get());
-				loop {
-					try {
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-						RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-						ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-						configuration.get().fromKeyValues((VectorRef<KeyValueRef>)results);
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
-					}
-				}
+			state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+			if (g_network && g_simulator->isSimulated()) {
+				tenantCache = makeReference<TenantEntryCache<Void>>(cx.get(), TenantEntryCacheRefreshMode::WATCH);
+				wait(tenantCache.get()->init());
 			}
-			wait(decodeKVPairs(&reader, &results, true, configuration, tenantCache));
+			wait(decodeKVPairs(&reader, &results, true, tenantCache));
 		} else {
 			throw restore_unsupported_file_version();
 		}
@@ -1754,7 +1724,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 		state Arena arena;
-		state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
+		state Reference<TenantEntryCache<Void>> tenantCache;
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
@@ -1824,15 +1794,10 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				state int64_t snapshotRangeFileCount;
 
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-				state DatabaseConfiguration configuration;
 				loop {
 					try {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-						RangeResult results = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-						ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-						configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
 
 						wait(taskBucket->keepRunning(tr, task) &&
 						     storeOrThrow(snapshotBeginVersion, backup.snapshotBeginVersion().get(tr)) &&
@@ -1853,8 +1818,11 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				// Initialize range file writer and write begin key
 				if (encryptionEnabled) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(
-					    cx, configuration, &arena, tenantCache, outFile, blockSize);
+					if (!tenantCache.isValid()) {
+						tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+						wait(tenantCache->init());
+					}
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, tenantCache, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
