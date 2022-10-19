@@ -126,28 +126,26 @@ public:
 		state double lastTenantListFetchTime = now();
 
 		loop {
-			if (now() - lastTenantListFetchTime > (2 * refreshInterval)) {
-				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshDelay", tenantCache->id()).log();
-			}
-
+			state double fetchStartTime = now();
 			state std::vector<std::pair<KeyRef, TenantName>> tenantList = tenantCache->getTenantList();
 			state int i;
 			for (i = 0; i < tenantList.size(); i++) {
 				state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenantList[i].second);
-				try {
-					state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-					tenantCache->updateStorageUsage(tenantList[i].first, size);
-				} catch (Error& e) {
-					if (e.code() != error_code_actor_cancelled) {
-						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id())
-						    .errorUnsuppressed(e)
-						    .suppressFor(1.0);
+				loop {
+					try {
+						state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
+						tenantCache->updateStorageUsage(tenantList[i].first, size);
+					} catch (Error& e) {
+						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
+						wait(tr.onError(e));
 					}
-					wait(tr.onError(e));
 				}
 			}
 
 			lastTenantListFetchTime = now();
+			if (lastTenantListFetchTime - fetchStartTime > (2 * refreshInterval)) {
+				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshSlow", tenantCache->id()).log();
+			}
 			wait(delay(refreshInterval));
 		}
 	}

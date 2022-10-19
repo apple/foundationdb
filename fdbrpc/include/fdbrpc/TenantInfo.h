@@ -43,7 +43,7 @@ struct TenantInfo {
 	// name is set and the client is authorized to use this tenant.
 	bool tenantAuthorized = false;
 	// Number of storage bytes currently used by this tenant.
-	int64_t storageUsage = -1;
+	int64_t storageUsage = 0;
 
 	// Helper function for most endpoints that read/write data. This returns true iff
 	// the client is either a) a trusted peer or b) is accessing keyspace belonging to a tenant,
