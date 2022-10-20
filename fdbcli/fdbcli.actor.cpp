@@ -1480,6 +1480,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						if (isCommitDesc && tokens.size() == 1) {
 							// prompt for description and add to txn
 							state Optional<std::string> raw;
+							warn.cancel();
 							while (!raw.present() || raw.get().empty()) {
 								fprintf(stdout,
 								        "Please set a description for the change. Description must be non-empty.\n");
@@ -1490,6 +1491,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							std::string line = raw.get();
 							config_tr->set("\xff\xff/description"_sr, line);
 						}
+						warn =
+						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (transtype == TransType::Db) {
 							wait(commitTransaction(tr));
 						} else {
@@ -1821,6 +1824,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						if (!intrans) {
 							// prompt for description and add to txn
 							state Optional<std::string> raw_desc;
+							warn.cancel();
 							while (!raw_desc.present() || raw_desc.get().empty()) {
 								fprintf(stdout,
 								        "Please set a description for the change. Description must be non-empty\n");
@@ -1830,6 +1834,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							}
 							std::string line = raw_desc.get();
 							config_tr->set("\xff\xff/description"_sr, line);
+							warn = checkStatus(
+							    timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 							wait(commitTransaction(config_tr));
 						} else {
 							isCommitDesc = true;
