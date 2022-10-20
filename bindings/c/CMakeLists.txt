@@ -282,6 +282,8 @@ if(NOT WIN32)
       add_test(NAME "${test_name}"
         COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
+          --api-tester-bin $<TARGET_FILE:fdb_c_api_tester>
+          --external-client-library ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
           --test-file ${test_file}
       )
       set_tests_properties("${test_name}" PROPERTIES TIMEOUT 300)

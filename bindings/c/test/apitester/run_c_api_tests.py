@@ -75,7 +75,7 @@ def dump_client_logs(log_dir):
 
 def run_tester(args, cluster, test_file):
     build_dir = Path(args.build_dir).resolve()
-    tester_binary = build_dir.joinpath("bin", "fdb_c_api_tester")
+    tester_binary = Path(args.api_tester_bin).resolve()
     external_client_library = build_dir.joinpath("bindings", "c", "libfdb_c_external.so")
     log_dir = Path(cluster.log).joinpath("client")
     log_dir.mkdir(exist_ok=True)
@@ -87,14 +87,16 @@ def run_tester(args, cluster, test_file):
         test_file,
         "--stats-interval",
         str(TESTER_STATS_INTERVAL_SEC * 1000),
-        "--external-client-library",
-        external_client_library,
         "--tmp-dir",
         cluster.tmp_dir,
         "--log",
         "--log-dir",
         str(log_dir),
     ]
+
+    if args.external_client_library is not None:
+        external_client_library = Path(args.external_client_library).resolve()
+        cmd += ["--external-client-library", external_client_library]
 
     if cluster.blob_granules_enabled:
         cmd += [
@@ -200,8 +202,9 @@ def run_tests(args):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="FoundationDB C API Tester")
-
     parser.add_argument("--build-dir", "-b", type=str, required=True, help="FDB build directory")
+    parser.add_argument("--api-tester-bin", type=str, help="Path to the fdb_c_api_tester executable.", required=True)
+    parser.add_argument("--external-client-library", type=str, help="Path to the external client library.")
     parser.add_argument(
         "--cluster-file",
         type=str,
