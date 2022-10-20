@@ -28,9 +28,14 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
 
-struct FlowReceiver : public NetworkMessageReceiver {
-	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
+// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
+class FlowReceiver : public NetworkMessageReceiver {
+	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
+	Endpoint endpoint;
+	bool m_isLocalEndpoint;
+	bool m_stream;
 
+protected:
 	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {}
 
 	FlowReceiver(Endpoint const& remoteEndpoint, bool stream)
@@ -46,8 +51,15 @@ struct FlowReceiver : public NetworkMessageReceiver {
 		}
 	}
 
+public:
 	bool isLocalEndpoint() { return m_isLocalEndpoint; }
 	bool isRemoteEndpoint() { return endpoint.isValid() && !m_isLocalEndpoint; }
+
+	void setEndpoint(Endpoint const& e) {
+		ASSERT(!endpoint.isValid());
+		m_isLocalEndpoint = true;
+		endpoint = e;
+	}
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
 	//   a local endpoint and returns that.
@@ -58,12 +70,6 @@ struct FlowReceiver : public NetworkMessageReceiver {
 			FlowTransport::transport().addEndpoint(endpoint, this, taskID);
 		}
 		return endpoint;
-	}
-
-	void setEndpoint(Endpoint const& e) {
-		ASSERT(!endpoint.isValid());
-		m_isLocalEndpoint = true;
-		endpoint = e;
 	}
 
 	void setPeerCompatibilityPolicy(const PeerCompatibilityPolicy& policy) { peerCompatibilityPolicy_ = policy; }
@@ -80,12 +86,6 @@ struct FlowReceiver : public NetworkMessageReceiver {
 	}
 
 	const Endpoint& getRawEndpoint() { return endpoint; }
-
-private:
-	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
-	Endpoint endpoint;
-	bool m_isLocalEndpoint;
-	bool m_stream;
 };
 
 template <class T>
