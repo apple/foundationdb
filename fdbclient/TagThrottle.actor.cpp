@@ -145,13 +145,13 @@ Value ThrottleApi::TagQuotaValue::toValue() const {
 
 ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
 	auto tuple = Tuple::unpack(value);
-	if (tuple.size() != 4) {
+	if (tuple.size() != 2) {
 		throw invalid_throttle_quota_value();
 	}
 	TagQuotaValue result;
 	try {
-		result.reservedQuota = tuple.getDouble(0);
-		result.totalQuota = tuple.getDouble(1);
+		result.reservedQuota = tuple.getInt(0);
+		result.totalQuota = tuple.getInt(1);
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
 		throw invalid_throttle_quota_value();

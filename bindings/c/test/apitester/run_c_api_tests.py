@@ -93,6 +93,10 @@ def run_tester(args, test_file):
     if args.tls_cert_file is not None:
         cmd += ["--tls-cert-file", args.tls_cert_file]
 
+    for knob in args.knobs:
+        knob_name, knob_value = knob.split("=")
+        cmd += ["--knob-" + knob_name, knob_value]
+
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
@@ -164,6 +168,8 @@ def parse_args(argv):
                         help='Path to client\'s TLS certificate file')
     parser.add_argument('--tls-key-file', type=str, default=None,
                         help='Path to client\'s TLS private key file')
+    parser.add_argument('--knob', type=str, default=[], action="append", dest="knobs",
+                        help='[lowercase-knob-name]=[knob-value] (there may be multiple --knob options)')
 
     return parser.parse_args(argv)
 

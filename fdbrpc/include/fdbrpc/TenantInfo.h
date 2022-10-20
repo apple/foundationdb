@@ -42,6 +42,8 @@ struct TenantInfo {
 	// Is set during deserialization. It will be set to true if the tenant
 	// name is set and the client is authorized to use this tenant.
 	bool tenantAuthorized = false;
+	// Number of storage bytes currently used by this tenant.
+	int64_t storageUsage = 0;
 
 	// Helper function for most endpoints that read/write data. This returns true iff
 	// the client is either a) a trusted peer or b) is accessing keyspace belonging to a tenant,
