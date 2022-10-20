@@ -244,30 +244,34 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Versionstamp> getLastTenantModification(Database cx) {
-		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
+	ACTOR template <class DB>
+	static Future<Versionstamp> getLastTenantModification(Reference<DB> db, OperationType type) {
+		state Reference<typename DB::TransactionT> tr = db->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				if (type == OperationType::METACLUSTER) {
+					Versionstamp vs =
+					    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().lastTenantModification.getD(
+					        tr, Snapshot::False, Versionstamp()));
+					return vs;
+				}
 				Versionstamp vs =
 				    wait(TenantMetadata::lastTenantModification().getD(tr, Snapshot::False, Versionstamp()));
 				return vs;
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
 	}
 
 	ACTOR template <class DB>
-	static Future<Versionstamp> getLastTenantModification(Reference<DB> db) {
+	static Future<Version> getLatestReadVersion(Reference<DB> db, OperationType type) {
 		state Reference<typename DB::TransactionT> tr = db->createTransaction();
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Versionstamp vs =
-				    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().lastTenantModification.getD(
-				        tr, Snapshot::False, Versionstamp()));
-				return vs;
+				Version readVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+				return readVersion;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
@@ -276,9 +280,17 @@ struct TenantManagementWorkload : TestWorkload {
 
 	static Future<Versionstamp> getLastTenantModification(TenantManagementWorkload* self, OperationType type) {
 		if (type == OperationType::METACLUSTER) {
-			return getLastTenantModification(self->mvDb);
+			return getLastTenantModification(self->mvDb, type);
 		} else {
-			return getLastTenantModification(self->dataDb);
+			return getLastTenantModification(self->dataDb.getReference(), type);
+		}
+	}
+
+	static Future<Version> getLatestReadVersion(TenantManagementWorkload* self, OperationType type) {
+		if (type == OperationType::METACLUSTER) {
+			return getLatestReadVersion(self->mvDb, type);
+		} else {
+			return getLatestReadVersion(self->dataDb.getReference(), type);
 		}
 	}
 
@@ -413,7 +425,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state int64_t minTenantCount = std::numeric_limits<int64_t>::max();
 		state int64_t finalTenantCount = 0;
 
-		state Versionstamp originalVersionstamp = wait(getLastTenantModification(self, operationType));
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				// First, attempt to create the tenants
@@ -506,10 +518,8 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
-					if (operationType != OperationType::SPECIAL_KEYS) {
-						Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-						ASSERT_GT(currentVersionstamp.version, originalVersionstamp.version);
-					}
+					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 
 					if (self->useMetacluster) {
 						// In a metacluster, we should also see that the tenant was created on the data cluster
@@ -755,7 +765,7 @@ struct TenantManagementWorkload : TestWorkload {
 			return Void();
 		}
 
-		state Versionstamp originalVersionstamp = wait(getLastTenantModification(self, operationType));
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				// Attempt to delete the tenant(s)
@@ -848,9 +858,9 @@ struct TenantManagementWorkload : TestWorkload {
 				// Deletion should not succeed if any tenant in the range wasn't empty
 				ASSERT(isEmpty);
 
-				if (tenants.size() > 0 && operationType != OperationType::SPECIAL_KEYS) {
+				if (tenants.size() > 0) {
 					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-					ASSERT_GT(currentVersionstamp.version, originalVersionstamp.version);
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 				}
 
 				// Update our local state to remove the deleted tenants
@@ -1273,16 +1283,14 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 		}
 
-		state Versionstamp originalVersionstamp = wait(getLastTenantModification(self, operationType));
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				wait(renameTenantImpl(
 				    tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
 				wait(verifyTenantRenames(self, tenantRenames));
-				if (operationType != OperationType::SPECIAL_KEYS) {
-					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-					ASSERT_GT(currentVersionstamp.version, originalVersionstamp.version);
-				}
+				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+				ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 				// Check that using the wrong rename API fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 				return Void();
@@ -1418,7 +1426,7 @@ struct TenantManagementWorkload : TestWorkload {
 			configuration["invalid_option"_sr] = ""_sr;
 		}
 
-		state Versionstamp originalVersionstamp = wait(getLastTenantModification(self, operationType));
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				wait(configureTenantImpl(tr, tenant, configuration, operationType, specialKeysUseInvalidTuple, self));
@@ -1427,10 +1435,8 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!hasInvalidOption);
 				ASSERT(!hasSystemTenantGroup);
 				ASSERT(!specialKeysUseInvalidTuple);
-				if (operationType != OperationType::SPECIAL_KEYS) {
-					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-					ASSERT_GT(currentVersionstamp.version, originalVersionstamp.version);
-				}
+				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+				ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 
 				auto itr = self->createdTenants.find(tenant);
 				if (itr->second.tenantGroup.present()) {
