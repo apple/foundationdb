@@ -180,5 +180,14 @@ private:
 // Check if id is present in kv, and if so return the commit version and batchIndex
 Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id);
 
+// Delete keys that are older than minAgeSeconds if the size of the idempotency keys is greater than byteTarget
+ACTOR Future<Void> idempotencyIdsCleaner(Database db,
+                                         int64_t minAgeSeconds,
+                                         int64_t byteTarget,
+                                         int64_t pollingInterval);
+
+// Delete the idempotency key associated with version and highOrderBatchIndex
+ACTOR static Future<Void> deleteIdempotencyKV(Database db, Version version, uint8_t highOrderBatchIndex);
+
 #include "flow/unactorcompiler.h"
 #endif

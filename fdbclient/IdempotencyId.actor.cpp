@@ -19,8 +19,10 @@
  */
 
 #include "fdbclient/IdempotencyId.actor.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // this has to be the last include
 
 struct IdempotencyIdKVBuilderImpl {
 	Optional<Version> commitVersion;
@@ -172,4 +174,183 @@ TEST_CASE("/fdbclient/IdempotencyId/serialization") {
 		ASSERT(t == id);
 	}
 	return Void();
+}
+
+ACTOR static Future<Version> timeKeeperVersionFromUnixEpoch(int64_t time, Reference<ReadYourWritesTransaction> tr) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+	state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
+	    wait(versionMap.getRange(tr, 0, time, 1, Snapshot::False, Reverse::True));
+	if (time < 0) {
+		return 0;
+	}
+	if (rangeResult.results.size() != 1) {
+		// No key less than time was found in the database
+		// Look for a key >= time.
+		wait(store(rangeResult, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1)));
+
+		if (rangeResult.results.size() != 1) {
+			// No timekeeper entries? Use current version and time to guess
+			Version version = wait(tr->getReadVersion());
+			rangeResult.results.emplace_back(static_cast<int64_t>(g_network->now()), version);
+		}
+	}
+
+	// Adjust version found by the delta between time and the time found and return at minimum 0
+	auto& result = rangeResult.results[0];
+	return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+}
+
+ACTOR static Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	// Binary search to find the closest date with a version <= v
+	state int64_t min = 0;
+	state int64_t max = (int64_t)now();
+	state int64_t mid;
+	state std::pair<int64_t, Version> found;
+	Version version = wait(tr->getReadVersion());
+
+	found = std::make_pair(static_cast<int64_t>(g_network->now()), version); // Worst case we use this for our guess
+
+	loop {
+		mid = (min + max + 1) / 2; // ceiling
+
+		// Find the highest time < mid
+		state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
+		    wait(versionMap.getRange(tr, min, mid, 1, Snapshot::False, Reverse::True));
+
+		if (rangeResult.results.size() != 1) {
+			if (min == mid) {
+				break;
+			}
+			min = mid;
+			break;
+		}
+
+		if (v < found.second) {
+			max = found.first;
+		} else {
+			found = rangeResult.results[0];
+			min = found.first;
+		}
+	}
+
+	auto result = found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	return result;
+}
+
+ACTOR Future<Void> idempotencyIdsCleaner(Database db,
+                                         int64_t minAgeSeconds,
+                                         int64_t byteTarget,
+                                         int64_t pollingInterval) {
+	state int64_t idmpKeySize;
+	state int64_t candidateDeleteSize;
+	state int64_t lastCandidateDeleteSize;
+	state KeyRange candidateRangeToClean;
+	state KeyRange finalRange;
+	state Reference<ReadYourWritesTransaction> tr;
+	state Version expiredVersion;
+	state Key firstKey;
+	state Version firstVersion;
+	state Version canDeleteLowerThan;
+	loop {
+		tr = makeReference<ReadYourWritesTransaction>(db);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)));
+				if (idmpKeySize <= byteTarget) {
+					break;
+				}
+
+				RangeResult result = wait(tr->getRange(idempotencyIdKeys, /*limit*/ 1));
+				if (!result.size()) {
+					break;
+				}
+				firstKey = result.front().key;
+				{
+					BinaryReader rd(firstKey, Unversioned());
+					rd.readBytes(idempotencyIdKeys.begin.size());
+					rd >> firstVersion;
+					firstVersion = bigEndian64(firstVersion);
+				}
+
+				wait(store(canDeleteLowerThan,
+				           timeKeeperVersionFromUnixEpoch(static_cast<int64_t>(g_network->now()) - minAgeSeconds, tr)));
+				if (firstVersion >= canDeleteLowerThan) {
+					break;
+				}
+
+				// Keep dividing the candidate range until clearing it would (probably) not take us under the byte
+				// target
+				lastCandidateDeleteSize = std::numeric_limits<int64_t>::max();
+				loop {
+					candidateRangeToClean =
+					    KeyRangeRef(firstKey,
+					                BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
+					                    .withPrefix(idempotencyIdKeys.begin));
+					wait(store(candidateDeleteSize, tr->getEstimatedRangeSizeBytes(candidateRangeToClean)));
+					if (candidateDeleteSize == lastCandidateDeleteSize) {
+						break;
+					}
+					TraceEvent("IdempotencyIdsCleanerCandidateDelete")
+					    .detail("IdmpKeySizeEstimate", idmpKeySize)
+					    .detail("ClearRangeSizeEstimate", candidateDeleteSize)
+					    .detail("Range", candidateRangeToClean.toString());
+					if (idmpKeySize - candidateDeleteSize >= byteTarget) {
+						break;
+					}
+					lastCandidateDeleteSize = candidateDeleteSize;
+					canDeleteLowerThan = (firstVersion + canDeleteLowerThan) / 2;
+				}
+				finalRange = KeyRangeRef(idempotencyIdKeys.begin, candidateRangeToClean.end);
+				RangeResult finalRangeEnd = wait(tr->getRange(finalRange, /*limit*/ 1, Snapshot::False, Reverse::True));
+				if (finalRangeEnd.size()) {
+					tr->addReadConflictRange(finalRange);
+					tr->clear(finalRange);
+					BinaryReader rd(finalRangeEnd.front().key, Unversioned());
+					rd.readBytes(idempotencyIdKeys.begin.size());
+					rd >> expiredVersion;
+					expiredVersion = bigEndian64(expiredVersion);
+					tr->set(idempotencyIdsExpiredVersion,
+					        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ expiredVersion }, Unversioned()));
+					int64_t expiredTime = wait(timeKeeperUnixEpochFromVersion(expiredVersion, tr));
+					TraceEvent("IdempotencyIdsCleanerAttempt")
+					    .detail("IdmpKeySizeEstimate", idmpKeySize)
+					    .detail("ClearRangeSizeEstimate", candidateDeleteSize)
+					    .detail("ExpiredVersion", expiredVersion)
+					    .detail("ExpiredVersionAgeEstimate", static_cast<int64_t>(g_network->now()) - expiredTime);
+				}
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		wait(delay(pollingInterval));
+	}
+}
+
+ACTOR static Future<Void> deleteIdempotencyKV(Database db, Version version, uint8_t highOrderBatchIndex) {
+	state Transaction tr(db);
+	state Key key;
+
+	BinaryWriter wr{ Unversioned() };
+	wr.serializeBytes(idempotencyIdKeys.begin);
+	wr << bigEndian64(version);
+	wr << highOrderBatchIndex;
+	key = wr.toValue();
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.clear(key);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
