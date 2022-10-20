@@ -2010,17 +2010,21 @@ Future<decltype(std::declval<Fun>()(std::declval<T>()))> fmap(Fun fun, Future<T>
 	return fun(val);
 }
 
+/*
+As much as I want >>= to be a thing, in c++ it's right associative so we can't really use it as intended anyway.
+
 ACTOR template <class T, class Fun>
 Future<decltype(std::declval<Fun>()(std::declval<T>()).getValue())> runAfter(Future<T> lhs, Fun rhs) {
-	T val1 = wait(lhs);
-	decltype(std::declval<Fun>()(std::declval<T>()).getValue()) res = wait(rhs(val1));
-	return res;
+    T val1 = wait(lhs);
+    decltype(std::declval<Fun>()(std::declval<T>()).getValue()) res = wait(rhs(val1));
+    return res;
 }
 
 template <class T, class Fun>
-auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
-	return runAfter(lhs, std::forward<Fun>(rhs));
+auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()).getValue())> {
+    return runAfter(lhs, std::forward<Fun>(rhs));
 }
+*/
 
 /*
  * NOTE: This implementation can't guarantee the doesn't really enforce the ACTOR execution order. See issue #7708
