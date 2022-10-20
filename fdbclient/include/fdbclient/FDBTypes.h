@@ -1675,8 +1675,8 @@ struct Versionstamp {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		uint64_t beVersion;
-		uint16_t beBatch;
+		int64_t beVersion;
+		int16_t beBatch;
 
 		if constexpr (!Ar::isDeserializing) {
 			beVersion = bigEndian64(version);
@@ -1686,7 +1686,7 @@ struct Versionstamp {
 		serializer(ar, beVersion, beBatch);
 
 		if constexpr (Ar::isDeserializing) {
-			version = bigEndian64(version);
+			version = bigEndian64(beVersion);
 			batchNumber = bigEndian16(beBatch);
 		}
 	}
