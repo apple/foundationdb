@@ -113,8 +113,11 @@ protected:
 	void twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize, bool restrictSize);
 };
 
+class MockGlobalStateImpl;
+
 class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
+	friend class MockGlobalStateImpl;
 
 	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
 
@@ -167,6 +170,7 @@ public:
 	 */
 	bool allShardRemovedFromServer(const UID& serverId);
 
+	// SOMEDAY: NativeAPI::waitStorageMetrics should share the code in the future, this is a simpler version of it
 	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
 	                                                                    StorageMetrics const& min,
 	                                                                    StorageMetrics const& max,
@@ -175,21 +179,21 @@ public:
 	                                                                    int expectedShardCount);
 
 	Future<KeyRangeLocationInfo> getKeyLocation(TenantInfo tenant,
-	                                                               Key key,
+	                                            Key key,
+	                                            SpanContext spanContext,
+	                                            Optional<UID> debugID,
+	                                            UseProvisionalProxies useProvisionalProxies,
+	                                            Reverse isBackward,
+	                                            Version version) override;
+
+	Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(TenantInfo tenant,
+	                                                               KeyRange keys,
+	                                                               int limit,
+	                                                               Reverse reverse,
 	                                                               SpanContext spanContext,
 	                                                               Optional<UID> debugID,
 	                                                               UseProvisionalProxies useProvisionalProxies,
-	                                                               Reverse isBackward,
 	                                                               Version version) override;
-
-	Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(TenantInfo tenant,
-	                                                                        KeyRange keys,
-	                                                                        int limit,
-	                                                                        Reverse reverse,
-	                                                                        SpanContext spanContext,
-	                                                                        Optional<UID> debugID,
-	                                                                        UseProvisionalProxies useProvisionalProxies,
-	                                                                        Version version) override;
 };
 
 #endif // FOUNDATIONDB_MOCKGLOBALSTATE_H

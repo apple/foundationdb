@@ -1915,7 +1915,8 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional
 	auto range =
 	    isBackward ? locationCache.rangeContainingKeyBefore(resolvedKey) : locationCache.rangeContaining(resolvedKey);
 	if (range->value()) {
-		return KeyRangeLocationInfo(tenantEntry, toPrefixRelativeRange(range->range(), tenantEntry.prefix), range->value());
+		return KeyRangeLocationInfo(
+		    tenantEntry, toPrefixRelativeRange(range->range(), tenantEntry.prefix), range->value());
 	}
 
 	return Optional<KeyRangeLocationInfo>();
@@ -1952,7 +1953,8 @@ bool DatabaseContext::getCachedLocations(const Optional<TenantNameRef>& tenantNa
 			result.clear();
 			return false;
 		}
-		result.emplace_back(tenantEntry, toPrefixRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
+		result.emplace_back(
+		    tenantEntry, toPrefixRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
 		}
@@ -7714,6 +7716,34 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 	}
 }
 
+ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
+                                                                      KeyRange keys,
+                                                                      std::vector<KeyRangeLocationInfo> locations,
+                                                                      StorageMetrics min,
+                                                                      StorageMetrics max,
+                                                                      StorageMetrics permittedError) {
+	try {
+		Future<StorageMetrics> fx;
+		if (locations.size() > 1) {
+			fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
+		} else {
+			WaitMetricsRequest req(tenantInfo, keys, min, max);
+			fx = loadBalance(locations[0].locations->locations(),
+			                 &StorageServerInterface::waitMetrics,
+			                 req,
+			                 TaskPriority::DataDistribution);
+		}
+		StorageMetrics x = wait(fx);
+		return x;
+	} catch (Error& e) {
+		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+			throw;
+		}
+	}
+	return Optional<StorageMetrics>();
+}
+
 ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     Database cx,
     KeyRange keys,
@@ -7743,30 +7773,8 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 		}
 
 		// SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better
-		// solution to this.
-		if (locations.size() < shardLimit) {
-			try {
-				Future<StorageMetrics> fx;
-				if (locations.size() > 1) {
-					fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
-				} else {
-					WaitMetricsRequest req(tenantInfo, keys, min, max);
-					fx = loadBalance(locations[0].locations->locations(),
-					                 &StorageServerInterface::waitMetrics,
-					                 req,
-					                 TaskPriority::DataDistribution);
-				}
-				StorageMetrics x = wait(fx);
-				return std::make_pair(x, -1);
-			} catch (Error& e) {
-				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-					throw;
-				}
-				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-			}
-		} else {
+		// solution to this. How could this happen?
+		if (locations.size() >= shardLimit) {
 			TraceEvent(SevWarn, "WaitStorageMetricsPenalty")
 			    .detail("Keys", keys)
 			    .detail("Limit", shardLimit)
@@ -7775,7 +7783,16 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
 			cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+			continue;
 		}
+
+		Optional<StorageMetrics> res =
+		    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+		if (res.present()) {
+			return std::make_pair(res, -1);
+		}
+		cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 

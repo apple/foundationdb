@@ -1,5 +1,5 @@
 /*
- * MockGlobalState.cpp
+ * MockGlobalState.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,6 +20,42 @@
 
 #include "fdbserver/MockGlobalState.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/actorcompiler.h"
+
+class MockGlobalStateImpl {
+public:
+	ACTOR static Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(MockGlobalState* mgs,
+	                                                                                 KeyRange keys,
+	                                                                                 StorageMetrics min,
+	                                                                                 StorageMetrics max,
+	                                                                                 StorageMetrics permittedError,
+	                                                                                 int shardLimit,
+	                                                                                 int expectedShardCount) {
+		state TenantInfo tenantInfo;
+		loop {
+			auto locations = mgs->getKeyRangeLocations(tenantInfo,
+			                                           keys,
+			                                           shardLimit,
+			                                           Reverse::False,
+			                                           SpanContext(),
+			                                           Optional<UID>(),
+			                                           UseProvisionalProxies::False,
+			                                           0)
+			                     .get();
+			// NOTE(xwang): in native API, there's code handling the non-equal situation, but I think in mock world
+			// there shouldn't have any delay to update the locations.
+			ASSERT_EQ(expectedShardCount, locations.size());
+
+			Optional<StorageMetrics> res =
+			    wait(::waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+
+			if (res.present()) {
+				return std::make_pair(res, -1);
+			}
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		}
+	}
+};
 
 bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus status) {
 	auto ranges = serverKeys.intersectingRanges(range);
@@ -198,7 +234,8 @@ Future<std::pair<Optional<StorageMetrics>, int>> MockGlobalState::waitStorageMet
     const StorageMetrics& permittedError,
     int shardLimit,
     int expectedShardCount) {
-	return Future<std::pair<Optional<StorageMetrics>, int>>();
+	return MockGlobalStateImpl::waitStorageMetrics(
+	    this, keys, min, max, permittedError, shardLimit, expectedShardCount);
 }
 
 Reference<LocationInfo> buildLocationInfo(const std::vector<StorageServerInterface>& interfaces) {

@@ -591,6 +591,16 @@ int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess);
 // Returns the maximum legal size of a key that can be cleared. Keys larger than this will be assumed not to exist.
 int64_t getMaxClearKeySize(KeyRef const& key);
 
+struct KeyRangeLocationInfo;
+// Return the aggregated StorageMetrics of range keys to the caller. The locations tell which interface should
+// serve the request. The final result is within (min-permittedError/2, max + permittedError/2) if valid.
+ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
+                                                                      KeyRange keys,
+                                                                      std::vector<KeyRangeLocationInfo> locations,
+                                                                      StorageMetrics min,
+                                                                      StorageMetrics max,
+                                                                      StorageMetrics permittedError);
+
 namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
