@@ -2626,14 +2626,14 @@ ACTOR void setupAndRun(std::string dataFolder,
 			if (tenantMode == TenantMode::REQUIRED && allowDefaultTenant) {
 				defaultTenant = "SimulatedDefaultTenant"_sr;
 			}
-		} else if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
+		} else if (allowDefaultTenant && deterministicRandom()->coinflip()) {
 			defaultTenant = "SimulatedDefaultTenant"_sr;
 			if (deterministicRandom()->random01() < 0.9) {
 				tenantMode = TenantMode::REQUIRED;
 			} else {
 				tenantMode = TenantMode::OPTIONAL_TENANT;
 			}
-		} else if (deterministicRandom()->random01() < 0.5) {
+		} else if (deterministicRandom()->coinflip()) {
 			tenantMode = TenantMode::OPTIONAL_TENANT;
 		}
 	}
@@ -2680,7 +2680,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			if (defaultTenant.present() && allowDefaultTenant) {
 				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
 			}
-			if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
+			if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->coinflip()) {
 				int numTenants = deterministicRandom()->randomInt(1, 6);
 				for (int i = 0; i < numTenants; ++i) {
 					tenantsToCreate.push_back_deep(tenantsToCreate.arena(),

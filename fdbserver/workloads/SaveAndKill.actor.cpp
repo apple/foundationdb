@@ -68,11 +68,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
-		std::string tenantMode = cx->clientInfo->get().tenantMode.toString();
-		if (tenantMode.find("_experimental") != std::string::npos) {
-			tenantMode.replace(tenantMode.find("_experimental"), std::string::npos, "");
-		}
-		ini.SetValue("META", "tenantMode", tenantMode.c_str());
+		ini.SetValue("META", "tenantMode", cx->clientInfo->get().tenantMode.toString().c_str());
 		if (cx->defaultTenant.present()) {
 			ini.SetValue("META", "defaultTenant", cx->defaultTenant.get().toString().c_str());
 		}
