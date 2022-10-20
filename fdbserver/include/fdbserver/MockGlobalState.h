@@ -178,6 +178,11 @@ public:
 	                                                                    int shardLimit,
 	                                                                    int expectedShardCount);
 
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(const KeyRange& keys,
+	                                                          const StorageMetrics& limit,
+	                                                          const StorageMetrics& estimated,
+	                                                          const Optional<int>& minSplitBytes);
+
 	Future<KeyRangeLocationInfo> getKeyLocation(TenantInfo tenant,
 	                                            Key key,
 	                                            SpanContext spanContext,

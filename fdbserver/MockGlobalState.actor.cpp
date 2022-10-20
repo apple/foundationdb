@@ -55,6 +55,41 @@ public:
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		}
 	}
+
+	// SOMEDAY: reuse the NativeAPI implementation
+	ACTOR static Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(MockGlobalState* mgs,
+	                                                                       KeyRange keys,
+	                                                                       StorageMetrics limit,
+	                                                                       StorageMetrics estimated,
+	                                                                       Optional<int> minSplitBytes) {
+		state TenantInfo tenantInfo;
+		loop {
+			state std::vector<KeyRangeLocationInfo> locations =
+			    mgs->getKeyRangeLocations(tenantInfo,
+			                              keys,
+			                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+			                              Reverse::False,
+			                              SpanContext(),
+			                              Optional<UID>(),
+			                              UseProvisionalProxies::False,
+			                              0)
+			        .get();
+
+			// Same solution to NativeAPI::splitStorageMetrics, wait some merge finished
+			if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
+				wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
+			}
+
+			Optional<Standalone<VectorRef<KeyRef>>> results =
+			    wait(splitStorageMetricsWithLocations(locations, keys, limit, estimated, minSplitBytes));
+
+			if (results.present()) {
+				return results.get();
+			}
+
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		}
+	}
 };
 
 bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus status) {
@@ -317,6 +352,13 @@ std::vector<StorageServerInterface> MockGlobalState::extractStorageServerInterfa
 		interfaces.emplace_back(allServers.at(id).ssi);
 	}
 	return interfaces;
+}
+
+Future<Standalone<VectorRef<KeyRef>>> MockGlobalState::splitStorageMetrics(const KeyRange& keys,
+                                                                           const StorageMetrics& limit,
+                                                                           const StorageMetrics& estimated,
+                                                                           const Optional<int>& minSplitBytes) {
+	return MockGlobalStateImpl::splitStorageMetrics(this, keys, limit, estimated, minSplitBytes);
 }
 
 TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {

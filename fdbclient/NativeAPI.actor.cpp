@@ -8653,6 +8653,56 @@ Future<Void> DatabaseContext::splitStorageMetricsStream(const PromiseStream<Key>
 	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated, minSplitBytes);
 }
 
+ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+    std::vector<KeyRangeLocationInfo> locations,
+    KeyRange keys,
+    StorageMetrics limit,
+    StorageMetrics estimated,
+    Optional<int> minSplitBytes) {
+	state StorageMetrics used;
+	state Standalone<VectorRef<KeyRef>> results;
+	results.push_back_deep(results.arena(), keys.begin);
+	//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
+	try {
+		state int i = 0;
+		for (; i < locations.size(); i++) {
+			SplitMetricsRequest req(
+			    locations[i].range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
+			SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
+			                                         &StorageServerInterface::splitMetrics,
+			                                         req,
+			                                         TaskPriority::DataDistribution));
+			if (res.splits.size() && res.splits[0] <= results.back()) { // split points are out of order, possibly
+				                                                        // because of moving data, throw error to retry
+				ASSERT_WE_THINK(false); // FIXME: This seems impossible and doesn't seem to be covered by testing
+				throw all_alternatives_failed();
+			}
+			if (res.splits.size()) {
+				results.append(results.arena(), res.splits.begin(), res.splits.size());
+				results.arena().dependsOn(res.splits.arena());
+			}
+			used = res.used;
+
+			//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
+		}
+
+		if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) && results.size() > 1) {
+			results.resize(results.arena(), results.size() - 1);
+		}
+
+		if (keys.end <= locations.back().range.end) {
+			results.push_back_deep(results.arena(), keys.end);
+		}
+		return results;
+	} catch (Error& e) {
+		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+			TraceEvent(SevError, "SplitStorageMetricsError").error(e);
+			throw;
+		}
+	}
+	return Optional<Standalone<VectorRef<KeyRef>>>();
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
@@ -8671,61 +8721,24 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 		                              Optional<UID>(),
 		                              UseProvisionalProxies::False,
 		                              latestVersion));
-		state StorageMetrics used;
-		state Standalone<VectorRef<KeyRef>> results;
 
 		// SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better
 		// solution to this.
 		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
 			wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			cx->invalidateCache(Key(), keys);
-		} else {
-			results.push_back_deep(results.arena(), keys.begin);
-			try {
-				//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
-
-				state int i = 0;
-				for (; i < locations.size(); i++) {
-					SplitMetricsRequest req(
-					    locations[i].range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
-					SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
-					                                         &StorageServerInterface::splitMetrics,
-					                                         req,
-					                                         TaskPriority::DataDistribution));
-					if (res.splits.size() &&
-					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of
-						                                   // moving data, throw error to retry
-						ASSERT_WE_THINK(
-						    false); // FIXME: This seems impossible and doesn't seem to be covered by testing
-						throw all_alternatives_failed();
-					}
-					if (res.splits.size()) {
-						results.append(results.arena(), res.splits.begin(), res.splits.size());
-						results.arena().dependsOn(res.splits.arena());
-					}
-					used = res.used;
-
-					//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
-				}
-
-				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) &&
-				    results.size() > 1) {
-					results.resize(results.arena(), results.size() - 1);
-				}
-
-				if (keys.end <= locations.back().range.end) {
-					results.push_back_deep(results.arena(), keys.end);
-				}
-				return results;
-			} catch (Error& e) {
-				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-					TraceEvent(SevError, "SplitStorageMetricsError").error(e);
-					throw;
-				}
-				cx->invalidateCache(Key(), keys);
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-			}
+			continue;
 		}
+
+		Optional<Standalone<VectorRef<KeyRef>>> results =
+		    wait(splitStorageMetricsWithLocations(locations, keys, limit, estimated, minSplitBytes));
+
+		if (results.present()) {
+			return results.get();
+		}
+
+		cx->invalidateCache(Key(), keys);
+		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 

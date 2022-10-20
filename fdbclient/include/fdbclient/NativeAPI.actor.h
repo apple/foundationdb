@@ -601,6 +601,15 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
                                                                       StorageMetrics max,
                                                                       StorageMetrics permittedError);
 
+// Return the suggested split points from storage server.The locations tell which interface should
+// serve the request. The
+ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+    std::vector<KeyRangeLocationInfo> locations,
+    KeyRange keys,
+    StorageMetrics limit,
+    StorageMetrics estimated,
+    Optional<int> minSplitBytes);
+
 namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);

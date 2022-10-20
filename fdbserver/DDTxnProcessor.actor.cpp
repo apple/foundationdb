@@ -862,13 +862,12 @@ Future<HealthMetrics> DDMockTxnProcessor::getHealthMetrics(bool detailed) const 
 	return Future<HealthMetrics>();
 }
 
-// FIXME: finish implementation
 Future<Standalone<VectorRef<KeyRef>>> DDMockTxnProcessor::splitStorageMetrics(
     const KeyRange& keys,
     const StorageMetrics& limit,
     const StorageMetrics& estimated,
     const Optional<int>& minSplitBytes) const {
-	return Future<Standalone<VectorRef<KeyRef>>>();
+	return mgs->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
 }
 
 Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorageMetrics(
