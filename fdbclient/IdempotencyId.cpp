@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IdempotencyId.h"
+#include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
 
