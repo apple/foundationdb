@@ -2097,7 +2097,8 @@ struct ConfigureTenantImpl {
 			self->updatedEntry.configure(configItr->first, configItr->second);
 		}
 
-		if (self->updatedEntry.matchesConfiguration(tenantEntry.get())) {
+		if (self->updatedEntry.matchesConfiguration(tenantEntry.get()) &&
+		    tenantEntry.get().tenantState == TenantState::READY) {
 			return false;
 		}
 

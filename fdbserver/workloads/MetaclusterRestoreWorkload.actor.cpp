@@ -39,6 +39,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetaclusterRestoreWorkload : TestWorkload {
+	static constexpr auto NAME = "MetaclusterRestore";
 
 	struct DataClusterData {
 		Database db;
@@ -79,8 +80,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		tenantGroupCapacity = (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size();
 	}
-
-	std::string description() const override { return "MetaclusterRestore"; }
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert("MachineAttritionWorkload");
@@ -583,4 +582,4 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<MetaclusterRestoreWorkload> MetaclusterRestoreWorkloadFactory("MetaclusterRestore");
+WorkloadFactory<MetaclusterRestoreWorkload> MetaclusterRestoreWorkloadFactory;

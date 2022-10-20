@@ -482,7 +482,7 @@ public:
 		    .add("testPriority", &testPriority)
 		    .add("extraDatabaseMode", &extraDatabaseModeStr)
 		    .add("extraDatabaseCount", &extraDatabaseCount)
-			.add("extraDatabaseBackupAgents", &extraDatabaseBackupAgents)
+		    .add("extraDatabaseBackupAgents", &extraDatabaseBackupAgents)
 		    .add("minimumReplication", &minimumReplication)
 		    .add("minimumRegions", &minimumRegions)
 		    .add("configureLocked", &configureLocked)
@@ -2512,22 +2512,23 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 					LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
 					localities.set("data_hall"_sr, dcUID);
-					systemActors->push_back(reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
-					                                                      conn,
-					                                                      extraIps,
-					                                                      sslEnabled,
-					                                                      localities,
-					                                                      processClass,
-					                                                      baseFolder,
-					                                                      false,
-					                                                      machine == useSeedForMachine,
-					                                                      testConfig.extraDatabaseBackupAgents ? AgentAddition : AgentNone,
-					                                                      sslOnly,
-					                                                      whitelistBinPaths,
-					                                                      protocolVersion,
-					                                                      configDBType,
-					                                                      true),
-					                                     "SimulatedMachine"));
+					systemActors->push_back(
+					    reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
+					                                  conn,
+					                                  extraIps,
+					                                  sslEnabled,
+					                                  localities,
+					                                  processClass,
+					                                  baseFolder,
+					                                  false,
+					                                  machine == useSeedForMachine,
+					                                  testConfig.extraDatabaseBackupAgents ? AgentAddition : AgentNone,
+					                                  sslOnly,
+					                                  whitelistBinPaths,
+					                                  protocolVersion,
+					                                  configDBType,
+					                                  true),
+					                 "SimulatedMachine"));
 					++cluster;
 				}
 			}
