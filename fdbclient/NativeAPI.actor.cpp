@@ -5426,26 +5426,17 @@ ACTOR Future<Void> restartWatch(Database cx,
 		tenantInfo.tenantId = locationInfo.tenantEntry.id;
 	}
 
-	if (key == "anotherKey"_sr)
-		std::cout << cx->dbId.toString() << " restartWatch" << std::endl;
+	wait(watchValueMap(cx->minAcceptableReadVersion,
+	                   tenantInfo,
+	                   key,
+	                   value,
+	                   cx,
+	                   tags,
+	                   spanContext,
+	                   taskID,
+	                   debugID,
+	                   useProvisionalProxies));
 
-	try {
-		wait(watchValueMap(cx->minAcceptableReadVersion,
-		                   tenantInfo,
-		                   key,
-		                   value,
-		                   cx,
-		                   tags,
-		                   spanContext,
-		                   taskID,
-		                   debugID,
-		                   useProvisionalProxies));
-	} catch (Error& err) {
-		std::cout << cx->dbId.toString() << " restartWatch fail " << err.code() << std::endl;
-		return Void();
-	}
-
-	std::cout << cx->dbId.toString() << " restartWatch pass" << std::endl;
 	return Void();
 }
 
