@@ -1,6 +1,6 @@
 [configuration]
 allowDefaultTenant = false
-tenantModes = [1]
+tenantModes = ['optional', 'required']
 allowCreatingTenants = false
 extraDatabaseMode = 'Single' 
 

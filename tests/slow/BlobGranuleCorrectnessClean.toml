@@ -1,7 +1,7 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-tenantModes = [1]
+tenantModes = ['optional', 'required']
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4, 5]
 

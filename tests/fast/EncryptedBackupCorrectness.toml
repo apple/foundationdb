@@ -1,6 +1,6 @@
 [configuration]
 allowDefaultTenant = true
-tenantModes = [2]
+tenantModes = ['required']
 
 [[knobs]]
 enable_encryption = true

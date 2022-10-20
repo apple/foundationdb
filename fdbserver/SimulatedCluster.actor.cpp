@@ -107,7 +107,8 @@ bool destructed = false;
 class TestConfig : public BasicTestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using base_variant = std::variant<int, float, double, bool, std::string, std::vector<int>, ConfigDBType>;
+		using base_variant = std::
+		    variant<int, float, double, bool, std::string, std::vector<int>, std::vector<std::string>, ConfigDBType>;
 		using types =
 		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
@@ -148,6 +149,17 @@ class TestConfig : public BasicTestConfig {
 				(*this)(&res);
 				*val = std::move(res);
 			}
+			void operator()(std::vector<std::string>* val) const {
+				auto arr = value.as_array();
+				for (const auto& i : arr) {
+					val->emplace_back(i.as_string());
+				}
+			}
+			void operator()(Optional<std::vector<std::string>>* val) const {
+				std::vector<std::string> res;
+				(*this)(&res);
+				*val = std::move(res);
+			}
 		};
 
 		struct trace_visitor {
@@ -172,6 +184,26 @@ class TestConfig : public BasicTestConfig {
 				evt.detail(key.c_str(), value.str());
 			}
 			void operator()(Optional<std::vector<int>> const* val) const {
+				if (!val->present()) {
+					evt.detail(key.c_str(), *val);
+				} else {
+					(*this)(&(val->get()));
+				}
+			}
+			void operator()(std::vector<std::string> const* val) const {
+				if (val->empty()) {
+					evt.detail(key.c_str(), "[]");
+					return;
+				}
+				std::stringstream value;
+				value << "[" << val->at(0);
+				for (int i = 1; i < val->size(); ++i) {
+					value << "," << val->at(i);
+				}
+				value << "]";
+				evt.detail(key.c_str(), value.str());
+			}
+			void operator()(Optional<std::vector<std::string>> const* val) const {
 				if (!val->present()) {
 					evt.detail(key.c_str(), *val);
 				} else {
@@ -323,11 +355,9 @@ class TestConfig : public BasicTestConfig {
 			}
 			if (attrib == "tenantModes") {
 				std::stringstream ss(value);
-				for (int i; ss >> i;) {
-					tenantModes.push_back(i);
-					if (ss.peek() == ',') {
-						ss.ignore();
-					}
+				std::string token;
+				while (std::getline(ss, token, ',')) {
+					tenantModes.push_back(token);
 				}
 			}
 			if (attrib == "defaultTenant") {
@@ -383,9 +413,9 @@ public:
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
 	// By default, tenant mode is set randomly
-	// If provided, set using TenantMode::fromValue
-	// Verify match with TenantMode::fromValue in FDBTypes.h
-	std::vector<int> tenantModes;
+	// If provided, set using TenantMode::fromString
+	// Ensure no '_experimental` suffix in the mode name
+	std::vector<std::string> tenantModes;
 	Optional<std::string> defaultTenant;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
@@ -1203,7 +1233,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		auto tssModeStr = ini.GetValue("META", "tssMode");
 		auto tenantMode = ini.GetValue("META", "tenantMode");
 		if (tenantMode != nullptr) {
-			testConfig->tenantModes.push_back(atoi(tenantMode));
+			testConfig->tenantModes.push_back(tenantMode);
 		}
 		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
 		if (!defaultTenant.empty()) {
@@ -2592,8 +2622,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 	if (!rebooting) {
 		if (testConfig.tenantModes.size()) {
 			auto randomPick = deterministicRandom()->randomChoice(testConfig.tenantModes);
-			tenantMode = TenantMode::fromValue(StringRef(std::to_string(randomPick)));
-			if (allowDefaultTenant) {
+			tenantMode = TenantMode::fromString(randomPick);
+			if (tenantMode == TenantMode::REQUIRED && allowDefaultTenant) {
 				defaultTenant = "SimulatedDefaultTenant"_sr;
 			}
 		} else if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
@@ -2640,7 +2670,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
 		// so set/overwrite those options if necessary here
 		if (rebooting && testConfig.tenantModes.size()) {
-			tenantMode = TenantMode::fromValue(StringRef(std::to_string(testConfig.tenantModes[0])));
+			tenantMode = TenantMode::fromString(testConfig.tenantModes[0]);
 		}
 		if (testConfig.defaultTenant.present() && tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
 			// Default tenant set by testConfig or restarting data in restartInfo.ini
