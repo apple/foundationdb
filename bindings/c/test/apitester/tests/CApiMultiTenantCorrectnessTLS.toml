@@ -1,24 +1,25 @@
 [[test]]
-title = 'Cancel Transaction with Database per Transaction'
+title = 'Multi-tenant API Correctness Multi Threaded'
 multiThreaded = true
 buggify = true
-databasePerTransaction = true
 minFdbThreads = 2
 maxFdbThreads = 8
-minDatabases = 2
-maxDatabases = 8
-minClientThreads = 2
-maxClientThreads = 8
 minClients = 2
 maxClients = 8
+minTenants = 2
+maxTenants = 5
+
+[[server]]
+tls_enabled = true
+max_num_processes = 1
 
 [[test.workload]]
-name = 'CancelTransaction'
+name = 'ApiCorrectness'
 minKeyLength = 1
 maxKeyLength = 64
 minValueLength = 1
 maxValueLength = 1000
-maxKeysPerTransaction = 50
+maxKeysPerTransaction = 5
 initialSize = 100
-numRandomOperations = 100
+numRandomOperations = 200
 readExistingKeysRatio = 0.9
