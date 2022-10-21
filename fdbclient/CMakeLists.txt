@@ -77,14 +77,13 @@ target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 # Setup the Swift sources in FDBClient.
 include(FindSwiftLibs)
 add_library(fdbclient_swift STATIC
-        future_support.swift
+        notified_support.swift
         )
 
 target_include_directories(fdbclient_swift PUBLIC
         "${CMAKE_BINARY_DIR}/flow/include"
         "${CMAKE_BINARY_DIR}/flow/"
         "${CMAKE_BINARY_DIR}/fdbclient/include"
-        "${CMAKE_BINARY_DIR}/fdbserver/include"
         "${CMAKE_SOURCE_DIR}/fdbrpc/include"
         "${CMAKE_BINARY_DIR}/fdbrpc/include"
         "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
@@ -115,6 +114,7 @@ include(SwiftToCXXInterop)
 generate_cxx_compat_header(fdbclient_swift "FDBClient")
 
 add_dependencies(fdbclient_swift flow_swift)
+add_dependencies(flow_swift boost_targetProject)
 # This does not work! (see rdar://99107402)
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(fdbclient fdbclient_swift)

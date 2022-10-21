@@ -7,7 +7,7 @@ import FDBClient
 extension NotifiedVersion {
 
     /// async version of `whenAtLeast`
-    func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
+    public func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
         var f: FutureVoid = self.whenAtLeast(limit)
         _ = try await f.waitValue
     }

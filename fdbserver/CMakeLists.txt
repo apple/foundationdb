@@ -35,6 +35,7 @@ add_library(fdbserver_swift STATIC
 target_include_directories(fdbserver_swift PUBLIC
     "${CMAKE_BINARY_DIR}/flow/include"
     "${CMAKE_BINARY_DIR}/flow/"
+    "${CMAKE_BINARY_DIR}/fdbclient"
     "${CMAKE_BINARY_DIR}/fdbclient/include"
     "${CMAKE_BINARY_DIR}/fdbserver/include"
     "${CMAKE_SOURCE_DIR}/fdbrpc/include"
@@ -69,10 +70,17 @@ add_dependencies(fdbserver fdbserver_swift)
 
 # This does not work! (see rdar://99107402)
 # target_link_libraries(fdbserver PRIVATE flow_swift fdbserver_swift)
-add_dependencies(fdbserver flow_swift fdbserver_swift)
+add_dependencies(fdbserver flow_swift fdbclient_swift fdbserver_swift)
 add_custom_target(show_fdbserver_swift_objs COMMAND ${CMAKE_COMMAND} -E echo "$<TARGET_OBJECTS:fdbserver_swift>")
+
 target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:flow_swift>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:flow_swift>")
+
+target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:fdbclient_swift>")
+target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbclient_swift>")
+# This dependency ensures that fdbserver depends on fdbclient_swift at link time.
+set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbclient_swift.a")
+
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbserver_swift>")
 # This dependency ensures that fdbserver depends on fdbserver_swift at link time.
 set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbserver_swift.a")
