@@ -20,6 +20,7 @@
 
 #include "fdbserver/MockGlobalState.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "flow/actorcompiler.h"
 
 class MockGlobalStateImpl {
@@ -42,6 +43,7 @@ public:
 			                                           UseProvisionalProxies::False,
 			                                           0)
 			                     .get();
+			TraceEvent(SevDebug, "MGSWaitStorageMetrics").detail("Phase", "GetLocation");
 			// NOTE(xwang): in native API, there's code handling the non-equal situation, but I think in mock world
 			// there shouldn't have any delay to update the locations.
 			ASSERT_EQ(expectedShardCount, locations.size());
@@ -89,6 +91,28 @@ public:
 
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		}
+	}
+};
+
+class MockStorageServerImpl {
+public:
+	ACTOR static Future<Void> waitMetricsTenantAware(MockStorageServer* self, WaitMetricsRequest req) {
+		if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
+			// TODO(xwang) add support for tenant test, search for tenant entry
+			Optional<TenantMapEntry> entry;
+			Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+			if (tenantPrefix.present()) {
+				UNREACHABLE();
+				// req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
+			}
+		}
+
+		if (!self->isReadable(req.keys)) {
+			self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+		} else {
+			wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT)));
+		}
+		return Void();
 	}
 };
 
@@ -201,6 +225,22 @@ uint64_t MockStorageServer::sumRangeSize(KeyRangeRef range) const {
 		totalSize += it->cvalue().shardSize;
 	}
 	return totalSize;
+}
+
+void MockStorageServer::addActor(Future<Void> future) {
+	actors.add(future);
+}
+
+void MockStorageServer::getSplitPoints(const SplitRangeRequest& req) {}
+
+Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	return MockStorageServerImpl::waitMetricsTenantAware(this, req);
+}
+
+void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {}
+
+Future<Void> MockStorageServer::run() {
+	return serveStorageMetricsRequests(this, ssi);
 }
 
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
@@ -542,5 +582,34 @@ TEST_CASE("/MockGlobalState/MockStorageServer/GetKeyLocations") {
 	ASSERT(locInfos[1].range == ranges[1]);
 	ASSERT(locationInfoEqualsToTeam(locInfos[1].locations, team2.servers));
 
+	return Void();
+}
+
+TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
+	BasicTestConfig testConfig;
+	testConfig.simpleConfig = true;
+	testConfig.minimumReplication = 1;
+	testConfig.logAntiQuorum = 0;
+	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
+	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
+
+	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	state ActorCollection actors;
+
+	ActorCollection* ptr = &actors; // get around ACTOR syntax restriction
+	std::for_each(mgs->allServers.begin(), mgs->allServers.end(), [ptr](auto& server) {
+		ptr->add(server.second.run());
+		server.second.metrics.byteSample.sample.insert("something"_sr, 500000);
+	});
+
+	KeyRange testRange = allKeys;
+	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
+	std::pair<Optional<StorageMetrics>, int> res =
+	    wait(mgs->waitStorageMetrics(testRange, bounds.min, bounds.max, bounds.permittedError, 1, 1));
+	// std::cout << "get result " << res.second << "\n";
+	// std::cout << "get byte "<< res.first.get().bytes << "\n";
+	ASSERT_EQ(res.second, -1); // the valid result always return -1, strange contraction though.
+	ASSERT_EQ(res.first.get().bytes, 500000);
 	return Void();
 }

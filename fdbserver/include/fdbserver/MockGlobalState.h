@@ -52,8 +52,10 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 	return false;
 }
 
-class MockStorageServer {
+class MockStorageServer : public IStorageMetricsService {
 	friend struct MockGlobalStateTester;
+
+	ActorCollection actors;
 
 public:
 	struct ShardInfo {
@@ -74,8 +76,6 @@ public:
 	// size() and nthRange() would use the metrics as index instead
 	KeyRangeMap<ShardInfo> serverKeys;
 
-	// sampled metrics
-	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 
 	StorageServerInterface ssi; // serve RPC requests
@@ -103,6 +103,34 @@ public:
 	void removeShard(KeyRangeRef range);
 
 	uint64_t sumRangeSize(KeyRangeRef range) const;
+
+	void addActor(Future<Void> future) override;
+
+	void getSplitPoints(SplitRangeRequest const& req) override;
+
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
+
+	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
+
+	template <class Reply>
+	using isLoadBalancedReply = std::is_base_of<LoadBalancedReply, Reply>;
+
+	template <class Reply>
+	typename std::enable_if<isLoadBalancedReply<Reply>::value, void>::type
+	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty) {
+		Reply reply;
+		reply.error = err;
+		reply.penalty = penalty;
+		promise.send(reply);
+	}
+
+	template <class Reply>
+	typename std::enable_if<!isLoadBalancedReply<Reply>::value, void>::type
+	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
+		promise.sendError(err);
+	}
+
+	Future<Void> run();
 
 protected:
 	void threeWayShardSplitting(KeyRangeRef outerRange,
