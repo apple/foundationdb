@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -331,7 +332,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		state Future<Void> status = statusLoop(cx, tag.toString());
-
+		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
@@ -340,7 +341,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
-			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                   configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
@@ -627,6 +629,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
+				state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 				try {
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       "file://simfdb/backups/"_sr,
@@ -635,7 +638,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION &&
+					                                           configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 					                                       StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)

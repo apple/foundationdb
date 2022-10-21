@@ -1,6 +1,5 @@
 [configuration]
 extraDatabaseMode = 'Single'
-tenantModeRequired = true
 
 [[test]]
 testTitle = 'VersionStampBackupToDB'

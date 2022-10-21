@@ -2,7 +2,6 @@ testClass = "Backup"
 
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
-tenantModeRequired = true
 
 [[test]]
 testTitle = 'BackupAndRestore'

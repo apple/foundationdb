@@ -18,12 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/simulator.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
@@ -1090,6 +1088,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 	for (auto b : reader->remainder())
 		if (b != 0xFF)
 			throw restore_corrupted_data_padding();
+
 	return Void();
 }
 

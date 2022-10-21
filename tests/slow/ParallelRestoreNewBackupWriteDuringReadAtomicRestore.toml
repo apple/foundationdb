@@ -2,9 +2,6 @@
 StderrSeverity = 30
 allowDefaultTenant = false
 
-[[knobs]]
-enable_encryption = false
-
 [[test]]
 testTitle = 'WriteDuringReadTest'
 clearAfterTest = false

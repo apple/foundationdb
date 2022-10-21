@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -38,7 +39,14 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		switch2delay = getOption(options, "switch2delay"_sr, 50.0);
 		stopDelay = getOption(options, "stopDelay"_sr, 50.0);
 
-		addDefaultBackupRanges(backupRanges);
+		// TODO: Currently atomic restore does not work well with encryption since we cannot
+		// seperate system key restore from the normal key restore, once we can support this (or no longer need to
+		// seperate the two restores) we can remove the use of the knob
+		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
+			addDefaultBackupRanges(backupRanges);
+		} else {
+			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		}
 
 		ASSERT(g_simulator->extraDatabases.size() == 1);
 		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);

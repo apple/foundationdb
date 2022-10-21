@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
@@ -150,6 +151,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 		if (self->submitOnly) {
 			TraceEvent("IBackupSubmitAttempt").log();
+			state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 			try {
 				wait(self->backupAgent.submitBackup(cx,
 				                                    self->backupDir,
@@ -158,7 +160,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
+				                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
+				                                        configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));

@@ -3,9 +3,6 @@ StderrSeverity = 30
 # tenants are not supported with parallel restore
 allowDefaultTenant = false
 
-[[knobs]]
-enable_encryption = false
-
 [[test]]
 testTitle = 'WriteDuringReadTest'
 clearAfterTest = false

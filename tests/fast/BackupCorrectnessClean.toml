@@ -1,8 +1,5 @@
 testClass = "Backup"
 
-[configuration]
-tenantModeRequired = true
-
 [[test]]
 testTitle = 'BackupAndRestore'
 clearAfterTest = false

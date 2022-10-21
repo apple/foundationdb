@@ -23,7 +23,6 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/TenantManagement.actor.h"
-#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -501,31 +500,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 
 			state Standalone<VectorRef<KeyRangeRef>> restoreRanges;
-			state bool containsSystemKeys = false;
 			for (auto r : prevBackupRanges) {
-				if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
-					restoreRanges.push_back_deep(
-					    restoreRanges.arena(),
-					    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
-				} else {
-					containsSystemKeys = true;
-				}
-			}
-
-			// restore system keys first before restoring user data
-			if (containsSystemKeys) {
-				state Key systemRestoreTag = "restore_system"_sr;
-				TraceEvent("DRU_RestoreDbSystemKeys").detail("RestoreTag", printable(systemRestoreTag));
-				try {
-					wait(restoreTool.submitBackup(
-					    cx, systemRestoreTag, getSystemBackupRanges(), StopWhenDone::True, StringRef(), StringRef()));
-				} catch (Error& e) {
-					TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(systemRestoreTag));
-					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-						throw;
-				}
-				wait(success(restoreTool.waitBackup(cx, systemRestoreTag)));
-				wait(restoreTool.unlockBackup(cx, systemRestoreTag));
+				restoreRanges.push_back_deep(
+				    restoreRanges.arena(),
+				    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
 			}
 
 			// start restoring db

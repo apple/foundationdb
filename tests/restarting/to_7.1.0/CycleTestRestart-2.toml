@@ -1,6 +1,7 @@
 [configuration]
 maxTLogVersion = 6
 disableTss = true
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'Clogged'
