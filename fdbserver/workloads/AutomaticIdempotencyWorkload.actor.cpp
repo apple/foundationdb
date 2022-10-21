@@ -121,13 +121,14 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		for (const auto& [k, v] : result) {
 			ids.emplace(v);
 		}
+		for (const auto& [k, rawValue] : result) {
+			auto v = ObjectReader::fromStringRef<ValueType>(rawValue, Unversioned());
+			TraceEvent("IdempotencyIdWorkloadTransactionCommitted")
+			    .detail("Key", k)
+			    .detail("Id", v.idempotencyId)
+			    .detail("CreatedTime", v.createdTime);
+		}
 		if (ids.size() != self->clientCount * self->numTransactions) {
-			for (const auto& [k, rawValue] : result) {
-				auto v = ObjectReader::fromStringRef<ValueType>(rawValue, Unversioned());
-				TraceEvent("IdempotencyIdWorkloadTransactionCommitted")
-				    .detail("Id", v.idempotencyId)
-				    .detail("CreatedTime", v.createdTime);
-			}
 			self->ok = false;
 		}
 		ASSERT_EQ(ids.size(), self->clientCount * self->numTransactions);
@@ -150,6 +151,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(db);
 		state RangeResult result;
 		state Key key;
+		state Version commitVersion;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -160,7 +162,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				for (const auto& [k, v] : result) {
 					BinaryReader keyReader(k.begin(), k.size(), Unversioned());
 					keyReader.readBytes(idempotencyIdKeys.begin.size());
-					Version commitVersion;
 					keyReader >> commitVersion;
 					commitVersion = bigEndian64(commitVersion);
 					uint8_t highOrderBatchIndex;
@@ -177,9 +178,15 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 					keyWriter.serializeBinaryItem(highOrderBatchIndex);
 					keyWriter.serializeBinaryItem(lowOrderBatchIndex);
 					key = keyWriter.toValue();
-					Optional<Value> entry = wait(tr.get(key));
+					// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
+					// be using a tenant.
+					Optional<Value> entry = wait(runRYWTransaction(
+					    db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); }));
 					if (!entry.present()) {
-						TraceEvent(SevError, "AutomaticIdempotencyKeyMissing").detail("Key", key);
+						TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
+						    .detail("Key", key)
+						    .detail("CommitVersion", commitVersion)
+						    .detail("ReadVersion", tr.getReadVersion().get());
 					}
 					ASSERT(entry.present());
 					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
@@ -213,7 +220,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    .detail("MinAgePolicy", minAgeSeconds);
 				successes = 0;
 				// Cleaning should happen eventually
-				wait(delay(self->pollingInterval));
 			} else if (size < byteTarget / self->slop || maxAge < minAgeSeconds / self->slop) {
 				TraceEvent(SevError, "AutomaticIdempotencyCleanedTooMuch")
 				    .detail("Size", size)
@@ -233,8 +239,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				if (successes >= 10) {
 					break;
 				}
-				wait(delay(self->pollingInterval));
 			}
+			wait(delay(self->pollingInterval));
 		}
 		cleaner.cancel();
 		return Void();

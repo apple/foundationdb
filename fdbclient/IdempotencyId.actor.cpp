@@ -208,9 +208,10 @@ ACTOR static Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference
 	state int64_t max = (int64_t)now();
 	state int64_t mid;
 	state std::pair<int64_t, Version> found;
+	state std::pair<int64_t, Version> best;
 	Version version = wait(tr->getReadVersion());
 
-	found = std::make_pair(static_cast<int64_t>(g_network->now()), version); // Worst case we use this for our guess
+	best = std::make_pair(static_cast<int64_t>(g_network->now()), version); // Worst case we use this for our guess
 
 	loop {
 		mid = (min + max + 1) / 2; // ceiling
@@ -227,15 +228,23 @@ ACTOR static Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference
 			break;
 		}
 
+		found = rangeResult.results[0];
+
 		if (v < found.second) {
+			if (max == found.first) {
+				break;
+			}
 			max = found.first;
 		} else {
-			found = rangeResult.results[0];
+			best = found;
+			if (min == found.first) {
+				break;
+			}
 			min = found.first;
 		}
 	}
 
-	auto result = found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	auto result = best.first + (v - best.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 	return result;
 }
 
