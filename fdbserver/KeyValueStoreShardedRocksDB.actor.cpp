@@ -494,7 +494,7 @@ struct PhysicalShard {
 		}
 		auto s = db->DestroyColumnFamilyHandle(cf);
 		if (!s.ok()) {
-			logRocksDBError(s, "DropCFHandle");
+			logRocksDBError(s, "DestroyCFHandle");
 			logShardEvent(id, ShardOp::DESTROY, SevError, s.ToString());
 			return;
 		}
