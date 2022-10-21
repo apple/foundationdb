@@ -641,7 +641,7 @@ struct BusiestWriteTagContext {
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
 
-struct StorageServer {
+struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
 private:
@@ -988,7 +988,6 @@ public:
 	Database cx;
 	ActorCollection actors;
 
-	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
@@ -1380,7 +1379,7 @@ public:
 	// This is the maximum version that might be read from storage (the minimum version is durableVersion)
 	Version storageVersion() const { return oldestVersion.get(); }
 
-	bool isReadable(KeyRangeRef const& keys) {
+	bool isReadable(KeyRangeRef const& keys) override {
 		auto sh = shards.intersectingRanges(keys);
 		for (auto i = sh.begin(); i != sh.end(); ++i)
 			if (!i->value()->isReadable())
@@ -1409,7 +1408,7 @@ public:
 	Counter::Value queueSize() { return counters.bytesInput.getValue() - counters.bytesDurable.getValue(); }
 
 	// penalty used by loadBalance() to balance requests among SSes. We prefer SS with less write queue size.
-	double getPenalty() {
+	double getPenalty() override {
 		return std::max(std::max(1.0,
 		                         (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER -
 		                                         2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
@@ -1503,7 +1502,7 @@ public:
 		}
 	}
 
-	void getSplitPoints(SplitRangeRequest const& req) {
+	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
 			Optional<TenantMapEntry> entry = getTenantEntry(version.get(), req.tenantInfo);
 			metrics.getSplitPoints(req, entry.map<Key>([](TenantMapEntry e) { return e.prefix; }));
@@ -1532,6 +1531,15 @@ public:
 			return true;
 		}
 		return false;
+	}
+
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
+
+	void addActor(Future<Void> future) override { actors.add(future); }
+
+	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
+		StorageBytes sb = storage.getStorageBytes();
+		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
 };
 
@@ -10166,7 +10174,7 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #pragma region Core
 #endif
 
-ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsRequest req) {
+ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
 		wait(success(waitForVersionNoTooOld(self, latestVersion)));
 		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
@@ -10182,6 +10190,10 @@ ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsReques
 		wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT)));
 	}
 	return Void();
+}
+
+Future<Void> StorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	return waitMetricsTenantAware_internal(this, req);
 }
 
 ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
@@ -10225,7 +10237,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					self->actors.add(waitMetricsTenantAware(self, req));
+					self->addActor(self->waitMetricsTenantAware(req));
 				}
 			}
 			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
@@ -10237,9 +10249,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 				}
 			}
 			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-				StorageBytes sb = self->storage.getStorageBytes();
-				self->metrics.getStorageMetrics(
-				    req, sb, self->counters.bytesInput.getRate(), self->versionLag, self->lastUpdate);
+				self->getStorageMetrics(req);
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
 				if (!self->isReadable(req.keys)) {

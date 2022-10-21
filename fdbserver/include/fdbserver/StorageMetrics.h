@@ -152,3 +152,25 @@ struct ByteSampleInfo {
 // Determines whether a key-value pair should be included in a byte sample
 // Also returns size information about the sample
 ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
+
+class IStorageMetricsService {
+public:
+	StorageServerMetrics metrics;
+
+	// penalty used by loadBalance() to balance requests among service instances
+	virtual double getPenalty() { return 1; }
+
+	virtual bool isReadable(KeyRangeRef const& keys) { return true; }
+
+	virtual void addActor(Future<Void> future) = 0;
+
+	virtual void getSplitPoints(SplitRangeRequest const& req) = 0;
+
+	virtual Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) = 0;
+
+	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
+
+	// NOTE: also need to have this function but template can't be a virtual so...
+	// template <class Reply>
+	// void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty);
+};
