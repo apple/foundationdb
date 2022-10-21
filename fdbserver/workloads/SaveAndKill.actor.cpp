@@ -50,9 +50,9 @@ struct SaveAndKillWorkload : TestWorkload {
 		g_simulator->disableSwapsToAll();
 		return Void();
 	}
-	Future<Void> start(Database const& cx) override { return _start(this); }
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
-	ACTOR Future<Void> _start(SaveAndKillWorkload* self) {
+	ACTOR Future<Void> _start(SaveAndKillWorkload* self, Database cx) {
 		state int i;
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
@@ -68,6 +68,10 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
+		ini.SetValue("META", "tenantMode", cx->clientInfo->get().tenantMode.toString().c_str());
+		if (cx->defaultTenant.present()) {
+			ini.SetValue("META", "defaultTenant", cx->defaultTenant.get().toString().c_str());
+		}
 
 		ini.SetBoolValue("META", "enableEncryption", SERVER_KNOBS->ENABLE_ENCRYPTION);
 		ini.SetBoolValue("META", "enableTLogEncryption", SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);

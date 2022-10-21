@@ -1402,6 +1402,25 @@ struct TenantMode {
 		serializer(ar, mode);
 	}
 
+	// This does not go back-and-forth cleanly with toString
+	// The '_experimental' suffix, if present, needs to be removed in order to be parsed.
+	static TenantMode fromString(std::string mode) {
+		if (mode.find("_experimental") != std::string::npos) {
+			mode.replace(mode.find("_experimental"), std::string::npos, "");
+		}
+		if (mode == "disabled") {
+			return TenantMode::DISABLED;
+		} else if (mode == "optional") {
+			return TenantMode::OPTIONAL_TENANT;
+		} else if (mode == "required") {
+			return TenantMode::REQUIRED;
+		} else {
+			TraceEvent(SevError, "UnknownTenantMode").detail("TenantMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	std::string toString() const {
 		switch (mode) {
 		case DISABLED:
