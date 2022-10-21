@@ -66,7 +66,7 @@ TEST_CASE("setup") {
 	    },
 	    &context));
 
-	std::thread network_thread{ &fdb_run_network };
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	CHECK(!context.called);
 	fdb_check(fdb_stop_network());

@@ -2998,7 +2998,7 @@ int main(int argc, char** argv) {
 	context.applyCommandLine(argc, argv);
 
 	fdb_check(fdb_setup_network());
-	std::thread network_thread{ &fdb_run_network };
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	db = fdb_open_database(argv[1]);
 	clusterFilePath = std::string(argv[1]);
