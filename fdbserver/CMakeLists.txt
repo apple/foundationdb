@@ -61,6 +61,7 @@ include(SwiftToCXXInterop)
 generate_cxx_compat_header(fdbserver_swift "FDBServer")
 
 add_dependencies(fdbserver_swift flow_swift)
+add_dependencies(fdbserver_swift fdbclient_swift)
 add_dependencies(fdbserver_swift fdbserver_actors)
 # This does not work! (see rdar://99107402)
 # target_link_libraries(flow PRIVATE flow_swift)
@@ -80,7 +81,6 @@ swift_get_linker_search_paths(SWIFT_LINK_PATHS)
 target_link_directories(fdbserver PRIVATE "${SWIFT_LINK_PATHS}")
 target_link_options(fdbserver PRIVATE "-lswiftCore")
 target_link_options(fdbserver PRIVATE "-lswift_Concurrency")
-
 
 # Generate the module map for FDBServer.
 include(GenerateModulemap)

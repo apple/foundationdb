@@ -1,6 +1,7 @@
 import Flow
-import FDBServer
+import Distributed
 
+<<<<<<< Updated upstream
 print("[swift] start")
 
 installGlobalSwiftConcurrencyHooks() // hook swift concurrency up to the net runloop
@@ -80,13 +81,26 @@ actor Greeter {
     let phrase: String
     init(phrase: String) {
         self.phrase = phrase
+=======
+distributed actor EchoServer {
+    init(actorSystem: FlowActorSystem) {
+        actorSystem.makeWellKnown(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint)
+>>>>>>> Stashed changes
     }
 
-    func greet(name: String) -> String {
-        assertOnNet2EventLoop()
-        return "\(phrase) \(name)!"
+    distributed func echo(req: EchoRequest) -> String {
+        return req.message
+    }
+
+    distributed func reverse(req: ReverseRequest) -> String {
+        return req.reverse
+    }
+
+    distributed func stream(req: StreamRequest) -> TODO {
+        // TODO: not designed yet, but we can support back-pressure aware streams like that
     }
 }
+<<<<<<< Updated upstream
 
 func actorTest() async {
     let ga = Greeter(phrase: "Hello,")
@@ -142,3 +156,5 @@ globalNetworkRun()
 func test(_ p: ResolutionBalancer) {
 }
 
+=======
+>>>>>>> Stashed changes
