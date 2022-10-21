@@ -160,6 +160,7 @@ private:
 		execTransaction(
 		    // 1. Set the key to val1
 		    [key, val1](auto ctx) {
+			    ctx->tx().addReadConflictRange(key, key + fdb::Key(1, '\x00'));
 			    ctx->tx().set(key, val1);
 			    ctx->commit();
 		    },
@@ -296,6 +297,7 @@ private:
 		    // 1. Set the key to initial value
 		    [key, val](auto ctx) {
 			    ctx->tx().set(key, val);
+			    ctx->tx().addReadConflictRange(key, key + fdb::Key(1, '\x00'));
 			    ctx->commit();
 		    },
 		    [this, key, val, cont]() {

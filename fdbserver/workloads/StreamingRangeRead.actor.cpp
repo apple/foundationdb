@@ -84,6 +84,7 @@ ACTOR Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream
 }
 
 struct StreamingRangeReadWorkload : KVWorkload {
+	static constexpr auto NAME = "StreamingRangeRead";
 	double testDuration;
 	std::string valueString;
 	Future<Void> client;
@@ -100,7 +101,6 @@ struct StreamingRangeReadWorkload : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
-	std::string description() const override { return "StreamingRangeReadWorkload"; }
 	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
 	Future<Void> start(Database const& cx) override {
 		client = timeout(streamingClient(cx->clone(), this), testDuration, Void());
@@ -174,4 +174,4 @@ struct StreamingRangeReadWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<StreamingRangeReadWorkload> StreamingRangeReadWorkloadFactory("StreamingRangeRead");
+WorkloadFactory<StreamingRangeReadWorkload> StreamingRangeReadWorkloadFactory;

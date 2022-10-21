@@ -1,4 +1,4 @@
-storageEngineExcludeTypes=3,4,5
+storageEngineExcludeTypes=4,5
 
 ;Take snap and do cycle test
 testTitle=SnapCyclePre

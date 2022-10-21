@@ -129,6 +129,8 @@ ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different clu
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
 ERROR( please_reboot_kv_store, 1219, "Need to reboot the storage engine")
 ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
+ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
+ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

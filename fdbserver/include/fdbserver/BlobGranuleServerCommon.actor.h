@@ -1,5 +1,5 @@
 /*
- * BlobGranuleServerCommon.h
+ * BlobGranuleServerCommon.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -105,10 +105,15 @@ struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
 	GranuleTenantData() {}
 	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
 
-	void setBStore(Reference<BlobConnectionProvider> bs) {
-		ASSERT(bstoreLoaded.canBeSet());
-		bstore = bs;
-		bstoreLoaded.send(Void());
+	void updateBStore(const BlobMetadataDetailsRef& metadata) {
+		if (bstoreLoaded.canBeSet()) {
+			// new
+			bstore = BlobConnectionProvider::newBlobConnectionProvider(metadata);
+			bstoreLoaded.send(Void());
+		} else {
+			// update existing
+			bstore->update(metadata);
+		}
 	}
 };
 
@@ -119,7 +124,7 @@ public:
 	void removeTenants(std::vector<int64_t> tenantIds);
 
 	Optional<TenantMapEntry> getTenantById(int64_t id);
-	Reference<GranuleTenantData> getDataForGranule(const KeyRangeRef& keyRange);
+	Future<Reference<GranuleTenantData>> getDataForGranule(const KeyRangeRef& keyRange);
 
 	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
 	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;

@@ -25,6 +25,8 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_DEFINE_BOOLEAN_PARAM(SkipDDModeCheck);
+
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
@@ -106,6 +108,62 @@ class DDTxnProcessorImpl {
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
+	ACTOR static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
+	    Database cx,
+	    KeyRangeRef range) {
+		state std::vector<IDDTxnProcessor::DDRangeLocations> res;
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+		loop {
+			res.clear();
+			try {
+				state RangeResult shards = wait(krmGetRanges(&tr,
+				                                             keyServersPrefix,
+				                                             range,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				ASSERT(!shards.empty());
+
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				state int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
+					state std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (int j = 0; j < src.size(); ++j) {
+						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
+					}
+					std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
+					for (int j = 0; j < serverListValues.size(); ++j) {
+						if (!serverListValues[j].present()) {
+							TraceEvent(SevWarnAlways, "GetSourceServerInterfacesMissing")
+							    .detail("StorageServer", src[j])
+							    .detail("Range", KeyRangeRef(shards[i].key, shards[i + 1].key));
+							continue;
+						}
+						StorageServerInterface ssi = decodeServerListValue(serverListValues[j].get());
+						current.servers[ssi.locality.describeDcId()].push_back(ssi);
+					}
+					res.push_back(current);
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError").errorUnsuppressed(e).detail("Range", range);
+				wait(tr.onError(e));
+			}
+		}
+
+		return res;
+	}
+
 	// set the system key space
 	ACTOR static Future<Void> updateReplicaKeys(Database cx,
 	                                            std::vector<Optional<Key>> primaryDcId,
@@ -184,7 +242,8 @@ class DDTxnProcessorImpl {
 	    UID distributorId,
 	    MoveKeysLock moveKeysLock,
 	    std::vector<Optional<Key>> remoteDcIds,
-	    const DDEnabledState* ddEnabledState) {
+	    const DDEnabledState* ddEnabledState,
+	    SkipDDModeCheck skipDDModeCheck) {
 		state Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
 		state Key beginKey = allKeys.begin;
 
@@ -197,6 +256,7 @@ class DDTxnProcessorImpl {
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
 		state int numDataMoves = 0;
 
+		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
 		loop {
@@ -229,7 +289,7 @@ class DDTxnProcessorImpl {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
 				}
-				if (!result->mode || !ddEnabledState->isDDEnabled()) {
+				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isDDEnabled()) {
 					// DD can be disabled persistently (result->mode = 0) or transiently (isDDEnabled() = 0)
 					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
 					return result;
@@ -537,6 +597,11 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
+Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(
+    const KeyRangeRef range) {
+	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
+}
+
 Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {
 	return DDTxnProcessorImpl::getServerListAndProcessClasses(cx);
 }
@@ -559,8 +624,10 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
     const UID& distributorId,
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState) {
-	return DDTxnProcessorImpl::getInitialDataDistribution(cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState);
+    const DDEnabledState* ddEnabledState,
+    SkipDDModeCheck skipDDModeCheck) {
+	return DDTxnProcessorImpl::getInitialDataDistribution(
+	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, skipDDModeCheck);
 }
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
@@ -619,6 +686,33 @@ Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
 Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 	return ::getWorkers(cx);
 }
+
+Future<Void> DDTxnProcessor::rawStartMovement(MoveKeysParams& params,
+                                              std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawStartMovement(cx, params, tssMapping);
+}
+
+Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                               const std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawFinishMovement(cx, params, tssMapping);
+}
+
+struct DDMockTxnProcessorImpl {
+	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
+		state std::map<UID, StorageServerInterface> tssMapping;
+		self->rawStartMovement(params, tssMapping);
+		ASSERT(tssMapping.empty());
+
+		if (BUGGIFY_WITH_PROB(0.5)) {
+			wait(delayJittered(5.0));
+		}
+
+		self->rawFinishMovement(params, tssMapping);
+		if (!params.dataMovementComplete.isSet())
+			params.dataMovementComplete.send(Void());
+		return Void();
+	}
+};
 
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 	ServerWorkerInfos res;
@@ -696,7 +790,8 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
     const UID& distributorId,
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState) {
+    const DDEnabledState* ddEnabledState,
+    SkipDDModeCheck skipDDModeCheck) {
 
 	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
 	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();
@@ -756,9 +851,10 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::Normal);
 }
 
-// FIXME: finish moveKeys implementation
 Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
-	UNREACHABLE();
+	// Not support location metadata yet
+	ASSERT(!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	return DDMockTxnProcessorImpl::moveKeys(this, params);
 }
 
 // FIXME: finish implementation
@@ -789,4 +885,49 @@ Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorage
 // FIXME: finish implementation
 Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 	return Future<std::vector<ProcessData>>();
+}
+
+void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
+	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
+	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
+	ASSERT(params.startMoveKeysParallelismLock->take().isReady());
+
+	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
+	destTeams.emplace_back(params.destinationTeam, true);
+	mgs->shardMapping->moveShard(params.keys, destTeams);
+
+	for (auto& id : params.destinationTeam) {
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+	}
+}
+
+void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                           const std::map<UID, StorageServerInterface>& tssMapping) {
+	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
+	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
+	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
+	ASSERT(params.finishMoveKeysParallelismLock->take().isReady());
+
+	// get source and dest teams
+	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsFor(params.keys);
+
+	ASSERT_EQ(destTeams.size(), 0);
+	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {
+		TraceEvent(SevError, "MockRawFinishMovementError")
+		    .detail("Reason", "InconsistentDestinations")
+		    .detail("ShardMappingDest", describe(destTeams.front().servers))
+		    .detail("ParamDest", describe(params.destinationTeam));
+		ASSERT(false); // This shouldn't happen because the overlapped key range movement won't be executed in parallel
+	}
+
+	for (auto& id : params.destinationTeam) {
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+	}
+
+	ASSERT_EQ(srcTeams.size(), 0);
+	for (auto& id : srcTeams.front().servers) {
+		mgs->allServers.at(id).removeShard(params.keys);
+	}
+	mgs->shardMapping->finishMove(params.keys);
 }

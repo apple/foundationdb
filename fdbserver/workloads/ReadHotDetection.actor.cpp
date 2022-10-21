@@ -27,6 +27,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ReadHotDetectionWorkload : TestWorkload {
+	static constexpr auto NAME = "ReadHotDetection";
+
 	int actorCount, keyCount;
 
 	double testDuration, transactionsPerSecond;
@@ -43,8 +45,6 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		keyCount = getOption(options, "keyCount"_sr, 100);
 		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
-
-	std::string description() const override { return "ReadHotDetection"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -162,4 +162,4 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ReadHotDetectionWorkload> ReadHotDetectionWorkloadFactory("ReadHotDetection");
+WorkloadFactory<ReadHotDetectionWorkload> ReadHotDetectionWorkloadFactory;

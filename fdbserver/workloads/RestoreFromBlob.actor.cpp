@@ -32,7 +32,7 @@ struct RestoreFromBlobWorkload : TestWorkload {
 	Standalone<StringRef> backupURL;
 	WaitForComplete waitForComplete{ false };
 
-	static constexpr const char* DESCRIPTION = "RestoreFromBlob";
+	static constexpr auto NAME = "RestoreFromBlob";
 
 	RestoreFromBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		restoreAfter = getOption(options, "restoreAfter"_sr, 10.0);
@@ -47,8 +47,6 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		}
 		backupURL = backupURLString;
 	}
-
-	std::string description() const override { return DESCRIPTION; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -71,4 +69,4 @@ struct RestoreFromBlobWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<RestoreFromBlobWorkload> RestoreFromBlobWorkloadFactory(RestoreFromBlobWorkload::DESCRIPTION);
+WorkloadFactory<RestoreFromBlobWorkload> RestoreFromBlobWorkloadFactory;

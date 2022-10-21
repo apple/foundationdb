@@ -1324,7 +1324,8 @@ typedef std::priority_queue<MergeStreamNext, std::vector<MergeStreamNext>, Order
 
 static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
                                      const std::vector<Standalone<VectorRef<ParsedDeltaBoundaryRef>>>& streams,
-                                     const std::vector<bool> startClears) {
+                                     const std::vector<bool> startClears,
+                                     GranuleMaterializeStats& stats) {
 	ASSERT(streams.size() < std::numeric_limits<int16_t>::max());
 	ASSERT(startClears.size() == streams.size());
 
@@ -1357,6 +1358,10 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 		}
 	}
 
+	if (chunk.snapshotFile.present()) {
+		stats.snapshotRows += streams[0].size();
+	}
+
 	RangeResult result;
 	std::vector<MergeStreamNext> cur;
 	cur.reserve(streams.size());
@@ -1373,6 +1378,7 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 
 		// un-set clears and find latest value for key (if present)
 		bool foundValue = false;
+		bool includesSnapshot = cur.back().streamIdx == 0 && chunk.snapshotFile.present();
 		for (auto& it : cur) {
 			auto& v = streams[it.streamIdx][it.dataIdx];
 			if (clearActive[it.streamIdx]) {
@@ -1392,6 +1398,13 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 					KeyRef finalKey =
 					    chunk.tenantPrefix.present() ? v.key.removePrefix(chunk.tenantPrefix.get()) : v.key;
 					result.push_back_deep(result.arena(), KeyValueRef(finalKey, v.value));
+					if (!includesSnapshot) {
+						stats.rowsInserted++;
+					} else if (it.streamIdx > 0) {
+						stats.rowsUpdated++;
+					}
+				} else if (includesSnapshot) {
+					stats.rowsCleared++;
 				}
 			}
 		}
@@ -1413,6 +1426,8 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 		}
 	}
 
+	stats.outputBytes += result.expectedSize();
+
 	return result;
 }
 
@@ -1421,7 +1436,8 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
-                                   StringRef deltaFileData[]) {
+                                   StringRef deltaFileData[],
+                                   GranuleMaterializeStats& stats) {
 	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
 
@@ -1444,6 +1460,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	streams.reserve(chunk.deltaFiles.size() + 2);
 
 	if (snapshotData.present()) {
+		stats.inputBytes += snapshotData.get().size();
 		ASSERT(chunk.snapshotFile.present());
 		Standalone<VectorRef<ParsedDeltaBoundaryRef>> snapshotRows =
 		    loadSnapshotFile(chunk.snapshotFile.get().filename,
@@ -1461,6 +1478,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
+		stats.inputBytes += deltaFileData[deltaIdx].size();
 		bool startClear = false;
 		auto deltaRows = loadChunkedDeltaFile(chunk.deltaFiles[deltaIdx].filename,
 		                                      deltaFileData[deltaIdx],
@@ -1480,6 +1498,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		fmt::print("Applying {} memory deltas\n", chunk.newDeltas.size());
 	}
 	if (!chunk.newDeltas.empty()) {
+		stats.inputBytes += chunk.newDeltas.expectedSize();
 		// TODO REMOVE validation
 		ASSERT(beginVersion <= chunk.newDeltas.front().version);
 		ASSERT(readVersion >= chunk.newDeltas.back().version);
@@ -1491,7 +1510,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		}
 	}
 
-	return mergeDeltaStreams(chunk, streams, startClears);
+	return mergeDeltaStreams(chunk, streams, startClears, stats);
 }
 
 struct GranuleLoadFreeHandle : NonCopyable, ReferenceCounted<GranuleLoadFreeHandle> {
@@ -1560,8 +1579,6 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 	}
 
 	GranuleLoadIds loadIds[files.size()];
-	int64_t inputBytes = 0;
-	int64_t outputBytes = 0;
 
 	try {
 		// Kick off first file reads if parallelism > 1
@@ -1586,7 +1603,6 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				if (!snapshotData.get().begin()) {
 					return ErrorOr<RangeResult>(blob_granule_file_load_error());
 				}
-				inputBytes += snapshotData.get().size();
 			}
 
 			// +1 to avoid UBSAN variable length array of size zero
@@ -1599,16 +1615,11 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				if (!deltaData[i].begin()) {
 					return ErrorOr<RangeResult>(blob_granule_file_load_error());
 				}
-				inputBytes += deltaData[i].size();
 			}
 
-			inputBytes += files[chunkIdx].newDeltas.expectedSize();
-
 			// materialize rows from chunk
-			chunkRows =
-			    materializeBlobGranule(files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData);
-
-			outputBytes += chunkRows.expectedSize();
+			chunkRows = materializeBlobGranule(
+			    files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData, stats);
 
 			results.arena().dependsOn(chunkRows.arena());
 			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
@@ -1616,8 +1627,6 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 			// free once done by forcing FreeHandles to trigger
 			loadIds[chunkIdx].freeHandles.clear();
 		}
-		stats.inputBytes = inputBytes;
-		stats.outputBytes = outputBytes;
 		return ErrorOr<RangeResult>(results);
 	} catch (Error& e) {
 		return ErrorOr<RangeResult>(e);
@@ -2303,6 +2312,7 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	// expected answer
 	std::map<KeyRef, ValueRef> expectedData;
 	Version lastFileEndVersion = 0;
+	GranuleMaterializeStats stats;
 
 	fmt::print("Delta Read [{0} - {1}) @ {2} - {3}\n",
 	           range.begin.printable(),
@@ -2322,7 +2332,7 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	chunk.includedVersion = readVersion;
 	chunk.snapshotVersion = invalidVersion;
 
-	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, {}, serialized);
+	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, {}, serialized, stats);
 
 	if (expectedData.size() != actualData.size()) {
 		fmt::print("Expected Data {0}:\n", expectedData.size());
@@ -2430,6 +2440,7 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	}
 	Version lastFileEndVersion = 0;
 	applyDeltasByVersion(deltaData, range, beginVersion, readVersion, lastFileEndVersion, expectedData);
+	GranuleMaterializeStats stats;
 
 	// actual answer
 	Standalone<BlobGranuleChunkRef> chunk;
@@ -2477,7 +2488,8 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	if (beginVersion == 0) {
 		snapshotPtr = serializedSnapshot;
 	}
-	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs);
+	RangeResult actualData =
+	    materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs, stats);
 
 	if (expectedData.size() != actualData.size()) {
 		fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
@@ -2663,6 +2675,14 @@ struct CommonPrefixStats {
 	int totalKeys = 0;
 	int minKeySize = 1000000000;
 	int maxKeySize = 0;
+	int64_t logicalBytes = 0;
+	int64_t totalLogicalBytes = 0;
+
+	int deltas = 0;
+	int deltasSet = 0;
+	int deltasClear = 0;
+	int deltasNoOp = 0;
+	int deltasClearAfter = 0;
 
 	void addKey(const KeyRef& k) {
 		if (len == -1) {
@@ -2677,7 +2697,38 @@ struct CommonPrefixStats {
 		maxKeySize = std::max(maxKeySize, k.size());
 	}
 
+	void addKeyValue(const KeyRef& k, const ValueRef& v) {
+		addKey(k);
+		logicalBytes += k.size();
+		logicalBytes += v.size();
+	}
+
+	void addBoundary(const ParsedDeltaBoundaryRef& d) {
+		addKey(d.key);
+
+		deltas++;
+		if (d.isSet()) {
+			deltasSet++;
+			logicalBytes += d.value.size();
+		} else if (d.isClear()) {
+			deltasClear++;
+		} else {
+			ASSERT(d.isNoOp());
+			deltasNoOp++;
+		}
+		if (d.clearAfter) {
+			deltasClearAfter++;
+		}
+	}
+
+	void doneFile() {
+		totalLogicalBytes += logicalBytes;
+		fmt::print("Logical Size: {0}\n", logicalBytes);
+		logicalBytes = 0;
+	}
+
 	Key done() {
+		doneFile();
 		ASSERT(len >= 0);
 		fmt::print("Common prefix: {0}\nCommon Prefix Length: {1}\nAverage Key Size: {2}\nMin Key Size: {3}, Max Key "
 		           "Size: {4}\n",
@@ -2686,11 +2737,21 @@ struct CommonPrefixStats {
 		           totalKeySize / totalKeys,
 		           minKeySize,
 		           maxKeySize);
+
+		if (deltas > 0) {
+			fmt::print("Delta stats: {0} deltas, {1} sets, {2} clears, {3} noops, {4} clearAfters\n",
+			           deltas,
+			           deltasSet,
+			           deltasClear,
+			           deltasNoOp,
+			           deltasClearAfter);
+		}
+		fmt::print("Logical Size: {0}\n", totalLogicalBytes);
 		return key.substr(0, len);
 	}
 };
 
-FileSet loadFileSet(std::string basePath, const std::vector<std::string>& filenames) {
+FileSet loadFileSet(std::string basePath, const std::vector<std::string>& filenames, bool newFormat) {
 	FileSet files;
 	CommonPrefixStats stats;
 	for (int i = 0; i < filenames.size(); i++) {
@@ -2701,40 +2762,66 @@ FileSet loadFileSet(std::string basePath, const std::vector<std::string>& filena
 			std::string fpath = basePath + filenames[i];
 			Value data = loadFileData(fpath);
 
-			Arena arena;
-			GranuleSnapshot file;
-			ObjectReader dataReader(data.begin(), Unversioned());
-			dataReader.deserialize(FileIdentifierFor<GranuleSnapshot>::value, file, arena);
-			Standalone<GranuleSnapshot> parsed(file, arena);
+			Standalone<GranuleSnapshot> parsed;
+			if (!newFormat) {
+				Arena arena;
+				GranuleSnapshot file;
+				ObjectReader dataReader(data.begin(), Unversioned());
+				dataReader.deserialize(FileIdentifierFor<GranuleSnapshot>::value, file, arena);
+				parsed = Standalone<GranuleSnapshot>(file, arena);
+				fmt::print("Loaded {0} rows from snapshot file\n", parsed.size());
 
-			fmt::print("Loaded {0} rows from snapshot file\n", parsed.size());
+				for (auto& it : parsed) {
+					stats.addKeyValue(it.key, it.value);
+				}
+			} else {
+				Standalone<VectorRef<ParsedDeltaBoundaryRef>> res = loadSnapshotFile(""_sr, data, normalKeys, {});
+				fmt::print("Loaded {0} rows from snapshot file\n", res.size());
+				for (auto& it : res) {
+					stats.addKeyValue(it.key, it.value);
+				}
+			}
+
 			files.snapshotFile = { filenames[i], version, data, parsed };
 
-			for (auto& it : parsed) {
-				stats.addKey(it.key);
-			}
 		} else {
 			std::string fpath = basePath + filenames[i];
 			Value data = loadFileData(fpath);
 
-			Arena arena;
-			GranuleDeltas file;
-			ObjectReader dataReader(data.begin(), Unversioned());
-			dataReader.deserialize(FileIdentifierFor<GranuleDeltas>::value, file, arena);
-			Standalone<GranuleDeltas> parsed(file, arena);
+			if (!newFormat) {
+				Arena arena;
+				GranuleDeltas file;
+				ObjectReader dataReader(data.begin(), Unversioned());
+				dataReader.deserialize(FileIdentifierFor<GranuleDeltas>::value, file, arena);
+				Standalone<GranuleDeltas> parsed(file, arena);
 
-			fmt::print("Loaded {0} deltas from delta file\n", parsed.size());
-			files.deltaFiles.push_back({ filenames[i], version, data, parsed });
+				fmt::print("Loaded {0} deltas from delta file\n", parsed.size());
+				files.deltaFiles.push_back({ filenames[i], version, data, parsed });
 
-			for (auto& it : parsed) {
-				for (auto& it2 : it.mutations) {
-					stats.addKey(it2.param1);
-					if (it2.type == MutationRef::Type::ClearRange) {
-						stats.addKey(it2.param2);
+				for (auto& it : parsed) {
+					for (auto& it2 : it.mutations) {
+						stats.addKey(it2.param1);
+						if (it2.type == MutationRef::Type::ClearRange) {
+							stats.addKey(it2.param2);
+						}
 					}
+				}
+			} else {
+				bool startClear = false;
+				Standalone<VectorRef<ParsedDeltaBoundaryRef>> res =
+				    loadChunkedDeltaFile(""_sr, data, normalKeys, 0, version, {}, startClear);
+				ASSERT(!startClear);
+
+				Standalone<GranuleDeltas> parsed;
+				fmt::print("Loaded {0} boundaries from delta file\n", res.size());
+				files.deltaFiles.push_back({ filenames[i], version, data, parsed });
+
+				for (auto& it : res) {
+					stats.addBoundary(it);
 				}
 			}
 		}
+		stats.doneFile();
 	}
 
 	files.commonPrefix = stats.done();
@@ -2818,10 +2905,12 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
                                        KeyRange readRange,
                                        bool clearAllAtEnd,
                                        Optional<BlobGranuleCipherKeysCtx> keys,
-                                       Optional<CompressionFilter> compressionFilter) {
+                                       Optional<CompressionFilter> compressionFilter,
+                                       bool printStats = false) {
 	Version readVersion = std::get<1>(fileSet.deltaFiles.back());
 
 	Standalone<BlobGranuleChunkRef> chunk;
+	GranuleMaterializeStats stats;
 	StringRef deltaPtrs[fileSet.deltaFiles.size()];
 
 	MutationRef clearAllAtEndMutation;
@@ -2829,12 +2918,12 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
 		clearAllAtEndMutation = MutationRef(MutationRef::Type::ClearRange, readRange.begin, readRange.end);
 	}
 	if (chunked) {
-		size_t snapshotSize = std::get<3>(fileSet.snapshotFile).size();
+		size_t snapshotSize = std::get<2>(fileSet.snapshotFile).size();
 		chunk.snapshotFile =
 		    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize, keys);
 
 		for (int i = 0; i < fileSet.deltaFiles.size(); i++) {
-			size_t deltaSize = std::get<3>(fileSet.deltaFiles[i]).size();
+			size_t deltaSize = std::get<2>(fileSet.deltaFiles[i]).size();
 			chunk.deltaFiles.emplace_back_deep(
 			    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize, keys);
 			deltaPtrs[i] = std::get<2>(fileSet.deltaFiles[i]);
@@ -2875,14 +2964,26 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
 			}
 			serializedBytes += actualData.expectedSize();
 		} else {
-			RangeResult actualData =
-			    materializeBlobGranule(chunk, readRange, 0, readVersion, std::get<2>(fileSet.snapshotFile), deltaPtrs);
+			RangeResult actualData = materializeBlobGranule(
+			    chunk, readRange, 0, readVersion, std::get<2>(fileSet.snapshotFile), deltaPtrs, stats);
 			serializedBytes += actualData.expectedSize();
 		}
 	}
 	elapsed += timer_monotonic();
 	elapsed /= READ_RUNS;
 	serializedBytes /= READ_RUNS;
+
+	if (printStats) {
+		fmt::print("Materialize stats:\n");
+		fmt::print("  Input bytes:  {0}\n", stats.inputBytes / READ_RUNS);
+		fmt::print("  Output bytes: {0}\n", stats.outputBytes / READ_RUNS);
+		fmt::print("    Write Amp:  {0}\n", (1.0 * stats.inputBytes) / stats.outputBytes);
+		fmt::print("  Snapshot Rows: {0}\n", stats.snapshotRows / READ_RUNS);
+		fmt::print("  Rows Cleared:  {0}\n", stats.rowsCleared / READ_RUNS);
+		fmt::print("  Rows Inserted: {0}\n", stats.rowsInserted / READ_RUNS);
+		fmt::print("  Rows Updated:  {0}\n", stats.rowsUpdated / READ_RUNS);
+	}
+
 	return { serializedBytes, elapsed };
 }
 
@@ -2913,7 +3014,7 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 	int64_t logicalSnapshotSize = 0;
 	int64_t logicalDeltaSize = 0;
 	for (auto& it : fileSetNames) {
-		FileSet fileSet = loadFileSet(basePath, it);
+		FileSet fileSet = loadFileSet(basePath, it, false);
 		fileSets.push_back(fileSet);
 		logicalSnapshotSize += std::get<3>(fileSet.snapshotFile).expectedSize();
 		for (auto& deltaFile : fileSet.deltaFiles) {
@@ -2944,7 +3045,7 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 					if (encrypt) {
 						name += "ENC";
 					}
-					if (compressionFilter.present()) {
+					if (compressionFilter.present() && compressionFilter.get() != CompressionFilter::NONE) {
 						name += "CMP";
 					}
 					if (name.empty()) {
@@ -3025,7 +3126,7 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 					if (encrypt) {
 						name += "ENC";
 					}
-					if (compressionFilter.present()) {
+					if (compressionFilter.present() && compressionFilter.get() != CompressionFilter::NONE) {
 						name += "CMP";
 					}
 					if (name.empty()) {
@@ -3110,6 +3211,25 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 	}
 
 	fmt::print("\n\nBenchmark Complete!\n");
+
+	return Void();
+}
+
+TEST_CASE("!/blobgranule/files/repeatFromFiles") {
+	std::string basePath = "SET_ME";
+	std::vector<std::vector<std::string>> fileSetNames = { { "SET_ME" } };
+
+	int64_t totalBytesRead = 0;
+	double totalElapsed = 0.0;
+	for (auto& it : fileSetNames) {
+		FileSet fileSet = loadFileSet(basePath, it, true);
+		auto res = doReadBench(fileSet, true, fileSet.range, false, {}, {}, true);
+		totalBytesRead += res.first;
+		totalElapsed += res.second;
+	}
+
+	double MBperCPUsec = (totalBytesRead / 1024.0 / 1024.0) / totalElapsed;
+	fmt::print("Read Results: {:.6} MB/cpusec\n", MBperCPUsec);
 
 	return Void();
 }

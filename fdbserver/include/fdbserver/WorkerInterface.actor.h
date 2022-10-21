@@ -33,6 +33,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
@@ -59,6 +60,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeBlobManagerRequest> blobManager;
 	RequestStream<struct InitializeBlobWorkerRequest> blobWorker;
 	RequestStream<struct InitializeConsistencyScanRequest> consistencyScan;
+	RequestStream<struct InitializeBlobMigratorRequest> blobMigrator;
 	RequestStream<struct InitializeResolverRequest> resolver;
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
@@ -115,6 +117,7 @@ struct WorkerInterface {
 		           blobManager,
 		           blobWorker,
 		           consistencyScan,
+		           blobMigrator,
 		           resolver,
 		           storage,
 		           logRouter,
@@ -430,6 +433,7 @@ struct RegisterWorkerRequest {
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
 	Optional<BlobManagerInterface> blobManagerInterf;
+	Optional<BlobMigratorInterface> blobMigratorInterf;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
 	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
@@ -452,6 +456,7 @@ struct RegisterWorkerRequest {
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      Optional<BlobManagerInterface> bmInterf,
+	                      Optional<BlobMigratorInterface> mgInterf,
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
@@ -461,9 +466,10 @@ struct RegisterWorkerRequest {
 	                      ConfigBroadcastInterface configBroadcastInterface)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
-	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
-	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface) {}
+	    blobMigratorInterf(mgInterf), encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf),
+	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet),
+	    requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
+	    configBroadcastInterface(configBroadcastInterface) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -476,6 +482,7 @@ struct RegisterWorkerRequest {
 		           distributorInterf,
 		           ratekeeperInterf,
 		           blobManagerInterf,
+		           blobMigratorInterf,
 		           encryptKeyProxyInterf,
 		           consistencyScanInterf,
 		           issues,
@@ -762,6 +769,19 @@ struct InitializeBlobManagerRequest {
 	}
 };
 
+struct InitializeBlobMigratorRequest {
+	constexpr static FileIdentifier file_identifier = 7932681;
+	UID reqId;
+	ReplyPromise<BlobMigratorInterface> reply;
+
+	InitializeBlobMigratorRequest() {}
+	explicit InitializeBlobMigratorRequest(UID uid) : reqId(uid) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, reply);
+	}
+};
+
 struct InitializeResolverRequest {
 	constexpr static FileIdentifier file_identifier = 7413317;
 	LifetimeToken masterLifetime;
@@ -1006,6 +1026,7 @@ struct Role {
 	static const Role RATEKEEPER;
 	static const Role BLOB_MANAGER;
 	static const Role BLOB_WORKER;
+	static const Role BLOB_MIGRATOR;
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
@@ -1042,6 +1063,8 @@ struct Role {
 			return BLOB_MANAGER;
 		case ProcessClass::BlobWorker:
 			return BLOB_WORKER;
+		case ProcessClass::BlobMigrator:
+			return BLOB_MIGRATOR;
 		case ProcessClass::StorageCache:
 			return STORAGE_CACHE;
 		case ProcessClass::Backup:
@@ -1173,6 +1196,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<Async
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);
+ACTOR Future<Void> blobMigrator(BlobMigratorInterface mgi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,
                                       Reference<AsyncVar<ServerDBInfo> const> db);
