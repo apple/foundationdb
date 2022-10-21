@@ -2419,8 +2419,8 @@ ACTOR Future<EncryptionAtRestMode> getEncryptionAtRestMode(TLogData* self) {
 			}
 		} catch (Error& e) {
 			TraceEvent("GetEncryptionAtRestError", self->dbgid).error(e);
+			throw;
 		}
-		wait(delay(0.0));
 	}
 }
 
@@ -2618,10 +2618,12 @@ ACTOR Future<Void> checkUpdateEncryptionAtRestMode(TLogData* self) {
 	if (self->encryptionAtRestMode.present()) {
 		// Ensure the TLog encryptionAtRestMode status matches with the cluster config, if not, kill the TLog process.
 		// Approach prevents a fake TLog process joining the cluster.
-		TraceEvent("EncryptionAtRestMismatch", self->dbgid)
-		    .detail("Expected", encryptionAtRestMode.toString())
-		    .detail("Present", self->encryptionAtRestMode.get().toString());
-		ASSERT(self->encryptionAtRestMode.get() == encryptionAtRestMode);
+		if (self->encryptionAtRestMode.get() != encryptionAtRestMode) {
+			TraceEvent("EncryptionAtRestMismatch", self->dbgid)
+			    .detail("Expected", encryptionAtRestMode.toString())
+			    .detail("Present", self->encryptionAtRestMode.get().toString());
+			ASSERT(false);
+		}
 	} else {
 		self->encryptionAtRestMode = Optional<EncryptionAtRestMode>(encryptionAtRestMode);
 		wait(self->persistentDataCommitLock.take());
