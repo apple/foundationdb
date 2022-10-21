@@ -2231,6 +2231,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
 	state ICheckpointReader* reader = nullptr;
+	state int64_t totalSize = 0;
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
@@ -2246,7 +2247,6 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	}
 
 	try {
-		state int64_t totalSize = 0;
 		reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
 		wait(reader->init(req.token));
 
