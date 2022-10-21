@@ -32,7 +32,11 @@
 
 typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 
-typedef std::unordered_map<TenantName, uint64_t> TenantStorageMap;
+struct Storage {
+	uint64_t quota;
+	int64_t usage;
+};
+typedef std::unordered_map<TenantName, Storage> TenantStorageMap;
 
 struct TenantCacheTenantCreated {
 	KeyRange keys;
@@ -52,7 +56,7 @@ private:
 	uint64_t generation;
 	TenantMapByPrefix tenantCache;
 
-	// Map from tenant names to storage quota
+	// Map from tenant names to storage quota and usage
 	TenantStorageMap tenantStorageMap;
 
 	// mark the start of a new sweep of the tenant cache
@@ -67,11 +71,8 @@ private:
 	// return count of tenants that were found to be stale and removed from the cache
 	int cleanup();
 
-	// return the mapping from prefix -> tenant name for all tenants stored in the cache
-	std::vector<std::pair<KeyRef, TenantName>> getTenantList() const;
-
-	// update the size for a tenant; do nothing if the tenant doesn't exist in the map
-	void updateStorageUsage(KeyRef prefix, int64_t size);
+	// return all the TenantName for all tenants stored in the cache
+	std::vector<TenantName> getTenantList() const;
 
 	UID id() const { return distributorID; }
 

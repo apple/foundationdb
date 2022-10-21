@@ -127,14 +127,14 @@ public:
 
 		loop {
 			state double fetchStartTime = now();
-			state std::vector<std::pair<KeyRef, TenantName>> tenantList = tenantCache->getTenantList();
+			state std::vector<TenantName> tenants = tenantCache->getTenantList();
 			state int i;
-			for (i = 0; i < tenantList.size(); i++) {
-				state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenantList[i].second);
+			for (i = 0; i < tenants.size(); i++) {
+				state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenants[i]);
 				loop {
 					try {
 						state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-						tenantCache->updateStorageUsage(tenantList[i].first, size);
+						tenantCache->tenantStorageMap[tenants[i]].usage = size;
 					} catch (Error& e) {
 						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
 						wait(tr.onError(e));
@@ -161,7 +161,7 @@ public:
 					for (auto const kv : currentQuotas) {
 						TenantName const tenant = kv.key.removePrefix(storageQuotaPrefix);
 						uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
-						tenantCache->tenantStorageMap[tenant] = quota;
+						tenantCache->tenantStorageMap[tenant].quota = quota;
 					}
 					wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
 					break;
@@ -226,19 +226,12 @@ int TenantCache::cleanup() {
 	return tenantsRemoved;
 }
 
-std::vector<std::pair<KeyRef, TenantName>> TenantCache::getTenantList() const {
-	std::vector<std::pair<KeyRef, TenantName>> tenants;
+std::vector<TenantName> TenantCache::getTenantList() const {
+	std::vector<TenantName> tenants;
 	for (const auto& [prefix, entry] : tenantCache) {
-		tenants.push_back({ prefix, entry->name() });
+		tenants.push_back(entry->name());
 	}
 	return tenants;
-}
-
-void TenantCache::updateStorageUsage(KeyRef prefix, int64_t size) {
-	auto it = tenantCache.find(prefix);
-	if (it != tenantCache.end()) {
-		it->value->updateStorageUsage(size);
-	}
 }
 
 std::string TenantCache::desc() const {
