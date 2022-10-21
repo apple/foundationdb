@@ -42,6 +42,12 @@ func figureVersion(current: Version,
                            upperBound: current + toAdd + maxOffset)
 }
 
+extension NotifiedVersion {
+    func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
+        var f = self.whenAtLeast(limit)
+        try await f.waitValue
+    }
+}
 
 public actor MasterDataActor {
     let myself: MasterData
@@ -52,14 +58,9 @@ public actor MasterDataActor {
 
     /// Reply still done via req.reply
     func getVersion(req: GetCommitVersionRequest) async {
-        // NOTE: the `req` is inout since `req.reply.sendNever()` imports as `mutating`
-        var req = req
-
-        // TODO: Wrap with a tracing span
         let requestingProxyUID: UID = req.requestingProxy
         myself.getGetCommitVersionRequests() += 1
 
-        // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
         guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
@@ -67,7 +68,7 @@ public actor MasterDataActor {
         }
 
         // CODE_PROBE(lastVersionReplies.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up")
-        var latestRequestNum = try! await lastVersionReplies.getLatestRequestNumRef()
+        var latestRequestNumFuture = try! await lastVersionReplies.getLatestRequestNumRef()
                 .atLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
 
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
