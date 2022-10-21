@@ -184,6 +184,8 @@ class Config:
         self.reproduce_prefix: str | None = None
         self.reproduce_prefix_args = {'type': str, 'required': False,
                                       'help': 'When printing the results, prepend this string to the command'}
+        self.long_running: bool = False
+        self.long_running_args = {'action': 'store_true'}
         self._env_names: Dict[str, str] = {}
         self._config_map = self._build_map()
         self._read_env()
