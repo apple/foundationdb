@@ -32,6 +32,8 @@
 
 typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 
+typedef std::unordered_map<TenantName, uint64_t> TenantStorageMap;
+
 struct TenantCacheTenantCreated {
 	KeyRange keys;
 	Promise<bool> reply;
@@ -51,9 +53,7 @@ private:
 	TenantMapByPrefix tenantCache;
 
 	// Map from tenant names to storage quota
-	struct StorageQuotaInfo {
-		std::map<Key, uint64_t> quotaMap;
-	} storageQuotaInfo;
+	TenantStorageMap tenantStorageMap;
 
 	// mark the start of a new sweep of the tenant cache
 	void startRefresh();
@@ -90,7 +90,7 @@ public:
 
 	Future<Void> monitorStorageUsage();
 
-	Future<Void> monitorstorageQuota();
+	Future<Void> monitorStorageQuota();
 
 	std::string desc() const;
 

@@ -122,7 +122,7 @@ public:
 	ACTOR static Future<Void> monitorStorageUsage(TenantCache* tenantCache) {
 		TraceEvent(SevInfo, "StartingTenantCacheStorageUsageMonitor", tenantCache->id()).log();
 
-		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_REFRESH_INTERVAL;
+		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL;
 		state double lastTenantListFetchTime = now();
 
 		loop {
@@ -150,21 +150,23 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorstorageQuota(TenantCache* tenantCache) {
+	ACTOR static Future<Void> monitorStorageQuota(TenantCache* tenantCache) {
+		TraceEvent(SevInfo, "StartingTenantCacheStorageQuotaMonitor", tenantCache->id()).log();
+
 		loop {
 			state Transaction tr(tenantCache->dbcx());
 			loop {
 				try {
 					state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-					TraceEvent("StorageQuota_ReadCurrentQuotas").detail("Size", currentQuotas.size());
 					for (auto const kv : currentQuotas) {
-						Key const key = kv.key.removePrefix(storageQuotaPrefix);
+						TenantName const tenant = kv.key.removePrefix(storageQuotaPrefix);
 						uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
-						tenantCache->storageQuotaInfo.quotaMap[key] = quota;
+						tenantCache->tenantStorageMap[tenant] = quota;
 					}
-					wait(delay(5.0));
+					wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
 					break;
 				} catch (Error& e) {
+					TraceEvent("TenantCacheGetStorageQuotaError", tenantCache->id()).error(e);
 					wait(tr.onError(e));
 				}
 			}
@@ -293,8 +295,8 @@ Future<Void> TenantCache::monitorStorageUsage() {
 	return TenantCacheImpl::monitorStorageUsage(this);
 }
 
-Future<Void> TenantCache::monitorstorageQuota() {
-	return TenantCacheImpl::monitorstorageQuota(this);
+Future<Void> TenantCache::monitorStorageQuota() {
+	return TenantCacheImpl::monitorStorageQuota(this);
 }
 
 class TenantCacheUnitTest {
