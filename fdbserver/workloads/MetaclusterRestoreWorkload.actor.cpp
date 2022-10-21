@@ -340,7 +340,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			return Void();
 		}
 
-
 		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup(self->createdTenants[tenantName].cluster);
 		state std::map<Standalone<StringRef>, Optional<Value>> configurationParams = { { "tenant_group"_sr,
 			                                                                             tenantGroup } };
@@ -400,7 +399,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		if (self->createdTenants.count(oldTenantName) == 0 || self->createdTenants.count(newTenantName) != 0) {
 			return Void();
 		}
-
 
 		wait(MetaclusterAPI::renameTenant(self->managementDb, oldTenantName, newTenantName));
 
