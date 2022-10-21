@@ -1,7 +1,8 @@
 [[test]]
-title = 'API Correctness Multi Threaded'
+title = 'Cancel Transaction with Database per Transaction with TLS'
 multiThreaded = true
 buggify = true
+databasePerTransaction = true
 minFdbThreads = 2
 maxFdbThreads = 8
 minDatabases = 2
@@ -11,8 +12,12 @@ maxClientThreads = 8
 minClients = 2
 maxClients = 8
 
+[[server]]
+tls_enabled = true
+max_num_processes = 1
+
 [[test.workload]]
-name = 'ApiCorrectness'
+name = 'CancelTransaction'
 minKeyLength = 1
 maxKeyLength = 64
 minValueLength = 1
@@ -21,13 +26,3 @@ maxKeysPerTransaction = 50
 initialSize = 100
 numRandomOperations = 100
 readExistingKeysRatio = 0.9
-
-[[test.workload]]
-name = 'AtomicOpsCorrectness'
-initialSize = 0
-numRandomOperations = 100
-
-[[test.workload]]
-name = 'WatchAndWait'
-initialSize = 0
-numRandomOperations = 10
