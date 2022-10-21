@@ -4,7 +4,6 @@ maxTLogVersion = 6
 disableTss = true
 disableHostname = true
 disableEncryption = true
-allowDefaultTenant = false
 
 [[knobs]]
 # This can be removed once the lower bound of this downgrade test is a version that understands the new protocol
