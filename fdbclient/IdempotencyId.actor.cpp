@@ -248,6 +248,25 @@ ACTOR static Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference
 	return result;
 }
 
+const static int64_t kIdmpKeySize =
+    /* idempotencyIdKeys.begin.size() */ 8 + /* commit version */ 8 + /* high order batch index */ 1;
+const static int64_t kMinIdmpValSize =
+    /* protocol version */ 8 + /* length */ 1 + /* smallest id */ 16 + /* low order batch index */ 1;
+
+// Based on byte sample in storage server
+const static double kMinSampleProbability = double(kIdmpKeySize + kMinIdmpValSize) / (kIdmpKeySize + 100) / 250;
+const static double kMinSampleSize = (kIdmpKeySize + kMinIdmpValSize) / kMinSampleProbability;
+
+// Assuming that there are n idempotency ids, each stored in a separate kv pair, the distribution of
+// getEstimatedRangeSizeBytes is kMinSampleSize * B(n, kMinSampleProbability), where B is the binomial distribution.
+// https://en.wikipedia.org/wiki/Binomial_distribution#Expected_value_and_variance
+
+ACTOR static Future<int64_t> idempotencyIdsEstimateSize(Reference<ReadYourWritesTransaction> tr) {
+	
+	int64_t size = wait(tr->getEstimatedRangeSizeBytes(idempotencyIdKeys));
+	return size;
+}
+
 ACTOR Future<Void> idempotencyIdsCleaner(Database db,
                                          int64_t minAgeSeconds,
                                          int64_t byteTarget,
@@ -268,7 +287,7 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)));
+				wait(store(idmpKeySize, idempotencyIdsEstimateSize(tr)));
 				if (idmpKeySize <= byteTarget) {
 					break;
 				}

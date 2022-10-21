@@ -139,8 +139,10 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(db);
 		loop {
 			try {
-				int64_t size = wait(tr.getEstimatedRangeSizeBytes(idempotencyIdKeys));
-				return size;
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult result = wait(tr.getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!result.more);
+				return result.logicalSize();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
