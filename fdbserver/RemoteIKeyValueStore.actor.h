@@ -392,7 +392,9 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
 		interf.set.send(IKVSSetRequest{ keyValue, ReplyPromise<Void>() });
 	}
-	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
+	void clear(KeyRangeRef range,
+	           const StorageServerMetrics* storageMetrics = nullptr,
+	           const Arena* arena = nullptr) override {
 		interf.clear.send(IKVSClearRequest{ range, ReplyPromise<Void>() });
 	}
 
