@@ -749,8 +749,8 @@ public:
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
 		if (file == 1)
 			ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos);
-		int bytesRead =
-		    wait(self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)));
+		int bytesRead = wait(uncancellable(holdWhile(
+		    result, self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)))));
 		ASSERT_WE_THINK(bytesRead == bytesRequested);
 		return result;
 	}
