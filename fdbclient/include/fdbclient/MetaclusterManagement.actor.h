@@ -1212,7 +1212,9 @@ struct RestoreClusterImpl {
 		state TenantName lastTenantNameRetrieved;
 		for (auto t : tenants.results) {
 			self->mgmtClusterTenantMap.emplace(t.first, t.second);
-			self->mgmtClusterTenantIdIndex.emplace(t.second.id, t.first);
+			if (t.second.tenantState != TenantState::RENAMING_FROM) {
+				self->mgmtClusterTenantIdIndex.emplace(t.second.id, t.first);
+			}
 			if (t.second.assignedCluster.present() && self->clusterName.compare(t.second.assignedCluster.get()) == 0) {
 				self->mgmtClusterTenantSetForCurrentDataCluster.emplace(t.first);
 			}
@@ -1314,7 +1316,14 @@ struct RestoreClusterImpl {
 			state TenantName managementName = self->mgmtClusterTenantIdIndex[tenantEntry.id];
 			state TenantMapEntry managementTenant = self->mgmtClusterTenantMap[managementName];
 			if (tenantName.compare(managementName) != 0) {
-				state TenantName temporaryName = metaclusterTemporaryRenamePrefix.withSuffix(managementName);
+				ASSERT(managementTenant.tenantState != TenantState::RENAMING_FROM);
+				state TenantName temporaryName;
+				if (self->dataClusterTenantMap.count(managementName) > 0) {
+					temporaryName = metaclusterTemporaryRenamePrefix.withSuffix(managementName);
+				} else {
+					temporaryName = managementName;
+				}
+
 				// Rename
 				if (self->applyManagementClusterUpdates) {
 					wait(self->ctx.runDataClusterTransaction(
@@ -1332,6 +1341,7 @@ struct RestoreClusterImpl {
 					    }));
 				}
 				tenantName = temporaryName;
+				// SOMEDAY: we could mark the tenant in the management cluster as READY if it is in the RENAMING state
 			}
 
 			if (!managementTenant.matchesConfiguration(tenantEntry) ||
@@ -1344,6 +1354,8 @@ struct RestoreClusterImpl {
 						    return updateTenantConfiguration(self, tr, tenantName, managementTenant);
 					    }));
 				}
+				// SOMEDAY: we could mark the tenant in the management cluster as READY if it is in the
+				// UPDATING_CONFIGURATION state
 			}
 
 			return std::make_pair(tenantName, managementTenant);
@@ -1407,10 +1419,18 @@ struct RestoreClusterImpl {
 		state std::unordered_set<TenantName>::iterator setItr = self->mgmtClusterTenantSetForCurrentDataCluster.begin();
 		while (setItr != self->mgmtClusterTenantSetForCurrentDataCluster.end()) {
 			TenantName tenantName = *setItr;
-			uint64_t tenantId = self->mgmtClusterTenantMap[tenantName].id;
+			TenantMapEntry const& managementTenant = self->mgmtClusterTenantMap[tenantName];
 
-			if (self->dataClusterTenantIdSet.find(tenantId) == self->dataClusterTenantIdSet.end()) {
-				// Set Tenant in ERROR state
+			// If a tenant is present on the management cluster and not on the data cluster, mark it in an error state
+			// unless it is already in certain states (e.g. REGISTERING, REMOVING) that allow the tenant to be missing
+			// on the data cluster
+			//
+			// SOMEDAY: this could optionally complete the partial operations (e.g. finish creating or removing the
+			// tenant)
+			if (self->dataClusterTenantIdSet.find(managementTenant.id) == self->dataClusterTenantIdSet.end() &&
+			    managementTenant.tenantState != TenantState::REGISTERING &&
+			    managementTenant.tenantState != TenantState::REMOVING &&
+			    managementTenant.tenantState != TenantState::ERROR) {
 				wait(self->ctx.runManagementTransaction([tenantName](Reference<typename DB::TransactionT> tr) {
 					return markManagementTenantAsError(tr, tenantName);
 				}));
