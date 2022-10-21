@@ -2660,6 +2660,7 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
+	// Write one block of a page of a physical page in the page file.  Futures returned must be allowed to complete.
 	ACTOR static Future<Void> writePhysicalBlock(DWALPager* self,
 	                                             Reference<ArenaPage> page,
 	                                             int blockNum,
@@ -2715,6 +2716,7 @@ public:
 		return Void();
 	}
 
+	// All returned futures are added to the operations vector
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
 	                               unsigned int level,
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
@@ -2949,9 +2951,9 @@ public:
 		return bytes;
 	}
 
-	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
-	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
-	// and before the user-chosen sized pages.
+	// Read a physical page from the page file.  Futures returned must be allowed to complete.
+	// Note that header pages use a page size of smallestPhysicalBlock.  If the user chosen physical page size is
+	// larger, then there will be a gap of unused space after the header pages and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
 	                                                           PhysicalPageID pageID,
 	                                                           int priority,
@@ -3080,6 +3082,9 @@ public:
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
+	// Read futures returned are safe to drop but NOT safe to cancel.  They are safe to drop because they
+	// will either be uncancellable or they will be stored in the page cache which is safely destructed
+	// during shutdown, allowing all futures to complete.
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                      unsigned int level,
 	                                      PhysicalPageID pageID,
@@ -3995,7 +4000,12 @@ private:
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise;
 	Future<Void> commitFuture;
+
+	// The operations vector is used to hold all disk writes made by the Pager. It is only cleared after all operations
+	// or successul during commit or recovery, or after all operations are ready during the uncancellable shutdown. This
+	// behavior is necessary to ensure disk write source buffers remain alive until the disk operation has completed.
 	std::vector<Future<Void>> operations;
+
 	Future<Void> recoverFuture;
 	Future<Void> remapCleanupFuture;
 	bool remapCleanupStop;
