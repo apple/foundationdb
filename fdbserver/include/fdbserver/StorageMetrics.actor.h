@@ -19,13 +19,18 @@
  */
 
 #pragma once
-
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_STORAGEMETRICS_G_H)
+#define FDBSERVER_STORAGEMETRICS_G_H
+#include "fdbserver/StorageMetrics.actor.g.h"
+#elif !defined(FDBSERVER_STORAGEMETRICS_H)
+#define FDBSERVER_STORAGEMETRICS_H
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/Knobs.h"
+#include "flow/actorcompiler.h"
 
 const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;
 const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = "FetchKeysLatency"_sr;
@@ -174,3 +179,54 @@ public:
 	// template <class Reply>
 	// void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty);
 };
+
+ACTOR template <class ServiceType>
+Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterface ssi){
+	state Future<Void> doPollMetrics = Void();
+	loop {
+		choose {
+			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
+				if (!req.tenantInfo.present() && !self->isReadable(req.keys)) {
+					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+				} else {
+					self->addActor(self->waitMetricsTenantAware(req));
+				}
+			}
+			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
+				if (!self->isReadable(req.keys)) {
+					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+				} else {
+					self->metrics.splitMetrics(req);
+				}
+			}
+			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
+				self->getStorageMetrics(req);
+			}
+			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
+				if (!self->isReadable(req.keys)) {
+					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+				} else {
+					self->metrics.getReadHotRanges(req);
+				}
+			}
+			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
+				if (!self->isReadable(req.keys)) {
+					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+				} else {
+					self->getSplitPoints(req);
+				}
+			}
+			when(wait(doPollMetrics)) {
+				self->metrics.poll();
+				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
+			}
+		}
+	}
+}
+
+#include "flow/unactorcompiler.h"
+#endif // FDBSERVER_STORAGEMETRICS_H

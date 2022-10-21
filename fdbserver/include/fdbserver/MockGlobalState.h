@@ -21,7 +21,7 @@
 #ifndef FOUNDATIONDB_MOCKGLOBALSTATE_H
 #define FOUNDATIONDB_MOCKGLOBALSTATE_H
 
-#include "StorageMetrics.h"
+#include "StorageMetrics.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"

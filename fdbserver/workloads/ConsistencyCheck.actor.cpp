@@ -30,7 +30,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/TSSMappingUtil.actor.h"

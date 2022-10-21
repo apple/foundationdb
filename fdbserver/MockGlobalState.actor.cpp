@@ -203,10 +203,6 @@ uint64_t MockStorageServer::sumRangeSize(KeyRangeRef range) const {
 	return totalSize;
 }
 
-Future<Void> MockStorageServer::serverInterface() const {
-	return Future<Void>();
-}
-
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;

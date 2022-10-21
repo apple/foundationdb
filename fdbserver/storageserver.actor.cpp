@@ -81,7 +81,7 @@
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SpanContextMessage.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "fdbserver/WaitFailure.h"
@@ -10197,7 +10197,6 @@ Future<Void> StorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req
 }
 
 ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
-	state Future<Void> doPollMetrics = Void();
 
 	wait(self->byteSampleRecovery);
 	TraceEvent("StorageServerRestoreDurableState", self->thisServerID).detail("RestoredBytes", self->bytesRestored);
@@ -10230,49 +10229,8 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		                               }
 	                               }));
 
-	loop {
-		choose {
-			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (!req.tenantInfo.present() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->addActor(self->waitMetricsTenantAware(req));
-				}
-			}
-			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.splitMetrics(req);
-				}
-			}
-			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-				self->getStorageMetrics(req);
-			}
-			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.getReadHotRanges(req);
-				}
-			}
-			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->getSplitPoints(req);
-				}
-			}
-			when(wait(doPollMetrics)) {
-				self->metrics.poll();
-				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
-			}
-		}
-	}
+	wait(serveStorageMetricsRequests(self, ssi));
+	return Void();
 }
 
 ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
