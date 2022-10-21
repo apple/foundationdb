@@ -521,15 +521,28 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		ASSERT(blobRanges.size() == 1);
 		ASSERT(blobRanges[0] == activeRange);
 
-		state Transaction tr(cx);
-		loop {
-			try {
-				Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000000));
-				ASSERT(granules.size() == 1);
-				ASSERT(granules[0] == activeRange);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+		{
+			state Transaction tr(cx);
+			loop {
+				try {
+					Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000000));
+					ASSERT(granules.size() == 1);
+					ASSERT(granules[0] == activeRange);
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+
+			state Version purgeVersion = deterministicRandom()->coinflip() ? latestVersion : 1;
+			state KeyRangeRef purgeRange = deterministicRandom()->coinflip() ? activeRange : range;
+			Key purgeKey = wait(cx->purgeBlobGranules(purgeRange, purgeVersion, {}, true));
+			wait(cx->waitPurgeGranulesComplete(purgeKey));
+
+			if (deterministicRandom()->coinflip()) {
+				// force purge again and ensure it is idempotent
+				Key purgeKeyAgain = wait(cx->purgeBlobGranules(purgeRange, purgeVersion, {}, true));
+				wait(cx->waitPurgeGranulesComplete(purgeKeyAgain));
 			}
 		}
 
