@@ -33,8 +33,8 @@
 typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 
 struct Storage {
-	int64_t quota;
-	int64_t usage;
+	int64_t quota = std::numeric_limits<int64_t>::max();
+	int64_t usage = 0;
 };
 typedef std::unordered_map<TenantName, Storage> TenantStorageMap;
 
@@ -98,4 +98,7 @@ public:
 	bool isTenantKey(KeyRef key) const;
 
 	Optional<Reference<TCTenantInfo>> tenantOwning(KeyRef key) const;
+
+	// Get the list of tenants where the storage bytes currently used is greater than the quota allocated
+	std::vector<TenantName> getTenantsOverQuota() const;
 };

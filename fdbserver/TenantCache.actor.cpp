@@ -280,6 +280,16 @@ Optional<Reference<TCTenantInfo>> TenantCache::tenantOwning(KeyRef key) const {
 	return it->value;
 }
 
+std::vector<TenantName> TenantCache::getTenantsOverQuota() const {
+	std::vector<TenantName> tenants;
+	for (const auto& [tenant, storage] : tenantStorageMap) {
+		if (storage.usage > storage.quota) {
+			tenants.push_back(tenant);
+		}
+	}
+	return tenants;
+}
+
 Future<Void> TenantCache::monitorTenantMap() {
 	return TenantCacheImpl::monitorTenantMap(this);
 }
