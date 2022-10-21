@@ -571,13 +571,14 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 				}
 			}
 
-			// tear down + check that un-blobbifying at a non-aligned range also doesn't work
-			Key purgeKey = wait(self->versionedForcePurge(cx, activeRange, self->tenantName));
+			state Version purgeVersion = deterministicRandom()->coinflip() ? latestVersion : 1;
+			state KeyRangeRef purgeRange = deterministicRandom()->coinflip() ? activeRange : range;
+			Key purgeKey = wait(cx->purgeBlobGranules(purgeRange, purgeVersion, self->tenantName, true));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 
 			if (deterministicRandom()->coinflip()) {
 				// force purge again and ensure it is idempotent
-				Key purgeKeyAgain = wait(cx->purgeBlobGranules(activeRange, 1, self->tenantName, true));
+				Key purgeKeyAgain = wait(cx->purgeBlobGranules(purgeRange, purgeVersion, self->tenantName, true));
 				wait(cx->waitPurgeGranulesComplete(purgeKeyAgain));
 			}
 		}
