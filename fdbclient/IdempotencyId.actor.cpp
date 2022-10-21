@@ -332,7 +332,7 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
 	}
 }
 
-ACTOR static Future<Void> deleteIdempotencyKV(Database db, Version version, uint8_t highOrderBatchIndex) {
+ACTOR Future<Void> deleteIdempotencyKV(Database db, Version version, uint8_t highOrderBatchIndex) {
 	state Transaction tr(db);
 	state Key key;
 

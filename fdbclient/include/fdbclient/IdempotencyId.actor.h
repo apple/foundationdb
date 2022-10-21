@@ -187,7 +187,7 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
                                          int64_t pollingInterval);
 
 // Delete the idempotency key associated with version and highOrderBatchIndex
-ACTOR static Future<Void> deleteIdempotencyKV(Database db, Version version, uint8_t highOrderBatchIndex);
+ACTOR Future<Void> deleteIdempotencyKV(Database db, Version version, uint8_t highOrderBatchIndex);
 
 #include "flow/unactorcompiler.h"
 #endif
