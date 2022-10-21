@@ -152,8 +152,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ChangeFeedOperationsMove.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
-  # TODO: fix failures and renable the test
-  add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
@@ -310,6 +309,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.txt
     restarting/from_7.2.0/DrUpgradeRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.2.0/CycleTestRestart-1.toml
+    restarting/to_7.2.0/CycleTestRestart-2.toml)
 
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)

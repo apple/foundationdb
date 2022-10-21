@@ -2802,6 +2802,7 @@ static std::set<int> const& normalWorkerErrors() {
 	if (s.empty()) {
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_please_reboot_delete);
+		s.insert(error_code_local_config_changed);
 	}
 	return s;
 }

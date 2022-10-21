@@ -114,6 +114,10 @@ def run_tester(args, cluster, test_file):
             cluster.client_cert_file,
         ]
 
+    for knob in args.knobs:
+        knob_name, knob_value = knob.split("=")
+        cmd += ["--knob-" + knob_name, knob_value]
+
     get_logger().info("\nRunning tester '%s'..." % " ".join(map(str, cmd)))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
@@ -235,6 +239,14 @@ def parse_args(argv):
         default="INFO",
         choices=["ERROR", "WARNING", "INFO", "DEBUG"],
         help="Specifies the level of detail in the tester output (default='INFO').",
+    )
+    parser.add_argument(
+        "--knob",
+        type=str,
+        default=[],
+        action="append",
+        dest="knobs",
+        help="[lowercase-knob-name]=[knob-value] (there may be multiple --knob options)",
     )
 
     return parser.parse_args(argv)

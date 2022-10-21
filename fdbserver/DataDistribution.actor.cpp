@@ -316,7 +316,8 @@ public:
 		                 ddId,
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
-		                 context->ddEnabledState.get()));
+		                 context->ddEnabledState.get(),
+		                 SkipDDModeCheck::False));
 	}
 
 	void initDcInfo() {
@@ -690,6 +691,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			if (ddIsTenantAware) {
 				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
 				                                    "DDTenantCacheMonitor",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageUsage(),
+				                                    "StorageUsageTracker",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
 			}

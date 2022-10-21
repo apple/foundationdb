@@ -285,6 +285,7 @@ if(NOT WIN32)
           --api-tester-bin $<TARGET_FILE:fdb_c_api_tester>
           --external-client-library ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
           --test-file ${test_file}
+          --knob delete-native-lib-after-loading=false
       )
       set_tests_properties("${test_name}" PROPERTIES TIMEOUT 300)
     endforeach()
