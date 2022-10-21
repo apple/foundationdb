@@ -160,7 +160,7 @@ public:
 					state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					for (auto const kv : currentQuotas) {
 						TenantName const tenant = kv.key.removePrefix(storageQuotaPrefix);
-						uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
+						int64_t const quota = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
 						tenantCache->tenantStorageMap[tenant].quota = quota;
 					}
 					wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));

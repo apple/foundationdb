@@ -33,7 +33,7 @@
 typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 
 struct Storage {
-	uint64_t quota;
+	int64_t quota;
 	int64_t usage;
 };
 typedef std::unordered_map<TenantName, Storage> TenantStorageMap;
