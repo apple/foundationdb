@@ -50,6 +50,11 @@ private:
 	uint64_t generation;
 	TenantMapByPrefix tenantCache;
 
+	// Map from tenant names to storage quota
+	struct StorageQuotaInfo {
+		std::map<Key, uint64_t> quotaMap;
+	} storageQuotaInfo;
+
 	// mark the start of a new sweep of the tenant cache
 	void startRefresh();
 
@@ -84,6 +89,8 @@ public:
 	Future<Void> monitorTenantMap();
 
 	Future<Void> monitorStorageUsage();
+
+	Future<Void> monitorstorageQuota();
 
 	std::string desc() const;
 

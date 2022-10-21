@@ -149,6 +149,27 @@ public:
 			wait(delay(refreshInterval));
 		}
 	}
+
+	ACTOR static Future<Void> monitorstorageQuota(TenantCache* tenantCache) {
+		loop {
+			state Transaction tr(tenantCache->dbcx());
+			loop {
+				try {
+					state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+					TraceEvent("StorageQuota_ReadCurrentQuotas").detail("Size", currentQuotas.size());
+					for (auto const kv : currentQuotas) {
+						Key const key = kv.key.removePrefix(storageQuotaPrefix);
+						uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
+						tenantCache->storageQuotaInfo.quotaMap[key] = quota;
+					}
+					wait(delay(5.0));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
 };
 
 void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
@@ -270,6 +291,10 @@ Future<Void> TenantCache::monitorTenantMap() {
 
 Future<Void> TenantCache::monitorStorageUsage() {
 	return TenantCacheImpl::monitorStorageUsage(this);
+}
+
+Future<Void> TenantCache::monitorstorageQuota() {
+	return TenantCacheImpl::monitorstorageQuota(this);
 }
 
 class TenantCacheUnitTest {
