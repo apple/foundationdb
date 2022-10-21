@@ -613,7 +613,7 @@ private:
 		    m.param1.startsWith(applyMutationsAddPrefixRange.begin) ||
 		    m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) ||
 		    m.param1.startsWith(serverTagHistoryPrefix) ||
-		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin)) {
+		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin) || m.param1 == clusterIdKey) {
 
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
