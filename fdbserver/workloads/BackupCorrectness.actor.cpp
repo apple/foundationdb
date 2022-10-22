@@ -694,7 +694,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Standalone<StringRef>> restoreTags;
 				state bool multipleRangesInOneTag = false;
 				state int restoreIndex = 0;
-				// make sure system keys are not present in the restoreRanges as they will get restored first seperately
+				// make sure system keys are not present in the restoreRanges as they will get restored first separately
 				// from the rest
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
 				bool hasSystemRanges = false;
