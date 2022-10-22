@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/GrvProxyTransactionTagThrottler.h"
 #include "fdbclient/Knobs.h"
+#include "fdbserver/GrvProxyTransactionTagThrottler.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
@@ -29,8 +29,8 @@ void GrvProxyTransactionTagThrottler::DelayedRequest::updateProxyTagThrottledDur
 	req.proxyTagThrottledDuration = now() - startTime;
 }
 
-bool GrvProxyTransactionTagThrottler::DelayedRequest::isTooOld() const {
-	return now() - startTime > CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE;
+bool GrvProxyTransactionTagThrottler::DelayedRequest::isMaxThrottled() const {
+	return now() - startTime > CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION;
 }
 
 void GrvProxyTransactionTagThrottler::TagQueue::setRate(double rate) {
@@ -41,8 +41,8 @@ void GrvProxyTransactionTagThrottler::TagQueue::setRate(double rate) {
 	}
 }
 
-bool GrvProxyTransactionTagThrottler::TagQueue::isTooOld() const {
-	return requests.empty() || requests.front().isTooOld();
+bool GrvProxyTransactionTagThrottler::TagQueue::isMaxThrottled() const {
+	return !requests.empty() && requests.front().isMaxThrottled();
 }
 
 void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests() {
@@ -159,7 +159,9 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 				// Cannot release any more transaction from this tag (don't push the tag queue handle back into
 				// pqOfQueues)
 				CODE_PROBE(true, "GrvProxyTransactionTagThrottler throttling transaction");
-				if (tagQueueHandle.queue->isTooOld()) {
+				if (tagQueueHandle.queue->isMaxThrottled()) {
+					// Requests in this queue have been throttled too long and errors
+					// should be sent to clients.
 					tagQueueHandle.queue->rejectRequests();
 				}
 				break;
