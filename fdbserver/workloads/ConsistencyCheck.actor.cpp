@@ -370,6 +370,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyValueRef>>
 		    serverList; // "\xff/serverList/[[serverID]]" := "[[StorageServerInterface]]"
 		state Standalone<VectorRef<KeyValueRef>> serverTag; // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
+		state bool testResult = true;
 
 		std::vector<Future<bool>> cacheResultsPromise;
 		cacheResultsPromise.push_back(self->fetchKeyValuesFromSS(cx, self, storageCacheKeys, cacheKeyPromise, true));
@@ -557,7 +558,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					for (j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 						// if (rangeResult.isError()) {
-						// 	throw rangeResult.getError();
+						//	throw rangeResult.getError();
 						// }
 
 						// Compare the results with other storage servers
@@ -685,7 +686,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									    .detail("MatchingKVPairs", matchingKVPairs);
 
 									self->testFailure("Data inconsistent", true);
-									return false;
+									testResult = false;
 								}
 							}
 						}
@@ -731,7 +732,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
-		return true;
+		return testResult;
 	}
 
 	// Directly fetch key/values from storage servers through GetKeyValuesRequest
@@ -1178,6 +1179,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
+		state bool testResult = true;
 
 		state double dbSize = 100e12;
 		if (g_network->isSimulated()) {
@@ -1501,7 +1503,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										    (!storageServerInterfaces[j].isTss() &&
 										     !storageServerInterfaces[firstValidServer].isTss())) {
 											self->testFailure("Data inconsistent", true);
-											return false;
+											testResult = false;
 										}
 									}
 								}
@@ -1731,7 +1733,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}*/
 
 		self->bytesReadInPreviousRound = bytesReadInthisRound;
-		return true;
+		return testResult;
 	}
 
 	// Returns true if any storage servers have the exact same network address or are not using the correct key value
