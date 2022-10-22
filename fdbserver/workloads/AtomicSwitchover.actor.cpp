@@ -40,7 +40,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		stopDelay = getOption(options, "stopDelay"_sr, 50.0);
 
 		// TODO: Currently atomic restore does not work well with encryption since we cannot
-		// seperate system key restore from the normal key restore, once we can support this (or no longer need to
+		// separate system key restore from the normal key restore, once we can support this (or no longer need to
 		// seperate the two restores) we can remove the use of the knob
 		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 			addDefaultBackupRanges(backupRanges);
