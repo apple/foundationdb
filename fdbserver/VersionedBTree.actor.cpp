@@ -3284,8 +3284,8 @@ public:
 			currentOffset = i * physicalReadSize;
 			debug_printf("DWALPager(%s) current offset %" PRId64 "\n", self->filename.c_str(), currentOffset);
 			++g_redwoodMetrics.metric.pagerDiskRead;
-			reads.push_back(
-			    self->pageFile->read(extent->rawData() + currentOffset, physicalReadSize, startOffset + currentOffset));
+			reads.push_back(self->readPhysicalBlock(
+			    self, extent, currentOffset, physicalReadSize, startOffset + currentOffset, ioMaxPriority));
 		}
 
 		// Handle the last read separately as it may be smaller than physicalReadSize
@@ -3297,8 +3297,8 @@ public:
 			             currentOffset,
 			             lastReadSize);
 			++g_redwoodMetrics.metric.pagerDiskRead;
-			reads.push_back(
-			    self->pageFile->read(extent->rawData() + currentOffset, lastReadSize, startOffset + currentOffset));
+			reads.push_back(self->readPhysicalBlock(
+			    self, extent, currentOffset, lastReadSize, startOffset + currentOffset, ioMaxPriority));
 		}
 
 		// wait for all the parallel read futures for the given extent
