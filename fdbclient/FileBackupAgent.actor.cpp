@@ -1040,13 +1040,10 @@ private:
 	Key lastValue;
 };
 
-ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
-                                        Standalone<VectorRef<KeyValueRef>>* results,
-                                        bool encryptedBlock,
-                                        Optional<Database> cx) {
+void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results) {
 	// Read begin key, if this fails then block was invalid.
-	state uint32_t kLen = reader->consumeNetworkUInt32();
-	state const uint8_t* k = reader->consume(kLen);
+	uint32_t kLen = reader->consumeNetworkUInt32();
+	const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 
 	// Read kv pairs and end key
@@ -1075,7 +1072,6 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 	for (auto b : reader->remainder())
 		if (b != 0xFF)
 			throw restore_corrupted_data_padding();
-	return Void();
 }
 
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
@@ -1098,7 +1094,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader, &results, false, cx));
+			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			ASSERT(cx.present());
@@ -1121,7 +1117,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			wait(decodeKVPairs(&reader, &results, true, cx));
+			decodeKVPairs(&reader, &results);
 		} else {
 			throw restore_unsupported_file_version();
 		}

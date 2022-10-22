@@ -2231,6 +2231,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
 	state ICheckpointReader* reader = nullptr;
+	state int64_t totalSize = 0;
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
@@ -2255,12 +2256,14 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			FetchCheckpointReply reply(req.token);
 			reply.data = data;
 			req.reply.send(reply);
+			totalSize += data.size();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_end_of_stream) {
 			req.reply.sendError(end_of_stream());
 			TraceEvent("ServeFetchCheckpointEnd", self->thisServerID)
 			    .detail("CheckpointID", req.checkpointID)
+			    .detail("TotalSize", totalSize)
 			    .detail("Token", req.token);
 		} else {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
