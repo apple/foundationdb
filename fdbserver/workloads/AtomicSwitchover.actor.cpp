@@ -41,7 +41,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 		// TODO: Currently atomic restore does not work well with encryption since we cannot
 		// separate system key restore from the normal key restore, once we can support this (or no longer need to
-		// seperate the two restores) we can remove the use of the knob
+		// separate the two restores) we can remove the use of the knob
 		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 			addDefaultBackupRanges(backupRanges);
 		} else {
