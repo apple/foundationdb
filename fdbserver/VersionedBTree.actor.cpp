@@ -2965,9 +2965,9 @@ public:
 		return bytes;
 	}
 
-	// Read a physical page from the page file.  Futures returned must be allowed to complete.
-	// Note that header pages use a page size of smallestPhysicalBlock.  If the user chosen physical page size is
-	// larger, then there will be a gap of unused space after the header pages and before the user-chosen sized pages.
+	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock.
+	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
+	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
 	                                                           PhysicalPageID pageID,
 	                                                           int priority,
