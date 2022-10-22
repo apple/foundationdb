@@ -49,7 +49,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	int64_t minByteTarget;
 	int64_t minMinAgeSeconds;
 	double automaticPercentage;
-	double slop;
+	constexpr static double slop = 2.0;
 	double pollingInterval;
 
 	bool ok = true;
@@ -60,8 +60,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		minByteTarget = getOption(options, "minByteTarget"_sr, 50000);
 		minMinAgeSeconds = getOption(options, "minMinAgeSeconds"_sr, 15);
 		automaticPercentage = getOption(options, "automaticPercentage"_sr, 0.1);
-		slop = getOption(options, "slop"_sr, 1.2);
-		pollingInterval = getOption(options, "pollingInterval"_sr, 1.0);
+		pollingInterval = getOption(options, "pollingInterval"_sr, 5.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }

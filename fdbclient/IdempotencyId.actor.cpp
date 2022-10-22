@@ -248,22 +248,77 @@ ACTOR static Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference
 	return result;
 }
 
-const static int64_t kIdmpKeySize =
-    /* idempotencyIdKeys.begin.size() */ 8 + /* commit version */ 8 + /* high order batch index */ 1;
-const static int64_t kMinIdmpValSize =
-    /* protocol version */ 8 + /* length */ 1 + /* smallest id */ 16 + /* low order batch index */ 1;
+/*
+import math
+import gmpy2
+from gmpy2 import mpfr
 
-// Based on byte sample in storage server
-const static double kMinSampleProbability = double(kIdmpKeySize + kMinIdmpValSize) / (kIdmpKeySize + 100) / 250;
-const static double kMinSampleSize = (kIdmpKeySize + kMinIdmpValSize) / kMinSampleProbability;
+kIdmpKeySize = 17
+# Assume the worst case - one id per value
+kIdmpValSize = 8 + 1 * 18
+kIdmpKVSize = kIdmpKeySize + kIdmpValSize
+kSampleProbability = kIdmpKVSize / (kIdmpKeySize + 100) / 250
+kSampleSize = int(kIdmpKVSize / min(1, kSampleProbability))
+kOverestimateFactor = 2
 
-// Assuming that there are n idempotency ids, each stored in a separate kv pair, the distribution of
-// getEstimatedRangeSizeBytes is kMinSampleSize * B(n, kMinSampleProbability), where B is the binomial distribution.
-// https://en.wikipedia.org/wiki/Binomial_distribution#Expected_value_and_variance
+gmpy2.get_context().precision=100
 
-ACTOR static Future<int64_t> idempotencyIdsEstimateSize(Reference<ReadYourWritesTransaction> tr) {
-	
-	int64_t size = wait(tr->getEstimatedRangeSizeBytes(idempotencyIdKeys));
+# We want to compute a small threshold such that if the estimate is >=
+# threshold, the probability of an overestimate of at least a factor of 2 is <=
+# 1e-9
+
+# Given that the estimate is threshold, what is the probability that the actual value < threshold / 2 ?
+def evalThreshold(threshold):
+    successes = threshold // kSampleSize
+    accum = mpfr(0)
+    minNumKeys = successes
+    k = successes
+    maxNumKeys = math.floor(threshold / kOverestimateFactor / kIdmpKVSize)
+    for numKeys in range(minNumKeys, maxNumKeys + 1):
+        accum += (
+            mpfr(math.comb(numKeys, k))
+            * (mpfr(kSampleProbability)**k)
+            * (mpfr(1 - kSampleProbability) ** (numKeys - k))
+        )
+    accum /= mpfr(maxNumKeys - minNumKeys)
+    return accum
+
+def search():
+    low = 0
+    high = 10000000
+    best = None
+    tolerance = mpfr(1e-9)
+    while True:
+        mid = (low + high) // 2
+        if abs(low - high) <= 1:
+            return mid, best
+        p = evalThreshold(mid)
+        if p <= tolerance:
+            best = p
+            high = mid
+        else:
+            low = mid
+
+print(search())
+*/
+
+// In tests we want to assert that the cleaner does not clean more than half its target bytes
+// 2193674 is chosen such that the probability of the actual size being less than half the estimate is less than 1e-9
+// See above for the python program used to calculate 2193674
+ACTOR static Future<int64_t> idempotencyIdsEstimateSize(Reference<ReadYourWritesTransaction> tr,
+                                                        KeyRange range,
+                                                        bool* cached) {
+	state int64_t size = 0;
+	if (!*cached) {
+		wait(store(size, tr->getEstimatedRangeSizeBytes(range)));
+	}
+	if (*cached || size <= 2193674) {
+		*cached = true;
+		RangeResult result = wait(tr->getRange(range, CLIENT_KNOBS->TOO_MANY));
+		ASSERT(!result.more);
+		return result.logicalSize();
+	}
+	CODE_PROBE(true, "Idempotency ids cleaner using byte estimate");
 	return size;
 }
 
@@ -273,7 +328,6 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
                                          int64_t pollingInterval) {
 	state int64_t idmpKeySize;
 	state int64_t candidateDeleteSize;
-	state int64_t lastCandidateDeleteSize;
 	state KeyRange candidateRangeToClean;
 	state KeyRange finalRange;
 	state Reference<ReadYourWritesTransaction> tr;
@@ -281,13 +335,15 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
 	state Key firstKey;
 	state Version firstVersion;
 	state Version canDeleteLowerThan;
+	state bool cached;
 	loop {
 		tr = makeReference<ReadYourWritesTransaction>(db);
 		loop {
 			try {
+				cached = false;
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(idmpKeySize, idempotencyIdsEstimateSize(tr)));
+				wait(store(idmpKeySize, idempotencyIdsEstimateSize(tr, idempotencyIdKeys, &cached)));
 				if (idmpKeySize <= byteTarget) {
 					break;
 				}
@@ -312,24 +368,22 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
 
 				// Keep dividing the candidate range until clearing it would (probably) not take us under the byte
 				// target
-				lastCandidateDeleteSize = std::numeric_limits<int64_t>::max();
 				loop {
-					candidateRangeToClean =
-					    KeyRangeRef(firstKey,
-					                BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
-					                    .withPrefix(idempotencyIdKeys.begin));
-					wait(store(candidateDeleteSize, tr->getEstimatedRangeSizeBytes(candidateRangeToClean)));
-					if (candidateDeleteSize == lastCandidateDeleteSize) {
+					auto candidateEndKey = BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
+					                           .withPrefix(idempotencyIdKeys.begin);
+					if (firstKey > candidateEndKey) {
 						break;
 					}
+					candidateRangeToClean = KeyRangeRef(firstKey, candidateEndKey);
+					wait(store(candidateDeleteSize, idempotencyIdsEstimateSize(tr, candidateRangeToClean, &cached)));
 					TraceEvent("IdempotencyIdsCleanerCandidateDelete")
 					    .detail("IdmpKeySizeEstimate", idmpKeySize)
 					    .detail("ClearRangeSizeEstimate", candidateDeleteSize)
+					    .detail("ByteTarget", byteTarget)
 					    .detail("Range", candidateRangeToClean.toString());
 					if (idmpKeySize - candidateDeleteSize >= byteTarget) {
 						break;
 					}
-					lastCandidateDeleteSize = candidateDeleteSize;
 					canDeleteLowerThan = (firstVersion + canDeleteLowerThan) / 2;
 				}
 				finalRange = KeyRangeRef(idempotencyIdKeys.begin, candidateRangeToClean.end);
