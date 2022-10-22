@@ -6558,7 +6558,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
-			    e.code() != error_code_tenant_not_found) {
+			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -7484,7 +7484,7 @@ Future<Void> Transaction::onError(Error const& e) {
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
 	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
-	    e.code() == error_code_blob_granule_request_failed) {
+	    e.code() == error_code_blob_granule_request_failed || e.code() == error_code_proxy_tag_throttled) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
