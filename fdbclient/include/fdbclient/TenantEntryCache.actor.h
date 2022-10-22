@@ -535,28 +535,33 @@ public:
 	}
 
 	void put(const TenantNameEntryPair& pair) {
-		TenantEntryCachePayload<T> payload = createPayloadFunc(pair.first, pair.second);
-		auto idItr = mapByTenantId.find(pair.second.id);
-		auto nameItr = mapByTenantName.find(pair.first);
+		const auto& [name, entry] = pair;
+		TenantEntryCachePayload<T> payload = createPayloadFunc(name, entry);
+		auto idItr = mapByTenantId.find(entry.id);
+		auto nameItr = mapByTenantName.find(name);
 
 		Optional<TenantName> existingName;
 		Optional<int64_t> existingId;
 		if (nameItr != mapByTenantName.end()) {
 			existingId = nameItr->value.entry.id;
-			mapByTenantId.erase(nameItr->value.entry.id);
 		}
 		if (idItr != mapByTenantId.end()) {
 			existingName = idItr->value.name;
-			mapByTenantName.erase(idItr->value.name);
+		}
+		if (existingId.present()) {
+			mapByTenantId.erase(existingId.get());
+		}
+		if (existingName.present()) {
+			mapByTenantName.erase(existingName.get());
 		}
 
-		mapByTenantId[pair.second.id] = payload;
-		mapByTenantName[pair.first] = payload;
+		mapByTenantId[entry.id] = payload;
+		mapByTenantName[name] = payload;
 
 		TraceEvent("TenantEntryCachePut")
-		    .detail("TenantName", pair.first)
+		    .detail("TenantName", name)
 		    .detail("TenantNameExisting", existingName)
-		    .detail("TenantID", pair.second.id)
+		    .detail("TenantID", entry.id)
 		    .detail("TenantIDExisting", existingId)
 		    .detail("TenantPrefix", pair.second.prefix);
 
