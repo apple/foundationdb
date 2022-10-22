@@ -45,7 +45,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		fastRestore = getOption(options, "fastRestore"_sr, false);
 		// TODO: Currently atomic restore does not work well with encryption since we cannot
 		// seperate system key restore from the normal key restore, once we can support this (or no longer need to
-		// seperate the two restores) we can remove the use of the knob
+		// separate the two restores) we can remove the use of the knob
 		if (!fastRestore && !SERVER_KNOBS->ENABLE_ENCRYPTION) {
 			addDefaultBackupRanges(backupRanges);
 		} else {
