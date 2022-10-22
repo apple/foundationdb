@@ -954,21 +954,22 @@ public:
 
 private:
 	template <class U>
-	friend Future<Void> quorum(std::vector<Future<U>> const& results, int n);
+	friend Future<Void> quorum(const Future<U>* pItems, int itemCount, int n);
 	Quorum<T>* head;
 	QuorumCallback() = default;
 	QuorumCallback(Future<T> future, Quorum<T>* head) : head(head) { future.addCallbackAndClear(this); }
 };
 
 template <class T>
-Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
-	ASSERT(n >= 0 && n <= results.size());
+Future<Void> quorum(const Future<T>* pItems, int itemCount, int n) {
+	ASSERT(n >= 0 && n <= itemCount);
 
-	int size = Quorum<T>::sizeFor(results.size());
-	Quorum<T>* q = new (allocateFast(size)) Quorum<T>(n, results.size());
+	int size = Quorum<T>::sizeFor(itemCount);
+	Quorum<T>* q = new (allocateFast(size)) Quorum<T>(n, itemCount);
 
 	QuorumCallback<T>* nextCallback = q->callbacks();
-	for (auto& r : results) {
+	for (int i = 0; i < itemCount; ++i) {
+		auto& r = pItems[i];
 		if (r.isReady()) {
 			new (nextCallback) QuorumCallback<T>();
 			nextCallback->next = 0;
@@ -981,6 +982,11 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 		++nextCallback;
 	}
 	return Future<Void>(q);
+}
+
+template <class T>
+Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
+	return quorum(&results.front(), results.size(), n);
 }
 
 ACTOR template <class T>
@@ -1203,7 +1209,8 @@ inline Future<Void> operator&&(Future<Void> const& lhs, Future<Void> const& rhs)
 			return lhs;
 	}
 
-	return waitForAll(std::vector<Future<Void>>{ lhs, rhs });
+	Future<Void> x[] = { lhs, rhs };
+	return quorum(x, 2, 2);
 }
 
 // error || unset -> error
