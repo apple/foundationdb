@@ -135,6 +135,7 @@ public:
 					try {
 						state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
 						tenantCache->tenantStorageMap[tenants[i]].usage = size;
+						break;
 					} catch (Error& e) {
 						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
 						wait(tr.onError(e));
@@ -153,8 +154,9 @@ public:
 	ACTOR static Future<Void> monitorStorageQuota(TenantCache* tenantCache) {
 		TraceEvent(SevInfo, "StartingTenantCacheStorageQuotaMonitor", tenantCache->id()).log();
 
+		state Transaction tr(tenantCache->dbcx());
+
 		loop {
-			state Transaction tr(tenantCache->dbcx());
 			loop {
 				try {
 					state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
@@ -163,13 +165,14 @@ public:
 						int64_t const quota = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
 						tenantCache->tenantStorageMap[tenant].quota = quota;
 					}
-					wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
+					tr.reset();
 					break;
 				} catch (Error& e) {
 					TraceEvent("TenantCacheGetStorageQuotaError", tenantCache->id()).error(e);
 					wait(tr.onError(e));
 				}
 			}
+			wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
 		}
 	}
 };
