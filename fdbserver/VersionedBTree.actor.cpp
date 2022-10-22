@@ -153,6 +153,15 @@ public:
 
 	~PriorityMultiLock() { prioritylock_printf("destruct"); }
 
+	void kill() {
+		brokenOnDestruct.sendError(broken_promise());
+		fRunner.cancel();
+		runners.clear();
+		for (auto& w : waiters) {
+			w.clear();
+		}
+	}
+
 	Future<Lock> lock(int priority = 0) {
 		prioritylock_printf("lock begin %s\n", toString().c_str());
 
@@ -2661,14 +2670,14 @@ public:
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
 	// Write one block of a page of a physical page in the page file.  Futures returned must be allowed to complete.
-	ACTOR static Future<Void> writePhysicalBlock(DWALPager* self,
-	                                             Reference<ArenaPage> page,
-	                                             int blockNum,
-	                                             int blockSize,
-	                                             PhysicalPageID pageID,
-	                                             PagerEventReasons reason,
-	                                             unsigned int level,
-	                                             bool header) {
+	ACTOR static UNCANCELLABLE Future<Void> writePhysicalBlock(DWALPager* self,
+	                                                           Reference<ArenaPage> page,
+	                                                           int blockNum,
+	                                                           int blockSize,
+	                                                           PhysicalPageID pageID,
+	                                                           PagerEventReasons reason,
+	                                                           unsigned int level,
+	                                                           bool header) {
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
@@ -2692,7 +2701,11 @@ public:
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		debug_printf("DWALPager(%s) op=writeBlock %s\n", self->filename.c_str(), toString(pageID).c_str());
 		wait(self->pageFile->write(page->rawData() + (blockNum * blockSize), blockSize, (int64_t)pageID * blockSize));
-		debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
+
+		// This next line could crash on shutdown because this actor can't be cancelled so self could be destroyed after
+		// write, so enable this line with caution when debugging.
+		// debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
+
 		return Void();
 	}
 
@@ -2940,14 +2953,15 @@ public:
 	}
 	void freeExtent(LogicalPageID pageID) override { freeExtent_impl(this, pageID); }
 
-	ACTOR static Future<int> readPhysicalBlock(DWALPager* self,
-	                                           uint8_t* data,
-	                                           int blockSize,
-	                                           int64_t offset,
-	                                           int priority) {
+	ACTOR static UNCANCELLABLE Future<int> readPhysicalBlock(DWALPager* self,
+	                                                         Reference<ArenaPage> pageBuffer,
+	                                                         int pageOffset,
+	                                                         int blockSize,
+	                                                         int64_t offset,
+	                                                         int priority) {
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
 		++g_redwoodMetrics.metric.pagerDiskRead;
-		int bytes = wait(self->pageFile->read(data, blockSize, offset));
+		int bytes = wait(self->pageFile->read(pageBuffer->rawData() + pageOffset, blockSize, offset));
 		return bytes;
 	}
 
@@ -2968,8 +2982,8 @@ public:
 		             page->rawData(),
 		             header);
 
-		int readBytes = wait(
-		    readPhysicalBlock(self, page->rawData(), page->rawSize(), (int64_t)pageID * page->rawSize(), priority));
+		int readBytes =
+		    wait(readPhysicalBlock(self, page, 0, page->rawSize(), (int64_t)pageID * page->rawSize(), priority));
 		debug_printf("DWALPager(%s) op=readPhysicalDiskReadComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
@@ -3032,8 +3046,8 @@ public:
 		state int blockSize = self->physicalPageSize;
 		std::vector<Future<int>> reads;
 		for (int i = 0; i < pageIDs.size(); ++i) {
-			reads.push_back(readPhysicalBlock(
-			    self, page->rawData() + (i * blockSize), blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
+			reads.push_back(
+			    readPhysicalBlock(self, page, i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
 		}
 		// wait for all the parallel read futures
 		wait(waitForAll(reads));
@@ -3077,14 +3091,11 @@ public:
 
 	Future<Reference<ArenaPage>> readHeaderPage(PhysicalPageID pageID) {
 		debug_printf("DWALPager(%s) readHeaderPage %s\n", filename.c_str(), toString(pageID).c_str());
-		return uncancellable(readPhysicalPage(this, pageID, ioMaxPriority, true));
+		return readPhysicalPage(this, pageID, ioMaxPriority, true);
 	}
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
-	// Read futures returned are safe to drop but NOT safe to cancel.  They are safe to drop because they
-	// will either be uncancellable or they will be stored in the page cache which is safely destructed
-	// during shutdown, allowing all futures to complete.
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                      unsigned int level,
 	                                      PhysicalPageID pageID,
@@ -3110,7 +3121,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
-			return forwardError(uncancellable(readPhysicalPage(this, pageID, priority, false)), errorPromise);
+			return forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
 		}
 		PageCacheEntry& cacheEntry = pageCache.get(pageID, physicalPageSize, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
@@ -3159,7 +3170,7 @@ public:
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
-			return forwardError(uncancellable(readPhysicalMultiPage(this, pageIDs, priority)), errorPromise);
+			return forwardError(readPhysicalMultiPage(this, pageIDs, priority), errorPromise);
 		}
 
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * physicalPageSize, noHit);
@@ -3764,12 +3775,13 @@ public:
 			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
 		}
 
-		// Must wait for pending operations to complete, canceling them can cause a crash because the underlying
-		// operations may be uncancellable and depend on memory from calling scope's page reference
-		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
+		debug_printf("DWALPager(%s) shutdown kill file extension\n", self->filename.c_str());
+		self->fileExtension.cancel();
 
-		// Pending ops must be all ready, errors are okay
-		wait(waitForAllReady(self->operations));
+		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
+		self->ioLock.kill();
+
+		debug_printf("DWALPager(%s) shutdown cancel operations\n", self->filename.c_str());
 		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
@@ -4001,9 +4013,8 @@ private:
 	Promise<Void> errorPromise;
 	Future<Void> commitFuture;
 
-	// The operations vector is used to hold all disk writes made by the Pager. It is only cleared after all operations
-	// or successul during commit or recovery, or after all operations are ready during the uncancellable shutdown. This
-	// behavior is necessary to ensure disk write source buffers remain alive until the disk operation has completed.
+	// The operations vector is used to hold all disk writes made by the Pager, but could also hold
+	// other operations that need to be waited on before a commit can finish.
 	std::vector<Future<Void>> operations;
 
 	Future<Void> recoverFuture;
