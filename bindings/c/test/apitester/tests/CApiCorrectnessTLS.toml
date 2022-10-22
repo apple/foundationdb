@@ -1,5 +1,5 @@
 [[test]]
-title = 'API Correctness Multi Threaded'
+title = 'API Correctness with TLS'
 multiThreaded = true
 buggify = true
 minFdbThreads = 2
@@ -10,6 +10,10 @@ minClientThreads = 2
 maxClientThreads = 8
 minClients = 2
 maxClients = 8
+
+[[server]]
+tls_enabled = true
+max_num_processes = 1
 
 [[test.workload]]
 name = 'ApiCorrectness'

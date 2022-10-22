@@ -1,15 +1,11 @@
 [[test]]
-title = 'API Correctness Multi Threaded'
-multiThreaded = true
-buggify = true
-minFdbThreads = 2
-maxFdbThreads = 8
-minDatabases = 2
-maxDatabases = 8
-minClientThreads = 2
-maxClientThreads = 8
-minClients = 2
-maxClients = 8
+title = 'API Correctness Single Threaded'
+minClients = 1
+maxClients = 3
+minDatabases = 1
+maxDatabases = 3
+multiThreaded = false
+disableClientBypass = true
 
 [[test.workload]]
 name = 'ApiCorrectness'
