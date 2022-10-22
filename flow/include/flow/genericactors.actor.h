@@ -406,6 +406,20 @@ Future<Void> map(FutureStream<T> input, F func, PromiseStream<std::invoke_result
 	return Void();
 }
 
+// X + Y will wait for X, then wait for and return the result of Y
+ACTOR template <class A, class B>
+Future<B> operatorPlus(Future<A> a, Future<B> b) {
+	A resultA = wait(a);
+	(void)resultA;
+	B resultB = wait(b);
+	return resultB;
+}
+
+template <class A, class B>
+Future<B> operator+(Future<A> a, Future<B> b) {
+	return operatorPlus(a, b);
+}
+
 // Returns if the future returns true, otherwise waits forever.
 ACTOR Future<Void> returnIfTrue(Future<bool> f);
 
@@ -988,6 +1002,15 @@ Future<Void> waitForAll(std::vector<Future<T>> const& results) {
 	if (results.empty())
 		return Void();
 	return quorum(results, (int)results.size());
+}
+
+// Wait for all futures in results to be ready and then throw the first (in execution order) error
+// if any of them resulted in an error.
+template <class T>
+Future<Void> waitForAllReadyThenThrow(std::vector<Future<T>> const& results) {
+	Future<Void> f = waitForAll(results);
+	Future<Void> fReady = waitForAllReady(results);
+	return fReady + f;
 }
 
 template <class T>
