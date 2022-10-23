@@ -107,7 +107,7 @@ class GlobalTagThrottlerImpl {
 			if (opType == OpType::READ) {
 				readCost.setTotal(newCost);
 			} else {
-				writeCost.setTotal(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * newCost);
+				writeCost.setTotal(CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * newCost);
 			}
 		}
 
