@@ -3,7 +3,7 @@ testTitle='ThroughputQuotaTest'
 
   [[test.workload]]
   testName='ThroughputQuota'
-  transactionTag='sampleTag1'
+  transactionTag='a'
   totalQuota=1.0
 
   [[test.workload]]

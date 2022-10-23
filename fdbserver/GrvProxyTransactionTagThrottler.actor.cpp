@@ -46,6 +46,7 @@ bool GrvProxyTransactionTagThrottler::TagQueue::isMaxThrottled() const {
 }
 
 void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests() {
+	CODE_PROBE(true, "GrvProxyTransactionTagThrottler rejecting requests");
 	while (!requests.empty()) {
 		auto& delayedReq = requests.front();
 		delayedReq.updateProxyTagThrottledDuration();
