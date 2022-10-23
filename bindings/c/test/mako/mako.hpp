@@ -138,6 +138,7 @@ struct Arguments {
 	int async_xacts;
 	int mode;
 	int rows; /* is 2 billion enough? */
+	double load_factor;
 	int row_digits;
 	int seconds;
 	int iteration;

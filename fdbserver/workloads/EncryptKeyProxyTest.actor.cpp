@@ -18,12 +18,18 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/Locality.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
+
+#include "fdbrpc/Locality.h"
+
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+
+#include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -34,13 +40,14 @@
 
 #include <atomic>
 #include <boost/range/const_iterator.hpp>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct EncryptKeyProxyTestWorkload : TestWorkload {
 	static constexpr auto NAME = "EncryptKeyProxyTest";
-	EncryptKeyProxyInterface ekpInf;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Arena arena;
 	uint64_t minDomainId;
@@ -65,235 +72,126 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	Future<Void> setup(Database const& ctx) override { return Void(); }
 
 	ACTOR Future<Void> simEmptyDomainIdCache(EncryptKeyProxyTestWorkload* self) {
-		TraceEvent("SimEmptyDomainIdCache_Start").log();
+		TraceEvent("SimEmptyDomainIdCacheStart").log();
 
+		state std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
 		for (int i = 0; i < self->numDomains / 2; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
-			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
+			domains.emplace(domainId, StringRef(std::to_string(domainId)));
 		}
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
 
-		state int nAttempts = 0;
-		loop {
-			EKPGetLatestBaseCipherKeysRequest req;
-			req.encryptDomainInfos = self->domainInfos;
-			// if (deterministicRandom()->randomInt(0, 100) < 50) {
-			req.debugId = deterministicRandom()->randomUniqueID();
-			//}
-			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
-			if (rep.present()) {
-
-				ASSERT(!rep.get().error.present());
-				ASSERT_EQ(rep.get().baseCipherDetails.size(), self->domainInfos.size());
-
-				for (const auto& info : self->domainInfos) {
-					bool found = false;
-					for (const auto& item : rep.get().baseCipherDetails) {
-						if (item.encryptDomainId == info.domainId) {
-							found = true;
-							break;
-						}
-					}
-					ASSERT(found);
-				}
-
-				// Ensure no hits reported by the cache.
-				if (nAttempts == 0) {
-					ASSERT_EQ(rep.get().numHits, 0);
-				} else {
-					ASSERT_GE(rep.get().numHits, 0);
-				}
-				break;
-			} else {
-				nAttempts++;
-				wait(delay(0.0));
-			}
-		}
+		ASSERT_EQ(latestCiphers.size(), domains.size());
 
 		TraceEvent("SimEmptyDomainIdCacheDone").log();
 		return Void();
 	}
 
 	ACTOR Future<Void> simPartialDomainIdCache(EncryptKeyProxyTestWorkload* self) {
-		state int expectedHits;
-		state int expectedMisses;
+		TraceEvent("SimPartialDomainIdCacheStart");
 
-		TraceEvent("SimPartialDomainIdCacheStart").log();
-
-		self->domainInfos.clear();
-
-		expectedHits = deterministicRandom()->randomInt(1, self->numDomains / 2);
+		// Construct a lookup set such that few ciphers are cached as well as few ciphers can never to cached (invalid
+		// keys)
+		state int expectedHits = deterministicRandom()->randomInt(1, self->numDomains / 2);
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
 		for (int i = 0; i < expectedHits; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
-			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
+			domains.emplace(domainId, StringRef(std::to_string(domainId)));
 		}
 
-		expectedMisses = deterministicRandom()->randomInt(1, self->numDomains / 2);
+		state int expectedMisses = deterministicRandom()->randomInt(1, self->numDomains / 2);
 		for (int i = 0; i < expectedMisses; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i + self->numDomains / 2 + 1;
-			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
+			domains.emplace(domainId, StringRef(std::to_string(domainId)));
 		}
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
 
-		state int nAttempts = 0;
-		loop {
-			// Test case given is measuring correctness for cache hit/miss scenarios is designed to have strict
-			// assertions. However, in simulation runs, RPCs can be force failed to inject retries, hence, code leverage
-			// tryGetReply to ensure at-most once delivery of message, further, assertions are relaxed to account of
-			// cache warm-up due to retries.
-			EKPGetLatestBaseCipherKeysRequest req;
-			req.encryptDomainInfos = self->domainInfos;
-			if (deterministicRandom()->randomInt(0, 100) < 50) {
-				req.debugId = deterministicRandom()->randomUniqueID();
-			}
-			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
-			if (rep.present()) {
-				ASSERT(!rep.get().error.present());
-				ASSERT_EQ(rep.get().baseCipherDetails.size(), self->domainInfos.size());
-
-				for (const auto& info : self->domainInfos) {
-					bool found = false;
-					for (const auto& item : rep.get().baseCipherDetails) {
-						if (item.encryptDomainId == info.domainId) {
-							found = true;
-							break;
-						}
-					}
-					ASSERT(found);
-				}
-
-				// Ensure desired cache-hit counts
-				if (nAttempts == 0) {
-					ASSERT_EQ(rep.get().numHits, expectedHits);
-				} else {
-					ASSERT_GE(rep.get().numHits, expectedHits);
-				}
-				break;
-			} else {
-				nAttempts++;
-				wait(delay(0.0));
-			}
-		}
-		self->domainInfos.clear();
-
-		TraceEvent("SimPartialDomainIdCacheDone").log();
+		TraceEvent("SimPartialDomainIdCacheEnd");
 		return Void();
 	}
 
 	ACTOR Future<Void> simRandomBaseCipherIdCache(EncryptKeyProxyTestWorkload* self) {
-		state int expectedHits;
+		TraceEvent("SimRandomDomainIdCacheStart");
 
-		TraceEvent("SimRandomDomainIdCacheStart").log();
-
-		self->domainInfos.clear();
+		// Ensure BlobCipherCache is populated
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
 		for (int i = 0; i < self->numDomains; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
-			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
+			domains[domainId] = StringRef(std::to_string(domainId));
 		}
 
-		EKPGetLatestBaseCipherKeysRequest req;
-		req.encryptDomainInfos = self->domainInfos;
-		if (deterministicRandom()->randomInt(0, 100) < 50) {
-			req.debugId = deterministicRandom()->randomUniqueID();
-		}
-		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
-
-		ASSERT(!rep.error.present());
-		ASSERT_EQ(rep.baseCipherDetails.size(), self->domainInfos.size());
-		for (const auto& info : self->domainInfos) {
-			bool found = false;
-			for (const auto& item : rep.baseCipherDetails) {
-				if (item.encryptDomainId == info.domainId) {
-					found = true;
-					break;
-				}
-			}
-			ASSERT(found);
-		}
-
-		self->cipherIdMap.clear();
-		self->cipherIds.clear();
-		for (auto& item : rep.baseCipherDetails) {
-			CacheKey cacheKey = std::make_pair(item.encryptDomainId, item.baseCipherId);
-			self->cipherIdMap.emplace(cacheKey, StringRef(self->arena, item.baseCipherKey));
-			self->cipherIds.emplace_back(cacheKey);
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
+		state std::vector<Reference<BlobCipherKey>> cipherKeysVec;
+		for (auto item : latestCiphers) {
+			cipherKeysVec.push_back(item.second);
 		}
 
 		state int numIterations = deterministicRandom()->randomInt(512, 786);
 		for (; numIterations > 0;) {
-			int idx = deterministicRandom()->randomInt(1, self->cipherIds.size());
-			int nIds = deterministicRandom()->randomInt(1, self->cipherIds.size());
-
-			EKPGetBaseCipherKeysByIdsRequest req;
-			if (deterministicRandom()->randomInt(0, 100) < 50) {
-				req.debugId = deterministicRandom()->randomUniqueID();
+			// Randomly select baseCipherIds to be lookedup in the cache
+			int idx = deterministicRandom()->randomInt(1, cipherKeysVec.size());
+			int nIds = deterministicRandom()->randomInt(1, cipherKeysVec.size());
+			std::unordered_set<BlobCipherDetails> cipherDetails;
+			for (int count = 0; count < nIds && idx < cipherKeysVec.size(); count++, idx++) {
+				cipherDetails.emplace(cipherKeysVec[idx]->getDomainId(),
+				                      cipherKeysVec[idx]->getBaseCipherId(),
+				                      cipherKeysVec[idx]->getSalt());
 			}
-			for (int i = idx; i < nIds && i < self->cipherIds.size(); i++) {
-				req.baseCipherInfos.emplace_back(
-				    EKPGetBaseCipherKeysRequestInfo(self->cipherIds[i].first,
-				                                    self->cipherIds[i].second,
-				                                    StringRef(std::to_string(self->cipherIds[i].first)),
-				                                    req.arena));
-			}
-			if (req.baseCipherInfos.empty()) {
+			ASSERT_LE(cipherDetails.size(), cipherKeysVec.size());
+			TraceEvent("SimRandomDomainIdCacheStart").detail("Count", cipherDetails.size());
+			if (cipherDetails.empty()) {
 				// No keys to query; continue
 				continue;
 			} else {
 				numIterations--;
 			}
 
-			expectedHits = req.baseCipherInfos.size();
-			EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
-
-			ASSERT(!rep.error.present());
-			ASSERT_EQ(rep.baseCipherDetails.size(), expectedHits);
-			ASSERT_EQ(rep.numHits, expectedHits);
-			// Valdiate the 'cipherKey' content against the one read while querying by domainIds
-			for (auto& item : rep.baseCipherDetails) {
-				CacheKey cacheKey = std::make_pair(item.encryptDomainId, item.baseCipherId);
-				const auto itr = self->cipherIdMap.find(cacheKey);
-				ASSERT(itr != self->cipherIdMap.end());
-				Standalone<StringRef> toCompare = self->cipherIdMap[cacheKey];
-				if (toCompare.compare(item.baseCipherKey) != 0) {
-					TraceEvent("Mismatch")
-					    .detail("Id", item.baseCipherId)
-					    .detail("CipherMapDataHash", XXH3_64bits(toCompare.begin(), toCompare.size()))
-					    .detail("CipherMapSize", toCompare.size())
-					    .detail("CipherMapValue", toCompare.toString())
-					    .detail("ReadDataHash", XXH3_64bits(item.baseCipherKey.begin(), item.baseCipherKey.size()))
-					    .detail("ReadValue", item.baseCipherKey.toString())
-					    .detail("ReadDataSize", item.baseCipherKey.size());
-					ASSERT(false);
+			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
+			    wait(getEncryptCipherKeys(self->dbInfo, cipherDetails, BlobCipherMetrics::UsageType::TEST));
+			// Ensure the sanity of the lookedup data
+			for (auto item : cipherKeys) {
+				bool found = false;
+				for (auto key : cipherKeysVec) {
+					if (key->isEqual(item.second)) {
+						found = true;
+						break;
+					}
 				}
+				ASSERT(found);
 			}
 		}
 
-		TraceEvent("SimRandomDomainIdCacheDone").log();
+		TraceEvent("SimRandomDomainIdCacheDone");
 		return Void();
 	}
 
 	ACTOR Future<Void> simLookupInvalidKeyId(EncryptKeyProxyTestWorkload* self) {
-		Arena arena;
-
 		TraceEvent("SimLookupInvalidKeyIdStart").log();
 
-		// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw encrypt_key_not_found()
-		EKPGetBaseCipherKeysByIdsRequest req;
-		for (auto item : self->cipherIds) {
-			req.baseCipherInfos.emplace_back(EKPGetBaseCipherKeysRequestInfo(
-			    item.first, item.second, StringRef(std::to_string(item.first)), req.arena));
+		Arena arena;
+		try {
+			Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+			// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw
+			// encrypt_key_not_found()
+			std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+			for (auto item : self->cipherIds) {
+				domains[item.second] = StringRef(std::to_string(item.first));
+				// Ensure the key is not 'cached'
+				cipherKeyCache->resetEncryptDomainId(item.second);
+			}
+			domains[FDB_DEFAULT_ENCRYPT_DOMAIN_ID - 1] = StringRef(std::to_string(1));
+			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> res =
+			    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
+			// BlobCipherKeyCache is 'empty'; fetching invalid cipher from KMS must through 'encrypt_key_not_found'
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_encrypt_keys_fetch_failed);
 		}
-		req.baseCipherInfos.emplace_back(EKPGetBaseCipherKeysRequestInfo(
-		    1, SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10, StringRef(std::to_string(1)), req.arena));
-		EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 
-		ASSERT_EQ(rep.baseCipherDetails.size(), 0);
-		ASSERT(rep.error.present());
-		ASSERT_EQ(rep.error.get().code(), error_code_encrypt_key_not_found);
-
-		TraceEvent("SimLookupInvalidKeyIdDone").log();
+		TraceEvent("SimLookupInvalidKeyIdDone");
 		return Void();
 	}
 
@@ -305,12 +203,11 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 	ACTOR Future<Void> testWorkload(Reference<AsyncVar<ServerDBInfo> const> dbInfo, EncryptKeyProxyTestWorkload* self) {
 		// Ensure EncryptKeyProxy role is recruited (a singleton role)
-		while (!dbInfo->get().encryptKeyProxy.present()) {
-			wait(delay(.1));
-		}
-
-		self->ekpInf = dbInfo->get().encryptKeyProxy.get();
 		self->numDomains = self->maxDomainId - self->minDomainId;
+
+		while (!self->dbInfo->get().encryptKeyProxy.present()) {
+			wait(self->dbInfo->onChange());
+		}
 
 		// Simulate empty cache access
 		wait(self->simEmptyDomainIdCache(self));
@@ -328,8 +225,6 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		// TODO: Enable this workload in testing
-		CODE_PROBE(true, "Running EncryptKeyProxyTest", probe::decoration::rare);
 		if (!enableTest) {
 			return Void();
 		}

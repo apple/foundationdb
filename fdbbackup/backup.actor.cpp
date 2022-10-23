@@ -47,6 +47,7 @@
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
 #include "flow/Platform.h"
@@ -155,6 +156,11 @@ enum {
 	OPT_RESTORE_CLUSTERFILE_ORIG,
 	OPT_RESTORE_BEGIN_VERSION,
 	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
+	// The two restore options below allow callers of fdbrestore to divide a normal restore into one which restores just
+	// the system keyspace and another that restores just the user key space. This is unlike the backup command where
+	// all keys (both system and user) will be backed up together
+	OPT_RESTORE_USER_DATA,
+	OPT_RESTORE_SYSTEM_DATA,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -696,6 +702,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
+	{ OPT_RESTORE_USER_DATA, "--user-data", SO_NONE },
+	{ OPT_RESTORE_SYSTEM_DATA, "--system-metadata", SO_NONE },
 	{ OPT_RESTORE_VERSION, "--version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -1187,6 +1195,13 @@ static void printRestoreUsage(bool devhelp) {
 	printf("                 The cluster file for the original database from which the backup was created.  The "
 	       "original database\n");
 	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
+	printf("  --user-data\n"
+	       "                  Restore only the user keyspace. This option should NOT be used alongside "
+	       "--system-metadata (below) and CANNOT be used alongside other specified key ranges.\n");
+	printf(
+	    "  --system-metadata\n"
+	    "                 Restore only the relevant system keyspace. This option "
+	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
 	if (devhelp) {
 #ifdef _WIN32
@@ -3367,6 +3382,8 @@ int main(int argc, char* argv[]) {
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
+		bool restoreSystemKeys = false;
+		bool restoreUserKeys = false;
 		// TODO (Nim): Set this value when we add optional encrypt_files CLI argument to backup agent start
 		bool encryptionEnabled = true;
 		std::string traceDir = "";
@@ -3691,6 +3708,14 @@ int main(int argc, char* argv[]) {
 				restoreVersion = ver;
 				break;
 			}
+			case OPT_RESTORE_USER_DATA: {
+				restoreUserKeys = true;
+				break;
+			}
+			case OPT_RESTORE_SYSTEM_DATA: {
+				restoreSystemKeys = true;
+				break;
+			}
 			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
 				inconsistentSnapshotOnly.set(true);
 				break;
@@ -3838,6 +3863,11 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+		if (restoreSystemKeys && restoreUserKeys) {
+			fprintf(stderr, "ERROR: Please only specify one of --user-data or --system-metadata, not both\n");
+			return FDB_EXIT_ERROR;
+		}
+
 		if (trace) {
 			if (!traceLogGroup.empty())
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(traceLogGroup));
@@ -3938,8 +3968,28 @@ int main(int argc, char* argv[]) {
 
 		// The fastrestore tool does not yet support multiple ranges and is incompatible with tenants
 		// or other features that back up data in the system keys
-		if (backupKeys.empty() && programExe != ProgramExe::FASTRESTORE_TOOL) {
+		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty() &&
+		    programExe != ProgramExe::FASTRESTORE_TOOL) {
 			addDefaultBackupRanges(backupKeys);
+		}
+
+		if ((restoreSystemKeys || restoreUserKeys) && programExe == ProgramExe::FASTRESTORE_TOOL) {
+			fprintf(stderr, "ERROR: Options: --user-data and --system-metadata are not supported with fastrestore\n");
+			return FDB_EXIT_ERROR;
+		}
+
+		if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
+			fprintf(stderr,
+			        "ERROR: Cannot specify additional ranges when using --user-data or --system-metadata "
+			        "options\n");
+			return FDB_EXIT_ERROR;
+		}
+		if (restoreUserKeys) {
+			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
+		} else if (restoreSystemKeys) {
+			for (const auto& r : getSystemBackupRanges()) {
+				backupKeys.push_back_deep(backupKeys.arena(), r);
+			}
 		}
 
 		switch (programExe) {

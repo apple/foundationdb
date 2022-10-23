@@ -4767,7 +4767,7 @@ struct BoundaryRefAndPage {
 // DecodeBoundaryVerifier provides simulation-only verification of DeltaTree boundaries between
 // reads and writes by using a static structure to track boundaries used during DeltaTree generation
 // for all writes and updates across cold starts and virtual process restarts.
-struct DecodeBoundaryVerifier {
+class DecodeBoundaryVerifier {
 	struct DecodeBoundaries {
 		Key lower;
 		Key upper;
@@ -4778,10 +4778,12 @@ struct DecodeBoundaryVerifier {
 
 	typedef std::map<Version, DecodeBoundaries> BoundariesByVersion;
 	std::unordered_map<LogicalPageID, BoundariesByVersion> boundariesByPageID;
-	std::vector<Key> boundarySamples;
 	int boundarySampleSize = 1000;
 	int boundaryPopulation = 0;
 	Reference<IPageEncryptionKeyProvider> keyProvider;
+
+public:
+	std::vector<Key> boundarySamples;
 
 	// Sample rate of pages to be scanned to verify if all entries in the page meet domain prefix requirement.
 	double domainPrefixScanProbability = 0.01;
@@ -4811,7 +4813,7 @@ struct DecodeBoundaryVerifier {
 		if (boundarySamples.empty()) {
 			return Key();
 		}
-		return boundarySamples[deterministicRandom()->randomInt(0, boundarySamples.size())];
+		return deterministicRandom()->randomChoice(boundarySamples);
 	}
 
 	bool update(BTreeNodeLinkRef id,
@@ -5377,6 +5379,15 @@ public:
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
+		// DecodeBoundaryVerifier objects outlive simulated processes.
+		// Thus, if we did not clear the key providers here, each DecodeBoundaryVerifier object might
+		// maintain references to untracked peers through its key provider. This would result in
+		// errors when FlowTransport::removePeerReference is called to remove a peer that is no
+		// longer tracked by FlowTransport::transport().
+		if (m_pBoundaryVerifier != nullptr) {
+			m_pBoundaryVerifier->setKeyProvider(Reference<IPageEncryptionKeyProvider>());
+		}
+
 		// This probably shouldn't be called directly (meaning deleting an instance directly) but it should be safe,
 		// it will cancel init and commit and leave the pager alive but with potentially an incomplete set of
 		// uncommitted writes so it should not be committed.
@@ -8187,7 +8198,9 @@ public:
 
 	Future<Void> getError() const override { return delayed(m_error.getFuture()); };
 
-	void clear(KeyRangeRef range, const Arena* arena = 0) override {
+	void clear(KeyRangeRef range,
+	           const StorageServerMetrics* storageMetrics = nullptr,
+	           const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}

@@ -21,16 +21,20 @@
 #include "fdbserver/RESTKmsConnector.h"
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/RESTClient.h"
+
 #include "fdbrpc/HTTP.h"
-#include "flow/IAsyncFile.h"
+
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbclient/RESTClient.h"
-#include "flow/ActorCollection.h"
+
 #include "flow/Arena.h"
+#include "flow/ActorCollection.h"
+#include "flow/BooleanParam.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
+#include "flow/IAsyncFile.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -147,6 +151,8 @@ using KmsUrlMinHeap = std::priority_queue<std::shared_ptr<KmsUrlCtx>,
                                           std::vector<std::shared_ptr<KmsUrlCtx>>,
                                           std::less<std::vector<std::shared_ptr<KmsUrlCtx>>::value_type>>;
 
+FDB_BOOLEAN_PARAM(RefreshPersistedUrls);
+
 struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	UID uid;
 	KmsUrlMinHeap kmsUrlHeap;
@@ -161,7 +167,7 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 
 std::string getFullRequestUrl(Reference<RESTKmsConnectorCtx> ctx, const std::string& url, const std::string& suffix) {
 	if (suffix.empty()) {
-		TraceEvent("GetFullUrl_EmptyEndpoint", ctx->uid).log();
+		TraceEvent("GetFullUrlEmptyEndpoint", ctx->uid).log();
 		throw encrypt_invalid_kms_config();
 	}
 	std::string fullUrl(url);
@@ -199,9 +205,8 @@ void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 
 	for (const auto& url : doc[KMS_URLS_TAG].GetArray()) {
 		if (!url.IsString()) {
-			// FIXME: This response contains sensitive information that should not be logged.
-			// We need to log only the kms section of the document
-			TraceEvent("DiscoverKmsUrls_MalformedResp", ctx->uid).detail("ResponseContent", httpResp->content);
+			// TODO: We need to log only the kms section of the document
+			TraceEvent("DiscoverKmsUrlsMalformedResp", ctx->uid).detail("UrlType", url.GetType());
 			throw operation_failed();
 		}
 
@@ -209,7 +214,7 @@ void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 		urlStr.resize(url.GetStringLength());
 		memcpy(urlStr.data(), url.GetString(), url.GetStringLength());
 
-		TraceEvent("DiscoverKmsUrls_AddUrl", ctx->uid).detail("Url", urlStr);
+		TraceEvent("DiscoverKmsUrlsAddUrl", ctx->uid).detail("Url", urlStr);
 
 		ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>(urlStr));
 	}
@@ -220,7 +225,7 @@ void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 
 ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, std::string filename) {
 	if (filename.empty() || !fileExists(filename)) {
-		TraceEvent("DiscoverKmsUrls_FileNotFound", ctx->uid).log();
+		TraceEvent("DiscoverKmsUrlsFileNotFound", ctx->uid).log();
 		throw encrypt_invalid_kms_config();
 	}
 
@@ -230,7 +235,7 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 	state Standalone<StringRef> buff = makeString(fSize);
 	int bytesRead = wait(dFile->read(mutateString(buff), fSize, 0));
 	if (bytesRead != fSize) {
-		TraceEvent("DiscoveryKmsUrl_FileReadShort", ctx->uid)
+		TraceEvent("DiscoveryKmsUrlFileReadShort", ctx->uid)
 		    .detail("Filename", filename)
 		    .detail("Expected", fSize)
 		    .detail("Actual", bytesRead);
@@ -249,14 +254,14 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 			// Empty URL, ignore and continue
 			continue;
 		}
-		TraceEvent(SevDebug, "DiscoverKmsUrls_AddUrl", ctx->uid).detail("Url", url);
+		TraceEvent(SevDebug, "DiscoverKmsUrlsAddUrl", ctx->uid).detail("Url", url);
 		ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>(url));
 	}
 
 	return Void();
 }
 
-ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, bool refreshPersistedUrls) {
+ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, RefreshPersistedUrls refreshPersistedUrls) {
 	// KMS discovery needs to be done in two scenarios:
 	// 1) Initial cluster bootstrap - first boot.
 	// 2) Requests to all cached KMS URLs is failing for some reason.
@@ -309,7 +314,7 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx, const rapidjson::
 			    .detail("ErrorMsg", errMsgRef.empty() ? "" : errMsgRef.toString())
 			    .detail("ErrorCode", errCodeRef.empty() ? "" : errCodeRef.toString());
 		} else {
-			TraceEvent("KMSErrorResponse_EmptyDetails", ctx->uid).log();
+			TraceEvent("KMSErrorResponseEmptyDetails", ctx->uid).log();
 		}
 
 		throw encrypt_keys_fetch_failed();
@@ -323,7 +328,7 @@ void checkDocForNewKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 		try {
 			extractKmsUrls(ctx, doc, resp);
 		} catch (Error& e) {
-			TraceEvent("RefreshKmsUrls_Failed", ctx->uid).error(e);
+			TraceEvent("RefreshKmsUrlsFailed", ctx->uid).error(e);
 			// Given cipherKeyDetails extraction was done successfully, ignore KmsUrls parsing error
 		}
 	}
@@ -369,13 +374,13 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 
 	// Extract CipherKeyDetails
 	if (!doc.HasMember(CIPHER_KEY_DETAILS_TAG) || !doc[CIPHER_KEY_DETAILS_TAG].IsArray()) {
-		TraceEvent(SevWarn, "ParseEncryptCipherResponse_FailureMissingCipherKeyDetails", ctx->uid).log();
+		TraceEvent(SevWarn, "ParseEncryptCipherResponseFailureMissingCipherKeyDetails", ctx->uid).log();
 		throw operation_failed();
 	}
 
 	for (const auto& cipherDetail : doc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
 		if (!cipherDetail.IsObject()) {
-			TraceEvent(SevWarn, "ParseEncryptCipherResponse_FailureEncryptKeyDetailsNotObject", ctx->uid)
+			TraceEvent(SevWarn, "ParseEncryptCipherResponseFailureEncryptKeyDetailsNotObject", ctx->uid)
 			    .detail("Type", cipherDetail.GetType());
 			throw operation_failed();
 		}
@@ -384,7 +389,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 		const bool isBaseCipherPresent = cipherDetail.HasMember(BASE_CIPHER_TAG);
 		const bool isEncryptDomainIdPresent = cipherDetail.HasMember(ENCRYPT_DOMAIN_ID_TAG);
 		if (!isBaseCipherIdPresent || !isBaseCipherPresent || !isEncryptDomainIdPresent) {
-			TraceEvent(SevWarn, "ParseEncryptCipherResponse_MalformedKeyDetail", ctx->uid)
+			TraceEvent(SevWarn, "ParseEncryptCipherResponseMalformedKeyDetail", ctx->uid)
 			    .detail("BaseCipherIdPresent", isBaseCipherIdPresent)
 			    .detail("BaseCipherPresent", isBaseCipherPresent)
 			    .detail("EncryptDomainIdPresent", isEncryptDomainIdPresent);
@@ -460,13 +465,13 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 
 	// Extract CipherKeyDetails
 	if (!doc.HasMember(BLOB_METADATA_DETAILS_TAG) || !doc[BLOB_METADATA_DETAILS_TAG].IsArray()) {
-		TraceEvent(SevWarn, "ParseBlobMetadataResponse_FailureMissingDetails", ctx->uid).log();
+		TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureMissingDetails", ctx->uid).log();
 		throw operation_failed();
 	}
 
 	for (const auto& detail : doc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
 		if (!detail.IsObject()) {
-			TraceEvent(SevWarn, "ParseBlobMetadataResponse_FailureDetailsNotObject", ctx->uid)
+			TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureDetailsNotObject", ctx->uid)
 			    .detail("Type", detail.GetType());
 			throw operation_failed();
 		}
@@ -476,7 +481,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		const bool isBasePresent = detail.HasMember(BLOB_METADATA_BASE_LOCATION_TAG);
 		const bool isPartitionsPresent = detail.HasMember(BLOB_METADATA_PARTITIONS_TAG);
 		if (!isDomainIdPresent || !isDomainNamePresent || (!isBasePresent && !isPartitionsPresent)) {
-			TraceEvent(SevWarn, "ParseBlobMetadataResponse_MalformedDetail", ctx->uid)
+			TraceEvent(SevWarn, "ParseBlobMetadataResponseMalformedDetail", ctx->uid)
 			    .detail("DomainIdPresent", isDomainIdPresent)
 			    .detail("DomainNamePresent", isDomainNamePresent)
 			    .detail("BaseLocationPresent", isBasePresent)
@@ -502,7 +507,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		if (isPartitionsPresent) {
 			for (const auto& partition : doc[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
 				if (!partition.IsString()) {
-					TraceEvent("ParseBlobMetadataResponse_FailurePartitionNotString", ctx->uid)
+					TraceEvent("ParseBlobMetadataResponseFailurePartitionNotString", ctx->uid)
 					    .detail("Type", partition.GetType());
 					throw operation_failed();
 				}
@@ -728,7 +733,7 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 
 			try {
 				std::string kmsEncryptionFullUrl = getFullRequestUrl(ctx, curUrl->url, urlSuffix);
-				TraceEvent(SevDebug, "KmsRequest_Start", ctx->uid)
+				TraceEvent(SevDebug, "KmsRequestStart", ctx->uid)
 				    .detail("RequestID", requestID)
 				    .detail("FullUrl", kmsEncryptionFullUrl);
 				Reference<HTTP::Response> resp =
@@ -744,22 +749,22 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 						tempStack.pop();
 					}
 
-					TraceEvent(SevDebug, "KmsRequest_Success", ctx->uid).detail("RequestID", requestID);
+					TraceEvent(SevDebug, "KmsRequestSuccess", ctx->uid).detail("RequestID", requestID);
 					return parsedResp;
 				} catch (Error& e) {
-					TraceEvent(SevWarn, "KmsRequest_RespParseFailure").error(e).detail("RequestID", requestID);
+					TraceEvent(SevWarn, "KmsRequestRespParseFailure").error(e).detail("RequestID", requestID);
 					curUrl->nResponseParseFailures++;
 					// attempt to do request from next KmsUrl
 				}
 			} catch (Error& e) {
 				curUrl->nFailedResponses++;
 				if (pass > 1 && isKmsNotReachable(e.code())) {
-					TraceEvent(SevDebug, "KmsRequest_FailedUnreachable", ctx->uid)
+					TraceEvent(SevDebug, "KmsRequestFailedUnreachable", ctx->uid)
 					    .error(e)
 					    .detail("RequestID", requestID);
 					throw e;
 				} else {
-					TraceEvent(SevDebug, "KmsRequest_Error", ctx->uid).error(e).detail("RequestID", requestID);
+					TraceEvent(SevDebug, "KmsRequestError", ctx->uid).error(e).detail("RequestID", requestID);
 					// attempt to do request from next KmsUrl
 				}
 			}
@@ -767,10 +772,10 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 
 		if (pass == 1) {
 			// Re-discover KMS urls and re-attempt request using newer KMS URLs
-			wait(discoverKmsUrls(ctx, true));
+			wait(discoverKmsUrls(ctx, RefreshPersistedUrls::True));
 		}
 	}
-	TraceEvent(SevDebug, "KmsRequest_Failed", ctx->uid).detail("RequestID", requestID);
+	TraceEvent(SevDebug, "KmsRequestFailed", ctx->uid).detail("RequestID", requestID);
 
 	// Failed to do request from the remote KMS
 	// TODO: generic KMS error types
@@ -792,7 +797,7 @@ ACTOR Future<Void> fetchEncryptionKeysByKeyIds(Reference<RESTKmsConnectorCtx> ct
 		reply.arena.dependsOn(result.arena());
 		req.reply.send(reply);
 	} catch (Error& e) {
-		TraceEvent("LookupEKsByKeyIds_Failed", ctx->uid).error(e);
+		TraceEvent("LookupEKsByKeyIdsFailed", ctx->uid).error(e);
 		if (!canReplyWith(e)) {
 			throw e;
 		}
@@ -877,7 +882,7 @@ ACTOR Future<Void> fetchEncryptionKeysByDomainIds(Reference<RESTKmsConnectorCtx>
 		reply.arena.dependsOn(result.arena());
 		req.reply.send(reply);
 	} catch (Error& e) {
-		TraceEvent("LookupEKsByDomainIds_Failed", ctx->uid).error(e);
+		TraceEvent("LookupEKsByDomainIdsFailed", ctx->uid).error(e);
 		if (!canReplyWith(e)) {
 			throw e;
 		}
@@ -958,7 +963,7 @@ ACTOR Future<Void> fetchBlobMetadata(Reference<RESTKmsConnectorCtx> ctx, KmsConn
 		              ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT, requestBodyRef, std::move(f))));
 		req.reply.send(reply);
 	} catch (Error& e) {
-		TraceEvent("LookupBlobMetadata_Failed", ctx->uid).error(e);
+		TraceEvent("LookupBlobMetadataFailed", ctx->uid).error(e);
 		if (!canReplyWith(e)) {
 			throw e;
 		}
@@ -970,7 +975,7 @@ ACTOR Future<Void> fetchBlobMetadata(Reference<RESTKmsConnectorCtx> ctx, KmsConn
 ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCtx> ctx, std::string details) {
 	Standalone<StringRef> detailsRef(details);
 	if (details.empty()) {
-		TraceEvent("ValidationToken_EmptyFileDetails", ctx->uid).log();
+		TraceEvent("ValidationTokenEmptyFileDetails", ctx->uid).log();
 		throw encrypt_invalid_kms_config();
 	}
 
@@ -984,14 +989,14 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 		}
 		StringRef path = detailsRef.eat(TOKEN_TUPLE_SEP);
 		if (path.empty()) {
-			TraceEvent("ValidationToken_FileDetailsMalformed", ctx->uid).detail("FileDetails", details);
+			TraceEvent("ValidationTokenFileDetailsMalformed", ctx->uid).detail("FileDetails", details);
 			throw operation_failed();
 		}
 
 		std::string tokenName = boost::trim_copy(name.toString());
 		std::string tokenFile = boost::trim_copy(path.toString());
 		if (!fileExists(tokenFile)) {
-			TraceEvent("ValidationToken_FileNotFound", ctx->uid)
+			TraceEvent("ValidationTokenFileNotFound", ctx->uid)
 			    .detail("TokenName", tokenName)
 			    .detail("Filename", tokenFile);
 			throw encrypt_invalid_kms_config();
@@ -1014,7 +1019,7 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 
 		state int64_t fSize = wait(tFile->size());
 		if (fSize > SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE) {
-			TraceEvent("ValidationToken_FileTooLarge", ctx->uid)
+			TraceEvent("ValidationTokenFileTooLarge", ctx->uid)
 			    .detail("FileName", tokenFile)
 			    .detail("Size", fSize)
 			    .detail("MaxAllowedSize", SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE);
@@ -1023,7 +1028,7 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 
 		tokensPayloadSize += fSize;
 		if (tokensPayloadSize > SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE) {
-			TraceEvent("ValidationToken_PayloadTooLarge", ctx->uid)
+			TraceEvent("ValidationTokenPayloadTooLarge", ctx->uid)
 			    .detail("MaxAllowedSize", SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE);
 			throw value_too_large();
 		}
@@ -1031,7 +1036,7 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 		state Standalone<StringRef> buff = makeString(fSize);
 		int bytesRead = wait(tFile->read(mutateString(buff), fSize, 0));
 		if (bytesRead != fSize) {
-			TraceEvent("DiscoveryKmsUrl_FileReadShort", ctx->uid)
+			TraceEvent("DiscoveryKmsUrlFileReadShort", ctx->uid)
 			    .detail("Filename", tokenFile)
 			    .detail("Expected", fSize)
 			    .detail("Actual", bytesRead);
@@ -1046,7 +1051,7 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 		tokenCtx.filePath = tokenFile;
 
 		// NOTE: avoid logging token-value to prevent token leaks in log files..
-		TraceEvent("ValidationToken_ReadFile", ctx->uid)
+		TraceEvent("ValidationTokenReadFile", ctx->uid)
 		    .detail("TokenName", tokenCtx.name)
 		    .detail("TokenSize", tokenCtx.value.size())
 		    .detail("TokenFilePath", tokenCtx.filePath.get())
@@ -1070,13 +1075,13 @@ ACTOR Future<Void> procureValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 	return Void();
 }
 
-ACTOR Future<Void> connectorCore_impl(KmsConnectorInterface interf) {
+ACTOR Future<Void> restConnectorCoreImpl(KmsConnectorInterface interf) {
 	state Reference<RESTKmsConnectorCtx> self = makeReference<RESTKmsConnectorCtx>(interf.id());
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
-	TraceEvent("RESTKmsConnector_Init", self->uid).log();
+	TraceEvent("RESTKmsConnectorInit", self->uid).log();
 
-	wait(discoverKmsUrls(self, false /* refreshPersistedUrls */));
+	wait(discoverKmsUrls(self, RefreshPersistedUrls::False));
 	wait(procureValidationTokens(self));
 
 	loop {
@@ -1099,7 +1104,7 @@ ACTOR Future<Void> connectorCore_impl(KmsConnectorInterface interf) {
 }
 
 Future<Void> RESTKmsConnector::connectorCore(KmsConnectorInterface interf) {
-	return connectorCore_impl(interf);
+	return restConnectorCoreImpl(interf);
 }
 
 // Only used to link unit tests

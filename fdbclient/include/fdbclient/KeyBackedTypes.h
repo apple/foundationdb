@@ -319,6 +319,11 @@ public:
 		tr->clear(key);
 	}
 
+	template <class Transaction>
+	Future<Void> watch(Transaction tr) {
+		return tr->watch(key);
+	}
+
 	Key key;
 };
 

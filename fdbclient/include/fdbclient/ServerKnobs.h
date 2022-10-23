@@ -237,6 +237,8 @@ public:
 	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
+	int TENANT_CACHE_STORAGE_REFRESH_INTERVAL; // How often the storage bytes used by each tenant in the TenantCache is
+	                                           // refreshed
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -343,6 +345,8 @@ public:
 	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
+	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
+	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
@@ -624,6 +628,12 @@ public:
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
 	// Cost multiplier for writes (because write operations are more expensive than reads)
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
+	// until some existing tags expire
+	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
+	// Global tag throttler forgets about throughput from a tag once no new transactions from that
+	// tag have been received for this duration (in seconds):
+	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
