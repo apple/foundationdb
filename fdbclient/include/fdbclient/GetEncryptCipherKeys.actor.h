@@ -104,6 +104,11 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 
 	// Collect cached cipher keys.
 	for (auto& domain : domains) {
+		if (domain.first == FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+			ASSERT(domain.second == FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+		} else if (domain.first == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+			ASSERT(domain.second == FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+		}
 		Reference<BlobCipherKey> cachedCipherKey = cipherKeyCache->getLatestCipherKey(domain.first /*domainId*/);
 		if (cachedCipherKey.isValid()) {
 			cipherKeys[domain.first] = cachedCipherKey;
@@ -301,7 +306,7 @@ template <class T>
 Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
                                                                  BlobCipherMetrics::UsageType usageType) {
 	return getLatestEncryptCipherKeysForDomain(
-	    db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME, usageType);
+	    db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME, usageType);
 }
 
 ACTOR template <class T>
