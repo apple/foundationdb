@@ -1815,9 +1815,17 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 }
 
 // Holds an index of recently used objects.
-// ObjectType must have the methods
-//   bool evictable() const;            // return true if the entry can be evicted
-//   Future<Void> onEvictable() const;  // ready when entry can be evicted
+// ObjectType must have these methods
+//
+//   // Returns true iff the entry can be evicted
+//   bool evictable() const;
+//
+//	 // Ready when object is safe to evict from cache
+//   Future<Void> onEvictable() const;
+//
+//   // Ready when object destruction is safe
+//   // Should cancel pending async operations that are safe to cancel when cache is being destroyed
+//   Future<Void> cancel() const;
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 	struct Entry;
@@ -2052,11 +2060,10 @@ public:
 
 		state typename CacheT::iterator i = self->cache.begin();
 		while (i != self->cache.end()) {
-			if (!i->second.item.evictable()) {
-				wait(i->second.item.onEvictable());
-			}
+			wait(i->second.item.cancel());
 			++i;
 		}
+		self->cache.clear();
 
 		return Void();
 	}
@@ -2122,6 +2129,13 @@ public:
 		// Entry is evictable when its write and read futures are ready, even if they are
 		// errors, so any buffers they hold are no longer needed by the underlying file actors
 		Future<Void> onEvictable() const { return ready(readFuture) && ready(writeFuture); }
+
+		// Read and write futures are safe to cancel so just cancel them and return
+		Future<Void> cancel() {
+			writeFuture.cancel();
+			readFuture.cancel();
+			return Void();
+		}
 	};
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 
@@ -3782,6 +3796,9 @@ public:
 		self->ioLock.kill();
 
 		debug_printf("DWALPager(%s) shutdown cancel operations\n", self->filename.c_str());
+		for (auto& f : self->operations) {
+			f.cancel();
+		}
 		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
