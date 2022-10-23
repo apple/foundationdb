@@ -1,4 +1,4 @@
-storageEngineExcludeTypes=[3]
+storageEngineExcludeTypes=3
 testTitle=StorefrontTest
 clearAfterTest=false 
 testName=Storefront
