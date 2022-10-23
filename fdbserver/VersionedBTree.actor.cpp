@@ -3777,23 +3777,26 @@ public:
 	Value getCommitRecord() const override { return lastCommittedHeader.userCommitRecord; }
 
 	ACTOR void shutdown(DWALPager* self, bool dispose) {
+		// Send to the error promise first and then delay(0) to give users a chance to cancel
+		// any outstanding operations
+		if (self->errorPromise.canBeSet()) {
+			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
+			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
+		}
+		wait(delay(0));
+
+		// The next section explicitly cancels all pending operations held in the pager
+		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
+		self->ioLock.kill();
+
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
 		self->commitFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
-
-		if (self->errorPromise.canBeSet()) {
-			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
-			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
-		}
-
 		debug_printf("DWALPager(%s) shutdown kill file extension\n", self->filename.c_str());
 		self->fileExtension.cancel();
-
-		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
-		self->ioLock.kill();
 
 		debug_printf("DWALPager(%s) shutdown cancel operations\n", self->filename.c_str());
 		for (auto& f : self->operations) {
@@ -3804,7 +3807,6 @@ public:
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->extentCache.clear());
 		wait(self->pageCache.clear());
-		wait(delay(0));
 
 		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
 		             self->filename.c_str(),
