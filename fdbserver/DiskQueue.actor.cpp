@@ -733,7 +733,10 @@ public:
 	}
 
 	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
-	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
+	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self,
+	                                                              int file,
+	                                                              int pageOffset,
+	                                                              int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
