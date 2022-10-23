@@ -113,6 +113,7 @@ ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
 		try {
 			tr->clear(ThrottleApi::getTagQuotaKey(tag));
 			wait(safeThreadFutureToFuture(tr->commit()));
+			fmt::print("Successfully cleared quota.\n");
 			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
