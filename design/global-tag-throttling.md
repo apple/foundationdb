@@ -47,7 +47,6 @@ To clear a both reserved and total throughput quotas for a tag, run:
 fdbcli> quota clear <tag>
 ```
 
->>>>>>> origin/main
 ### Limit Calculation
 The transaction budget that ratekeeper calculates and distributes to clients (via GRV proxies) for each tag is calculated based on several intermediate rate calculations, outlined in this section.
 

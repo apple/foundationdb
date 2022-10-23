@@ -102,7 +102,7 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+			return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 		}
 	};
 
@@ -116,7 +116,7 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return 2 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+			return 2 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 		}
 	};
 
@@ -132,7 +132,7 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return 10 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+			return 10 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 		}
 	};
 
@@ -145,7 +145,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return Void();
 		}
 
-		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->READ_COST_BYTE_FACTOR; }
+		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR; }
 	};
 
 	class ReadRangeTest : public ITest {
@@ -224,7 +224,7 @@ class TransactionCostWorkload : public TestWorkload {
 				try {
 					for (int i = 0; i < 10; ++i) {
 						tr.set(workload->getKey(self->testNumber, i),
-						       workload->getValue(CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR));
+						       workload->getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
 					}
 					wait(tr.commit());
 					return Void();
