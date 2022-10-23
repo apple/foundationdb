@@ -568,16 +568,16 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
-// Round up to the nearest page size. Multiply by fungibility ratio
+// Measured in bytes, rounded up to the nearest page size. Multiply by fungibility ratio
 // because writes are more expensive than reads.
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
-	return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO *
+	return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR *
 	       ((bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1);
 }
 
-// Round up to the nearest page size.
+// Measured in bytes, rounded up to the nearest page size.
 inline uint64_t getReadOperationCost(uint64_t bytes) {
-	return (bytes - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
+	return ((bytes - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value

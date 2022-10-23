@@ -5819,8 +5819,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	// NOTE: The throttling cost of each clear is assumed to be one page.
 	// This makes compuation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
-	++trState->totalCost;
-
+	trState->totalCost += CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }

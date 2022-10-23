@@ -63,9 +63,9 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 			} else {
 				auto const quota = ThrottleApi::TagQuotaValue::fromValue(v.get());
 				if (limitType == LimitType::TOTAL) {
-					fmt::print("{}\n", quota.totalQuota * CLIENT_KNOBS->READ_COST_BYTE_FACTOR);
+					fmt::print("{}\n", quota.totalQuota);
 				} else if (limitType == LimitType::RESERVED) {
-					fmt::print("{}\n", quota.reservedQuota * CLIENT_KNOBS->READ_COST_BYTE_FACTOR);
+					fmt::print("{}\n", quota.reservedQuota);
 				}
 			}
 			return Void();
@@ -90,9 +90,13 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 			// Internally, costs are stored in terms of pages, but in the API,
 			// costs are specified in terms of bytes
 			if (limitType == LimitType::TOTAL) {
-				quota.totalQuota = (value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
+				// Round up to nearest page size
+				quota.totalQuota =
+				    ((value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
 			} else if (limitType == LimitType::RESERVED) {
-				quota.reservedQuota = (value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
+				// Round up to nearest page size
+				quota.reservedQuota =
+				    ((value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
 			}
 			ThrottleApi::setTagQuota(tr, tag, quota.reservedQuota, quota.totalQuota);
 			wait(safeThreadFutureToFuture(tr->commit()));

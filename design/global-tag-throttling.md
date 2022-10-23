@@ -11,16 +11,16 @@ The global tag throttler bases throttling decisions on "quotas" provided by clie
 The global tag throttler cannot throttle tags to a throughput below the reserved quota, and it cannot allow throughput to exceed the total quota.
 
 ### Cost
-Internally, the units for these quotas are "page costs", computed as follows. The "page cost" of a read operation is computed as:
+Internally, the units for these quotas are bytes. The cost of an operation is rounded up to the nearest page size. The cost of a read operation is computed as:
 
 ```
-readCost = ceiling(bytesRead / CLIENT_KNOBS->READ_COST_BYTE_FACTOR);
+readCost = ceiling(bytesRead / CLIENT_KNOBS->READ_COST_BYTE_FACTOR) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
 ```
 
-The "page cost" of a write operation is computed as:
+The cost of a write operation is computed as:
 
 ```
-writeCost = SERVER_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * ceiling(bytesWritten / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR);
+writeCost = SERVER_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * ceiling(bytesWritten / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 ```
 
 Here `bytesWritten` includes cleared bytes. The size of range clears is estimated at commit time.
@@ -39,12 +39,6 @@ To set the quota through `fdbcli`, run:
 
 ```
 fdbcli> quota set <tag> [reserved_throughput|total_throughput] <bytes_per_second>
-```
-
-Note that the quotas are specified in terms of bytes/second, and internally converted to page costs:
-
-```
-page_cost_quota = ceiling(byte_quota / CLIENT_KNOBS->READ_COST_BYTE_FACTOR)
 ```
 
 ### Limit Calculation
