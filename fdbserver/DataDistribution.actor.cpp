@@ -693,6 +693,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    "DDTenantCacheMonitor",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageUsage(),
+				                                    "StorageUsageTracker",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
 			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;

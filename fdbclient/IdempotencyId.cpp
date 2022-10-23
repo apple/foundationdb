@@ -122,6 +122,7 @@ IdempotencyIdRef generate(Arena& arena) {
 TEST_CASE("/fdbclient/IdempotencyId/basic") {
 	Arena arena;
 	uint16_t firstBatchIndex = deterministicRandom()->randomUInt32();
+	firstBatchIndex &= 0xff7f; // ensure firstBatchIndex+5 won't change the higher order byte
 	uint16_t batchIndex = firstBatchIndex;
 	Version commitVersion = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
 	std::vector<IdempotencyIdRef> idVector; // Reference

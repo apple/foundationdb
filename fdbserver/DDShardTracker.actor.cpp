@@ -2081,6 +2081,10 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 	}
 }
 
+bool PhysicalShardCollection::physicalShardExists(uint64_t physicalShardID) {
+	return physicalShardInstances.find(physicalShardID) != physicalShardInstances.end();
+}
+
 // FIXME: complete this test with non-empty range
 TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	state DataDistributionTracker self;
