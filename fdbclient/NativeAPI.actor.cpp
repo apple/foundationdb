@@ -3916,7 +3916,7 @@ class WatchRefCountUpdater {
 	Version version;
 
 public:
-	WatchRefCountUpdater() {}
+	WatchRefCountUpdater() = default;
 
 	WatchRefCountUpdater(const Database& cx_, const int64_t tenantID_, KeyRef key_, const Version& ver)
 	  : cx(cx_), tenantID(tenantID_), key(key_), version(ver) {}
