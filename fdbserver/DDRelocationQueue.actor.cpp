@@ -689,7 +689,7 @@ struct DDQueue : public IDDRelocationQueue {
 
 	int moveReusePhysicalShard;
 	int moveCreateNewPhysicalShard;
-	enum NewPhysicalShardReason {
+	enum RetryFindDstReason {
 		None = 0,
 		RemoteBestTeamNotReady,
 		PrimaryNoHealthyTeam,
@@ -699,7 +699,7 @@ struct DDQueue : public IDDRelocationQueue {
 		NoAvailablePhysicalShard,
 		NumberOfTypes,
 	};
-	std::vector<int> newPhysicalShardReasonCount;
+	std::vector<int> retryFindDstReasonCount;
 
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -765,8 +765,8 @@ struct DDQueue : public IDDRelocationQueue {
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
-	    moveCreateNewPhysicalShard(0),
-	    newPhysicalShardReasonCount(static_cast<int>(NewPhysicalShardReason::NumberOfTypes), 0) {}
+	    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {
+	}
 	DDQueue() = default;
 
 	void validate() {
@@ -1479,7 +1479,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		loop {
 			destOverloadedCount = 0;
 			stuckCount = 0;
-			state DDQueue::NewPhysicalShardReason newPhysicalShardReason = DDQueue::NewPhysicalShardReason::None;
+			state DDQueue::RetryFindDstReason retryFindDstReason = DDQueue::RetryFindDstReason::None;
 			// state int bestTeamStuckThreshold = 50;
 			loop {
 				state int tciIndex = 0;
@@ -1506,14 +1506,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							    .detail("TeamCollectionIndex", tciIndex)
 							    .detail("RestoreDataMoveForDest",
 							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest));
-							newPhysicalShardReason = DDQueue::NewPhysicalShardReason::RemoteBestTeamNotReady;
+							retryFindDstReason = DDQueue::RetryFindDstReason::RemoteBestTeamNotReady;
 							foundTeams = false;
 							break;
 						}
 						if (!bestTeam.first.present() || !bestTeam.first.get()->isHealthy()) {
-							newPhysicalShardReason = tciIndex == 0
-							                             ? DDQueue::NewPhysicalShardReason::PrimaryNoHealthyTeam
-							                             : DDQueue::NewPhysicalShardReason::RemoteNoHealthyTeam;
+							retryFindDstReason = tciIndex == 0 ? DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam
+							                                   : DDQueue::RetryFindDstReason::RemoteNoHealthyTeam;
 							foundTeams = false;
 							break;
 						}
@@ -1566,16 +1565,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							// getting the destination team or we could miss failure notifications for the storage
 							// servers in the destination team
 							TraceEvent("BestTeamNotReady");
-							newPhysicalShardReason = DDQueue::NewPhysicalShardReason::RemoteBestTeamNotReady;
+							retryFindDstReason = DDQueue::RetryFindDstReason::RemoteBestTeamNotReady;
 							foundTeams = false;
 							break;
 						}
 						// If a DC has no healthy team, we stop checking the other DCs until
 						// the unhealthy DC is healthy again or is excluded.
 						if (!bestTeam.first.present()) {
-							newPhysicalShardReason = tciIndex == 0
-							                             ? DDQueue::NewPhysicalShardReason::PrimaryNoHealthyTeam
-							                             : DDQueue::NewPhysicalShardReason::RemoteNoHealthyTeam;
+							retryFindDstReason = tciIndex == 0 ? DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam
+							                                   : DDQueue::RetryFindDstReason::RemoteNoHealthyTeam;
 							foundTeams = false;
 							break;
 						}
@@ -1599,7 +1597,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							if (tciIndex == 1 && !forceToUseNewPhysicalShard) {
 								bool minAvailableSpaceRatio = bestTeam.first.get()->getMinAvailableSpaceRatio(true);
 								if (minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
-									newPhysicalShardReason = DDQueue::NewPhysicalShardReason::RemoteTeamIsFull;
+									retryFindDstReason = DDQueue::RetryFindDstReason::RemoteTeamIsFull;
 									foundTeams = false;
 									break;
 								}
@@ -1642,7 +1640,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
 				    bestTeams.size() > 1 && !forceToUseNewPhysicalShard) {
 					if (!bestTeams[1].first->isHealthy()) {
-						newPhysicalShardReason = DDQueue::NewPhysicalShardReason::RemoteTeamIsNotHealthy;
+						retryFindDstReason = DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy;
 						foundTeams = false;
 					}
 				}
@@ -1707,14 +1705,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						self->moveReusePhysicalShard++;
 					} else {
 						self->moveCreateNewPhysicalShard++;
-						if (newPhysicalShardReason == DDQueue::NewPhysicalShardReason::None) {
+						if (retryFindDstReason == DDQueue::RetryFindDstReason::None) {
 							// When creating a new physical shard, but the reason is none, this can only happen when
 							// determinePhysicalShardIDGivenPrimaryTeam() finds that there is no available physical
 							// shard.
-							self->newPhysicalShardReasonCount
-							    [DDQueue::NewPhysicalShardReason::NoAvailablePhysicalShard]++;
+							self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
 						} else {
-							self->newPhysicalShardReasonCount[newPhysicalShardReason]++;
+							self->retryFindDstReasonCount[retryFindDstReason]++;
 						}
 					}
 					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
@@ -2519,26 +2516,22 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 						    .detail("MoveCreateNewPhysicalShard", self.moveCreateNewPhysicalShard)
 						    .detail("MoveReusePhysicalShard", self.moveReusePhysicalShard)
 						    .detail("RemoteBestTeamNotReady",
-						            self.newPhysicalShardReasonCount
-						                [DDQueue::NewPhysicalShardReason::RemoteBestTeamNotReady])
-						    .detail(
-						        "PrimaryNoHealthyTeam",
-						        self.newPhysicalShardReasonCount[DDQueue::NewPhysicalShardReason::PrimaryNoHealthyTeam])
-						    .detail(
-						        "RemoteNoHealthyTeam",
-						        self.newPhysicalShardReasonCount[DDQueue::NewPhysicalShardReason::RemoteNoHealthyTeam])
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady])
+						    .detail("PrimaryNoHealthyTeam",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam])
+						    .detail("RemoteNoHealthyTeam",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteNoHealthyTeam])
 						    .detail("RemoteTeamIsFull",
-						            self.newPhysicalShardReasonCount[DDQueue::NewPhysicalShardReason::RemoteTeamIsFull])
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsFull])
 						    .detail("RemoteTeamIsNotHealthy",
-						            self.newPhysicalShardReasonCount
-						                [DDQueue::NewPhysicalShardReason::RemoteTeamIsNotHealthy])
-						    .detail("NoAvailablePhysicalShard",
-						            self.newPhysicalShardReasonCount
-						                [DDQueue::NewPhysicalShardReason::NoAvailablePhysicalShard]);
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy])
+						    .detail(
+						        "NoAvailablePhysicalShard",
+						        self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]);
 						self.moveCreateNewPhysicalShard = 0;
 						self.moveReusePhysicalShard = 0;
-						for (int i = 0; i < self.newPhysicalShardReasonCount.size(); ++i) {
-							self.newPhysicalShardReasonCount[i] = 0;
+						for (int i = 0; i < self.retryFindDstReasonCount.size(); ++i) {
+							self.retryFindDstReasonCount[i] = 0;
 						}
 					}
 				}
