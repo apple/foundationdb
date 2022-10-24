@@ -2055,23 +2055,24 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 
-      // FIXME(swift): This is test code, remove.
-      if (getenv("FDBSWIFTTEST")) {
-        printf("[c++][main] setting up Swift Concurrency hooks\n");
-        installGlobalSwiftConcurrencyHooks(g_network);
+			// FIXME(swift): This is test code, remove.
+			if (getenv("FDBSWIFTTEST")) {
+				//        printf("[c++][main] setting up Swift Concurrency hooks\n");
+				installGlobalSwiftConcurrencyHooks(g_network);
 
+				// Test calling into Swift's fdbserver module.
+				using namespace fdbserver_swift;
+				int val = swiftFunctionCalledFromCpp(42);
+				if (val != 42)
+					abort();
 
-        // Test calling into Swift's fdbserver module.
-        using namespace fdbserver_swift;
-        int val = swiftFunctionCalledFromCpp(42);
-        if (val != 42)
-            abort();
+        		auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
 
-        auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
-
-        g_network->run();
-        while(true);
-      }
+				g_network->run();
+				while (true) {
+					// ...
+				}
+			}
 
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);

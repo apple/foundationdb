@@ -109,6 +109,7 @@ generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
 
 add_library(flow_swift STATIC
         future_support.swift
+        clock_support.swift
         SwiftFileA.swift
         SwiftFileB.swift
         )

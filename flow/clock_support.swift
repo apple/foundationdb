@@ -17,6 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 import Flow
 
 public struct FlowClock {
@@ -29,7 +30,8 @@ public struct FlowClock {
         }
     }
 
-    public init() { }
+    public init() {
+    }
 }
 
 
@@ -39,7 +41,9 @@ extension Clock where Self == FlowClock {
     ///
     ///       try await Task.sleep(until: .now + .seconds(3), clock: .flow)
     ///
-    public static var flow: FlowClock { return FlowClock() }
+    public static var flow: FlowClock {
+        return FlowClock()
+    }
 }
 
 
@@ -101,17 +105,21 @@ extension FlowClock: Clock {
         var secondsDouble = Double(duration.seconds)
         var nanosDouble = 0 // TODO: fix this
 
+        print("[swift] sleep: \(secondsDouble)s")
+
         var f = flow_gNetwork_delay(/*secondsDouble=*/secondsDouble, /*priority=*/TaskPriority.DefaultDelay)
         try? await f.waitValue
     }
 }
 
 extension FlowClock.Instant: InstantProtocol {
-    public static var now: FlowClock.Instant { FlowClock.now }
+    public static var now: FlowClock.Instant {
+        FlowClock.now
+    }
 
     public func advanced(by duration: Swift.Duration) -> FlowClock.Instant {
         return FlowClock.Instant(_value: _value + duration)
-            }
+    }
 
     public func duration(to other: FlowClock.Instant) -> Swift.Duration {
         other._value - _value
@@ -119,15 +127,15 @@ extension FlowClock.Instant: InstantProtocol {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(_value)
-                    }
+    }
 
-    public static func == (
+    public static func ==(
             _ lhs: FlowClock.Instant, _ rhs: FlowClock.Instant
     ) -> Bool {
         return lhs._value == rhs._value
-            }
+    }
 
-    public static func < (
+    public static func <(
             _ lhs: FlowClock.Instant, _ rhs: FlowClock.Instant
     ) -> Bool {
         return lhs._value < rhs._value
@@ -135,15 +143,15 @@ extension FlowClock.Instant: InstantProtocol {
 
     @_alwaysEmitIntoClient
     @inlinable
-    public static func + (
+    public static func +(
             _ lhs: FlowClock.Instant, _ rhs: Swift.Duration
     ) -> FlowClock.Instant {
         lhs.advanced(by: rhs)
-        }
+    }
 
     @_alwaysEmitIntoClient
     @inlinable
-    public static func += (
+    public static func +=(
             _ lhs: inout FlowClock.Instant, _ rhs: Swift.Duration
     ) {
         lhs = lhs.advanced(by: rhs)
@@ -151,15 +159,15 @@ extension FlowClock.Instant: InstantProtocol {
 
     @_alwaysEmitIntoClient
     @inlinable
-    public static func - (
+    public static func -(
             _ lhs: FlowClock.Instant, _ rhs: Swift.Duration
     ) -> FlowClock.Instant {
         lhs.advanced(by: .zero - rhs)
-}
+    }
 
     @_alwaysEmitIntoClient
     @inlinable
-    public static func -= (
+    public static func -=(
             _ lhs: inout FlowClock.Instant, _ rhs: Swift.Duration
     ) {
         lhs = lhs.advanced(by: .zero - rhs)
@@ -167,7 +175,7 @@ extension FlowClock.Instant: InstantProtocol {
 
     @_alwaysEmitIntoClient
     @inlinable
-    public static func - (
+    public static func -(
             _ lhs: FlowClock.Instant, _ rhs: FlowClock.Instant
     ) -> Swift.Duration {
         rhs.duration(to: lhs)
@@ -175,6 +183,7 @@ extension FlowClock.Instant: InstantProtocol {
 }
 
 // ==== ----------------------------------------------------------------------------------------------------------------
+
 // MARK: Duration conversion support
 
 extension Swift.Duration {
@@ -186,17 +195,17 @@ extension Swift.Duration {
         let asNanos = attoseconds / Value(1_000_000_000)
         let (totalNanos, overflow) = sNanos.addingReportingOverflow(asNanos)
         return overflow ? .max : totalNanos
-                    }
+    }
 
     /// The microseconds representation of the `TimeAmount`.
     public var microseconds: Value {
         self.nanoseconds / TimeUnit.microseconds.rawValue
-            }
+    }
 
     /// The milliseconds representation of the `TimeAmount`.
     public var milliseconds: Value {
         self.nanoseconds / TimeUnit.milliseconds.rawValue
-        }
+    }
 
     /// The seconds representation of the `TimeAmount`.
     public var seconds: Value {
@@ -205,7 +214,7 @@ extension Swift.Duration {
 
     public var isEffectivelyInfinite: Bool {
         self.nanoseconds == .max
-}
+    }
 
     /// Represents number of nanoseconds within given time unit
     public enum TimeUnit: Value {
