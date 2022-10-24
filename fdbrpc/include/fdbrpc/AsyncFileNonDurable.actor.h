@@ -67,15 +67,7 @@ private:
 	bool assertOnReadWriteCancel;
 
 public:
-	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file), assertOnReadWriteCancel(false) {
-		// Assert that read or write ops are not cancelled for certain file types
-		// TODO:  Do this for all files, fix all remaining bugs.
-		Standalone<StringRef> fn(file->getFilename());
-		if (fn.endsWith(".redwood-v1"_sr) || fn.endsWith(".sqlite"_sr) || fn.endsWith(".sqlite-wal"_sr) ||
-		    fn.endsWith(".fdq"_sr)) {
-			assertOnReadWriteCancel = true;
-		}
-
+	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file), assertOnReadWriteCancel(true) {
 		shutdown = doShutdown(this);
 	}
 
