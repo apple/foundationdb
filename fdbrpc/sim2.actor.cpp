@@ -789,6 +789,19 @@ private:
 				    .detail("To", self->filename)
 				    .detail("SourceCount", machineCache.count(sourceFilename))
 				    .detail("FileCount", machineCache.count(self->filename));
+				auto maxBlockValue =
+				    std::numeric_limits<decltype(g_simulator->corruptedBlocks)::key_type::second_type>::max();
+				g_simulator->corruptedBlocks.erase(
+				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(self->filename, maxBlockValue)));
+				// next we need to rename all files. In practice, the number of corruptions for a given file should be
+				// very small
+				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
+				for (auto iter = begin; iter != end; ++iter) {
+					g_simulator->corruptedBlocks.emplace(self->filename, iter->second);
+				}
+				g_simulator->corruptedBlocks.erase(begin, end);
 				renameFile(sourceFilename.c_str(), self->filename.c_str());
 
 				machineCache[self->filename] = machineCache[sourceFilename];
@@ -2733,6 +2746,20 @@ Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBe
 
 ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
 	wait(delay(0.5 * deterministicRandom()->random01()));
+	// rename all keys in the corrupted list
+	// first we have to delete all corruption of the destination, since this file will be unlinked if it exists
+	TraceEvent("RenamingFile").detail("From", from).detail("To", to).log();
+	auto maxBlockValue = std::numeric_limits<decltype(g_simulator->corruptedBlocks)::key_type::second_type>::max();
+	g_simulator->corruptedBlocks.erase(g_simulator->corruptedBlocks.lower_bound(std::make_pair(to, 0u)),
+	                                   g_simulator->corruptedBlocks.upper_bound(std::make_pair(to, maxBlockValue)));
+	// next we need to rename all files. In practice, the number of corruptions for a given file should be very small
+	auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(from, 0u)),
+	     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(from, maxBlockValue));
+	for (auto iter = begin; iter != end; ++iter) {
+		g_simulator->corruptedBlocks.emplace(to, iter->second);
+	}
+	g_simulator->corruptedBlocks.erase(begin, end);
+	// do the rename
 	::renameFile(from, to);
 	wait(delay(0.5 * deterministicRandom()->random01()));
 	return Void();

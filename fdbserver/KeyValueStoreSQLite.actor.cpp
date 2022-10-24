@@ -156,7 +156,7 @@ struct PageChecksumCodec {
 					severity = SevWarnAlways;
 				}
 			}
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)
@@ -713,7 +713,7 @@ struct IntKeyCursor {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
 			}
-			delete[] (char*)cursor;
+			delete[](char*) cursor;
 		}
 	}
 };
@@ -751,7 +751,7 @@ struct RawCursor {
 			} catch (...) {
 				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
-			delete[] (char*)cursor;
+			delete[](char*) cursor;
 		}
 	}
 	void moveFirst() {
