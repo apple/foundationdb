@@ -120,6 +120,7 @@ public:
 		bool excludeFromRestarts = false;
 
 		std::vector<ProcessInfo*> childs;
+		bool drProcess = false;
 
 		ProcessInfo(const char* name,
 		            LocalityData locality,

@@ -40,6 +40,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
+#include "fdbrpc/TenantInfo.h"
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
@@ -66,6 +67,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
@@ -687,24 +689,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
 			    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
 			    .detail("NumLocalityCacheEntries", cx->locationCache.size());
-			if (cx->anyBlobGranuleRequests) {
-				ev.detail("MeanBGLatency", cx->bgLatencies.mean())
-				    .detail("MedianBGLatency", cx->bgLatencies.median())
-				    .detail("MaxBGLatency", cx->bgLatencies.max())
-				    .detail("MeanBGGranulesPerRequest", cx->bgGranulesPerRequest.mean())
-				    .detail("MedianBGGranulesPerRequest", cx->bgGranulesPerRequest.median())
-				    .detail("MaxBGGranulesPerRequest", cx->bgGranulesPerRequest.max());
-			}
 		}
-
-		cx->latencies.clear();
-		cx->readLatencies.clear();
-		cx->GRVLatencies.clear();
-		cx->commitLatencies.clear();
-		cx->mutationsPerCommit.clear();
-		cx->bytesPerCommit.clear();
-		cx->bgLatencies.clear();
-		cx->bgGranulesPerRequest.clear();
 
 		if (cx->usedAnyChangeFeeds && logTraces) {
 			TraceEvent feedEv("ChangeFeedClientMetrics", cx->dbId);
@@ -718,6 +703,37 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 
 			cx->ccFeed.logToTraceEvent(feedEv);
 		}
+
+		if (cx->anyBGReads && logTraces) {
+			TraceEvent bgReadEv("BlobGranuleReadMetrics", cx->dbId);
+
+			bgReadEv.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Cluster",
+			            cx->getConnectionRecord()
+			                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
+			                : "")
+			    .detail("Internal", cx->internal);
+
+			// add counters
+			cx->ccBG.logToTraceEvent(bgReadEv);
+
+			// add latencies
+			bgReadEv.detail("MeanBGLatency", cx->bgLatencies.mean())
+			    .detail("MedianBGLatency", cx->bgLatencies.median())
+			    .detail("MaxBGLatency", cx->bgLatencies.max())
+			    .detail("MeanBGGranulesPerRequest", cx->bgGranulesPerRequest.mean())
+			    .detail("MedianBGGranulesPerRequest", cx->bgGranulesPerRequest.median())
+			    .detail("MaxBGGranulesPerRequest", cx->bgGranulesPerRequest.max());
+		}
+
+		cx->latencies.clear();
+		cx->readLatencies.clear();
+		cx->GRVLatencies.clear();
+		cx->commitLatencies.clear();
+		cx->mutationsPerCommit.clear();
+		cx->bytesPerCommit.clear();
+		cx->bgLatencies.clear();
+		cx->bgGranulesPerRequest.clear();
 
 		lastLogged = now();
 	}
@@ -1524,17 +1540,21 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), bgReadInputBytes("BGReadInputBytes", cc),
-    bgReadOutputBytes("BGReadOutputBytes", cc), usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"),
-    feedStreamStarts("FeedStreamStarts", ccFeed), feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed),
-    feedErrors("FeedErrors", ccFeed), feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed),
-    feedPops("FeedPops", ccFeed), feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
-    lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), anyBGReads(false),
+    ccBG("BlobGranuleReadMetrics"), bgReadInputBytes("BGReadInputBytes", ccBG),
+    bgReadOutputBytes("BGReadOutputBytes", ccBG), bgReadSnapshotRows("BGReadSnapshotRows", ccBG),
+    bgReadRowsCleared("BGReadRowsCleared", ccBG), bgReadRowsInserted("BGReadRowsInserted", ccBG),
+    bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(1000), bgGranulesPerRequest(1000),
+    usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
+    feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000), commitLatencies(1000),
+    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0), sharedStatePtr(nullptr),
+    lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0),
+    lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 
@@ -1824,14 +1844,17 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), bgReadInputBytes("BGReadInputBytes", cc),
-    bgReadOutputBytes("BGReadOutputBytes", cc), usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"),
-    feedStreamStarts("FeedStreamStarts", ccFeed), feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed),
-    feedErrors("FeedErrors", ccFeed), feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed),
-    feedPops("FeedPops", ccFeed), feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), sharedStatePtr(nullptr), transactionTracingSample(false),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), anyBGReads(false),
+    ccBG("BlobGranuleReadMetrics"), bgReadInputBytes("BGReadInputBytes", ccBG),
+    bgReadOutputBytes("BGReadOutputBytes", ccBG), bgReadSnapshotRows("BGReadSnapshotRows", ccBG),
+    bgReadRowsCleared("BGReadRowsCleared", ccBG), bgReadRowsInserted("BGReadRowsInserted", ccBG),
+    bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(1000), bgGranulesPerRequest(1000),
+    usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
+    feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000), commitLatencies(1000),
+    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), sharedStatePtr(nullptr),
+    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -6224,7 +6247,7 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 			trCommitCosts.opsCount++;
 			keyRange = KeyRangeRef(it->param1, it->param2);
 			if (trState->options.expensiveClearCostEstimation) {
-				StorageMetrics m = wait(trState->cx->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
+				StorageMetrics m = wait(trState->cx->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY, trState));
 				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));
 				trCommitCosts.writeCosts += getWriteOperationCost(m.bytes);
 				++trCommitCosts.expensiveCostEstCount;
@@ -7497,34 +7520,45 @@ Future<Void> Transaction::onError(Error const& e) {
 
 	return e;
 }
-ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys);
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
+                                                            KeyRange keys,
+                                                            Optional<Reference<TransactionState>> trState);
 
-ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Reference<LocationInfo> locationInfo) {
-	loop {
-		try {
-			WaitMetricsRequest req(keys, StorageMetrics(), StorageMetrics());
-			req.min.bytes = 0;
-			req.max.bytes = -1;
-			StorageMetrics m = wait(loadBalance(
-			    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
-			return m;
-		} catch (Error& e) {
-			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-				throw;
-			}
-			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-			cx->invalidateCache(Key(), keys);
-			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys));
-			return m;
+ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
+                                                 KeyRange keys,
+                                                 Reference<LocationInfo> locationInfo,
+                                                 TenantMapEntry tenantEntry,
+                                                 Optional<Reference<TransactionState>> trState) {
+	state TenantInfo tenantInfo =
+	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
+	try {
+		WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
+		req.min.bytes = 0;
+		req.max.bytes = -1;
+		StorageMetrics m = wait(loadBalance(
+		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
+		return m;
+	} catch (Error& e) {
+		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+			throw;
 		}
+		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		cx->invalidateCache(tenantEntry.prefix, keys);
+
+		StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
+		return m;
 	}
 }
 
-ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys) {
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
+                                                            KeyRange keys,
+                                                            Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
+	state TenantInfo tenantInfo =
+	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
-	                                                                        TenantInfo(),
+	                                                                        tenantInfo,
 	                                                                        keys,
 	                                                                        std::numeric_limits<int>::max(),
 	                                                                        Reverse::False,
@@ -7540,7 +7574,8 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	for (int i = 0; i < nLocs; i++) {
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
-		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].locations);
+		fx[i] = doGetStorageMetrics(
+		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -7549,14 +7584,15 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	return total;
 }
 
-ACTOR Future<Void> trackBoundedStorageMetrics(KeyRange keys,
+ACTOR Future<Void> trackBoundedStorageMetrics(TenantInfo tenantInfo,
+                                              KeyRange keys,
                                               Reference<LocationInfo> location,
                                               StorageMetrics x,
                                               StorageMetrics halfError,
                                               PromiseStream<StorageMetrics> deltaStream) {
 	try {
 		loop {
-			WaitMetricsRequest req(keys, x - halfError, x + halfError);
+			WaitMetricsRequest req(tenantInfo, keys, x - halfError, x + halfError);
 			StorageMetrics nextX = wait(loadBalance(location->locations(), &StorageServerInterface::waitMetrics, req));
 			deltaStream.send(nextX - x);
 			x = nextX;
@@ -7567,7 +7603,8 @@ ACTOR Future<Void> trackBoundedStorageMetrics(KeyRange keys,
 	}
 }
 
-ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(std::vector<KeyRangeLocationInfo> locations,
+ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(TenantInfo tenantInfo,
+                                                                 std::vector<KeyRangeLocationInfo> locations,
                                                                  StorageMetrics min,
                                                                  StorageMetrics max,
                                                                  StorageMetrics permittedError) {
@@ -7581,7 +7618,7 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(std::vector<Key
 	state StorageMetrics minMinus = min - halfErrorPerMachine * (nLocs - 1);
 
 	for (int i = 0; i < nLocs; i++) {
-		WaitMetricsRequest req(locations[i].range, StorageMetrics(), StorageMetrics());
+		WaitMetricsRequest req(tenantInfo, locations[i].range, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
 		fx[i] = loadBalance(locations[i].locations->locations(),
@@ -7602,7 +7639,7 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(std::vector<Key
 
 	for (int i = 0; i < nLocs; i++)
 		wx[i] = trackBoundedStorageMetrics(
-		    locations[i].range, locations[i].locations, fx[i].get(), halfErrorPerMachine, deltas);
+		    tenantInfo, locations[i].range, locations[i].locations, fx[i].get(), halfErrorPerMachine, deltas);
 
 	loop {
 		StorageMetrics delta = waitNext(deltas.getFuture());
@@ -7687,25 +7724,30 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 	}
 }
 
-ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Database cx,
-                                                                          KeyRange keys,
-                                                                          StorageMetrics min,
-                                                                          StorageMetrics max,
-                                                                          StorageMetrics permittedError,
-                                                                          int shardLimit,
-                                                                          int expectedShardCount) {
+ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
+    Database cx,
+    KeyRange keys,
+    StorageMetrics min,
+    StorageMetrics max,
+    StorageMetrics permittedError,
+    int shardLimit,
+    int expectedShardCount,
+    Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
+	state TenantInfo tenantInfo =
+	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	loop {
-		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
-		                                                                        TenantInfo(),
-		                                                                        keys,
-		                                                                        shardLimit,
-		                                                                        Reverse::False,
-		                                                                        &StorageServerInterface::waitMetrics,
-		                                                                        span.context,
-		                                                                        Optional<UID>(),
-		                                                                        UseProvisionalProxies::False,
-		                                                                        latestVersion));
+		state std::vector<KeyRangeLocationInfo> locations =
+		    wait(getKeyRangeLocations(cx,
+		                              tenantInfo,
+		                              keys,
+		                              shardLimit,
+		                              Reverse::False,
+		                              &StorageServerInterface::waitMetrics,
+		                              span.context,
+		                              Optional<UID>(),
+		                              UseProvisionalProxies::False,
+		                              latestVersion));
 		if (expectedShardCount >= 0 && locations.size() != expectedShardCount) {
 			return std::make_pair(Optional<StorageMetrics>(), locations.size());
 		}
@@ -7716,9 +7758,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 			try {
 				Future<StorageMetrics> fx;
 				if (locations.size() > 1) {
-					fx = waitStorageMetricsMultipleLocations(locations, min, max, permittedError);
+					fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
 				} else {
-					WaitMetricsRequest req(keys, min, max);
+					WaitMetricsRequest req(tenantInfo, keys, min, max);
 					fx = loadBalance(locations[0].locations->locations(),
 					                 &StorageServerInterface::waitMetrics,
 					                 req,
@@ -7731,7 +7773,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 					throw;
 				}
-				cx->invalidateCache(Key(), keys);
+				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			}
 		} else {
@@ -7741,7 +7783,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 			    .detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
-			cx->invalidateCache(Key(), keys);
+			cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
 		}
 	}
 }
@@ -7752,17 +7794,21 @@ Future<std::pair<Optional<StorageMetrics>, int>> DatabaseContext::waitStorageMet
     StorageMetrics const& max,
     StorageMetrics const& permittedError,
     int shardLimit,
-    int expectedShardCount) {
+    int expectedShardCount,
+    Optional<Reference<TransactionState>> trState) {
 	return ::waitStorageMetrics(Database(Reference<DatabaseContext>::addRef(this)),
 	                            keys,
 	                            min,
 	                            max,
 	                            permittedError,
 	                            shardLimit,
-	                            expectedShardCount);
+	                            expectedShardCount,
+	                            trState);
 }
 
-Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys, int shardLimit) {
+Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys,
+                                                          int shardLimit,
+                                                          Optional<Reference<TransactionState>> trState) {
 	if (shardLimit > 0) {
 		StorageMetrics m;
 		m.bytes = -1;
@@ -7772,9 +7818,10 @@ Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys, 
 		                                           m,
 		                                           StorageMetrics(),
 		                                           shardLimit,
-		                                           -1));
+		                                           -1,
+		                                           trState));
 	} else {
-		return ::getStorageMetricsLargeKeyRange(Database(Reference<DatabaseContext>::addRef(this)), keys);
+		return ::getStorageMetricsLargeKeyRange(Database(Reference<DatabaseContext>::addRef(this)), keys, trState);
 	}
 }
 
@@ -8062,8 +8109,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	}
 	if (blobGranuleMapping.more) {
 		if (BG_REQUEST_DEBUG) {
-			fmt::print(
-			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
+			fmt::print("BG Mapping for [{0} - {1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
 		TraceEvent(SevWarn, "BGMappingTooLarge")
 		    .detail("Range", range)
@@ -8276,7 +8322,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		}
 	}
 
-	self->trState->cx->anyBlobGranuleRequests = true;
+	self->trState->cx->anyBGReads = true;
 	self->trState->cx->bgGranulesPerRequest.addSample(results.size());
 	self->trState->cx->bgLatencies.addSample(now() - startTime);
 
@@ -8318,8 +8364,13 @@ Transaction::summarizeBlobGranules(const KeyRange& range, Optional<Version> summ
 }
 
 void Transaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stats) {
+	trState->cx->anyBGReads = true;
 	trState->cx->bgReadInputBytes += stats.inputBytes;
 	trState->cx->bgReadOutputBytes += stats.outputBytes;
+	trState->cx->bgReadSnapshotRows += stats.snapshotRows;
+	trState->cx->bgReadRowsCleared += stats.rowsCleared;
+	trState->cx->bgReadRowsInserted += stats.rowsInserted;
+	trState->cx->bgReadRowsUpdated += stats.rowsUpdated;
 }
 
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {

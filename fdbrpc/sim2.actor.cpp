@@ -1253,6 +1253,7 @@ public:
 				PromiseTask* task = self->taskQueue.getReadyTask();
 				self->taskQueue.popReadyTask();
 				self->execTask(*task);
+				delete task;
 				self->yielded = false;
 			}
 		}
@@ -2275,7 +2276,7 @@ public:
 	}
 
 	// Implementation
-	struct PromiseTask final {
+	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
 		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}

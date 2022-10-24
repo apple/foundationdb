@@ -130,7 +130,7 @@ public:
 		}
 	}
 
-	void clear(KeyRangeRef range, const Arena* arena) override {
+	void clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0)
 			return;

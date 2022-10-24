@@ -687,6 +687,9 @@ struct DDQueue : public IDDRelocationQueue {
 
 	Reference<EventCacheHolder> movedKeyServersEventHolder;
 
+	int moveReusePhysicalShard;
+	int moveCreateNewPhysicalShard;
+
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -750,7 +753,8 @@ struct DDQueue : public IDDRelocationQueue {
 	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
+	    moveCreateNewPhysicalShard(0) {}
 	DDQueue() = default;
 
 	void validate() {
@@ -1676,6 +1680,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
 					// thus, update the physicalShardIDCandidate to related data structures
 					ASSERT(physicalShardIDCandidate != UID().first());
+					if (self->physicalShardCollection->physicalShardExists(physicalShardIDCandidate)) {
+						self->moveReusePhysicalShard++;
+					} else {
+						self->moveCreateNewPhysicalShard++;
+					}
 					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
@@ -2472,6 +2481,14 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 					    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
 					                                // DataDistributor::movingDataEventHolder. The track latest
 					                                // key we use here must match the key used in the holder.
+
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+						TraceEvent("PhysicalShardMoveStats")
+						    .detail("MoveCreateNewPhysicalShard", self.moveCreateNewPhysicalShard)
+						    .detail("MoveReusePhysicalShard", self.moveReusePhysicalShard);
+						self.moveCreateNewPhysicalShard = 0;
+						self.moveReusePhysicalShard = 0;
+					}
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(ddQueueFutures))) {}
