@@ -181,7 +181,7 @@ public:
 };
 
 ACTOR template <class ServiceType>
-Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterface ssi){
+Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterface ssi) {
 	state Future<Void> doPollMetrics = Void();
 	loop {
 		choose {
