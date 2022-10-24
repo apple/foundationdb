@@ -54,7 +54,7 @@ class RocksDBLogger {
 	// The log record
 	std::vector<RocksDBLogRecord> records;
 
-    // An ACTOR that logs the non-main thread data periodically
+	// An ACTOR that logs the non-main thread data periodically
 	Future<Void> periodicLogger;
 
 public:
