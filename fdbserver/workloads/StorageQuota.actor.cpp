@@ -38,17 +38,17 @@ struct StorageQuotaWorkload : TestWorkload {
 		wait(setStorageQuotaHelper(cx, "name2"_sr, 200));
 		wait(setStorageQuotaHelper(cx, "name1"_sr, 300));
 
-		state Optional<uint64_t> quota1 = wait(getStorageQuotaHelper(cx, "name1"_sr));
+		state Optional<int64_t> quota1 = wait(getStorageQuotaHelper(cx, "name1"_sr));
 		ASSERT(quota1.present() && quota1.get() == 300);
-		state Optional<uint64_t> quota2 = wait(getStorageQuotaHelper(cx, "name2"_sr));
+		state Optional<int64_t> quota2 = wait(getStorageQuotaHelper(cx, "name2"_sr));
 		ASSERT(quota2.present() && quota2.get() == 200);
-		state Optional<uint64_t> quota3 = wait(getStorageQuotaHelper(cx, "name3"_sr));
+		state Optional<int64_t> quota3 = wait(getStorageQuotaHelper(cx, "name3"_sr));
 		ASSERT(!quota3.present());
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> setStorageQuotaHelper(Database cx, StringRef tenantName, uint64_t quota) {
+	ACTOR static Future<Void> setStorageQuotaHelper(Database cx, StringRef tenantName, int64_t quota) {
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -61,11 +61,11 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Optional<uint64_t>> getStorageQuotaHelper(Database cx, StringRef tenantName) {
+	ACTOR static Future<Optional<int64_t>> getStorageQuotaHelper(Database cx, StringRef tenantName) {
 		state Transaction tr(cx);
 		loop {
 			try {
-				state Optional<uint64_t> quota = wait(getStorageQuota(&tr, tenantName));
+				state Optional<int64_t> quota = wait(getStorageQuota(&tr, tenantName));
 				wait(tr.commit());
 				return quota;
 			} catch (Error& e) {
