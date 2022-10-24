@@ -72,7 +72,14 @@ void logTraceEvent(const RocksDBLogRecord& record) {
 	}
 }
 
-RocksDBLogger::RocksDBLogger() : mainThreadId(std::this_thread::get_id()) {}
+ACTOR Future<Void> rocksDBPeriodicallyLogger(RocksDBLogger* pRecords) {
+	loop choose {
+		when(wait(delay(0.1))) { pRecords->consume(); }
+	}
+}
+
+RocksDBLogger::RocksDBLogger()
+  : mainThreadId(std::this_thread::get_id()), periodicLogger(rocksDBPeriodicallyLogger(this)) {}
 
 void RocksDBLogger::inject(RocksDBLogRecord&& record) {
 	const std::thread::id threadId = std::this_thread::get_id();
@@ -101,16 +108,10 @@ void RocksDBLogger::consume() {
 	}
 }
 
-ACTOR Future<Void> rocksDBPeriodicallyLogger(RocksDBLogger* pRecords) {
-	loop choose {
-		when(wait(delay(0.1))) { pRecords->consume(); }
-	}
-}
-
 } // namespace details
 
 RocksDBLogForwarder::RocksDBLogForwarder(const UID& id_, const InfoLogLevel log_level)
-  : rocksdb::Logger(log_level), id(id_), records(), periodicLogger(details::rocksDBPeriodicallyLogger(&records)) {
+  : rocksdb::Logger(log_level), id(id_), records() {
 	TraceEvent(SevInfo, "RocksDBLoggerStart", id);
 }
 
@@ -128,7 +129,7 @@ void RocksDBLogForwarder::Logv(const InfoLogLevel log_level, const char* format,
 	// FIXME: Restrict the RocksDB log level to warn in order to prevent almost all simulation test failure. This has to
 	// be reconsidered.
 	const Severity severity = std::min(getSeverityFromLogLevel(log_level), SevWarn);
-	
+
 	// TODO: Parse the log information into KV pairs
 	if (severity < SevError) {
 		records.inject(
