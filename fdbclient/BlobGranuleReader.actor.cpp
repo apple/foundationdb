@@ -142,7 +142,6 @@ bool isRangeFullyCovered(KeyRange range, Standalone<VectorRef<BlobGranuleChunkRe
 	for (const BlobGranuleChunkRef& chunk : blobChunks) {
 		blobRanges.push_back(chunk.keyRange);
 	}
-
 	return range.isCovered(blobRanges);
 }
 
@@ -194,7 +193,7 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 		testAddChunkRange("key_a1"_sr, "key_a9"_sr, continuedChunks);
 		testAddChunkRange("key_a9"_sr, "key_b1"_sr, continuedChunks);
 		testAddChunkRange("key_b1"_sr, "key_b9"_sr, continuedChunks);
-		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_b9"_sr), continuedChunks) == false);
+		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_b9"_sr), continuedChunks));
 	}
 	return Void();
 }
