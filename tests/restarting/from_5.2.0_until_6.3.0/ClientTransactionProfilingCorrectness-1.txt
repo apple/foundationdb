@@ -2,6 +2,7 @@ testTitle=ClientTransactionProfilingCorrectness
 clearAfterTest=false
 runSetup=true
 timeout=2100
+storageEngineExcludeTypes = [4, 5]
 
     testName=ApiCorrectness
     numKeys=5000
