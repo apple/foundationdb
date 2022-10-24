@@ -114,10 +114,14 @@ include(SwiftToCXXInterop)
 generate_cxx_compat_header(fdbclient_swift "FDBClient")
 
 add_dependencies(fdbclient_swift flow_swift)
-add_dependencies(flow_swift boost_targetProject)
 # This does not work! (see rdar://99107402)
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(fdbclient fdbclient_swift)
+
+target_link_options(fdbclient_swift PUBLIC "$<TARGET_OBJECTS:flow_swift>")
+target_link_options(fdbclient PRIVATE "$<TARGET_OBJECTS:flow_swift>")
+
+target_link_options(fdbclient PRIVATE "$<TARGET_OBJECTS:fdbclient_swift>")
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling
