@@ -21,10 +21,8 @@
 #include "fdbserver/RocksDBLogForwarder.h"
 
 #include "flow/network.h"
-#include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
-
-#include <iostream>
+#include "fdbrpc/simulator.h"
 
 #include "flow/actorcompiler.h" // This must be the last include file
 
@@ -131,15 +129,18 @@ void RocksDBLogForwarder::Logv(const InfoLogLevel log_level, const char* format,
 	const Severity severity = std::min(getSeverityFromLogLevel(log_level), SevWarn);
 
 	// TODO: Parse the log information into KV pairs
+	// At this stage vsnprintf is used
+	char buf[1024];
+	vsnprintf(buf, 1024, format, ap);
 	if (severity < SevError) {
 		records.inject(
-		    details::RocksDBLogRecord{ now(), severity, id, threadID, { { "Format", std::string(format) } } });
+		    details::RocksDBLogRecord{ now(), severity, id, threadID, { { "Text", std::string(buf) } } });
 	} else {
 		records.inject(details::RocksDBLogRecord{
 		    now(),
 		    severity,
 		    id,
 		    threadID,
-		    { { "Format", std::string(format) }, { "OriginalBacktrace", platform::get_backtrace() } } });
+		    { { "Text", std::string(buf) }, { "OriginalBacktrace", platform::get_backtrace() } } });
 	}
 }
