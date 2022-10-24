@@ -31,12 +31,10 @@
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:
 	Reference<IAsyncFile> file;
-	// since we have to read this often, we cache the filename here
-	std::string filename;
 	bool enabled;
 
 public:
-	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file), filename(file->getFilename()) {
+	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {
 		// We only allow chaos events on storage files
 		enabled = (file->getFilename().find("storage-") != std::string::npos);
 	}
@@ -98,7 +96,11 @@ public:
 					auto corruptedPos = deterministicRandom()->randomInt(0, length);
 					pdata[corruptedPos] ^= (1 << deterministicRandom()->randomInt(0, 8));
 					// mark the block as corrupted
-					corruptedBlock = offset + corruptedPos / (4 * 1024);
+					corruptedBlock = (offset + corruptedPos) / 4096;
+					TraceEvent("CorruptedBlock")
+					    .detail("Filename", file->getFilename())
+					    .detail("Block", corruptedBlock)
+					    .log();
 
 					// increment the metric for bit flips
 					auto res = g_network->global(INetwork::enChaosMetrics);
@@ -114,7 +116,7 @@ public:
 				// if (g_network->isSimulated())
 				return map(holdWhile(arena, file->write(pdata, length, offset)), [corruptedBlock, this](auto res) {
 					if (g_network->isSimulated()) {
-						g_simulator->corruptedBlocks.template emplace(filename, corruptedBlock);
+						g_simulator->corruptedBlocks.template emplace(file->getFilename(), corruptedBlock);
 					}
 					return res;
 				});
@@ -125,11 +127,12 @@ public:
 					return res;
 				}
 				g_simulator->corruptedBlocks.erase(
-				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, offset / 4096)),
-				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(filename, (offset + length) / 4096)));
+				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(file->getFilename(), offset / 4096)),
+				    g_simulator->corruptedBlocks.upper_bound(
+				        std::make_pair(file->getFilename(), (offset + length) / 4096)));
 				return res;
 			});
- 		});
+		});
 	}
 
 	Future<Void> truncate(int64_t size) override {
@@ -140,7 +143,16 @@ public:
 		// Wait for diskDelay before submitting the I/O
 		// Capture file by value in case this is destroyed during the delay
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [=, file = file](Void _) -> Future<Void> { return file->truncate(size); });
+		    delay(diskDelay), [this, size, file = file](Void _) -> Future<Void> {
+			    constexpr auto maxBlockValue =
+			        std::numeric_limits<decltype(g_simulator->corruptedBlocks)::key_type::second_type>::max();
+			    auto firstDeletedBlock =
+			        g_simulator->corruptedBlocks.lower_bound(std::make_pair(file->getFilename(), size / 4096));
+			    auto lastFileBlock =
+			        g_simulator->corruptedBlocks.upper_bound(std::make_pair(file->getFilename(), maxBlockValue));
+			    g_simulator->corruptedBlocks.erase(firstDeletedBlock, lastFileBlock);
+			    return file->truncate(size);
+		    });
 	}
 
 	Future<Void> sync() override {

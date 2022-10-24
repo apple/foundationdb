@@ -91,6 +91,8 @@ static FILE* g_debugStream = stdout;
 #define TRACE                                                                                                          \
 	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
+using namespace std::string_view_literals;
+
 // Returns a string where every line in lines is prefixed with prefix
 std::string addPrefix(std::string prefix, std::string lines) {
 	StringRef m = lines;
@@ -1229,17 +1231,31 @@ public:
 					// These pages are not encrypted
 					page->postReadPayload(c.pageID);
 				} catch (Error& e) {
-					TraceEvent(SevError, "RedwoodChecksumFailed")
+					bool isInjected = false;
+					if (g_network->isSimulated()) {
+						auto num4kBlocks = std::max(self->pager->getPhysicalPageSize() / 4096, 1);
+						auto startBlock = (c.pageID * self->pager->getPhysicalPageSize()) / 4096;
+						auto iter = g_simulator->corruptedBlocks.lower_bound(
+						    std::make_pair(self->pager->getName(), startBlock));
+						if (iter->first == self->pager->getName() && iter->second < startBlock + num4kBlocks) {
+							isInjected = true;
+						}
+					}
+					TraceEvent(isInjected ? SevWarnAlways : SevError, "RedwoodChecksumFailed")
 					    .error(e)
 					    .detail("PageID", c.pageID)
 					    .detail("PageSize", self->pager->getPhysicalPageSize())
-					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize());
+					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
+					    .detail("Filename", self->pager->getName());
 
 					debug_printf("FIFOQueue::Cursor(%s) peekALLExt getSubPage error=%s for %s. Offset %d ",
 					             c.toString().c_str(),
 					             e.what(),
 					             toString(c.pageID).c_str(),
 					             c.pageID * self->pager->getPhysicalPageSize());
+					if (isInjected) {
+						throw e.asInjectedFault();
+					}
 					throw;
 				}
 
