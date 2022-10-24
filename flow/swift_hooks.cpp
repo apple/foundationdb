@@ -25,6 +25,16 @@
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
+double flow_gNetwork_now() {
+	return g_network->now();
+}
+
+Future<class Void> flow_gNetwork_delay(double seconds, TaskPriority taskID) {
+	return g_network->delay(seconds, taskID);
+}
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
 // TODO: Bridge the scheduled task from Swift into DelayedTask
 // struct SwiftDelayedOrderedTask : OrderedTask {
 //    double at;
