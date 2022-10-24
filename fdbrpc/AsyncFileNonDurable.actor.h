@@ -57,7 +57,7 @@ Future<T> sendErrorOnShutdown(Future<T> in, bool assertOnCancel = false) {
 			}
 		}
 	} catch (Error& e) {
-		ASSERT(e.code() != error_code_actor_cancelled || !assertOnCancel);
+		// ASSERT(e.code() != error_code_actor_cancelled || !assertOnCancel);
 		throw;
 	}
 }
