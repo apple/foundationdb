@@ -7,3 +7,4 @@ maxOrderSize=4
 testName=SaveAndKill
 restartInfoLocation=simfdb/restartInfo.ini
 testDuration=10.0
+storageEngineExcludeTypes = [4, 5]
