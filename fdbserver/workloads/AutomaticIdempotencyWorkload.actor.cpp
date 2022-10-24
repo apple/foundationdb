@@ -190,7 +190,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<int64_t> getMaxAge(AutomaticIdempotencyWorkload* self, Database db) {
+	ACTOR static Future<int64_t> getMinCreatedTime(AutomaticIdempotencyWorkload* self, Database db) {
 		state ReadYourWritesTransaction tr(db);
 		state RangeResult result;
 		state Key key;
@@ -235,7 +235,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 					}
 					ASSERT(entry.present());
 					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
-					return int64_t(now()) - e.createdTime;
+					return e.createdTime;
 				}
 				ASSERT(false);
 			} catch (Error& e) {
@@ -252,33 +252,33 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	                                                  const std::vector<int64_t>* createdTimes) {
 		state Future<Void> cleaner = idempotencyIdsCleaner(db, minAgeSeconds, byteTarget, self->pollingInterval);
 		state int64_t size;
-		state int64_t maxAge;
+		state int64_t minCreatedTime;
 		state int64_t successes = 0;
 		actors->add(cleaner);
 		loop {
-			wait(store(size, getIdmpKeySize(db)) && store(maxAge, getMaxAge(self, db)));
-			// Max age could seem too low if there's a large gap in the age
-			// of entries, so account for this by making maxAge one more than
-			// the youngest age that actually got deleted.
-			auto iter = std::lower_bound(createdTimes->begin(), createdTimes->end(), maxAge);
+			wait(store(size, getIdmpKeySize(db)) && store(minCreatedTime, getMinCreatedTime(self, db)));
+			// minCreatedTime could seem too high if there's a large gap in the age
+			// of entries, so account for this by making minCreatedTime one more than
+			// the youngest entry that actually got deleted.
+			auto iter = std::lower_bound(createdTimes->begin(), createdTimes->end(), minCreatedTime);
 			if (iter != createdTimes->begin()) {
 				--iter;
-				maxAge = *iter + 1;
+				minCreatedTime = *iter + 1;
 			}
-			if (size > byteTarget * self->slop && maxAge > minAgeSeconds * self->slop) {
+			if (size > byteTarget * self->slop && int64_t(now()) - minCreatedTime > minAgeSeconds * self->slop) {
 				CODE_PROBE(true, "Idempotency cleaner more to clean");
 				TraceEvent("AutomaticIdempotencyCleanerMoreToClean")
 				    .detail("Size", size)
 				    .detail("ByteTarget", byteTarget)
-				    .detail("MaxActualAge", maxAge)
+				    .detail("MaxActualAge", minCreatedTime)
 				    .detail("MinAgePolicy", minAgeSeconds);
 				successes = 0;
 				// Cleaning should happen eventually
-			} else if (size < byteTarget / self->slop || maxAge < minAgeSeconds / self->slop) {
+			} else if (size < byteTarget / self->slop || int64_t(now()) - minCreatedTime < minAgeSeconds / self->slop) {
 				TraceEvent(SevError, "AutomaticIdempotencyCleanedTooMuch")
 				    .detail("Size", size)
 				    .detail("ByteTarget", byteTarget)
-				    .detail("MaxActualAge", maxAge)
+				    .detail("MaxActualAge", int64_t(now()) - minCreatedTime)
 				    .detail("MinAgePolicy", minAgeSeconds);
 				self->ok = false;
 				ASSERT(false);
@@ -287,7 +287,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				TraceEvent("AutomaticIdempotencyCleanerSuccess")
 				    .detail("Size", size)
 				    .detail("ByteTarget", byteTarget)
-				    .detail("MaxActualAge", maxAge)
+				    .detail("MaxActualAge", int64_t(now()) - minCreatedTime)
 				    .detail("MinAgePolicy", minAgeSeconds)
 				    .detail("Successes", successes);
 				if (successes >= 10) {
@@ -321,7 +321,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		state std::vector<int64_t> createdTimes;
 
 		// Initialize the byteTarget and minAgeSeconds to match the current status
-		wait(store(byteTarget, getIdmpKeySize(db)) && store(minAgeSeconds, getMaxAge(self, db)) &&
+		wait(store(byteTarget, getIdmpKeySize(db)) &&
+		     store(minAgeSeconds, fmap([](int64_t t) { return int64_t(now()) - t; }, getMinCreatedTime(self, db))) &&
 		     store(createdTimes, runRYWTransaction(db, [self = self](Reference<ReadYourWritesTransaction> tr) {
 			           return getCreatedTimes(self, tr);
 		           })));
