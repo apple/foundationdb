@@ -591,12 +591,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<StringRef> decryptImpl(Database cx,
-	                                           StringRef headerS,
+	                                           BlobCipherEncryptHeader header,
 	                                           const uint8_t* dataP,
 	                                           int64_t dataLen,
 	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-		state BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
 		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::BACKUP));
 		ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
 		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
@@ -606,7 +605,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	static Future<StringRef> decrypt(Database cx,
-	                                 StringRef headerS,
+	                                 BlobCipherEncryptHeader headerS,
 	                                 const uint8_t* dataP,
 	                                 int64_t dataLen,
 	                                 Arena* arena) {
@@ -1034,13 +1033,15 @@ private:
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
-                                        Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
+                                        Optional<Reference<TenantEntryCache<Void>>> tenantCache,
+                                        Optional<BlobCipherEncryptHeader> encryptHeader) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 	state KeyRef prevKey = KeyRef(k, kLen);
 	state bool done = false;
+	state Optional<std::pair<int64_t, TenantName>> prevTenantInfo;
 
 	// Read kv pairs and end key
 	while (1) {
@@ -1052,12 +1053,16 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
 		if (encryptedBlock && g_network && g_network->isSimulated()) {
 			ASSERT(tenantCache.present());
+			ASSERT(encryptHeader.present());
 			state KeyRef curKey = KeyRef(k, kLen);
-			state std::pair<int64_t, TenantName> prevTenantInfo =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, tenantCache.get()));
+			if (!prevTenantInfo.present()) {
+				std::pair<int64_t, TenantName> tenantInfo =
+				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, tenantCache.get()));
+				prevTenantInfo = tenantInfo;
+			}
 			std::pair<int64_t, TenantName> curTenantInfo =
 			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, tenantCache.get()));
-			if (curKey.size() > 0 && prevKey.size() > 0 && prevTenantInfo.first != curTenantInfo.first) {
+			if (!curKey.empty() && !prevKey.empty() && prevTenantInfo.get().first != curTenantInfo.first) {
 				ASSERT(!done);
 				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
 				    curTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
@@ -1065,7 +1070,12 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 				}
 				done = true;
 			}
+			// make sure that all keys (except possibly the last key) in a block are encrypted using the correct key
+			if (!prevKey.empty()) {
+				ASSERT(prevTenantInfo.get().first == encryptHeader.get().cipherTextDetails.encryptDomainId);
+			}
 			prevKey = curKey;
+			prevTenantInfo = curTenantInfo;
 		}
 
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
@@ -1112,7 +1122,11 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader, &results, false, Optional<Reference<TenantEntryCache<Void>>>()));
+			wait(decodeKVPairs(&reader,
+			                   &results,
+			                   false,
+			                   Optional<Reference<TenantEntryCache<Void>>>(),
+			                   Optional<BlobCipherEncryptHeader>()));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			ASSERT(cx.present());
@@ -1126,7 +1140,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 
 			// read encryption header
 			const uint8_t* headerStart = reader.consume(BlobCipherEncryptHeader::headerSize);
-			StringRef header = StringRef(headerStart, BlobCipherEncryptHeader::headerSize);
+			StringRef headerS = StringRef(headerStart, BlobCipherEncryptHeader::headerSize);
+			state BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
 			const uint8_t* dataPayloadStart = headerStart + BlobCipherEncryptHeader::headerSize;
 			// calculate the total bytes read up to (and including) the header
 			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
@@ -1140,7 +1155,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 				tenantCache = makeReference<TenantEntryCache<Void>>(cx.get(), TenantEntryCacheRefreshMode::WATCH);
 				wait(tenantCache.get()->init());
 			}
-			wait(decodeKVPairs(&reader, &results, true, tenantCache));
+			wait(decodeKVPairs(&reader, &results, true, tenantCache, header));
 		} else {
 			throw restore_unsupported_file_version();
 		}
@@ -6040,7 +6055,7 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
+		state Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();
