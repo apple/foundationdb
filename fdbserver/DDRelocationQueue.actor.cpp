@@ -691,7 +691,6 @@ struct DDQueue : public IDDRelocationQueue {
 	int moveCreateNewPhysicalShard;
 	enum NewPhysicalShardReason {
 		None = 0,
-		PrimaryBestTeamNotReady,
 		RemoteBestTeamNotReady,
 		PrimaryNoHealthyTeam,
 		RemoteNoHealthyTeam,
@@ -700,7 +699,6 @@ struct DDQueue : public IDDRelocationQueue {
 		NoAvailablePhysicalShard,
 		NumberOfTypes,
 	};
-	// std::unordered_map<NewPhysicalShardReason, int> newPhysicalShardReasonCount;
 	std::vector<int> newPhysicalShardReasonCount;
 
 	void startRelocation(int priority, int healthPriority) {
@@ -1508,9 +1506,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							    .detail("TeamCollectionIndex", tciIndex)
 							    .detail("RestoreDataMoveForDest",
 							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest));
-							newPhysicalShardReason = tciIndex == 0
-							                             ? DDQueue::NewPhysicalShardReason::PrimaryBestTeamNotReady
-							                             : DDQueue::NewPhysicalShardReason::RemoteBestTeamNotReady;
+							newPhysicalShardReason = DDQueue::NewPhysicalShardReason::RemoteBestTeamNotReady;
 							foundTeams = false;
 							break;
 						}
@@ -2522,9 +2518,6 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 						TraceEvent("PhysicalShardMoveStats")
 						    .detail("MoveCreateNewPhysicalShard", self.moveCreateNewPhysicalShard)
 						    .detail("MoveReusePhysicalShard", self.moveReusePhysicalShard)
-						    .detail("PrimaryBestTeamNotReady",
-						            self.newPhysicalShardReasonCount
-						                [DDQueue::NewPhysicalShardReason::PrimaryBestTeamNotReady])
 						    .detail("RemoteBestTeamNotReady",
 						            self.newPhysicalShardReasonCount
 						                [DDQueue::NewPhysicalShardReason::RemoteBestTeamNotReady])
