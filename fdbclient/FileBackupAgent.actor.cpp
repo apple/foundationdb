@@ -1079,7 +1079,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
                                                                       int len,
                                                                       Optional<Database> cx) {
 	state Standalone<StringRef> buf = makeString(len);
-	int rLen = wait(file->read(mutateString(buf), len, offset));
+	int rLen = wait(uncancellable(holdWhile(buf, file->read(mutateString(buf), len, offset))));
 	if (rLen != len)
 		throw restore_bad_read();
 

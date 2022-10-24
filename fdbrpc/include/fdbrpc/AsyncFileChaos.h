@@ -71,8 +71,9 @@ public:
 
 		// Wait for diskDelay before submitting the I/O
 		// Template types are being provided explicitly because they can't be automatically deduced for some reason.
+		// Capture file by value in case this is destroyed during the delay
 		return mapAsync<Void, std::function<Future<int>(Void)>, int>(
-		    delay(diskDelay), [=](Void _) -> Future<int> { return file->read(data, length, offset); });
+		    delay(diskDelay), [=, file = file](Void _) -> Future<int> { return file->read(data, length, offset); });
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
@@ -111,12 +112,14 @@ public:
 		}
 
 		// Wait for diskDelay before submitting the I/O
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(diskDelay), [=](Void _) -> Future<Void> {
-			if (pdata)
-				return holdWhile(arena, file->write(pdata, length, offset));
+		// Capture file by value in case this is destroyed during the delay
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+		    delay(diskDelay), [=, file = file](Void _) -> Future<Void> {
+			    if (pdata)
+				    return holdWhile(arena, file->write(pdata, length, offset));
 
-			return file->write(data, length, offset);
-		});
+			    return file->write(data, length, offset);
+		    });
 	}
 
 	Future<Void> truncate(int64_t size) override {
@@ -125,8 +128,9 @@ public:
 			return file->truncate(size);
 
 		// Wait for diskDelay before submitting the I/O
+		// Capture file by value in case this is destroyed during the delay
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [=](Void _) -> Future<Void> { return file->truncate(size); });
+		    delay(diskDelay), [=, file = file](Void _) -> Future<Void> { return file->truncate(size); });
 	}
 
 	Future<Void> sync() override {
@@ -135,8 +139,9 @@ public:
 			return file->sync();
 
 		// Wait for diskDelay before submitting the I/O
+		// Capture file by value in case this is destroyed during the delay
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [=](Void _) -> Future<Void> { return file->sync(); });
+		    delay(diskDelay), [=, file = file](Void _) -> Future<Void> { return file->sync(); });
 	}
 
 	Future<int64_t> size() const override {
@@ -145,8 +150,9 @@ public:
 			return file->size();
 
 		// Wait for diskDelay before submitting the I/O
+		// Capture file by value in case this is destroyed during the delay
 		return mapAsync<Void, std::function<Future<int64_t>(Void)>, int64_t>(
-		    delay(diskDelay), [=](Void _) -> Future<int64_t> { return file->size(); });
+		    delay(diskDelay), [=, file = file](Void _) -> Future<int64_t> { return file->size(); });
 	}
 
 	int64_t debugFD() const override { return file->debugFD(); }
