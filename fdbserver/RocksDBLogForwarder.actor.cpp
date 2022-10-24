@@ -133,8 +133,7 @@ void RocksDBLogForwarder::Logv(const InfoLogLevel log_level, const char* format,
 	char buf[1024];
 	vsnprintf(buf, 1024, format, ap);
 	if (severity < SevError) {
-		records.inject(
-		    details::RocksDBLogRecord{ now(), severity, id, threadID, { { "Text", std::string(buf) } } });
+		records.inject(details::RocksDBLogRecord{ now(), severity, id, threadID, { { "Text", std::string(buf) } } });
 	} else {
 		records.inject(details::RocksDBLogRecord{
 		    now(),
