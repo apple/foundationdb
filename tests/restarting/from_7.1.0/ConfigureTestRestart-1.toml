@@ -1,3 +1,7 @@
+[configuration]
+extraMachineCountDC = 2
+storageEngineExcludeTypes = [3]
+
 [[test]]
 testTitle='CloggedConfigureDatabaseTest'
 clearAfterTest=false
