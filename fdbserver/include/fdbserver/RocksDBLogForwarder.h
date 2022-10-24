@@ -41,7 +41,8 @@ struct RocksDBLogRecord {
 	std::vector<std::pair<std::string, std::string>> kvPairs;
 };
 
-// Stores RocksDB log lines for furthur consumption
+// Stores RocksDB log lines for furthur consumption.
+// *NOTE* This logger *MUST* run in a thread that is able to generate TraceEvents, e.g. in the event loop thread.
 class RocksDBLogger {
 	// The mutex that protects log records, as RocksDB is multi-threaded
 	std::mutex recordsMutex;
@@ -52,6 +53,9 @@ class RocksDBLogger {
 
 	// The log record
 	std::vector<RocksDBLogRecord> records;
+
+    // An ACTOR that logs the non-main thread data periodically
+	Future<Void> periodicLogger;
 
 public:
 	// Constructor
@@ -72,9 +76,6 @@ class RocksDBLogForwarder : public rocksdb::Logger {
 
 	// The cache that stores the logs from RocksDB
 	details::RocksDBLogger records;
-
-	// An ACTOR that logs the non-main thread data periodically
-	Future<Void> periodicLogger;
 
 public:
 	// Constructor
