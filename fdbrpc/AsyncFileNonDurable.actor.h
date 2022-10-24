@@ -52,9 +52,7 @@ Future<T> sendErrorOnShutdown(Future<T> in, bool assertOnCancel = false) {
 			when(wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()))) {
 				throw io_error().asInjectedFault();
 			}
-			when(T rep = wait(in)) {
-				return rep;
-			}
+			when(T rep = wait(in)) { return rep; }
 		}
 	} catch (Error& e) {
 		// ASSERT(e.code() != error_code_actor_cancelled || !assertOnCancel);
