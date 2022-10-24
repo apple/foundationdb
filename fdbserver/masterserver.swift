@@ -58,10 +58,13 @@ public actor MasterDataActor {
 
     /// Reply still done via req.reply
     func getVersion(req: GetCommitVersionRequest) async {
+        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> ")
         let requestingProxyUID: UID = req.requestingProxy
         myself.getGetCommitVersionRequests() += 1
 
-        guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
+        let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
+        // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
+        guard let lastVersionReplies = lp /* FIXME: (workaround for first runtime issue (rdar://101092612)): lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
@@ -139,6 +142,7 @@ public actor MasterDataActor {
         lastVersionReplies.replies[UInt(req.requestNum)] = rep
         assert(rep.prevVersion >= 0)
 
+        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> version: \(rep.version)")
         req.reply.send(&rep)
 
         assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
