@@ -424,7 +424,7 @@ public:
 		waitfor.push_back(self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos));
 		self->writingPos += pageData.size();
 
-		return waitForAll(waitfor);
+		return waitForAllReadyThenThrow(waitfor);
 	}
 
 	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem)
@@ -645,7 +645,7 @@ public:
 			for (int i = 0; i < 2; i++)
 				if (self->files[i].size > 0)
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
-			wait(waitForAll(reads));
+			wait(waitForAllReadyThenThrow(reads));
 
 			// Determine which file comes first
 			if (compare(self->firstPages[1], self->firstPages[0])) {
