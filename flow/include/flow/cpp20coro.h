@@ -38,9 +38,10 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 			// std::cerr << "promise_type()" << std::endl;
 		}
 		~promise_type() {
-			// std::cerr << "~promise_type()" << std::endl;
-			SAV<ReturnValue>::delFutureRef();
+			// std::cout << "~promise_type() " << SAV<ReturnValue>::getFutureReferenceCount() << " "
+			//           << SAV<ReturnValue>::getPromiseReferenceCount() << std::endl;
 		}
+
 		// TODO: FastAlloc
 		// Use the global new and delete operator for now. The state and the variables of the coroutine are also
 		// allocated in this promise_type struct, resulting in sizeof(promise_type) != size_t s . So we cannot use the
@@ -49,21 +50,29 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 			// std::cerr << "promise_type::new(" << s << ")" << std::endl;
 			return ::malloc(s);
 		}
-		static void operator delete(void* s) {
+		static void operator delete(void* p) {
 			// std::cerr << "promise_type::delete()" << std::endl;
-			::free(s);
+			::free(p);
 		}
 
 		Future<ReturnValue> get_return_object() noexcept { return Future<ReturnValue>(this); }
 
 		n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
-		n_coroutine::suspend_never final_suspend() const noexcept { return {}; }
+		n_coroutine::suspend_always final_suspend() noexcept {
+			// std::cerr << "final_suspend()" << SAV<ReturnValue>::getFutureReferenceCount() << " "
+			//           << SAV<ReturnValue>::getPromiseReferenceCount() << std::endl;
+
+			SAV<ReturnValue>::delPromiseRef();
+
+			return {};
+		}
 
 		template <class U>
 		void return_value(U&& value) {
 			// std::cerr << "return_value()" << std::endl;
-			SAV<ReturnValue>::send(std::forward<U>(value));
-			// SAV<ReturnValue>::delPromiseRef();
+			if (SAV<ReturnValue>::futures) {
+				SAV<ReturnValue>::send(std::forward<U>(value));
+			}
 		}
 
 		void unhandled_exception() {
@@ -73,7 +82,7 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 			try {
 				std::rethrow_exception(std::current_exception());
 			} catch (const Error& error) {
-				SAV<ReturnValue>::sendErrorAndDelPromiseRef(error);
+				SAV<ReturnValue>::sendError(error);
 			}
 		}
 
@@ -88,12 +97,14 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 				AwaitableFuture(Future<U> f, promise_type* pt) : Future<U>(f), pt(pt){};
 
 				~AwaitableFuture() {
-					if (cb)
+					if (cb) {
 						delete cb;
+						cb = nullptr;
+					}
 				}
 
 				bool await_ready() const {
-					// std::cerr << "await_ready " << awaiting_future.canGet() << std::endl;
+					// std::cerr << "await_ready " << std::endl;
 					return Future<U>::isValid() && Future<U>::isReady();
 				}
 
@@ -113,6 +124,8 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 					sf.addCallbackAndClear(cb);
 				}
 				U const& await_resume() {
+
+					// std::cerr << "await_resume wait_state:" << pt->actor_wait_state << std::endl;
 
 					// If actor is cancelled, then throw actor_cancelled()
 					if (pt->actor_wait_state < 0) {
@@ -141,15 +154,21 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 		void cancel() override {
 			// std::cerr << "cancel()" << std::endl;
 
-			auto wait_state = Actor<ReturnValue>::actor_wait_state;
+			auto prev_wait_state = Actor<ReturnValue>::actor_wait_state;
 
 			// Set wait state to -1
 			Actor<ReturnValue>::actor_wait_state = -1;
 
 			// If the actor is waiting, then resume the coroutine to throw actor_cancelled().
-			if (wait_state > 0) {
+			if (prev_wait_state > 0) {
 				h.resume();
 			}
+		}
+
+		virtual void destroy() override {
+			// std::cerr << "destroy()" << std::endl;
+
+			h.destroy();
 		}
 	};
 };
