@@ -68,6 +68,8 @@ using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(con
 // 1. Lookup by 'TenantId'
 // 2. Lookup by 'TenantPrefix'
 // 3. Lookup by 'TenantName'
+// TODO: Currently this cache performs poorly if the tenant mode is optional and majority of keys do not belong to a
+// tenant.
 
 template <class T>
 class TenantEntryCache : public ReferenceCounted<TenantEntryCache<T>>, NonCopyable {
