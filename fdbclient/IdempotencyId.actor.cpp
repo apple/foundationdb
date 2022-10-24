@@ -186,7 +186,7 @@ from gmpy2 import mpfr
 
 kIdmpKeySize = 17
 # Assume the worst case - one id per value
-kIdmpValSize = 8 + 1 * 18
+kIdmpValSize = 8 + 8 + 1 * 18
 kIdmpKVSize = kIdmpKeySize + kIdmpValSize
 kSampleProbability = kIdmpKVSize / (kIdmpKeySize + 100) / 250
 kSampleSize = int(kIdmpKVSize / min(1, kSampleProbability))
@@ -234,18 +234,20 @@ print(search())
 */
 
 // In tests we want to assert that the cleaner does not clean more than half its target bytes
-// 2193674 is chosen such that the probability of the actual size being less than half the estimate is less than 1e-9
-// See above for the python program used to calculate 2193674
-//
+// 2193749 is chosen such that the probability of the actual size being less than half the estimate is less than 1e-9
+// See above for the python program used to calculate 2193749
+static constexpr auto byteEstimateCutoff = 2193749;
+
 // range should always be a subset of the range from the last call
 ACTOR static Future<int64_t> idempotencyIdsEstimateSize(Reference<ReadYourWritesTransaction> tr,
                                                         KeyRange range,
-                                                        Optional<KeyRange>* cached) {
+                                                        Optional<KeyRange>* cached,
+                                                        int64_t byteTarget) {
 	state int64_t size = 0;
 	if (!cached->present()) {
 		wait(store(size, tr->getEstimatedRangeSizeBytes(range)));
 	}
-	if (size <= 2193674) {
+	if (cached->present() || (size <= byteEstimateCutoff && byteTarget <= 2 * byteEstimateCutoff)) {
 		if (!cached->present()) {
 			*cached = range;
 		} else {
@@ -316,7 +318,7 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
 				}
 
 				// Check if we're using more than our byte target
-				wait(store(idmpKeySize, idempotencyIdsEstimateSize(tr, idempotencyIdKeys, &cached)));
+				wait(store(idmpKeySize, idempotencyIdsEstimateSize(tr, idempotencyIdKeys, &cached, byteTarget)));
 				if (idmpKeySize <= byteTarget) {
 					break;
 				}
@@ -332,12 +334,18 @@ ACTOR Future<Void> idempotencyIdsCleaner(Database db,
 						candidateRangeToClean = KeyRangeRef(idempotencyIdKeys.begin, idempotencyIdKeys.begin);
 						break;
 					}
-					auto candidateEndKey = BinaryWriter::toValue(bigEndian64(candidateDeleteVersion + 1), Unversioned())
-					                           .withPrefix(idempotencyIdKeys.begin);
-					candidateRangeToClean = KeyRangeRef(firstKey, candidateEndKey);
-					wait(store(candidateDeleteSize, idempotencyIdsEstimateSize(tr, candidateRangeToClean, &cached)) &&
+					candidateRangeToClean =
+					    KeyRangeRef(firstKey,
+					                BinaryWriter::toValue(bigEndian64(candidateDeleteVersion + 1), Unversioned())
+					                    .withPrefix(idempotencyIdKeys.begin));
+					wait(store(candidateDeleteSize,
+					           idempotencyIdsEstimateSize(tr, candidateRangeToClean, &cached, byteTarget)) &&
 					     success(getBoundary(
 					         tr, candidateRangeToClean, Reverse::True, &candidateDeleteVersion, &candidateDeleteTime)));
+					candidateRangeToClean =
+					    KeyRangeRef(firstKey,
+					                BinaryWriter::toValue(bigEndian64(candidateDeleteVersion + 1), Unversioned())
+					                    .withPrefix(idempotencyIdKeys.begin));
 					int64_t youngestAge = int64_t(now()) - candidateDeleteTime;
 					TraceEvent("IdempotencyIdsCleanerCandidateDelete")
 					    .detail("Range", candidateRangeToClean.toString())

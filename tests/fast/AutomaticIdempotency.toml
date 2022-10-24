@@ -3,7 +3,6 @@ testTitle = 'AutomaticIdempotency'
 
     [[test.workload]]
     testName = 'AutomaticIdempotencyCorrectness'
-    minByteTarget = 200000
 
     [[test.workload]]
     testName='Attrition'

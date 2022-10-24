@@ -105,7 +105,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> testAll(AutomaticIdempotencyWorkload* self, Database db) {
-		wait(runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) { return logIdempotencyIds(self, tr); }));
+		wait(runRYWTransaction(db,
+		                       [=](Reference<ReadYourWritesTransaction> tr) { return logIdempotencyIds(self, tr); }));
 		wait(runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) { return testIdempotency(self, tr); }));
 		wait(testCleaner(self, db));
 		return self->ok;
@@ -163,7 +164,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			reader >> highOrderBatchIndex;
 			TraceEvent("IdempotencyIdWorkloadTransactionCommitted")
 			    .detail("CommitVersion", commitVersion)
-				.detail("HighOrderBatchIndex", highOrderBatchIndex)
+			    .detail("HighOrderBatchIndex", highOrderBatchIndex)
 			    .detail("Key", k)
 			    .detail("Id", v.idempotencyId)
 			    .detail("CreatedTime", v.createdTime);
@@ -247,7 +248,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	                                                  Database db,
 	                                                  ActorCollection* actors,
 	                                                  int64_t minAgeSeconds,
-	                                                  int64_t byteTarget) {
+	                                                  int64_t byteTarget,
+	                                                  const std::vector<int64_t>* createdTimes) {
 		state Future<Void> cleaner = idempotencyIdsCleaner(db, minAgeSeconds, byteTarget, self->pollingInterval);
 		state int64_t size;
 		state int64_t maxAge;
@@ -255,6 +257,14 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		actors->add(cleaner);
 		loop {
 			wait(store(size, getIdmpKeySize(db)) && store(maxAge, getMaxAge(self, db)));
+			// Max age could seem too low if there's a large gap in the age
+			// of entries, so account for this by making maxAge one more than
+			// the youngest age that actually got deleted.
+			auto iter = std::lower_bound(createdTimes->begin(), createdTimes->end(), maxAge);
+			if (iter != createdTimes->begin()) {
+				--iter;
+				maxAge = *iter + 1;
+			}
 			if (size > byteTarget * self->slop && maxAge > minAgeSeconds * self->slop) {
 				CODE_PROBE(true, "Idempotency cleaner more to clean");
 				TraceEvent("AutomaticIdempotencyCleanerMoreToClean")
@@ -290,14 +300,31 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<std::vector<int64_t>> getCreatedTimes(AutomaticIdempotencyWorkload* self,
+	                                                          Reference<ReadYourWritesTransaction> tr) {
+		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+		ASSERT(!result.more);
+		std::vector<int64_t> createdTimes;
+		for (const auto& [k, v] : result) {
+			auto e = ObjectReader::fromStringRef<ValueType>(v, Unversioned());
+			createdTimes.emplace_back(e.createdTime);
+		}
+		std::sort(createdTimes.begin(), createdTimes.end());
+		return createdTimes;
+	}
+
 	// Check that min age and byte target are respected. Also test that we can tolerate concurrent cleaners.
 	ACTOR static Future<Void> testCleaner(AutomaticIdempotencyWorkload* self, Database db) {
 		state ActorCollection actors;
 		state int64_t minAgeSeconds;
 		state int64_t byteTarget;
+		state std::vector<int64_t> createdTimes;
 
 		// Initialize the byteTarget and minAgeSeconds to match the current status
-		wait(store(byteTarget, getIdmpKeySize(db)) && store(minAgeSeconds, getMaxAge(self, db)));
+		wait(store(byteTarget, getIdmpKeySize(db)) && store(minAgeSeconds, getMaxAge(self, db)) &&
+		     store(createdTimes, runRYWTransaction(db, [self = self](Reference<ReadYourWritesTransaction> tr) {
+			           return getCreatedTimes(self, tr);
+		           })));
 
 		// Slowly and somewhat randomly allow the cleaner to do more cleaning. Observe that it cleans some, but not too
 		// much.
@@ -314,7 +341,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				break;
 			}
 			choose {
-				when(wait(testCleanerOneIteration(self, db, &actors, minAgeSeconds, byteTarget))) {}
+				when(wait(testCleanerOneIteration(self, db, &actors, minAgeSeconds, byteTarget, &createdTimes))) {}
 				when(wait(actors.getResult())) { ASSERT(false); }
 			}
 		}
