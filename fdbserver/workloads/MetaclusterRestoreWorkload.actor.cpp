@@ -149,15 +149,12 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 	}
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterRestoreWorkload* self) {
-		fmt::print("Setup start\n");
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-		fmt::print("Create thread safe handle\n");
 
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr)));
-		fmt::print("Create metacluster\n");
 
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 		state std::vector<std::string>::iterator extraDatabasesItr;
@@ -175,14 +172,12 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
 
 			wait(MetaclusterAPI::registerCluster(self->managementDb, clusterName, ccs, clusterEntry));
-			fmt::print("Register cluster {}\n", printable(clusterName));
 		}
 
 		while (self->createdTenants.size() < self->initialTenants) {
 			wait(createTenant(self, true));
 		}
 
-		fmt::print("Setup complete\n");
 		return Void();
 	}
 
@@ -195,8 +190,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		addDefaultBackupRanges(backupRanges);
 
-		fmt::print("Backup cluster start {}\n", printable(clusterName));
-
 		try {
 			wait(backupAgent.submitBackup(
 			    dataDb, backupContainer, {}, 0, 0, clusterName.toString(), backupRanges, StopWhenDone::True));
@@ -205,11 +198,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				throw;
 		}
 
-		fmt::print("Backup submitted {}\n", printable(clusterName));
-
 		state Reference<IBackupContainer> container;
 		wait(success(backupAgent.waitBackup(dataDb, clusterName.toString(), StopWhenDone::True, &container)));
-		fmt::print("Backup completed {} {}\n", printable(clusterName), container->getURL());
 		return container->getURL();
 	}
 
@@ -221,8 +211,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
 
-		fmt::print("Restore cluster start {}\n", printable(clusterName));
-
 		wait(runTransaction(dataDb.getReference(),
 		                    [backupRanges = backupRanges](Reference<ReadYourWritesTransaction> tr) {
 			                    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -232,11 +220,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			                    return Future<Void>(Void());
 		                    }));
 
-		fmt::print("Restore cleared data {}\n", printable(clusterName));
-
 		wait(success(backupAgent.restore(dataDb, dataDb, clusterName, StringRef(backupUrl), {}, backupRanges)));
-
-		fmt::print("Restore cluster {}\n", printable(clusterName));
 
 		wait(MetaclusterAPI::restoreCluster(self->managementDb,
 		                                    clusterName,
@@ -244,8 +228,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		                                    ApplyManagementClusterUpdates::True));
 
 		self->dataDbs[clusterName].restored = true;
-
-		fmt::print("Restore added back to metacluster {}\n", printable(clusterName));
 
 		return Void();
 	}
@@ -263,14 +245,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			return Void();
 		}
 
-		fmt::print("Create tenant {}\n", printable(tenantName));
-
 		loop {
 			try {
 				TenantMapEntry tenantEntry;
 				tenantEntry.tenantGroup = self->chooseTenantGroup();
 				wait(MetaclusterAPI::createTenant(self->managementDb, tenantName, tenantEntry));
-				fmt::print("Created tenant {}\n", printable(tenantName));
 				TenantMapEntry createdEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenantName));
 				self->createdTenants[tenantName] =
 				    TenantData(createdEntry.assignedCluster.get(), createdEntry.tenantGroup, beforeBackup);
@@ -282,13 +261,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				}
 				return Void();
 			} catch (Error& e) {
-				fmt::print("Tenant create error {} {}\n", e.what(), printable(tenantName));
 				if (e.code() != error_code_metacluster_no_capacity) {
 					throw;
 				}
 
 				wait(increaseMetaclusterCapacity(self));
-				fmt::print("Increased metacluster capacity {}\n", printable(tenantName));
 			}
 		}
 	}
@@ -305,8 +282,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		if (self->createdTenants.count(tenantName) == 0) {
 			return Void();
 		}
-
-		fmt::print("Delete tenant {}\n", printable(tenantName));
 
 		wait(MetaclusterAPI::deleteTenant(self->managementDb, tenantName));
 		auto const& tenantData = self->createdTenants[tenantName];
@@ -375,7 +350,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				}
 
 				wait(increaseMetaclusterCapacity(self));
-				fmt::print("Increased metacluster capacity {}\n", printable(tenantName));
 			}
 		}
 	}
@@ -514,7 +488,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			for (auto tenantName : clusterData.tenants) {
 				TenantData tenantData = self->createdTenants[tenantName];
 				if (tenantData.beforeBackup) {
-					fmt::print("Expected tenant: {}\n", printable(tenantName));
 					++expectedTenantCount;
 					auto tenantItr = tenantMap.find(tenantName);
 					ASSERT(tenantItr != tenantMap.end());
@@ -525,12 +498,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				}
 			}
 
-			fmt::print("Size check: {} {}\n", tenants.size(), expectedTenantCount);
-			for (auto tenant : tenants) {
-				fmt::print("Has tenant {}, {}\n",
-				           printable(tenant.first),
-				           clusterData.tenants.find(tenant.first) != clusterData.tenants.end());
-			}
 			ASSERT(tenants.size() == expectedTenantCount);
 		}
 

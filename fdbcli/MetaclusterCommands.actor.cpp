@@ -163,10 +163,20 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 
 // metacluster restore command
 ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() < 4 || tokens.size() > 6) {
+	if (tokens.size() != 5) {
 		fmt::print("Usage: metacluster restore <NAME> connection_string=<CONNECTION_STRING>\n"
-		           "[repopulate_from_data_cluster]\n\n");
-		fmt::print("Restore a data cluster.\n");
+		           "<restore_known_data_cluster|repopulate_from_data_cluster>\n\n");
+		fmt::print("Add a restored data cluster back to a metacluster.\n");
+		fmt::print("Use `restore_known_data_cluster' to add back a restored copy of a data cluster\n");
+		fmt::print("that the metacluster is already tracking. This mode should be used if only data\n");
+		fmt::print("clusters are being restored, and any discrepancies between the management and\n");
+		fmt::print("data clusters will be resolved using the management cluster metadata.\n");
+		fmt::print("Use `repopulate_from_data_cluster' to rebuild a lost management cluster from the\n");
+		fmt::print("data clusters in a metacluster. This mode should be used if the management\n");
+		fmt::print("cluster is being restored. If any data clusters are also being restored, the\n");
+		fmt::print("oldest data clusters should be added first before any non-recovered data\n");
+		fmt::print("clusters. Any discrepancies arising between the data clusters will be resolved\n");
+		fmt::print("using the data cluster that was added last.");
 		return false;
 	}
 
@@ -180,15 +190,19 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 		return false;
 	}
 
-	state bool restore_from_data_cluster = tokens.size() == 5;
-	if (restore_from_data_cluster) {
+	if (tokens[4] == "restore_known_data_cluster"_sr) {
 		wait(MetaclusterAPI::restoreCluster(
 		    db, tokens[2], config.get().first.get(), ApplyManagementClusterUpdates::True));
 
 		fmt::print("The cluster `{}' has been restored\n", printable(tokens[2]).c_str());
 		return true;
+	} else if (tokens[4] == "repopulate_from_data_cluster"_sr) {
+		fmt::print(stderr, "ERROR: the `repopulate_from_data_cluster' restore mode is not currently supported\n");
+		return false;
+	} else {
+		fmt::print(stderr, "ERROR: unrecognized restore mode `{}'\n", printable(tokens[4]));
+		return false;
 	}
-	return false;
 }
 
 // metacluster configure command
@@ -475,7 +489,7 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "<NAME>",
 			                                     "connection_string=<CONNECTION_STRING> ",
-			                                     "[repopulate_from_data_cluster]" };
+			                                     "<restore_known_data_cluster|repopulate_from_data_cluster>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "configure")) {
 		static std::vector<const char*> opts = {
@@ -503,7 +517,7 @@ CommandFactory metaclusterRegisterFactory(
         "`create_experimental' and `decommission' set up or deconfigure a metacluster.\n"
         "`register' and `remove' add and remove data clusters from the metacluster.\n"
         "`configure' updates the configuration of a data cluster.\n"
-        "`restore' restores the specified data cluster."
+        "`restore' is used to recover from lost management or data clusters.\n"
         "`list' prints a list of data clusters in the metacluster.\n"
         "`get' prints the metadata for a particular data cluster.\n"
         "`status' prints metacluster metadata.\n"),
