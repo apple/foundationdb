@@ -180,16 +180,16 @@ struct ExpireIdempotencyIdRequest {
 struct ExpireIdempotencyKeyValuePairRequest {
 	constexpr static FileIdentifier file_identifier = 11455947;
 	Version commitVersion = invalidVersion;
+	int16_t idempotencyIdCount = 0;
 	uint8_t batchIndexHighByte = 0;
-	uint8_t idempotencyIdCount = 0;
 
 	ExpireIdempotencyKeyValuePairRequest() {}
-	ExpireIdempotencyKeyValuePairRequest(Version commitVersion, uint8_t batchIndexHighByte, uint8_t idempotencyIdCount)
-	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte), idempotencyIdCount(idempotencyIdCount) {}
+	ExpireIdempotencyKeyValuePairRequest(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
+	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, commitVersion, batchIndexHighByte, idempotencyIdCount);
+		serializer(ar, commitVersion, idempotencyIdCount, batchIndexHighByte);
 	}
 };
 

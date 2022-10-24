@@ -6150,6 +6150,7 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
                                                                   IdempotencyIdRef idempotencyId) {
 	state Transaction tr(trState->cx);
 	state int retries = 0;
+	state Version expiredVersion;
 	state Span span("NAPI:determineCommitStatus"_loc, trState->spanContext);
 	tr.span.setParent(span.context);
 	loop {
@@ -6161,17 +6162,20 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			Optional<Value> expiredVal = wait(tr.get(idempotencyIdsExpiredVersion));
 			if (expiredVal.present()) {
-				Version expiredVersion =
+				expiredVersion =
 				    ObjectReader::fromStringRef<IdempotencyIdsExpiredVersion>(expiredVal.get(), Unversioned()).expired;
 				if (expiredVersion >= minPossibleCommitVersion) {
 					throw commit_unknown_result_fatal();
 				}
+			} else {
+				expiredVersion = 0;
 			}
 			Version rv = wait(tr.getReadVersion());
 			TraceEvent("DetermineCommitStatusAttempt")
 			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
 			    .detail("Retries", retries)
 			    .detail("ReadVersion", rv)
+			    .detail("ExpiredVersion", expiredVersion)
 			    .detail("MinPossibleCommitVersion", minPossibleCommitVersion)
 			    .detail("MaxPossibleCommitVersion", maxPossibleCommitVersion);
 			KeyRange possibleRange =

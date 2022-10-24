@@ -105,9 +105,41 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> testAll(AutomaticIdempotencyWorkload* self, Database db) {
+		wait(runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) { return logIdempotencyIds(self, tr); }));
 		wait(runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) { return testIdempotency(self, tr); }));
 		wait(testCleaner(self, db));
 		return self->ok;
+	}
+
+	ACTOR static Future<Void> logIdempotencyIds(AutomaticIdempotencyWorkload* self,
+	                                            Reference<ReadYourWritesTransaction> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		RangeResult result = wait(tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY));
+		ASSERT(!result.more);
+		for (const auto& [k, v] : result) {
+			BinaryReader reader(k, Unversioned());
+			reader.readBytes(idempotencyIdKeys.begin.size());
+			Version commitVersion;
+			reader >> commitVersion;
+			commitVersion = bigEndian64(commitVersion);
+			uint8_t highOrderBatchIndex;
+			reader >> highOrderBatchIndex;
+			BinaryReader valReader(v, IncludeVersion());
+			int64_t timestamp; // ignored
+			valReader >> timestamp;
+			while (!valReader.empty()) {
+				uint8_t length;
+				valReader >> length;
+				StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
+				uint8_t lowOrderBatchIndex;
+				valReader >> lowOrderBatchIndex;
+				TraceEvent("IdempotencyIdWorkloadIdCommitted")
+				    .detail("CommitVersion", commitVersion)
+				    .detail("HighOrderBatchIndex", highOrderBatchIndex)
+				    .detail("Id", id);
+			}
+		}
+		return Void();
 	}
 
 	// Check that each transaction committed exactly once.
@@ -122,7 +154,16 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 		for (const auto& [k, rawValue] : result) {
 			auto v = ObjectReader::fromStringRef<ValueType>(rawValue, Unversioned());
+			BinaryReader reader(k, Unversioned());
+			reader.readBytes(self->keyPrefix.size());
+			Version commitVersion;
+			reader >> commitVersion;
+			commitVersion = bigEndian64(commitVersion);
+			uint8_t highOrderBatchIndex;
+			reader >> highOrderBatchIndex;
 			TraceEvent("IdempotencyIdWorkloadTransactionCommitted")
+			    .detail("CommitVersion", commitVersion)
+				.detail("HighOrderBatchIndex", highOrderBatchIndex)
 			    .detail("Key", k)
 			    .detail("Id", v.idempotencyId)
 			    .detail("CreatedTime", v.createdTime);
@@ -168,6 +209,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 					uint8_t highOrderBatchIndex;
 					keyReader >> highOrderBatchIndex;
 					BinaryReader valReader(v.begin(), v.size(), IncludeVersion());
+					int64_t timeStamp; // ignored
+					valReader >> timeStamp;
 					uint8_t length;
 					valReader >> length;
 					StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };

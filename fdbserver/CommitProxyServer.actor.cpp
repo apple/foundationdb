@@ -1873,7 +1873,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	    pProxyCommitData->db->get().client.commitProxies.size()
 	        ? deterministicRandom()->randomChoice(pProxyCommitData->db->get().client.commitProxies)
 	        : CommitProxyInterface();
-	std::unordered_map<uint8_t, uint8_t> idCountsForKey;
+	std::unordered_map<uint8_t, int16_t> idCountsForKey;
 	for (int t = 0; t < self->trs.size(); t++) {
 		auto& tr = self->trs[t];
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
@@ -1919,11 +1919,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			}
 		}
 
-		for (auto [highOrderBatchIndex, count] : idCountsForKey) {
-			idempotencyIdProxy.expireIdempotencyKeyValuePair.send(
-			    ExpireIdempotencyKeyValuePairRequest{ self->commitVersion, highOrderBatchIndex, count });
-		}
-
 		// Update corresponding transaction indices on each resolver
 		for (int resolverInd : self->transactionResolverMap[t])
 			self->nextTr[resolverInd]++;
@@ -1937,6 +1932,10 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			                  std::numeric_limits<int>::max());
 			pProxyCommitData->stats.commitLatencyBands.addMeasurement(duration, filter);
 		}
+	}
+	for (auto [highOrderBatchIndex, count] : idCountsForKey) {
+		idempotencyIdProxy.expireIdempotencyKeyValuePair.send(
+		    ExpireIdempotencyKeyValuePairRequest{ self->commitVersion, count, highOrderBatchIndex });
 	}
 
 	++pProxyCommitData->stats.commitBatchOut;
@@ -2529,6 +2528,8 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
     PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
     RequestStream<ExpireIdempotencyKeyValuePairRequest> expireIdempotencyKeyValuePair) {
 	state std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
+	state std::unordered_map<IdempotencyKey, ExpireServerEntry>::iterator iter;
+	state int64_t purgeBefore;
 	state ActorCollection actors;
 	state IdempotencyKey key;
 	state ExpireServerEntry* status = nullptr;
@@ -2547,18 +2548,17 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 			}
 			when(wait(purgeOld)) {
 				purgeOld = delay(10);
-				int64_t purgeBefore = now() - 10;
-				for (auto iter = idStatus.begin(); iter != idStatus.end();) {
-					if (check_yield()) {
-						break;
-					}
+				purgeBefore = now() - 10;
+				for (iter = idStatus.begin(); iter != idStatus.end();) {
+					// We have exclusive access to idStatus in this when block, so iter will still be valid after the
+					// wait
+					wait(yield());
 					if (iter->second.timeReceived < purgeBefore) {
 						iter = idStatus.erase(iter);
 					} else {
 						++iter;
 					}
 				}
-				wait(yield());
 				continue;
 			}
 		}
