@@ -1,8 +1,8 @@
+storageEngineExcludeTypes = [4, 5]
 testTitle=ClientTransactionProfilingCorrectness
 clearAfterTest=true
 timeout=2100
 runSetup=true
-storageEngineExcludeTypes = [4, 5]
 
     testName=ApiCorrectness
     numKeys=5000
