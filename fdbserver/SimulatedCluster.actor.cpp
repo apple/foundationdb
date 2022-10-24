@@ -2172,6 +2172,19 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 
+	for (const auto& coordinators : extraCoordinatorAddresses) {
+		for (int i = 0; i < (coordinators.size() / 2) + 1; i++) {
+			TraceEvent("ProtectCoordinator")
+			    .detail("Address", coordinators[i])
+			    .detail("Coordinators", describe(coordinators));
+			g_simulator->protectedAddresses.insert(
+			    NetworkAddress(coordinators[i].ip, coordinators[i].port, true, coordinators[i].isTLS()));
+			if (coordinators[i].port == 2) {
+				g_simulator->protectedAddresses.insert(NetworkAddress(coordinators[i].ip, 1, true, true));
+			}
+		}
+	}
+
 	ASSERT_EQ(coordinatorAddresses.size(), coordinatorCount);
 	ClusterConnectionString conn(coordinatorAddresses, "TestCluster:0"_sr);
 	if (useHostname) {

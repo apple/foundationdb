@@ -1350,7 +1350,8 @@ public:
 	bool isAvailable() const override {
 		std::vector<ProcessInfo*> processesLeft, processesDead;
 		for (auto processInfo : getAllProcesses()) {
-			if (processInfo->isAvailableClass()) {
+			if (processInfo->isAvailableClass() &&
+			    !processInfo->drProcess) { // Only checks availability of main cluster
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					processesDead.push_back(processInfo);
 				} else {
@@ -1866,7 +1867,7 @@ public:
 			int protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
 			for (auto processInfo : getAllProcesses()) {
-				if (processInfo->isAvailableClass()) {
+				if (processInfo->isAvailableClass() && processInfo->drProcess != isMainCluster) {
 					if (processInfo->isExcluded()) {
 						processesDead.push_back(processInfo);
 						excluded++;
@@ -2083,7 +2084,7 @@ public:
 		                   (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))) {
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
-				if (processInfo->isAvailableClass()) {
+				if (processInfo->isAvailableClass() && !processInfo->drProcess) { // TODO: Reboot DR processes as well
 					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
 					} else if (protectedAddresses.count(processInfo->address) ||
