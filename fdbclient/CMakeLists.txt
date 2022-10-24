@@ -74,11 +74,54 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINA
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 
+# Setup the Swift sources in FDBClient.
+include(FindSwiftLibs)
+add_library(fdbclient_swift STATIC
+        notified_support.swift
+        )
+
+target_include_directories(fdbclient_swift PUBLIC
+        "${CMAKE_BINARY_DIR}/flow/include"
+        "${CMAKE_BINARY_DIR}/flow/"
+        "${CMAKE_BINARY_DIR}/fdbclient/include"
+        "${CMAKE_SOURCE_DIR}/fdbrpc/include"
+        "${CMAKE_BINARY_DIR}/fdbrpc/include"
+        "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
+        "${CMAKE_SOURCE_DIR}/contrib/md5/include"
+        "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
+        "${CMAKE_SOURCE_DIR}/contrib/sqlite"
+        "${CMAKE_BINARY_DIR}/boost_install/include"
+        "${CMAKE_BINARY_DIR}/msgpackProject-prefix/src/msgpackProject/include"
+        )
+
+# TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
+target_include_directories(fdbclient_swift PRIVATE
+        "/opt/rh/devtoolset-8/root/usr/include/c++/8/x86_64-redhat-linux/"
+        "/opt/rh/devtoolset-8/root/usr/lib/gcc/x86_64-redhat-linux/8/../../../../include/c++/8"
+        )
+
 # Generate the module map for FDBClient.
 include(GenerateModulemap)
 set(FDBCLIENT_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbclient")
 generate_modulemap("${CMAKE_BINARY_DIR}/fdbclient/include" "FDBClient" fdbclient
 )
+
+# TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
+target_compile_options(fdbclient_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml>")
+
+# Ensure that C++ code in fdbclient can import Swift using a compatibility header.
+include(SwiftToCXXInterop)
+generate_cxx_compat_header(fdbclient_swift "FDBClient")
+
+add_dependencies(fdbclient_swift flow_swift)
+# This does not work! (see rdar://99107402)
+# target_link_libraries(flow PRIVATE flow_swift)
+add_dependencies(fdbclient fdbclient_swift)
+
+target_link_options(fdbclient_swift PUBLIC "$<TARGET_OBJECTS:flow_swift>")
+target_link_options(fdbclient PRIVATE "$<TARGET_OBJECTS:flow_swift>")
+
+target_link_options(fdbclient PRIVATE "$<TARGET_OBJECTS:fdbclient_swift>")
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling

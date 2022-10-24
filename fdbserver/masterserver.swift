@@ -2,6 +2,7 @@ import Flow
 import flow_swift
 import FDBServer
 import FDBClient
+import fdbclient_swift
 
 ///
 /// ```
@@ -67,12 +68,8 @@ public actor MasterDataActor {
         }
 
         // CODE_PROBE(lastVersionReplies.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up")
-
-        // BEFORE:
-        // wait(lastVersionReplies.latestRequestNum.whenAtLeast(req.requestNum - 1))
-        var latestRequestNumFuture = lastVersionReplies.getLatestRequestNumRef()
-                .whenAtLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
-        let latestRequestNum = try! await latestRequestNumFuture.waitValue
+        var latestRequestNum = try! await lastVersionReplies.getLatestRequestNumRef()
+                .atLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
 
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
         if lastVersionReplies.replies.count(UInt(req.requestNum)) != 0 {
