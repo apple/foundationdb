@@ -48,6 +48,7 @@
 #endif
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
+#include "fdbserver/RocksDBLogForwarder.h"
 #include "flow/ActorCollection.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
@@ -202,6 +203,9 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+
+	options.info_log = std::shared_ptr<rocksdb::Logger>(new RocksDBLogForwarder(id, options.info_log_level));
+
 	return options;
 }
 
