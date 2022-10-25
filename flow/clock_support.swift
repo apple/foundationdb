@@ -59,11 +59,6 @@ extension FlowClock: Clock {
         var nanoseconds = Int64(0)
 
         nanoseconds += Duration.milliseconds(100).nanoseconds
-        // let now = flow_gNetwork_now()
-//        _getClockRes(
-//                seconds: &seconds,
-//                nanoseconds: &nanoseconds,
-//                clock: _ClockID.flow.rawValue)
 
         return .seconds(seconds) + .nanoseconds(nanoseconds)
     }
@@ -76,11 +71,6 @@ extension FlowClock: Clock {
         var nowDouble: Double = flow_gNetwork_now()
         seconds += Duration.seconds(nowDouble).seconds
         nanoseconds = Duration.seconds(nowDouble).nanoseconds
-
-//        _getTime(
-//                seconds: &seconds,
-//                nanoseconds: &nanoseconds,
-//                clock: _ClockID.flow.rawValue)
 
         return FlowClock.Instant(_value: .seconds(seconds) + .nanoseconds(nanoseconds))
     }
