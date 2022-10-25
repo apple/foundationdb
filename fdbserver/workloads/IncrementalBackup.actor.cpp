@@ -254,6 +254,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                       Key(),
 				                                       Key(),
 				                                       LockDB::True,
+				                                       UnlockDB::True,
 				                                       OnlyApplyMutationLogs::True,
 				                                       InconsistentSnapshotOnly::False,
 				                                       beginVersion)));
@@ -271,6 +272,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       Key(),
 			                                       Key(),
 			                                       LockDB::True,
+			                                       UnlockDB::True,
 			                                       OnlyApplyMutationLogs::True,
 			                                       InconsistentSnapshotOnly::False,
 			                                       beginVersion)));

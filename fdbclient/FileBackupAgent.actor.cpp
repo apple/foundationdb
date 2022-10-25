@@ -167,6 +167,7 @@ public:
 	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() { return configSpace.pack(__FUNCTION__sr); }
@@ -3436,6 +3437,8 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 
 		state RestoreConfig restore(task);
 		restore.stateEnum().set(tr, ERestoreState::COMPLETED);
+		state bool unlockDB = wait(restore.unlockDBAfterRestore().getD(tr, Snapshot::False, true));
+
 		tr->atomicOp(metadataVersionKey, metadataVersionRequiredValue, MutationRef::SetVersionstampedValue);
 		// Clear the file map now since it could be huge.
 		restore.fileSet().clear(tr);
@@ -3451,7 +3454,9 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 		restore.clearApplyMutationsKeys(tr);
 
 		wait(taskBucket->finish(tr, task));
-		wait(unlockDatabase(tr, restore.getUid()));
+		if (unlockDB) {
+			wait(unlockDatabase(tr, restore.getUid()));
+		}
 
 		return Void();
 	}
@@ -5210,6 +5215,7 @@ public:
 	                                        Key addPrefix,
 	                                        Key removePrefix,
 	                                        LockDB lockDB,
+	                                        UnlockDB unlockDB,
 	                                        OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                        InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                        Version beginVersion,
@@ -5283,6 +5289,7 @@ public:
 		restore.onlyApplyMutationLogs().set(tr, onlyApplyMutationLogs);
 		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
+		restore.unlockDBAfterRestore().set(tr, unlockDB);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
@@ -5874,6 +5881,7 @@ public:
 	                                     Key addPrefix,
 	                                     Key removePrefix,
 	                                     LockDB lockDB,
+	                                     UnlockDB unlockDB,
 	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                     Version beginVersion,
@@ -5930,6 +5938,7 @@ public:
 				                   addPrefix,
 				                   removePrefix,
 				                   lockDB,
+				                   unlockDB,
 				                   onlyApplyMutationLogs,
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
@@ -6081,24 +6090,74 @@ public:
 			return -1;
 		} else {
 			TraceEvent("AS_StartRestore").log();
-			Version ver = wait(restore(backupAgent,
-			                           cx,
-			                           cx,
-			                           tagName,
-			                           KeyRef(bc->getURL()),
-			                           bc->getProxy(),
-			                           ranges,
-			                           WaitForComplete::True,
-			                           ::invalidVersion,
-			                           Verbose::True,
-			                           addPrefix,
-			                           removePrefix,
-			                           LockDB::True,
-			                           OnlyApplyMutationLogs::False,
-			                           InconsistentSnapshotOnly::False,
-			                           ::invalidVersion,
-			                           {},
-			                           randomUid));
+			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
+			bool containsSystemKeys = false;
+			bool encryptionEnabled = cx->clientInfo->get().isEncryptionEnabled;
+			for (auto r : ranges) {
+				if (!encryptionEnabled || !r.intersects(getSystemBackupRanges())) {
+					restoreRange.push_back_deep(restoreRange.arena(), r);
+				} else {
+					containsSystemKeys = true;
+				}
+			}
+			if (containsSystemKeys) {
+				// restore system keys
+				wait(success(restore(backupAgent,
+				                     cx,
+				                     cx,
+				                     "system_restore"_sr,
+				                     KeyRef(bc->getURL()),
+				                     bc->getProxy(),
+				                     getSystemBackupRanges(),
+				                     WaitForComplete::True,
+				                     ::invalidVersion,
+				                     Verbose::True,
+				                     addPrefix,
+				                     removePrefix,
+				                     LockDB::True,
+				                     UnlockDB::False,
+				                     OnlyApplyMutationLogs::False,
+				                     InconsistentSnapshotOnly::False,
+				                     ::invalidVersion,
+				                     {},
+				                     randomUid)));
+				state Reference<ReadYourWritesTransaction> rywTransaction =
+				    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+				// clear old restore config associated with system keys
+				loop {
+					try {
+						rywTransaction->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						rywTransaction->setOption(FDBTransactionOptions::LOCK_AWARE);
+						Optional<Value> val = wait(rywTransaction->get(databaseLockedKey));
+						state RestoreConfig oldRestore(randomUid);
+						oldRestore.clear(rywTransaction);
+						wait(rywTransaction->commit());
+						break;
+					} catch (Error& e) {
+						wait(rywTransaction->onError(e));
+					}
+				}
+			}
+			// restore user data
+			state Version ver = wait(restore(backupAgent,
+			                                 cx,
+			                                 cx,
+			                                 tagName,
+			                                 KeyRef(bc->getURL()),
+			                                 bc->getProxy(),
+			                                 restoreRange,
+			                                 WaitForComplete::True,
+			                                 ::invalidVersion,
+			                                 Verbose::True,
+			                                 addPrefix,
+			                                 removePrefix,
+			                                 LockDB::True,
+			                                 UnlockDB::True,
+			                                 OnlyApplyMutationLogs::False,
+			                                 InconsistentSnapshotOnly::False,
+			                                 ::invalidVersion,
+			                                 {},
+			                                 randomUid));
 			return ver;
 		}
 	}
@@ -6158,6 +6217,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Key addPrefix,
                                          Key removePrefix,
                                          LockDB lockDB,
+                                         UnlockDB unlockDB,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
@@ -6175,6 +6235,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    addPrefix,
 	                                    removePrefix,
 	                                    lockDB,
+	                                    unlockDB,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    beginVersion,
@@ -6216,6 +6277,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               addPrefix,
 	               removePrefix,
 	               lockDB,
+	               UnlockDB::True,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
 	               beginVersion,

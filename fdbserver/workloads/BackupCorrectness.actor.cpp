@@ -543,6 +543,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		                                  Key(),
 		                                  Key(),
 		                                  self->locked,
+		                                  UnlockDB::True,
 		                                  OnlyApplyMutationLogs::False,
 		                                  InconsistentSnapshotOnly::False,
 		                                  ::invalidVersion,
@@ -708,6 +709,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				}
 				self->restoreRanges = modifiedRestoreRanges;
 				if (hasSystemRanges) {
+					// We are able to restore system keys first since we restore an entire cluster at once rather than
+					// partial key ranges.
 					wait(clearAndRestoreSystemKeys(cx, self, &backupAgent, targetVersion, lastBackupContainer));
 				}
 				if (deterministicRandom()->random01() < 0.5) {
@@ -757,6 +760,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       Key(),
 					                                       Key(),
 					                                       self->locked,
+					                                       UnlockDB::True,
 					                                       OnlyApplyMutationLogs::False,
 					                                       InconsistentSnapshotOnly::False,
 					                                       ::invalidVersion,
@@ -789,6 +793,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 							                                             Key(),
 							                                             Key(),
 							                                             self->locked,
+							                                             UnlockDB::True,
 							                                             OnlyApplyMutationLogs::False,
 							                                             InconsistentSnapshotOnly::False,
 							                                             ::invalidVersion,
