@@ -87,16 +87,6 @@ void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
     latestRequestNum.set(v);
 }
 
-// FIXME: remove once runtime issue #1 is fixed (rdar://101092612).
-CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterData *rd, UID value) {
-	auto &map = rd->lastCommitProxyVersionReplies;
-	auto it = map.find(value);
-	if (it == map.end())
-		return nullptr;
-	CommitProxyVersionReplies *pret = &(*it).second;
-	return pret;
-}
-
 ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =

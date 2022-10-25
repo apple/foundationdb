@@ -180,8 +180,5 @@ void swift_workaround_releaseMasterData(MasterData *rd);
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
 
-// FIXME: remove once runtime issue #1 is fixed (rdar://101092612).
-CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterData *rd, UID value);
-
 #include "flow/unactorcompiler.h"
 #endif
