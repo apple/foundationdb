@@ -151,6 +151,15 @@ public:
 
 	~PriorityMultiLock() { prioritylock_printf("destruct"); }
 
+	void kill() {
+		brokenOnDestruct.sendError(broken_promise());
+		fRunner.cancel();
+		runners.clear();
+		for (auto& w : waiters) {
+			w.clear();
+		}
+	}
+
 	Future<Lock> lock(int priority = 0) {
 		prioritylock_printf("lock begin %s\n", toString().c_str());
 
@@ -1804,9 +1813,17 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 }
 
 // Holds an index of recently used objects.
-// ObjectType must have the methods
-//   bool evictable() const;            // return true if the entry can be evicted
-//   Future<Void> onEvictable() const;  // ready when entry can be evicted
+// ObjectType must have these methods
+//
+//   // Returns true iff the entry can be evicted
+//   bool evictable() const;
+//
+//	 // Ready when object is safe to evict from cache
+//   Future<Void> onEvictable() const;
+//
+//   // Ready when object destruction is safe
+//   // Should cancel pending async operations that are safe to cancel when cache is being destroyed
+//   Future<Void> cancel() const;
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 	struct Entry;
@@ -2029,7 +2046,7 @@ public:
 	}
 
 	// Clears the cache, saving the entries to second cache, then waits for each item to be evictable and evicts it.
-	ACTOR static Future<Void> clear_impl(ObjectCache* self) {
+	ACTOR static Future<Void> clear_impl(ObjectCache* self, bool waitForSafeEviction) {
 		// Claim ownership of all of our cached items, removing them from the evictor's control and quota.
 		for (auto& ie : self->cache) {
 			self->pEvictor->reclaim(ie.second);
@@ -2041,16 +2058,15 @@ public:
 
 		state typename CacheT::iterator i = self->cache.begin();
 		while (i != self->cache.end()) {
-			if (!i->second.item.evictable()) {
-				wait(i->second.item.onEvictable());
-			}
+			wait(waitForSafeEviction ? i->second.item.onEvictable() : i->second.item.cancel());
 			++i;
 		}
+		self->cache.clear();
 
 		return Void();
 	}
 
-	Future<Void> clear() { return clear_impl(this); }
+	Future<Void> clear(bool waitForSafeEviction = false) { return clear_impl(this, waitForSafeEviction); }
 
 	// Move the prioritized evictions queued to the front of the eviction order
 	void flushPrioritizedEvictions() { pEvictor->moveIn(prioritizedEvictions); }
@@ -2111,6 +2127,13 @@ public:
 		// Entry is evictable when its write and read futures are ready, even if they are
 		// errors, so any buffers they hold are no longer needed by the underlying file actors
 		Future<Void> onEvictable() const { return ready(readFuture) && ready(writeFuture); }
+
+		// Read and write futures are safe to cancel so just cancel them and return
+		Future<Void> cancel() {
+			writeFuture.cancel();
+			readFuture.cancel();
+			return Void();
+		}
 	};
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 
@@ -2658,14 +2681,15 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
-	ACTOR static Future<Void> writePhysicalBlock(DWALPager* self,
-	                                             Reference<ArenaPage> page,
-	                                             int blockNum,
-	                                             int blockSize,
-	                                             PhysicalPageID pageID,
-	                                             PagerEventReasons reason,
-	                                             unsigned int level,
-	                                             bool header) {
+	// Write one block of a page of a physical page in the page file.  Futures returned must be allowed to complete.
+	ACTOR static UNCANCELLABLE Future<Void> writePhysicalBlock(DWALPager* self,
+	                                                           Reference<ArenaPage> page,
+	                                                           int blockNum,
+	                                                           int blockSize,
+	                                                           PhysicalPageID pageID,
+	                                                           PagerEventReasons reason,
+	                                                           unsigned int level,
+	                                                           bool header) {
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
@@ -2689,7 +2713,11 @@ public:
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		debug_printf("DWALPager(%s) op=writeBlock %s\n", self->filename.c_str(), toString(pageID).c_str());
 		wait(self->pageFile->write(page->rawData() + (blockNum * blockSize), blockSize, (int64_t)pageID * blockSize));
-		debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
+
+		// This next line could crash on shutdown because this actor can't be cancelled so self could be destroyed after
+		// write, so enable this line with caution when debugging.
+		// debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
+
 		return Void();
 	}
 
@@ -2713,6 +2741,7 @@ public:
 		return Void();
 	}
 
+	// All returned futures are added to the operations vector
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
 	                               unsigned int level,
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
@@ -2936,18 +2965,19 @@ public:
 	}
 	void freeExtent(LogicalPageID pageID) override { freeExtent_impl(this, pageID); }
 
-	ACTOR static Future<int> readPhysicalBlock(DWALPager* self,
-	                                           uint8_t* data,
-	                                           int blockSize,
-	                                           int64_t offset,
-	                                           int priority) {
+	ACTOR static UNCANCELLABLE Future<int> readPhysicalBlock(DWALPager* self,
+	                                                         Reference<ArenaPage> pageBuffer,
+	                                                         int pageOffset,
+	                                                         int blockSize,
+	                                                         int64_t offset,
+	                                                         int priority) {
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
 		++g_redwoodMetrics.metric.pagerDiskRead;
-		int bytes = wait(self->pageFile->read(data, blockSize, offset));
+		int bytes = wait(self->pageFile->read(pageBuffer->rawData() + pageOffset, blockSize, offset));
 		return bytes;
 	}
 
-	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
+	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock.
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
@@ -2964,11 +2994,8 @@ public:
 		             page->rawData(),
 		             header);
 
-		int readBytes = wait(readPhysicalBlock(self,
-		                                       page->rawData(),
-		                                       page->rawSize(),
-		                                       (int64_t)pageID * page->rawSize(),
-		                                       std::min(priority, ioMaxPriority)));
+		int readBytes = wait(readPhysicalBlock(
+		    self, page, 0, page->rawSize(), (int64_t)pageID * page->rawSize(), std::min(priority, ioMaxPriority)));
 		debug_printf("DWALPager(%s) op=readPhysicalDiskReadComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
@@ -3031,8 +3058,8 @@ public:
 		state int blockSize = self->physicalPageSize;
 		std::vector<Future<int>> reads;
 		for (int i = 0; i < pageIDs.size(); ++i) {
-			reads.push_back(readPhysicalBlock(
-			    self, page->rawData() + (i * blockSize), blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
+			reads.push_back(
+			    readPhysicalBlock(self, page, i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
 		}
 		// wait for all the parallel read futures
 		wait(waitForAll(reads));
@@ -3269,8 +3296,8 @@ public:
 			currentOffset = i * physicalReadSize;
 			debug_printf("DWALPager(%s) current offset %" PRId64 "\n", self->filename.c_str(), currentOffset);
 			++g_redwoodMetrics.metric.pagerDiskRead;
-			reads.push_back(
-			    self->pageFile->read(extent->rawData() + currentOffset, physicalReadSize, startOffset + currentOffset));
+			reads.push_back(self->readPhysicalBlock(
+			    self, extent, currentOffset, physicalReadSize, startOffset + currentOffset, ioMaxPriority));
 		}
 
 		// Handle the last read separately as it may be smaller than physicalReadSize
@@ -3282,8 +3309,8 @@ public:
 			             currentOffset,
 			             lastReadSize);
 			++g_redwoodMetrics.metric.pagerDiskRead;
-			reads.push_back(
-			    self->pageFile->read(extent->rawData() + currentOffset, lastReadSize, startOffset + currentOffset));
+			reads.push_back(self->readPhysicalBlock(
+			    self, extent, currentOffset, lastReadSize, startOffset + currentOffset, ioMaxPriority));
 		}
 
 		// wait for all the parallel read futures for the given extent
@@ -3748,30 +3775,36 @@ public:
 	Value getCommitRecord() const override { return lastCommittedHeader.userCommitRecord; }
 
 	ACTOR void shutdown(DWALPager* self, bool dispose) {
+		// Send to the error promise first and then delay(0) to give users a chance to cancel
+		// any outstanding operations
+		if (self->errorPromise.canBeSet()) {
+			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
+			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
+		}
+		wait(delay(0));
+
+		// The next section explicitly cancels all pending operations held in the pager
+		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
+		self->ioLock.kill();
+
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
 		self->commitFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
+		debug_printf("DWALPager(%s) shutdown kill file extension\n", self->filename.c_str());
+		self->fileExtension.cancel();
 
-		if (self->errorPromise.canBeSet()) {
-			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
-			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
+		debug_printf("DWALPager(%s) shutdown cancel operations\n", self->filename.c_str());
+		for (auto& f : self->operations) {
+			f.cancel();
 		}
-
-		// Must wait for pending operations to complete, canceling them can cause a crash because the underlying
-		// operations may be uncancellable and depend on memory from calling scope's page reference
-		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
-
-		// Pending ops must be all ready, errors are okay
-		wait(waitForAllReady(self->operations));
 		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->extentCache.clear());
 		wait(self->pageCache.clear());
-		wait(delay(0));
 
 		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
 		             self->filename.c_str(),
@@ -3996,7 +4029,11 @@ private:
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise;
 	Future<Void> commitFuture;
+
+	// The operations vector is used to hold all disk writes made by the Pager, but could also hold
+	// other operations that need to be waited on before a commit can finish.
 	std::vector<Future<Void>> operations;
+
 	Future<Void> recoverFuture;
 	Future<Void> remapCleanupFuture;
 	bool remapCleanupStop;

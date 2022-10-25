@@ -429,7 +429,7 @@ public:
 		waitfor.push_back(self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos));
 		self->writingPos += pageData.size();
 
-		return waitForAll(waitfor);
+		return waitForAllReadyThenThrow(waitfor);
 	}
 
 	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem)
@@ -655,7 +655,7 @@ public:
 			for (int i = 0; i < 2; i++)
 				if (self->files[i].size > 0)
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
-			wait(waitForAll(reads));
+			wait(waitForAllReadyThenThrow(reads));
 
 			// Determine which file comes first
 			if (compare(self->firstPages[1], self->firstPages[0])) {
@@ -743,14 +743,17 @@ public:
 	}
 
 	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
-	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
+	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self,
+	                                                              int file,
+	                                                              int pageOffset,
+	                                                              int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
 		if (file == 1)
 			ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos);
-		int bytesRead = wait(uncancellable(holdWhile(
-		    result, self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)))));
+		int bytesRead =
+		    wait(self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)));
 		ASSERT_WE_THINK(bytesRead == bytesRequested);
 		return result;
 	}

@@ -52,7 +52,7 @@ public:
 
 		state Reference<CacheBlock> block(new CacheBlock(length));
 		try {
-			int len = wait(f->m_f->read(block->data, length, offset));
+			int len = wait(uncancellable(holdWhile(block, f->m_f->read(block->data, length, offset))));
 			block->len = len;
 		} catch (Error& e) {
 			f->m_max_concurrent_reads.release(1);
