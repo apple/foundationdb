@@ -607,6 +607,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 	ActorCollection* ptr = &actors; // get around ACTOR syntax restriction
 	std::for_each(mgs->allServers.begin(), mgs->allServers.end(), [ptr](auto& server) {
 		ptr->add(server.second.run());
+		IFailureMonitor::failureMonitor().setStatus(server.second.ssi.address(), FailureStatus(false));
 		server.second.metrics.byteSample.sample.insert("something"_sr, 500000);
 	});
 
