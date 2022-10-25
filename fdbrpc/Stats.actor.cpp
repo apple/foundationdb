@@ -138,8 +138,11 @@ void LatencyBands::insertBand(double value) {
 	bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
 }
 
-LatencyBands::LatencyBands(std::string const& name, UID id, double loggingInterval)
-  : name(name), id(id), loggingInterval(loggingInterval) {}
+LatencyBands::LatencyBands(std::string const& name,
+                           UID id,
+                           double loggingInterval,
+                           std::function<void(TraceEvent&)> const& decorator)
+  : name(name), id(id), loggingInterval(loggingInterval), decorator(decorator) {}
 
 void LatencyBands::addThreshold(double value) {
 	if (value > 0 && bands.count(value) == 0) {

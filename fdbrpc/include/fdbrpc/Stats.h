@@ -185,6 +185,7 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 class LatencyBands {
 	std::map<double, std::unique_ptr<Counter>> bands;
 	std::unique_ptr<Counter> filteredCount;
+	std::function<void(TraceEvent&)> decorator;
 
 	std::string name;
 	UID id;
@@ -196,7 +197,11 @@ class LatencyBands {
 	void insertBand(double value);
 
 public:
-	LatencyBands(std::string const& name, UID id, double loggingInterval);
+	LatencyBands(
+	    std::string const& name,
+	    UID id,
+	    double loggingInterval,
+	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
 	void addThreshold(double value);
 	void addMeasurement(double measurement, bool filtered = false);
 	void clearBands();
