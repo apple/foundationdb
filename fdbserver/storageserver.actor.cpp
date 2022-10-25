@@ -1308,10 +1308,10 @@ public:
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 
-		version.initMetric("StorageServer.Version"_sr, counters.cc.id);
-		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.id);
-		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.id);
-		desiredOldestVersion.initMetric("StorageServer.DesiredOldestVersion"_sr, counters.cc.id);
+		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
+		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.getId());
+		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageServer.DesiredOldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -10188,32 +10188,32 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	TraceEvent("StorageServerRestoreDurableState", self->thisServerID).detail("RestoredBytes", self->bytesRestored);
 
 	// Logs all counters in `counters.cc` and reset the interval.
-	self->actors.add(traceCounters("StorageMetrics",
-	                               self->thisServerID,
-	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                               &self->counters.cc,
-	                               self->thisServerID.toString() + "/StorageMetrics",
-	                               [self = self](TraceEvent& te) {
-		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
-		                               te.detail("Tag", self->tag.toString());
-		                               StorageBytes sb = self->storage.getStorageBytes();
-		                               te.detail("KvstoreBytesUsed", sb.used);
-		                               te.detail("KvstoreBytesFree", sb.free);
-		                               te.detail("KvstoreBytesAvailable", sb.available);
-		                               te.detail("KvstoreBytesTotal", sb.total);
-		                               te.detail("KvstoreBytesTemp", sb.temp);
-		                               if (self->isTss()) {
-			                               te.detail("TSSPairID", self->tssPairID);
-			                               te.detail("TSSJointID",
-			                                         UID(self->thisServerID.first() ^ self->tssPairID.get().first(),
-			                                             self->thisServerID.second() ^ self->tssPairID.get().second()));
-		                               } else if (self->isSSWithTSSPair()) {
-			                               te.detail("SSPairID", self->ssPairID);
-			                               te.detail("TSSJointID",
-			                                         UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
-			                                             self->thisServerID.second() ^ self->ssPairID.get().second()));
-		                               }
-	                               }));
+	self->actors.add(self->counters.cc.traceCounters(
+	    "StorageMetrics",
+	    self->thisServerID,
+	    SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	    self->thisServerID.toString() + "/StorageMetrics",
+	    [self = self](TraceEvent& te) {
+		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    te.detail("Tag", self->tag.toString());
+		    StorageBytes sb = self->storage.getStorageBytes();
+		    te.detail("KvstoreBytesUsed", sb.used);
+		    te.detail("KvstoreBytesFree", sb.free);
+		    te.detail("KvstoreBytesAvailable", sb.available);
+		    te.detail("KvstoreBytesTotal", sb.total);
+		    te.detail("KvstoreBytesTemp", sb.temp);
+		    if (self->isTss()) {
+			    te.detail("TSSPairID", self->tssPairID);
+			    te.detail("TSSJointID",
+			              UID(self->thisServerID.first() ^ self->tssPairID.get().first(),
+			                  self->thisServerID.second() ^ self->tssPairID.get().second()));
+		    } else if (self->isSSWithTSSPair()) {
+			    te.detail("SSPairID", self->ssPairID);
+			    te.detail("TSSJointID",
+			              UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
+			                  self->thisServerID.second() ^ self->ssPairID.get().second()));
+		    }
+	    }));
 
 	loop {
 		choose {

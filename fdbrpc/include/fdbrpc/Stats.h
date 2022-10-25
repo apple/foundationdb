@@ -67,17 +67,39 @@ struct Traceable<ICounter*> : std::true_type {
 	}
 };
 
-struct CounterCollection {
-	CounterCollection(std::string name, std::string id = std::string()) : name(name), id(id) {}
-	std::vector<struct ICounter*> counters, counters_to_remove;
-	~CounterCollection() {
-		for (auto c : counters_to_remove)
-			c->remove();
-	}
+class CounterCollectionImpl;
+
+class CounterCollection {
+	friend class CounterCollectionImpl;
+
 	std::string name;
 	std::string id;
+	std::vector<struct ICounter*> counters, countersToRemove;
+
+public:
+	CounterCollection(std::string const& name, std::string const& id = std::string()) : name(name), id(id) {}
+	~CounterCollection() {
+		for (auto c : countersToRemove)
+			c->remove();
+	}
+
+	void addCounter(ICounter* counter) { counters.push_back(counter); }
+
+	// Call remove method on this counter in ~CounterCollection
+	void markForRemoval(ICounter* counter) { countersToRemove.push_back(counter); }
+
+	std::string const& getName() const { return name; }
+
+	std::string const& getId() const { return id; }
 
 	void logToTraceEvent(TraceEvent& te) const;
+
+	Future<Void> traceCounters(
+	    std::string const& traceEventName,
+	    UID traceEventID,
+	    double interval,
+	    std::string const& trackLatestName = std::string(),
+	    std::function<void(TraceEvent&)> const& decorator = [](auto& te) {});
 };
 
 struct Counter final : ICounter, NonCopyable {
@@ -131,8 +153,8 @@ struct Traceable<Counter> : std::true_type {
 template <class F>
 struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
 	SpecialCounter(CounterCollection& collection, std::string const& name, F&& f) : name(name), f(f) {
-		collection.counters.push_back(this);
-		collection.counters_to_remove.push_back(this);
+		collection.addCounter(this);
+		collection.markForRemoval(this);
 	}
 	void remove() override { delete this; }
 
@@ -162,14 +184,6 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 	new SpecialCounter<F>(collection, name, std::move(f));
 }
 
-Future<Void> traceCounters(
-    std::string const& traceEventName,
-    UID const& traceEventID,
-    double const& interval,
-    CounterCollection* const& counters,
-    std::string const& trackLatestName = std::string(),
-    std::function<void(TraceEvent&)> const& decorator = [](TraceEvent& te) {});
-
 class LatencyBands {
 public:
 	LatencyBands(std::string name, UID id, double loggingInterval)
@@ -180,7 +194,7 @@ public:
 			if (bands.size() == 0) {
 				ASSERT(!cc && !filteredCount);
 				cc = std::make_unique<CounterCollection>(name, id.toString());
-				logger = traceCounters(name, id, loggingInterval, cc.get(), id.toString() + "/" + name);
+				logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name);
 				filteredCount = std::make_unique<Counter>("Filtered", *cc);
 				insertBand(std::numeric_limits<double>::infinity());
 			}

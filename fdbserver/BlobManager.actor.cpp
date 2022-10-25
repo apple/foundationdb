@@ -296,7 +296,7 @@ struct BlobManagerStats {
 		specialCounter(cc, "HardBoundaries", [mergeHardBoundaries]() { return mergeHardBoundaries->size(); });
 		specialCounter(cc, "SoftBoundaries", [mergeBoundaries]() { return mergeBoundaries->size(); });
 		specialCounter(cc, "BlockedAssignments", [this]() { return this->blockedAssignments; });
-		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
+		logger = cc.traceCounters("BlobManagerMetrics", id, interval, "BlobManagerMetrics");
 	}
 };
 
