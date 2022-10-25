@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
 	}
 	fdb_check(fdb_select_api_version(FDB_API_VERSION));
 	fdb_check(fdb_setup_network());
-	std::thread network_thread{ &fdb_run_network };
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	fdb_check(
 	    fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, reinterpret_cast<const uint8_t*>(""), 0));

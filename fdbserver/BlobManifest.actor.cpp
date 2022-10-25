@@ -26,6 +26,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbserver/Knobs.h"
 #include "flow/FastRef.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BlobConnectionProvider.h"
@@ -189,23 +190,6 @@ private:
 	static const int sMaxCount_{ 5 }; // max number of manifest file to keep
 };
 
-// Defines granule info that interests full restore
-struct BlobGranuleVersion {
-	// Two constructors required by VectorRef
-	BlobGranuleVersion() {}
-	BlobGranuleVersion(Arena& a, const BlobGranuleVersion& copyFrom)
-	  : granuleID(copyFrom.granuleID), keyRange(a, copyFrom.keyRange), version(copyFrom.version),
-	    sizeInBytes(copyFrom.sizeInBytes) {}
-
-	UID granuleID;
-	KeyRangeRef keyRange;
-	Version version;
-	int64_t sizeInBytes;
-};
-
-// Defines a vector for BlobGranuleVersion
-typedef Standalone<VectorRef<BlobGranuleVersion>> BlobGranuleVersionVector;
-
 // Defines filename, version, size for each granule file that interests full restore
 struct GranuleFileVersion {
 	Version version;
@@ -226,16 +210,53 @@ public:
 			Value data = wait(readFromFile(self));
 			Standalone<BlobManifest> manifest = decode(data);
 			wait(writeSystemKeys(self, manifest.rows));
-			BlobGranuleVersionVector _ = wait(listGranules(self));
+			BlobGranuleRestoreVersionVector _ = wait(listGranules(self));
 		} catch (Error& e) {
 			dprint("WARNING: unexpected manifest loader error {}\n", e.what()); // skip error handling so far
 		}
 		return Void();
 	}
 
+	// Iterate active granules and return their version/sizes
+	ACTOR static Future<BlobGranuleRestoreVersionVector> listGranules(Reference<BlobManifestLoader> self) {
+		state Transaction tr(self->db_);
+		loop {
+			state BlobGranuleRestoreVersionVector results;
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			try {
+				std::vector<KeyRangeRef> granules;
+				state int i = 0;
+				auto limit = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
+				state RangeResult blobRanges = wait(tr.getRange(blobGranuleMappingKeys, limit));
+				for (i = 0; i < blobRanges.size() - 1; i++) {
+					Key startKey = blobRanges[i].key.removePrefix(blobGranuleMappingKeys.begin);
+					Key endKey = blobRanges[i + 1].key.removePrefix(blobGranuleMappingKeys.begin);
+					state KeyRange granuleRange = KeyRangeRef(startKey, endKey);
+					try {
+						Standalone<BlobGranuleRestoreVersion> granule = wait(getGranule(&tr, granuleRange));
+						results.push_back_deep(results.arena(), granule);
+					} catch (Error& e) {
+						if (e.code() == error_code_restore_missing_data) {
+							dprint("missing data for key range {} \n", granuleRange.toString());
+							TraceEvent("BlobRestoreMissingData").detail("KeyRange", granuleRange.toString());
+						} else {
+							throw;
+						}
+					}
+				}
+				return results;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// Print out a summary for blob granules
 	ACTOR static Future<Void> print(Reference<BlobManifestLoader> self) {
-		state BlobGranuleVersionVector granules = wait(listGranules(self));
+		state BlobGranuleRestoreVersionVector granules = wait(listGranules(self));
 		for (auto granule : granules) {
 			wait(checkGranuleFiles(self, granule));
 		}
@@ -285,41 +306,9 @@ private:
 		}
 	}
 
-	// Iterate active granules and return their version/sizes
-	ACTOR static Future<BlobGranuleVersionVector> listGranules(Reference<BlobManifestLoader> self) {
-		state Transaction tr(self->db_);
-		loop {
-			state BlobGranuleVersionVector results;
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			try {
-				std::vector<KeyRangeRef> granules;
-				state int i = 0;
-				auto limit = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
-				state RangeResult blobRanges = wait(tr.getRange(blobGranuleMappingKeys, limit));
-				for (i = 0; i < blobRanges.size() - 1; i++) {
-					Key startKey = blobRanges[i].key.removePrefix(blobGranuleMappingKeys.begin);
-					Key endKey = blobRanges[i + 1].key.removePrefix(blobGranuleMappingKeys.begin);
-					state KeyRange granuleRange = KeyRangeRef(startKey, endKey);
-					try {
-						Standalone<BlobGranuleVersion> granule = wait(getGranule(&tr, granuleRange));
-						results.push_back_deep(results.arena(), granule);
-					} catch (Error& e) {
-						dprint("missing data for key range {} \n", granuleRange.toString());
-					}
-				}
-				return results;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Find the newest granule for a key range. The newest granule has the max version and relevant files
-	ACTOR static Future<Standalone<BlobGranuleVersion>> getGranule(Transaction* tr, KeyRangeRef range) {
-		state Standalone<BlobGranuleVersion> granuleVersion;
+	ACTOR static Future<Standalone<BlobGranuleRestoreVersion>> getGranule(Transaction* tr, KeyRangeRef range) {
+		state Standalone<BlobGranuleRestoreVersion> granuleVersion;
 		KeyRange historyKeyRange = blobGranuleHistoryKeyRangeFor(range);
 		// reverse lookup so that the first row is the newest version
 		state RangeResult results =
@@ -389,7 +378,7 @@ private:
 	}
 
 	// Read data from granules and print out summary
-	ACTOR static Future<Void> checkGranuleFiles(Reference<BlobManifestLoader> self, BlobGranuleVersion granule) {
+	ACTOR static Future<Void> checkGranuleFiles(Reference<BlobManifestLoader> self, BlobGranuleRestoreVersion granule) {
 		state KeyRangeRef range = granule.keyRange;
 		state Version readVersion = granule.version;
 		state Transaction tr(self->db_);
@@ -440,4 +429,12 @@ ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProv
 	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
 	wait(BlobManifestLoader::print(loader));
 	return Void();
+}
+
+// API to list blob granules
+ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db,
+                                                               Reference<BlobConnectionProvider> blobConn) {
+	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
+	BlobGranuleRestoreVersionVector result = wait(BlobManifestLoader::listGranules(loader));
+	return result;
 }

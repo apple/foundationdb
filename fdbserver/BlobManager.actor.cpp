@@ -3537,7 +3537,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	}
 
 	// skip the rest of the algorithm for the first blob manager
-	if (bmData->epoch == 1) {
+	if (bmData->epoch == 1 && !isFullRestoreMode()) {
 		bmData->doneRecovering.send(Void());
 		return Void();
 	}
