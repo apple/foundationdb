@@ -69,8 +69,8 @@ public:
 	// If a request is ready to be executed, it is sent to the deque
 	// corresponding to its priority. If not, the request remains queued.
 	void releaseTransactions(double elapsed,
-	                         SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-	                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
+	                         Deque<GetReadVersionRequest>& outBatchPriority,
+	                         Deque<GetReadVersionRequest>& outDefaultPriority);
 
 	void addRequest(GetReadVersionRequest const&);
 
