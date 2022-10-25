@@ -5254,11 +5254,11 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	}
 	state int64_t resultSize = 0;
 	state ReadOptions options;
-	state ReadType type = ReadType::NORMAL;
+	state ReadType readType = ReadType::NORMAL;
 
 	if (req.options.present()) {
 		options = req.options.get();
-		type = options.type;
+		readType = options.type;
 	}
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
@@ -5272,7 +5272,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
 
-	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)type])));
+	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)readType])));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
