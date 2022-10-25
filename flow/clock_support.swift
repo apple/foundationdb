@@ -1,5 +1,5 @@
 /*
- * clock_support.cpp
+ * clock_support.swift
  *
  * This source file is part of the FoundationDB open source project
  *

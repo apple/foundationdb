@@ -51,6 +51,17 @@ struct SwiftJobTask final : public N2::Task, public FastAllocated<SwiftJobTask> 
 };
 
 // ==== ----------------------------------------------------------------------------------------------------------------
+
+double flow_gNetwork_now() {
+	return g_network->now();
+}
+
+Future<class Void> flow_gNetwork_delay(double seconds, TaskPriority taskID) {
+	return g_network->delay(seconds, taskID);
+}
+
+
+// ==== ----------------------------------------------------------------------------------------------------------------
 // ==== Net2 hooks
 
 //void net2_swift_task_enqueueGlobal(swift::Job* job, swift_task_enqueueGlobal_original _Nonnull original) {
