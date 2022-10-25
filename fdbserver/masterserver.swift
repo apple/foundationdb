@@ -4,17 +4,6 @@ import FDBServer
 import FDBClient
 import fdbclient_swift
 
-///
-/// ```
-/// #define BUGGIFY_WITH_PROB(x)                                                                                           \
-///	(getSBVar(__FILE__, __LINE__, BuggifyType::General) && deterministicRandom()->random01() < (x))
-///
-/// #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)])
-/// ```
-var BUGGIFY: Bool {
-    false
-}
-
 func clamp(_ v: Version, lowerBound: Version, upperBound: Version) -> Version {
     return max(min(v, upperBound), lowerBound)
 }
@@ -96,7 +85,7 @@ public actor MasterDataActor {
             rep.prevVersion = myself.lastEpochEnd
         } else {
             var t1 = now()
-            if BUGGIFY {
+            if BUGGIFY() {
                 t1 = myself.lastVersionTime
             }
 
