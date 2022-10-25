@@ -11,13 +11,15 @@ maxClientThreads = 8
 minClients = 2
 maxClients = 8
 
-    [[test.workload]]
-    name = 'ApiBlobGranuleCorrectness'
-    minKeyLength = 1
-	maxKeyLength = 64
-	minValueLength = 1
-	maxValueLength = 1000
-	maxKeysPerTransaction = 50
-	initialSize = 100
-	numRandomOperations = 100
+[[server]]
+blob_granules_enabled = true
 
+[[test.workload]]
+name = 'ApiBlobGranuleCorrectness'
+minKeyLength = 1
+maxKeyLength = 64
+minValueLength = 1
+maxValueLength = 1000
+maxKeysPerTransaction = 50
+initialSize = 100
+numRandomOperations = 100

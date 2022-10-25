@@ -3960,7 +3960,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 			}
 
-			if (createChangeFeed) {
+			if (createChangeFeed && !isFullRestoreMode()) {
 				// create new change feed for new version of granule
 				wait(updateChangeFeed(
 				    &tr, granuleIDToCFKey(info.granuleID), ChangeFeedStatus::CHANGE_FEED_CREATE, req.keyRange));

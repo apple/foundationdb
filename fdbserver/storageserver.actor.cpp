@@ -86,6 +86,7 @@
 #include "fdbserver/TransactionTagCounter.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -2231,6 +2232,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
 	state ICheckpointReader* reader = nullptr;
+	state int64_t totalSize = 0;
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
@@ -2255,12 +2257,14 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			FetchCheckpointReply reply(req.token);
 			reply.data = data;
 			req.reply.send(reply);
+			totalSize += data.size();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_end_of_stream) {
 			req.reply.sendError(end_of_stream());
 			TraceEvent("ServeFetchCheckpointEnd", self->thisServerID)
 			    .detail("CheckpointID", req.checkpointID)
+			    .detail("TotalSize", totalSize)
 			    .detail("Token", req.token);
 		} else {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
@@ -5973,27 +5977,26 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
                                        Reference<BlobConnectionProvider> blobConn) {
 	ASSERT(blobConn.isValid());
 	try {
-
 		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tryReadBlobGranules(tr, keys, fetchVersion));
-
 		if (chunks.size() == 0) {
 			throw blob_granule_transaction_too_old(); // no data on blob
 		}
-
 		if (!isRangeFullyCovered(keys, chunks)) {
 			throw blob_granule_transaction_too_old();
 		}
-
-		for (const BlobGranuleChunkRef& chunk : chunks) {
-			state KeyRangeRef chunkRange = chunk.keyRange;
-			state RangeResult rows = wait(readBlobGranule(chunk, keys, 0, fetchVersion, blobConn));
+		state int i;
+		for (i = 0; i < chunks.size(); ++i) {
+			state KeyRangeRef chunkRange = chunks[i].keyRange;
+			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
 			TraceEvent("ReadBlobData")
 			    .detail("Rows", rows.size())
 			    .detail("ChunkRange", chunkRange.toString())
 			    .detail("Keys", keys.toString());
-
 			if (rows.size() == 0) {
-				rows.readThrough = KeyRef(rows.arena(), chunkRange.end);
+				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
+			}
+			if (i == chunks.size() - 1) {
+				rows.readThrough = KeyRef(rows.arena(), keys.end);
 			}
 			results.send(rows);
 		}
@@ -6007,7 +6010,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		tr->reset();
 		tr->setVersion(fetchVersion);
 		tr->trState->taskID = TaskPriority::FetchKeys;
-		wait(tryGetRange(results, tr, keys)); // fail back to storage server
+		throw;
 	}
 	return Void();
 }
@@ -6795,8 +6798,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to ensure
 		// change feed mutations get applied correctly
 		state std::vector<Key> changeFeedsToFetch;
-		std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
-		changeFeedsToFetch = _cfToFetch;
+		if (!isFullRestoreMode()) {
+			std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
+			changeFeedsToFetch = _cfToFetch;
+		}
 		wait(data->durableVersionLock.take());
 
 		shard->phase = AddingShard::Fetching;
@@ -9471,7 +9476,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
-	storage->clear(keys);
+	storage->clear(keys, &data->metrics);
 	++(*kvClearRanges);
 }
 
@@ -9485,7 +9490,7 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
 		*kvCommitLogicalBytes += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
-		storage->clear(KeyRangeRef(mutation.param1, mutation.param2));
+		storage->clear(KeyRangeRef(mutation.param1, mutation.param2), &data->metrics);
 		++(*kvClearRanges);
 	} else
 		ASSERT(false);
@@ -9500,7 +9505,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 			storage->set(KeyValueRef(m.param1, m.param2));
 			*kvCommitLogicalBytes += m.expectedSize();
 		} else if (m.type == MutationRef::ClearRange) {
-			storage->clear(KeyRangeRef(m.param1, m.param2));
+			storage->clear(KeyRangeRef(m.param1, m.param2), &data->metrics);
 			++(*kvClearRanges);
 		}
 	}
@@ -9929,7 +9934,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 				++data->counters.kvSystemClearRanges;
 				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 				// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
-				storage->clear(clearRange);
+				storage->clear(clearRange, &data->metrics);
 				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(clearRange, invalidVersion);
 			}

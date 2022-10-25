@@ -2615,8 +2615,9 @@ ACTOR Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
 	}
 	loop {
 		if (self->db.serverInfo->get().blobMigrator.present() && !self->recruitBlobMigrator.get()) {
-			state Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().blobMigrator.get().waitFailure,
-			                                                SERVER_KNOBS->BLOB_MIGRATOR_FAILURE_TIME);
+			state Future<Void> wfClient =
+			    waitFailureClient(self->db.serverInfo->get().blobMigrator.get().ssi.waitFailure,
+			                      SERVER_KNOBS->BLOB_MIGRATOR_FAILURE_TIME);
 			loop {
 				choose {
 					when(wait(wfClient)) {

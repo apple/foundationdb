@@ -529,6 +529,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	state int64_t offset = 0;
 	state Reference<IAsyncFile> asyncFile;
 	loop {
+		offset = 0;
 		try {
 			asyncFile = Reference<IAsyncFile>();
 			++attempt;
@@ -559,7 +560,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 				offset += rep.data.size();
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
+			if (e.code() != error_code_end_of_stream ||
+			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
 				TraceEvent("FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
