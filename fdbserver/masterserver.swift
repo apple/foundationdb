@@ -163,11 +163,15 @@ public struct MasterDataActorCxx {
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
     public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
         print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+        // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+        swift_workaround_retainMasterData(myself.myself)
         Task {
             print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
             await myself.getVersion(req: req)
             var result = Flow.Void()
             promise.send(&result)
+            // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+            swift_workaround_releaseMasterData(myself.myself)
             print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
     }

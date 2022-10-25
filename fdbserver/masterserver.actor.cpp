@@ -60,6 +60,15 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
+// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+void swift_workaround_retainMasterData(MasterData *rd) {
+    rd->addref();
+}
+// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+void swift_workaround_releaseMasterData(MasterData *rd) {
+    rd->delref();
+}
+
 ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
   using namespace fdbserver_swift;
 

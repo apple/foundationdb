@@ -171,6 +171,11 @@ inline void delrefMasterData(MasterData* ptr) {
 
 using ReferenceMasterData = Reference<MasterData>;
 
+// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+void swift_workaround_retainMasterData(MasterData *rd);
+// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+void swift_workaround_releaseMasterData(MasterData *rd);
+
 // FIXME: Workaround for linker issue (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
