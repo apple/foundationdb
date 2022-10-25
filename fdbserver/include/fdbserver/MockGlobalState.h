@@ -113,11 +113,12 @@ public:
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
 
 	template <class Reply>
-	using isLoadBalancedReply = std::is_base_of<LoadBalancedReply, Reply>;
+	static constexpr bool isLoadBalancedReply = std::is_base_of_v<LoadBalancedReply, Reply>;
 
 	template <class Reply>
-	typename std::enable_if<isLoadBalancedReply<Reply>::value, void>::type
-	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty) {
+	typename std::enable_if_t<isLoadBalancedReply<Reply>, void> sendErrorWithPenalty(const ReplyPromise<Reply>& promise,
+	                                                                                 const Error& err,
+	                                                                                 double penalty) {
 		Reply reply;
 		reply.error = err;
 		reply.penalty = penalty;
@@ -125,7 +126,7 @@ public:
 	}
 
 	template <class Reply>
-	typename std::enable_if<!isLoadBalancedReply<Reply>::value, void>::type
+	typename std::enable_if_t<!isLoadBalancedReply<Reply>, void>
 	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
 		promise.sendError(err);
 	}

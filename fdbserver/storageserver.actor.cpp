@@ -807,8 +807,8 @@ public:
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
 
-	double old_rate = 1.0;
-	double currentRate() {
+	mutable double old_rate = 1.0;
+	double currentRate() const {
 		auto versionLag = version.get() - durableVersion.get();
 		double res;
 		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
@@ -1379,7 +1379,7 @@ public:
 	// This is the maximum version that might be read from storage (the minimum version is durableVersion)
 	Version storageVersion() const { return oldestVersion.get(); }
 
-	bool isReadable(KeyRangeRef const& keys) override {
+	bool isReadable(KeyRangeRef const& keys) const override {
 		auto sh = shards.intersectingRanges(keys);
 		for (auto i = sh.begin(); i != sh.end(); ++i)
 			if (!i->value()->isReadable())
@@ -1405,10 +1405,10 @@ public:
 		}
 	}
 
-	Counter::Value queueSize() { return counters.bytesInput.getValue() - counters.bytesDurable.getValue(); }
+	Counter::Value queueSize() const { return counters.bytesInput.getValue() - counters.bytesDurable.getValue(); }
 
 	// penalty used by loadBalance() to balance requests among SSes. We prefer SS with less write queue size.
-	double getPenalty() override {
+	double getPenalty() const override {
 		return std::max(std::max(1.0,
 		                         (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER -
 		                                         2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /

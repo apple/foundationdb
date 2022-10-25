@@ -602,7 +602,8 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
                                                                       StorageMetrics permittedError);
 
 // Return the suggested split points from storage server.The locations tell which interface should
-// serve the request. The
+// serve the request. `limit` is the current estimated storage metrics of `keys`.The returned points, if present,
+// guarantee the metrics of split result is within limit.
 ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
     std::vector<KeyRangeLocationInfo> locations,
     KeyRange keys,

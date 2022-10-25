@@ -477,19 +477,7 @@ struct ShardSizeBounds {
 		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
 	}
 
-	static ShardSizeBounds shardSizeBoundsBeforeTrack() {
-		return ShardSizeBounds{
-			.max = StorageMetrics{ .bytes = -1,
-			                       .bytesPerKSecond = StorageMetrics::infinity,
-			                       .iosPerKSecond = StorageMetrics::infinity,
-			                       .bytesReadPerKSecond = StorageMetrics::infinity },
-			.min = StorageMetrics{ .bytes = -1, .bytesPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
-			.permittedError = StorageMetrics{ .bytes = -1,
-			                                  .bytesPerKSecond = StorageMetrics::infinity,
-			                                  .iosPerKSecond = StorageMetrics::infinity,
-			                                  .bytesReadPerKSecond = StorageMetrics::infinity }
-		};
-	}
+	static ShardSizeBounds shardSizeBoundsBeforeTrack();
 };
 
 // Gets the permitted size and IO bounds for a shard

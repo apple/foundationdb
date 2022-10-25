@@ -80,8 +80,8 @@ public:
 	bool hasShards(Team team) const;
 
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
-	// shards The second element of the pair is all previous sources for in-flight shards. This function only return the
-	// teams for the first shard in [keys.begin, keys.end)
+	// shards. The second element of the pair is all previous sources for in-flight shards. This function only returns
+	// the teams for the first shard in [keys.begin, keys.end)
 	std::pair<std::vector<Team>, std::vector<Team>> getTeamsForFirstShard(KeyRangeRef keys);
 
 	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRef key);
