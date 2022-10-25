@@ -1314,10 +1314,10 @@ public:
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READ_RANKS, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
-		version.initMetric("StorageServer.Version"_sr, counters.cc.id);
-		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.id);
-		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.id);
-		desiredOldestVersion.initMetric("StorageServer.DesiredOldestVersion"_sr, counters.cc.id);
+		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
+		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.getId());
+		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageServer.DesiredOldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -10210,47 +10210,47 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	TraceEvent("StorageServerRestoreDurableState", self->thisServerID).detail("RestoredBytes", self->bytesRestored);
 
 	// Logs all counters in `counters.cc` and reset the interval.
-	self->actors.add(traceCounters("StorageMetrics",
-	                               self->thisServerID,
-	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                               &self->counters.cc,
-	                               self->thisServerID.toString() + "/StorageMetrics",
-	                               [self = self](TraceEvent& te) {
-		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
-		                               te.detail("Tag", self->tag.toString());
-		                               std::vector<int> rpr = self->readPriorityRanks;
-		                               te.detail("ReadsActive", self->ssLock.totalRunners());
-		                               te.detail("ReadsWaiting", self->ssLock.totalWaiters());
-		                               int type = (int)ReadType::FETCH;
-		                               te.detail("ReadFetchActive", self->ssLock.numRunners(rpr[type]));
-		                               te.detail("ReadFetchWaiting", self->ssLock.numWaiters(rpr[type]));
-		                               type = (int)ReadType::LOW;
-		                               te.detail("ReadLowActive", self->ssLock.numRunners(rpr[type]));
-		                               te.detail("ReadLowWaiting", self->ssLock.numWaiters(rpr[type]));
-		                               type = (int)ReadType::NORMAL;
-		                               te.detail("ReadNormalActive", self->ssLock.numRunners(rpr[type]));
-		                               te.detail("ReadNormalWaiting", self->ssLock.numWaiters(rpr[type]));
-		                               type = (int)ReadType::HIGH;
-		                               te.detail("ReadHighActive", self->ssLock.numRunners(rpr[type]));
-		                               te.detail("ReadHighWaiting", self->ssLock.numWaiters(rpr[type]));
-		                               StorageBytes sb = self->storage.getStorageBytes();
-		                               te.detail("KvstoreBytesUsed", sb.used);
-		                               te.detail("KvstoreBytesFree", sb.free);
-		                               te.detail("KvstoreBytesAvailable", sb.available);
-		                               te.detail("KvstoreBytesTotal", sb.total);
-		                               te.detail("KvstoreBytesTemp", sb.temp);
-		                               if (self->isTss()) {
-			                               te.detail("TSSPairID", self->tssPairID);
-			                               te.detail("TSSJointID",
-			                                         UID(self->thisServerID.first() ^ self->tssPairID.get().first(),
-			                                             self->thisServerID.second() ^ self->tssPairID.get().second()));
-		                               } else if (self->isSSWithTSSPair()) {
-			                               te.detail("SSPairID", self->ssPairID);
-			                               te.detail("TSSJointID",
-			                                         UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
-			                                             self->thisServerID.second() ^ self->ssPairID.get().second()));
-		                               }
-	                               }));
+	self->actors.add(self->counters.cc.traceCounters(
+	    "StorageMetrics",
+	    self->thisServerID,
+	    SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	    self->thisServerID.toString() + "/StorageMetrics",
+	    [self = self](TraceEvent& te) {
+		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    te.detail("Tag", self->tag.toString());
+		    std::vector<int> rpr = self->readPriorityRanks;
+		    te.detail("ReadsActive", self->ssLock.totalRunners());
+		    te.detail("ReadsWaiting", self->ssLock.totalWaiters());
+		    int type = (int)ReadType::FETCH;
+		    te.detail("ReadFetchActive", self->ssLock.numRunners(rpr[type]));
+		    te.detail("ReadFetchWaiting", self->ssLock.numWaiters(rpr[type]));
+		    type = (int)ReadType::LOW;
+		    te.detail("ReadLowActive", self->ssLock.numRunners(rpr[type]));
+		    te.detail("ReadLowWaiting", self->ssLock.numWaiters(rpr[type]));
+		    type = (int)ReadType::NORMAL;
+		    te.detail("ReadNormalActive", self->ssLock.numRunners(rpr[type]));
+		    te.detail("ReadNormalWaiting", self->ssLock.numWaiters(rpr[type]));
+		    type = (int)ReadType::HIGH;
+		    te.detail("ReadHighActive", self->ssLock.numRunners(rpr[type]));
+		    te.detail("ReadHighWaiting", self->ssLock.numWaiters(rpr[type]));
+		    StorageBytes sb = self->storage.getStorageBytes();
+		    te.detail("KvstoreBytesUsed", sb.used);
+		    te.detail("KvstoreBytesFree", sb.free);
+		    te.detail("KvstoreBytesAvailable", sb.available);
+		    te.detail("KvstoreBytesTotal", sb.total);
+		    te.detail("KvstoreBytesTemp", sb.temp);
+		    if (self->isTss()) {
+			    te.detail("TSSPairID", self->tssPairID);
+			    te.detail("TSSJointID",
+			              UID(self->thisServerID.first() ^ self->tssPairID.get().first(),
+			                  self->thisServerID.second() ^ self->tssPairID.get().second()));
+		    } else if (self->isSSWithTSSPair()) {
+			    te.detail("SSPairID", self->ssPairID);
+			    te.detail("TSSJointID",
+			              UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
+			                  self->thisServerID.second() ^ self->ssPairID.get().second()));
+		    }
+	    }));
 
 	loop {
 		choose {
