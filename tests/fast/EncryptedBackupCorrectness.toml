@@ -9,28 +9,14 @@ enable_storage_server_encryption = false
 enable_blob_granule_encryption = true
 
 [[test]]
-testTitle = 'TenantCreation'
-
-    [[test.workload]]
-    testName = 'CreateTenant'
-    name = 'First'
-
-    [[test.workload]]
-    testName = 'CreateTenant'
-    name = 'Second'
-
-    [[test.workload]]
-    testName = 'CreateTenant'
-    name = 'Third'
-
-[[test]]
 testTitle = 'EncryptedBackupAndRestore'
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'BulkSetup'
-    tenants = 'First,Second,Third'
+    maxNumTenants = 100
+    minNumTenants = 10
     transactionsPerSecond = 2500.0
 
     [[test.workload]]
