@@ -159,13 +159,20 @@ class Parser:
         pass
 
 
-class XmlParser(Parser, xml.sax.handler.ContentHandler):
+class XmlParser(Parser, xml.sax.handler.ContentHandler, xml.sax.handler.ErrorHandler):
     def __init__(self):
         super().__init__()
         self.handler: ParseHandler | None = None
 
     def parse(self, file: TextIO, handler: ParseHandler) -> None:
-        xml.sax.parse(file, self)
+        self.handler = handler
+        xml.sax.parse(file, self, errorHandler=self)
+
+    def error(self, exception):
+        pass
+
+    def fatalError(self, exception):
+        pass
 
     def startElement(self, name, attrs) -> None:
         attributes: Dict[str, str] = {}
@@ -276,6 +283,7 @@ class TraceFiles:
                     raise StopIteration
                 self.current += 1
                 return self.trace_files[self.current - 1]
+
         return TraceFilesIterator(self)
 
 
@@ -426,7 +434,8 @@ class Summary:
             lines = self.error_out.splitlines()
             stderr_bytes = 0
             for line in lines:
-                if line.endswith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
+                if line.endswith(
+                        "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
                     # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
                     continue
                 if line.endswith("Warning: unimplemented fcntl command: 1036"):
@@ -606,6 +615,7 @@ class Summary:
                 child.attributes['File'] = attrs['File']
                 child.attributes['Line'] = attrs['Line']
                 self.out.append(child)
+
         self.handler.add_handler(('Type', 'BuggifySection'), buggify_section)
         self.handler.add_handler(('Type', 'FaultInjected'), buggify_section)
 
@@ -614,9 +624,11 @@ class Summary:
             child.attributes['Name'] = attrs['Name']
             child.attributes['File'] = attrs['File']
             child.attributes['Line'] = attrs['Line']
+
         self.handler.add_handler(('Type', 'RunningUnitTest'), running_unit_test)
 
         def stderr_severity(attrs: Dict[str, str]):
             if 'NewSeverity' in attrs:
                 self.stderr_severity = attrs['NewSeverity']
+
         self.handler.add_handler(('Type', 'StderrSeverity'), stderr_severity)
