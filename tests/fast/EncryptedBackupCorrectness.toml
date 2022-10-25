@@ -14,7 +14,7 @@ clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
-    testName = 'BulkSetup'
+    testName = 'BulkLoadWithTenants'
     maxNumTenants = 100
     minNumTenants = 10
     transactionsPerSecond = 2500.0

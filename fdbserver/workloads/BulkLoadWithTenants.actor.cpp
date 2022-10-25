@@ -28,18 +28,20 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BulkSetupWorkload : TestWorkload {
-	static constexpr auto NAME = "BulkSetup";
+	static constexpr auto NAME = "BulkLoadWithTenants";
 
 	int nodeCount;
 	double transactionsPerSecond;
 	Key keyPrefix;
 	double maxNumTenants;
 	double minNumTenants;
+	std::vector<TenantName> tenantNames;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
+		// maximum and minimum number of tenants per client
 		maxNumTenants = getOption(options, "maxNumTenants"_sr, 0);
 		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
 		ASSERT(minNumTenants <= maxNumTenants);
@@ -59,42 +61,37 @@ struct BulkSetupWorkload : TestWorkload {
 		    deterministicRandom()->randomInt(workload->minNumTenants, workload->maxNumTenants + 1);
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
 		std::vector<Future<Void>> tenantFutures;
-		state std::vector<TenantName> tenantNames;
 		for (int i = 0; i < numTenantsToCreate; i++) {
 			TenantMapEntry entry;
 			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
-			tenantNames.push_back(TenantName(format("BulkSetupTenant%04d", i)));
-			TraceEvent("CreatingTenant").detail("Tenant", tenantNames.back()).detail("TenantGroup", entry.tenantGroup);
-			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenantNames.back())));
+			workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d_%04d", workload->clientId, i)));
+			TraceEvent("CreatingTenant")
+			    .detail("Tenant", workload->tenantNames.back())
+			    .detail("TenantGroup", entry.tenantGroup);
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), workload->tenantNames.back())));
 		}
 		wait(waitForAll(tenantFutures));
-
-		// bulk load data into the tenants created above
-		wait(bulkSetup(cx,
-		               workload,
-		               workload->nodeCount,
-		               Promise<double>(),
-		               false,
-		               0.0,
-		               1e12,
-		               std::vector<uint64_t>(),
-		               Promise<std::vector<std::pair<uint64_t, double>>>(),
-		               0,
-		               0.1,
-		               0,
-		               0,
-		               tenantNames));
 		return Void();
 	}
 
-	Future<Void> start(Database const& cx) override { return Void(); }
-
-	Future<Void> setup(Database const& cx) override {
-		if (clientId == 0) {
-			return _setup(this, cx);
-		}
-		return Void();
+	Future<Void> start(Database const& cx) override {
+		return bulkSetup(cx,
+		                 this,
+		                 nodeCount,
+		                 Promise<double>(),
+		                 false,
+		                 0.0,
+		                 1e12,
+		                 std::vector<uint64_t>(),
+		                 Promise<std::vector<std::pair<uint64_t, double>>>(),
+		                 0,
+		                 0.1,
+		                 0,
+		                 0,
+		                 tenantNames);
 	}
+
+	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 };
