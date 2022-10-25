@@ -22,15 +22,21 @@
 #define FLOW_SWIFT_COMPAT_H
 
 #pragma once
+#include "flow/swift/ABI/Task.h"
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
 #define SWIFT_CXX_REF_IMMORTAL                                                                                         \
-	__attribute__((swift_attr("import_as_ref")))                                                                         \
-  __attribute__((swift_attr("retain:immortal")))                                                                       \
+	__attribute__((swift_attr("import_as_ref")))                                                                       \
+    __attribute__((swift_attr("retain:immortal")))                                                                     \
 	__attribute__((swift_attr("release:immortal")))
 
 #define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
+/// Convert a Swift JobPriority value to a numeric value of Flow/TaskPriority.
+int64_t swift_priority_to_net2(swift::JobPriority p);
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 

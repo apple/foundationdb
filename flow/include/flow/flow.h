@@ -650,17 +650,17 @@ public:
 
 	template <class U>
 	void send(U&& value) {
-		printf("[c++][%s:%d] send, ...\n", __FILE_NAME__, __LINE__);
+		// printf("[c++][%s:%d] send, ...\n", __FILE_NAME__, __LINE__);
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
 
-		printf("[c++][%s:%d] send, next: %p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
+		// printf("[c++][%s:%d] send, next: %p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 		while (Callback<T>::next != this) {
-			printf("[c++][%s:%d] send, fire! next:%p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
+			// printf("[c++][%s:%d] send, fire! next:%p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 			Callback<T>::next->fire(this->value());
 		}
-		printf("[c++][tid:%lu][%s:%d] send ..., done\n", pthread_self(), __FILE_NAME__, __LINE__);
+		// printf("[c++][tid:%lu][%s:%d] send ..., done\n", pthread_self(), __FILE_NAME__, __LINE__);
 	}
 
 	void send(Never) {
@@ -761,31 +761,31 @@ public:
 	virtual void cancel() {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
-		printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
+		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 
 		// We are always *logically* dropping one future reference from this, but if we are adding a first callback
 		// we also need to add one (since futures is defined as being +1 if there are any callbacks), so net nothing
 		if (Callback<T>::next != this)
 			delFutureRef();
 
-		printf("[c++][%s:%d](%s) %p insert %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, this);
+		// printf("[c++][%s:%d](%s) %p insert %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, this);
 		cb->insert(this);
 	}
 
 	void addYieldedCallbackAndDelFutureRef(Callback<T>* cb) {
-		printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
+		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 
 		// Same contract as addCallbackAndDelFutureRef, except that the callback is placed at the end of the callback
 		// chain rather than at the beginning
 		if (Callback<T>::next != this)
 			delFutureRef();
 
-		printf("[c++][%s:%d](%s) %p insertBack %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, this);
+		// printf("[c++][%s:%d](%s) %p insertBack %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, this);
 		cb->insertBack(this);
 	}
 
 	void addCallbackChainAndDelFutureRef(Callback<T>* cb) {
-		printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
+		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 
 		if (Callback<T>::next != this)
 			delFutureRef();
@@ -837,7 +837,7 @@ public:
 
 	~Future() {
 		// if (sav && sav->endpoint.isValid()) std::cout << "Future destroyed for " << sav->endpoint.key << std::endl;
-		printf("[c++][%s:%d](%s) future destructor, %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+		// printf("[c++][%s:%d](%s) future destructor, %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 		if (sav)
 			sav->delFutureRef();
 	}
@@ -865,19 +865,19 @@ public:
 	}
 
 	void addCallbackAndClear(Callback<T>* cb) {
-		printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
+		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addCallbackAndDelFutureRef(cb);
 		sav = 0;
 	}
 
 	void addYieldedCallbackAndClear(Callback<T>* cb) {
-		printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
+    // printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addYieldedCallbackAndDelFutureRef(cb);
 		sav = 0;
 	}
 
 	void addCallbackChainAndClear(Callback<T>* cb) {
-		printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
+    // printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addCallbackChainAndDelFutureRef(cb);
 		sav = 0;
 	}

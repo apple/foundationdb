@@ -42,6 +42,12 @@ func figureVersion(current: Version,
                            upperBound: current + toAdd + maxOffset)
 }
 
+extension NotifiedVersion {
+    func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
+        var f = self.whenAtLeast(limit)
+        try await f.waitValue
+    }
+}
 
 public actor MasterDataActor {
     let myself: MasterData
@@ -52,24 +58,21 @@ public actor MasterDataActor {
 
     /// Reply still done via req.reply
     func getVersion(req: GetCommitVersionRequest) async {
-        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) handle request")
-        // NOTE: the `req` is inout since `req.reply.sendNever()` imports as `mutating`
-        var req = req
-
-        // TODO: Wrap with a tracing span
+        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> ")
         let requestingProxyUID: UID = req.requestingProxy
         myself.getGetCommitVersionRequests() += 1
 
+        let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
+        guard let lastVersionReplies = lp /* FIXME: (workaround for first runtime issue (rdar://101092612)): lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
         }
 
         // CODE_PROBE(lastVersionReplies.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up")
-        var latestRequestNum = try! await lastVersionReplies.getLatestRequestNumRef()
-                .atLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
+        try! await lastVersionReplies.getLatestRequestNumRef()
+            .atLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
 
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
         if lastVersionReplies.replies.count(UInt(req.requestNum)) != 0 {
@@ -105,7 +108,7 @@ public actor MasterDataActor {
             if myself.referenceVersion.present() {
                 // FIXME: myself.referenceVersion.get()
                 // FIXME: getMutating() ambiguity
-                var r = myself.referenceVersion
+                let r = myself.referenceVersion
                 // FIXME: Do not use r.__getUnsafe
                 myself.version = figureVersion(current: myself.version,
                                                now: SwiftGNetwork.timer(),
@@ -129,7 +132,7 @@ public actor MasterDataActor {
 
         rep.version = myself.version
         rep.requestNum = req.requestNum
-        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
+        // print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
 
         //  FIXME: figure out how to map:
         //            // lastVersionReplies.replies.erase(
@@ -139,6 +142,7 @@ public actor MasterDataActor {
         lastVersionReplies.replies[UInt(req.requestNum)] = rep
         assert(rep.prevVersion >= 0)
 
+        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> version: \(rep.version)")
         req.reply.send(&rep)
 
         assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
@@ -162,17 +166,17 @@ public struct MasterDataActorCxx {
     /// Promise type must match result type of the target function.
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
     public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
-        print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+        // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
         swift_workaround_retainMasterData(myself.myself)
         Task {
-            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
             await myself.getVersion(req: req)
             var result = Flow.Void()
             promise.send(&result)
             // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
             swift_workaround_releaseMasterData(myself.myself)
-            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
     }
 }
