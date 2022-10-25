@@ -38,6 +38,13 @@ inline pthread_t _tid() {
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
+double flow_gNetwork_now();
+
+enum class TaskPriority;
+Future<class Void> flow_gNetwork_delay(double seconds, TaskPriority taskID);
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
 /// A count in nanoseconds.
 using JobDelay = unsigned long long;
 

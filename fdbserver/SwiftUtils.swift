@@ -23,6 +23,8 @@ public func swiftCallMeFuture(result opaqueResultPromisePtr: OpaquePointer) {
     Task {
         var value = await swiftCallMe()
         promise.send(&value)
+        print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) sleep...!")
+        try? await Task.sleep(until: .now.advanced(by: .seconds(1)), clock: .flow)
         print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) value [\(value)] sent!")
     }
 }
