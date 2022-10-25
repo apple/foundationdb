@@ -812,7 +812,7 @@ public:
 	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
 	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), getGenerationRequests("GetGenerationRequests", cc) {
-		logger = traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigNode");
+		logger = cc.traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ConfigNode");
 		TraceEvent(SevInfo, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 
