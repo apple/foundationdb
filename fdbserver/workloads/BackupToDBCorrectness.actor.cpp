@@ -668,24 +668,24 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				// wait(diffRanges(self->backupRanges, self->backupPrefix, cx, self->extraDB));
 
 				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
-				state bool containsSystemKeys = false;
+				state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 				for (auto r : self->backupRanges) {
 					if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
 						restoreRange.push_back_deep(
 						    restoreRange.arena(),
 						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
 					} else {
-						containsSystemKeys = true;
+						systemRestoreRange.push_back_deep(systemRestoreRange.arena(), r);
 					}
 				}
 
 				// restore system keys first before restoring user data
-				if (containsSystemKeys) {
+				if (!systemRestoreRange.empty()) {
 					state Key systemRestoreTag = "restore_system"_sr;
 					try {
 						wait(restoreTool.submitBackup(cx,
 						                              systemRestoreTag,
-						                              getSystemBackupRanges(),
+						                              systemRestoreRange,
 						                              StopWhenDone::True,
 						                              StringRef(),
 						                              self->backupPrefix,

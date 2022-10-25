@@ -232,22 +232,22 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Key backupURL = Key(containers.front());
 
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
-			state bool containsSystemKeys = false;
+			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			for (auto r : backupRanges) {
 				if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
-					containsSystemKeys = true;
+					systemRestoreRange.push_back_deep(systemRestoreRange.arena(), r);
 				}
 			}
-			if (containsSystemKeys) {
+			if (!systemRestoreRange.empty()) {
 				TraceEvent("IBackupSystemRestoreAttempt").detail("BeginVersion", beginVersion);
 				wait(success(self->backupAgent.restore(cx,
 				                                       cx,
 				                                       "system_restore"_sr,
 				                                       backupURL,
 				                                       {},
-				                                       getSystemBackupRanges(),
+				                                       systemRestoreRange,
 				                                       WaitForComplete::True,
 				                                       invalidVersion,
 				                                       Verbose::True,

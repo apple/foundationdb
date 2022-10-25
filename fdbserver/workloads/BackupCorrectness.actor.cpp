@@ -521,11 +521,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	                                                    BackupAndRestoreCorrectnessWorkload* self,
 	                                                    FileBackupAgent* backupAgent,
 	                                                    Version targetVersion,
-	                                                    Reference<IBackupContainer> lastBackupContainer) {
+	                                                    Reference<IBackupContainer> lastBackupContainer,
+	                                                    Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges) {
 		// restore system keys before restoring any other ranges
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			for (auto& range : getSystemBackupRanges())
+			for (auto& range : systemRestoreRanges)
 				tr->clear(range);
 			return Void();
 		}));
@@ -536,7 +537,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		                                  restoreTag,
 		                                  KeyRef(lastBackupContainer->getURL()),
 		                                  lastBackupContainer->getProxy(),
-		                                  getSystemBackupRanges(),
+		                                  systemRestoreRanges,
 		                                  WaitForComplete::True,
 		                                  targetVersion,
 		                                  Verbose::True,
@@ -698,20 +699,21 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				// make sure system keys are not present in the restoreRanges as they will get restored first separately
 				// from the rest
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
-				bool hasSystemRanges = false;
+				Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges;
 				for (int i = 0; i < self->restoreRanges.size(); ++i) {
 					if (!SERVER_KNOBS->ENABLE_ENCRYPTION ||
 					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {
-						hasSystemRanges = true;
+						systemRestoreRanges.push_back_deep(systemRestoreRanges.arena(), self->restoreRanges[i]);
 					}
 				}
 				self->restoreRanges = modifiedRestoreRanges;
-				if (hasSystemRanges) {
+				if (!systemRestoreRanges.empty()) {
 					// We are able to restore system keys first since we restore an entire cluster at once rather than
 					// partial key ranges.
-					wait(clearAndRestoreSystemKeys(cx, self, &backupAgent, targetVersion, lastBackupContainer));
+					wait(clearAndRestoreSystemKeys(
+					    cx, self, &backupAgent, targetVersion, lastBackupContainer, systemRestoreRanges));
 				}
 				if (deterministicRandom()->random01() < 0.5) {
 					for (restoreIndex = 0; restoreIndex < self->restoreRanges.size(); restoreIndex++) {

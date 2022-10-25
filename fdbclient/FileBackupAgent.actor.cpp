@@ -6091,16 +6091,16 @@ public:
 		} else {
 			TraceEvent("AS_StartRestore").log();
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
-			bool containsSystemKeys = false;
+			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			bool encryptionEnabled = cx->clientInfo->get().isEncryptionEnabled;
 			for (auto r : ranges) {
 				if (!encryptionEnabled || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
-					containsSystemKeys = true;
+					systemRestoreRange.push_back_deep(systemRestoreRange.arena(), r);
 				}
 			}
-			if (containsSystemKeys) {
+			if (!systemRestoreRange.empty()) {
 				// restore system keys
 				wait(success(restore(backupAgent,
 				                     cx,
@@ -6128,7 +6128,6 @@ public:
 					try {
 						rywTransaction->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						rywTransaction->setOption(FDBTransactionOptions::LOCK_AWARE);
-						Optional<Value> val = wait(rywTransaction->get(databaseLockedKey));
 						state RestoreConfig oldRestore(randomUid);
 						oldRestore.clear(rywTransaction);
 						wait(rywTransaction->commit());
