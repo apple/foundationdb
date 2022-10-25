@@ -260,6 +260,7 @@ class TestConfig : public BasicTestConfig {
 			return;
 
 		std::string cline;
+		bool hasBackupToDB = false;
 
 		while (ifs.good()) {
 			getline(ifs, cline);
@@ -363,6 +364,16 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "defaultTenant") {
 				defaultTenant = value;
 			}
+			if (attrib == "simBackupAgents") {
+				hasBackupToDB |= (value == "BackupToDB") || (value == "BackupToFileAndDB");
+			}
+		}
+		// Disable encryption in simulation if BackupToDB is in used. BackupToDB currently does not backup the
+		// system key space first, so it is possible the remote DB receive tenant data without havnig the tenant
+		// map, causing data not being encrypted using the right tenant cipher key.
+		// TODO(yiwu): Fix BackupToDB when encryption is enabled.
+		if (hasBackupToDB) {
+			disableEncryption = true;
 		}
 
 		ifs.close();
@@ -500,6 +511,21 @@ public:
 				}
 				if (stderrSeverity.present()) {
 					TraceEvent("StderrSeverity").detail("NewSeverity", stderrSeverity.get());
+				}
+			}
+			// Disable encryption in simulation if BackupToDB is in used. BackupToDB currently does not backup the
+			// system key space first, so it is possible the remote DB receive tenant data without havnig the tenant
+			// map, causing data not being encrypted using the right tenant cipher key.
+			// TODO(yiwu): Fix BackupToDB when encryption is enabled.
+			if (file.contains("test") && toml::find(file, "test").is_array()) {
+				const auto& tests = toml::find(file, "test").as_array();
+				for (const toml::value& test : tests) {
+					if (test.contains("simBackupAgents")) {
+						std::string simBackupAgents = toml::find(test, "simBackupAgents").as_string();
+						if (simBackupAgents == "BackupToDB" || simBackupAgents == "BackupToFileAndDB") {
+							disableEncryption = true;
+						}
+					}
 				}
 			}
 			// look for restartInfoLocation to mark isFirstTestInRestart
@@ -1256,14 +1282,14 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		if (testConfig->disableRemoteKVS) {
 			g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisableRemoteKVS");
+			TraceEvent("DisableRemoteKVS");
 		}
 		if (testConfig->disableEncryption) {
 			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisableEncryption");
+			TraceEvent("DisableEncryption");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -2047,14 +2073,14 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	if (testConfig.disableRemoteKVS) {
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisableRemoteKVS");
+		TraceEvent("DisableRemoteKVS");
 	}
 	if (testConfig.disableEncryption) {
 		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisableEncryption");
+		TraceEvent("DisableEncryption");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
