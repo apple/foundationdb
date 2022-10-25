@@ -384,6 +384,7 @@ class Summary:
             child.attributes['Severity'] = '40'
             child.attributes['ErrorCount'] = str(self.errors)
             self.out.append(child)
+            self.error = True
         if self.was_killed:
             child = SummaryTree('ExternalTimeout')
             child.attributes['Severity'] = '40'
@@ -420,6 +421,7 @@ class Summary:
             child = SummaryTree('TestUnexpectedlyNotFinished')
             child.attributes['Severity'] = '40'
             self.out.append(child)
+            self.error = True
         if self.error_out is not None and len(self.error_out) > 0:
             lines = self.error_out.splitlines()
             stderr_bytes = 0

@@ -97,8 +97,12 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 				quota.reservedQuota =
 				    ((value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
 			}
+			if (!quota.isValid()) {
+				throw invalid_throttle_quota_value();
+			}
 			ThrottleApi::setTagQuota(tr, tag, quota.reservedQuota, quota.totalQuota);
 			wait(safeThreadFutureToFuture(tr->commit()));
+			fmt::print("Successfully updated quota.\n");
 			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -113,6 +117,7 @@ ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
 		try {
 			tr->clear(ThrottleApi::getTagQuotaKey(tag));
 			wait(safeThreadFutureToFuture(tr->commit()));
+			fmt::print("Successfully cleared quota.\n");
 			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
