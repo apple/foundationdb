@@ -930,7 +930,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && BUGGIFY ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && BUGGIFY ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
 	init( REDWOOD_PRIORITY_LAUNCHS,                    "32,32,32,32" );
-	init( REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT,             false );
+	init( REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT,              true );
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
@@ -940,7 +940,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,              "Master" );
 
 	// Encryption
-	init( ENABLE_ENCRYPTION,                                   false ); if ( randomize && BUGGIFY ) ENABLE_ENCRYPTION = !ENABLE_ENCRYPTION;
+	init( ENABLE_ENCRYPTION,                                    true );
 	init( ENCRYPTION_MODE,                             "AES-256-CTR" );
 	init( SIM_KMS_MAX_KEYS,                                     4096 );
 	init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                 100000 );
