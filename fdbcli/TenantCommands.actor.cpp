@@ -225,11 +225,12 @@ ACTOR Future<bool> tenantDeleteCommand(Reference<IDatabase> db, std::vector<Stri
 
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 5) {
-		fmt::print("Usage: tenant list [BEGIN] [END] [LIMIT]\n\n");
+	if (tokens.size() > 6) {
+		fmt::print("Usage: tenant list [BEGIN] [END] [LIMIT] [state=<STATE1>,<STATE2>,...]\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
+		fmt::print("Optional comma-separated state(s) can be provided to filter the list.\n");
 		return false;
 	}
 
@@ -243,15 +244,27 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	if (tokens.size() >= 4) {
 		endTenant = tokens[3];
 		if (endTenant <= beginTenant) {
-			fmt::print(stderr, "ERROR: end must be larger than begin");
+			fmt::print(stderr, "ERROR: end must be larger than begin\n");
 			return false;
 		}
 	}
-	if (tokens.size() == 5) {
+	if (tokens.size() >= 5) {
 		int n = 0;
 		if (sscanf(tokens[4].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[4].size() || limit <= 0) {
 			fmt::print(stderr, "ERROR: invalid limit `{}'\n", tokens[4].toString().c_str());
 			return false;
+		}
+	}
+
+	state std::vector<TenantState> filters;
+	if (tokens.size() == 6) { // state=ready,registering
+		if (!tokens[5].startsWith("state="_sr)) {
+			fmt::print(stderr, "ERROR: state filter must begin with `state='\n");
+			return false;
+		}
+		auto filterStrings = tokens[5].removePrefix("state="_sr).splitAny(","_sr);
+		for (auto sref : filterStrings) {
+			filters.push_back(TenantMapEntry::stringToTenantState(sref.toString()));
 		}
 	}
 
@@ -266,7 +279,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			state std::vector<TenantName> tenantNames;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(MetaclusterAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
+				    wait(MetaclusterAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit, filters));
 				for (auto tenant : tenants) {
 					tenantNames.push_back(tenant.first);
 				}

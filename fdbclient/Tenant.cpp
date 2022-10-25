@@ -70,6 +70,7 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 }
 
 TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
+	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
 	if (stateStr == "registering") {
 		return TenantState::REGISTERING;
 	} else if (stateStr == "ready") {
@@ -103,6 +104,7 @@ std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState)
 }
 
 TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
+	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
 	if (stateStr == "unlocked") {
 		return TenantLockState::UNLOCKED;
 	} else if (stateStr == "read only") {

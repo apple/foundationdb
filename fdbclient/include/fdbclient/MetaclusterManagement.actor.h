@@ -1555,23 +1555,36 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
-                                                                                  TenantNameRef begin,
-                                                                                  TenantNameRef end,
-                                                                                  int limit) {
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(
+    Transaction tr,
+    TenantNameRef begin,
+    TenantNameRef end,
+    int limit,
+    std::vector<TenantState> filters = std::vector<TenantState>()) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
 	    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit));
 
-	return results.results;
+	if (filters.empty()) {
+		return results.results;
+	}
+	std::vector<std::pair<TenantName, TenantMapEntry>> filterResults;
+	for (auto pair : results.results) {
+		if (std::count(filters.begin(), filters.end(), pair.second.tenantState)) {
+			filterResults.push_back(pair);
+		}
+	}
+	return filterResults;
 }
 
 ACTOR template <class DB>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference<DB> db,
-                                                                       TenantName begin,
-                                                                       TenantName end,
-                                                                       int limit) {
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
+    Reference<DB> db,
+    TenantName begin,
+    TenantName end,
+    int limit,
+    std::vector<TenantState> filters = std::vector<TenantState>()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	loop {
@@ -1579,7 +1592,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-			    wait(listTenantsTransaction(tr, begin, end, limit));
+			    wait(listTenantsTransaction(tr, begin, end, limit, filters));
 			return tenants;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
