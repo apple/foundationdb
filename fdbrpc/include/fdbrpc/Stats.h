@@ -67,8 +67,6 @@ struct Traceable<ICounter*> : std::true_type {
 	}
 };
 
-class CounterCollectionImpl;
-
 class CounterCollection {
 	friend class CounterCollectionImpl;
 
