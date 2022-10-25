@@ -60,12 +60,12 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_retainMasterData(MasterData *rd) {
+// FIXME(swift): remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+void swift_workaround_retainMasterData(MasterData* _Nonnull rd) {
     rd->addref();
 }
-// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_releaseMasterData(MasterData *rd) {
+// FIXME(swift): remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+void swift_workaround_releaseMasterData(MasterData* _Nonnull rd) {
     rd->delref();
 }
 

@@ -2074,8 +2074,6 @@ int main(int argc, char* argv[]) {
 
 				g_network->run();
 				while (true);
-					// ...
-				}
 			}
 
 			g_network->addStopCallback(Net2FileSystem::stop);
