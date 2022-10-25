@@ -964,8 +964,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_committed_version",
 	                   headerVersion >= 0);
-	loadClientFunction(
-	    &api->transactionGetTotalCost, lib, fdbCPath, "fdb_transaction_get_approximate_size", headerVersion >= 730);
+	loadClientFunction(&api->transactionGetTotalCost,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_total_cost",
+	                   headerVersion >= ApiVersion::withGetTotalCost().version());
 	loadClientFunction(&api->transactionGetApproximateSize,
 	                   lib,
 	                   fdbCPath,
