@@ -34,7 +34,10 @@ class LatencyBandsMap {
 	// added by LatencyBands)
 	std::vector<double> thresholds;
 
-	LatencyBands& getLatencyBands(TransactionTag tag);
+	// Get or create a LatencyBands object stored in map.
+	// Returns pointer to this object, or nullptr if object
+	// cannot be created.
+	LatencyBands* getLatencyBands(TransactionTag tag);
 
 public:
 	LatencyBandsMap(std::string const& name, UID id, double loggingInterval, int maxSize)
