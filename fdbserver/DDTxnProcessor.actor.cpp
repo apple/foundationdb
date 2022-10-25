@@ -816,7 +816,7 @@ Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
                                                      const Optional<UID>& tssPairID,
                                                      const MoveKeysLock& lock,
                                                      const DDEnabledState* ddEnabledState) const {
-	ASSERT(mgs->allShardRemovedFromServer(serverID));
+	ASSERT(mgs->allShardsRemovedFromServer(serverID));
 	mgs->allServers.erase(serverID);
 	return Void();
 }

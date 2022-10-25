@@ -197,7 +197,7 @@ public:
 	 * * mgs.shardMapping doesn’t have any information about X
 	 * * mgs.allServer[X] is existed
 	 */
-	bool allShardRemovedFromServer(const UID& serverId);
+	bool allShardsRemovedFromServer(const UID& serverId);
 
 	// SOMEDAY: NativeAPI::waitStorageMetrics should share the code in the future, this is a simpler version of it
 	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,

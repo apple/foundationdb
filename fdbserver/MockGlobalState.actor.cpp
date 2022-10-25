@@ -240,6 +240,13 @@ Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest&
 void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {}
 
 Future<Void> MockStorageServer::run() {
+	ssi.locality = LocalityData(Optional<Standalone<StringRef>>(),
+	                            Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                            Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                            Optional<Standalone<StringRef>>());
+	ssi.initEndpoints();
+	ssi.startAcceptingRequests();
+	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
 	return serveStorageMetricsRequests(this, ssi);
 }
 
@@ -298,7 +305,7 @@ bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shar
 	});
 }
 
-bool MockGlobalState::allShardRemovedFromServer(const UID& serverId) {
+bool MockGlobalState::allShardsRemovedFromServer(const UID& serverId) {
 	return allServers.count(serverId) && shardMapping->getNumberOfShards(serverId) == 0;
 }
 
@@ -362,7 +369,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 
 	if (reverse) {
 		// DD never ask for backward range.
-		UNREACHABLE();
+		ASSERT(false);
 	}
 	ASSERT(keys.begin < keys.end);
 
@@ -591,7 +598,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
 	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
-	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
+	TraceEvent("WaitStorageMetricsRequestUnitTestConfig").detail("Config", dbConfig.toString());
 
 	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig);

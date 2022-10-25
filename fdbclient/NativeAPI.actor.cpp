@@ -7736,6 +7736,7 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
 		StorageMetrics x = wait(fx);
 		return x;
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
 		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
