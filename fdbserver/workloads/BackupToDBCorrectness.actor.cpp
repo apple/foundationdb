@@ -675,7 +675,16 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						    restoreRange.arena(),
 						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
 					} else {
-						systemRestoreRange.push_back_deep(systemRestoreRange.arena(), r);
+						KeyRangeRef normalKeyRange = r & normalKeys;
+						KeyRangeRef systemKeyRange = r & systemKeys;
+						if (!normalKeyRange.empty()) {
+							restoreRange.push_back_deep(restoreRange.arena(),
+							                            KeyRangeRef(normalKeyRange.begin.withPrefix(self->backupPrefix),
+							                                        normalKeyRange.end.withPrefix(self->backupPrefix)));
+						}
+						if (!systemKeyRange.empty()) {
+							systemRestoreRange.push_back_deep(systemRestoreRange.arena(), systemKeyRange);
+						}
 					}
 				}
 

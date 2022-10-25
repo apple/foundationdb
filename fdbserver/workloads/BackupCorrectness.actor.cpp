@@ -705,7 +705,14 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {
-						systemRestoreRanges.push_back_deep(systemRestoreRanges.arena(), self->restoreRanges[i]);
+						KeyRangeRef normalKeyRange = self->restoreRanges[i] & normalKeys;
+						KeyRangeRef systemKeyRange = self->restoreRanges[i] & systemKeys;
+						if (!normalKeyRange.empty()) {
+							modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), normalKeyRange);
+						}
+						if (!systemKeyRange.empty()) {
+							systemRestoreRanges.push_back_deep(systemRestoreRanges.arena(), systemKeyRange);
+						}
 					}
 				}
 				self->restoreRanges = modifiedRestoreRanges;
