@@ -1449,9 +1449,10 @@ struct RestoreClusterImpl {
 			    managementTenant.tenantState != TenantState::REGISTERING &&
 			    managementTenant.tenantState != TenantState::REMOVING &&
 			    managementTenant.tenantState != TenantState::ERROR) {
-				wait(self->ctx.runManagementTransaction([tenantName, managementTenant](Reference<typename DB::TransactionT> tr) {
-					return markManagementTenantAsError(tr, tenantName, managementTenant.id);
-				}));
+				wait(self->ctx.runManagementTransaction(
+				    [tenantName, managementTenant](Reference<typename DB::TransactionT> tr) {
+					    return markManagementTenantAsError(tr, tenantName, managementTenant.id);
+				    }));
 			}
 			++setItr;
 		}
