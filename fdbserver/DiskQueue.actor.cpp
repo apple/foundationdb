@@ -743,14 +743,17 @@ public:
 	}
 
 	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
-	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
+	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self,
+	                                                              int file,
+	                                                              int pageOffset,
+	                                                              int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
 		if (file == 1)
 			ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos);
-		int bytesRead = wait(uncancellable(holdWhile(
-		    result, self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)))));
+		int bytesRead =
+		    wait(self->files[file].f->read(mutateString(result), bytesRequested, pageOffset * sizeof(Page)));
 		ASSERT_WE_THINK(bytesRead == bytesRequested);
 		return result;
 	}
