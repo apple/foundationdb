@@ -1179,6 +1179,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			if (SERVER_KNOBS->ROCKSDB_DISABLE_WAL_EXPERIMENTAL) {
 				options.disableWAL = true;
+				options.sync = false;
 			}
 
 			double writeBeginTime = timer_monotonic();
