@@ -1846,22 +1846,52 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	void set(KeyValueRef kv, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
+			keysSet.clear();
 		}
 		ASSERT(defaultFdbCF != nullptr);
 		writeBatch->Put(defaultFdbCF, toSlice(kv.key), toSlice(kv.value));
+		if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE) {
+			keysSet.insert(kv.key);
+		}
 	}
 
-	void clear(KeyRangeRef keyRange, const Arena*) override {
+	void clear(KeyRangeRef keyRange, const StorageServerMetrics* storageMetrics, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
+			keysSet.clear();
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
-
 		if (keyRange.singleKeyRange()) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 		} else {
-			writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
+			    storageMetrics->byteSample.getEstimate(keyRange) <
+			        SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT) {
+				rocksdb::ReadOptions options = sharedState->getReadOptions();
+				auto beginSlice = toSlice(keyRange.begin);
+				auto endSlice = toSlice(keyRange.end);
+				options.iterate_lower_bound = &beginSlice;
+				options.iterate_upper_bound = &endSlice;
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, defaultFdbCF));
+				cursor->Seek(toSlice(keyRange.begin));
+				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
+					writeBatch->Delete(defaultFdbCF, cursor->key());
+					cursor->Next();
+				}
+				if (!cursor->status().ok()) {
+					// if readrange iteration fails, then do a deleteRange.
+					writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+				} else {
+					auto it = keysSet.lower_bound(keyRange.begin);
+					while (it != keysSet.end() && *it < keyRange.end) {
+						writeBatch->Delete(defaultFdbCF, toSlice(*it));
+						it++;
+					}
+				}
+			} else {
+				writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+			}
 		}
 	}
 
@@ -1890,6 +1920,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
+		keysSet.clear();
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
@@ -2083,6 +2114,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	std::set<Key> keysSet;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
 	int numReadWaiters;

@@ -641,6 +641,7 @@ struct ILogSystem {
 	virtual Future<Reference<ILogSystem>> newEpoch(
 	    RecruitFromConfigurationReply const& recr,
 	    Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	    UID clusterId,
 	    DatabaseConfiguration const& config,
 	    LogEpoch recoveryCount,
 	    Version recoveryTransactionVersion,

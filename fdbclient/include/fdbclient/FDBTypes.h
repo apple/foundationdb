@@ -336,12 +336,13 @@ struct KeyRangeRef {
 	bool isCovered(std::vector<KeyRangeRef>& ranges) {
 		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		KeyRangeRef clone(begin, end);
+
 		for (auto r : ranges) {
-			if (begin < r.begin)
+			if (clone.begin < r.begin)
 				return false; // uncovered gap between clone.begin and r.begin
-			if (end <= r.end)
+			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (end > r.begin)
+			if (clone.end > r.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
@@ -1402,6 +1403,25 @@ struct TenantMode {
 		serializer(ar, mode);
 	}
 
+	// This does not go back-and-forth cleanly with toString
+	// The '_experimental' suffix, if present, needs to be removed in order to be parsed.
+	static TenantMode fromString(std::string mode) {
+		if (mode.find("_experimental") != std::string::npos) {
+			mode.replace(mode.find("_experimental"), std::string::npos, "");
+		}
+		if (mode == "disabled") {
+			return TenantMode::DISABLED;
+		} else if (mode == "optional") {
+			return TenantMode::OPTIONAL_TENANT;
+		} else if (mode == "required") {
+			return TenantMode::REQUIRED;
+		} else {
+			TraceEvent(SevError, "UnknownTenantMode").detail("TenantMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	std::string toString() const {
 		switch (mode) {
 		case DISABLED:
@@ -1675,8 +1695,8 @@ struct Versionstamp {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		uint64_t beVersion;
-		uint16_t beBatch;
+		int64_t beVersion;
+		int16_t beBatch;
 
 		if constexpr (!Ar::isDeserializing) {
 			beVersion = bigEndian64(version);
@@ -1686,7 +1706,7 @@ struct Versionstamp {
 		serializer(ar, beVersion, beBatch);
 
 		if constexpr (Ar::isDeserializing) {
-			version = bigEndian64(version);
+			version = bigEndian64(beVersion);
 			batchNumber = bigEndian16(beBatch);
 		}
 	}
