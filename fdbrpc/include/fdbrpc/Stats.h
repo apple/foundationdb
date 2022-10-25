@@ -183,44 +183,6 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 }
 
 class LatencyBands {
-public:
-	LatencyBands(std::string name, UID id, double loggingInterval)
-	  : name(name), id(id), loggingInterval(loggingInterval) {}
-
-	void addThreshold(double value) {
-		if (value > 0 && bands.count(value) == 0) {
-			if (bands.size() == 0) {
-				ASSERT(!cc && !filteredCount);
-				cc = std::make_unique<CounterCollection>(name, id.toString());
-				logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name);
-				filteredCount = std::make_unique<Counter>("Filtered", *cc);
-				insertBand(std::numeric_limits<double>::infinity());
-			}
-
-			insertBand(value);
-		}
-	}
-
-	void addMeasurement(double measurement, bool filtered = false) {
-		if (filtered && filteredCount) {
-			++(*filteredCount);
-		} else if (bands.size() > 0) {
-			auto itr = bands.upper_bound(measurement);
-			ASSERT(itr != bands.end());
-			++(*itr->second);
-		}
-	}
-
-	void clearBands() {
-		logger = Void();
-		bands.clear();
-		filteredCount.reset();
-		cc.reset();
-	}
-
-	~LatencyBands() { clearBands(); }
-
-private:
 	std::map<double, std::unique_ptr<Counter>> bands;
 	std::unique_ptr<Counter> filteredCount;
 
@@ -231,9 +193,14 @@ private:
 	std::unique_ptr<CounterCollection> cc;
 	Future<Void> logger;
 
-	void insertBand(double value) {
-		bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
-	}
+	void insertBand(double value);
+
+public:
+	LatencyBands(std::string const& name, UID id, double loggingInterval);
+	void addThreshold(double value);
+	void addMeasurement(double measurement, bool filtered = false);
+	void clearBands();
+	~LatencyBands();
 };
 
 class LatencySample {

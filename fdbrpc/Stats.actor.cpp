@@ -133,3 +133,45 @@ Future<Void> CounterCollection::traceCounters(std::string const& traceEventName,
 	return CounterCollectionImpl::traceCounters(
 	    this, traceEventName, traceEventID, interval, trackLatestName, decorator);
 }
+
+void LatencyBands::insertBand(double value) {
+	bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
+}
+
+LatencyBands::LatencyBands(std::string const& name, UID id, double loggingInterval)
+  : name(name), id(id), loggingInterval(loggingInterval) {}
+
+void LatencyBands::addThreshold(double value) {
+	if (value > 0 && bands.count(value) == 0) {
+		if (bands.size() == 0) {
+			ASSERT(!cc && !filteredCount);
+			cc = std::make_unique<CounterCollection>(name, id.toString());
+			logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name, decorator);
+			filteredCount = std::make_unique<Counter>("Filtered", *cc);
+			insertBand(std::numeric_limits<double>::infinity());
+		}
+
+		insertBand(value);
+	}
+}
+
+void LatencyBands::addMeasurement(double measurement, bool filtered) {
+	if (filtered && filteredCount) {
+		++(*filteredCount);
+	} else if (bands.size() > 0) {
+		auto itr = bands.upper_bound(measurement);
+		ASSERT(itr != bands.end());
+		++(*itr->second);
+	}
+}
+
+void LatencyBands::clearBands() {
+	logger = Void();
+	bands.clear();
+	filteredCount.reset();
+	cc.reset();
+}
+
+LatencyBands::~LatencyBands() {
+	clearBands();
+}
