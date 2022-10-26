@@ -81,11 +81,12 @@
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SpanContextMessage.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -641,7 +642,7 @@ struct BusiestWriteTagContext {
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
 
-struct StorageServer {
+struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
 private:
@@ -807,8 +808,8 @@ public:
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
 
-	double old_rate = 1.0;
-	double currentRate() {
+	mutable double old_rate = 1.0;
+	double currentRate() const {
 		auto versionLag = version.get() - durableVersion.get();
 		double res;
 		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
@@ -993,7 +994,6 @@ public:
 	Database cx;
 	ActorCollection actors;
 
-	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
@@ -1313,10 +1313,10 @@ public:
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 
-		version.initMetric("StorageServer.Version"_sr, counters.cc.id);
-		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.id);
-		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.id);
-		desiredOldestVersion.initMetric("StorageServer.DesiredOldestVersion"_sr, counters.cc.id);
+		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
+		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.getId());
+		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageServer.DesiredOldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -1386,7 +1386,7 @@ public:
 	// This is the maximum version that might be read from storage (the minimum version is durableVersion)
 	Version storageVersion() const { return oldestVersion.get(); }
 
-	bool isReadable(KeyRangeRef const& keys) {
+	bool isReadable(KeyRangeRef const& keys) const override {
 		auto sh = shards.intersectingRanges(keys);
 		for (auto i = sh.begin(); i != sh.end(); ++i)
 			if (!i->value()->isReadable())
@@ -1412,10 +1412,10 @@ public:
 		}
 	}
 
-	Counter::Value queueSize() { return counters.bytesInput.getValue() - counters.bytesDurable.getValue(); }
+	Counter::Value queueSize() const { return counters.bytesInput.getValue() - counters.bytesDurable.getValue(); }
 
 	// penalty used by loadBalance() to balance requests among SSes. We prefer SS with less write queue size.
-	double getPenalty() {
+	double getPenalty() const override {
 		return std::max(std::max(1.0,
 		                         (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER -
 		                                         2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
@@ -1509,7 +1509,7 @@ public:
 		}
 	}
 
-	void getSplitPoints(SplitRangeRequest const& req) {
+	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
 			Optional<TenantMapEntry> entry = getTenantEntry(version.get(), req.tenantInfo);
 			metrics.getSplitPoints(req, entry.map<Key>([](TenantMapEntry e) { return e.prefix; }));
@@ -1538,6 +1538,15 @@ public:
 			return true;
 		}
 		return false;
+	}
+
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
+
+	void addActor(Future<Void> future) override { actors.add(future); }
+
+	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
+		StorageBytes sb = storage.getStorageBytes();
+		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
 };
 
@@ -5983,27 +5992,26 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
                                        Reference<BlobConnectionProvider> blobConn) {
 	ASSERT(blobConn.isValid());
 	try {
-
 		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tryReadBlobGranules(tr, keys, fetchVersion));
-
 		if (chunks.size() == 0) {
 			throw blob_granule_transaction_too_old(); // no data on blob
 		}
-
 		if (!isRangeFullyCovered(keys, chunks)) {
 			throw blob_granule_transaction_too_old();
 		}
-
-		for (const BlobGranuleChunkRef& chunk : chunks) {
-			state KeyRangeRef chunkRange = chunk.keyRange;
-			state RangeResult rows = wait(readBlobGranule(chunk, keys, 0, fetchVersion, blobConn));
+		state int i;
+		for (i = 0; i < chunks.size(); ++i) {
+			state KeyRangeRef chunkRange = chunks[i].keyRange;
+			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
 			TraceEvent("ReadBlobData")
 			    .detail("Rows", rows.size())
 			    .detail("ChunkRange", chunkRange.toString())
 			    .detail("Keys", keys.toString());
-
 			if (rows.size() == 0) {
-				rows.readThrough = KeyRef(rows.arena(), chunkRange.end);
+				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
+			}
+			if (i == chunks.size() - 1) {
+				rows.readThrough = KeyRef(rows.arena(), keys.end);
 			}
 			results.send(rows);
 		}
@@ -6017,7 +6025,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		tr->reset();
 		tr->setVersion(fetchVersion);
 		tr->trState->taskID = TaskPriority::FetchKeys;
-		wait(tryGetRange(results, tr, keys)); // fail back to storage server
+		throw;
 	}
 	return Void();
 }
@@ -6805,8 +6813,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to ensure
 		// change feed mutations get applied correctly
 		state std::vector<Key> changeFeedsToFetch;
-		std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
-		changeFeedsToFetch = _cfToFetch;
+		if (!isFullRestoreMode()) {
+			std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
+			changeFeedsToFetch = _cfToFetch;
+		}
 		wait(data->durableVersionLock.take());
 
 		shard->phase = AddingShard::Fetching;
@@ -10173,7 +10183,7 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #pragma region Core
 #endif
 
-ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsRequest req) {
+ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
 		wait(success(waitForVersionNoTooOld(self, latestVersion)));
 		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
@@ -10191,85 +10201,45 @@ ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsReques
 	return Void();
 }
 
+Future<Void> StorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	return waitMetricsTenantAware_internal(this, req);
+}
+
 ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
-	state Future<Void> doPollMetrics = Void();
 
 	wait(self->byteSampleRecovery);
 	TraceEvent("StorageServerRestoreDurableState", self->thisServerID).detail("RestoredBytes", self->bytesRestored);
 
 	// Logs all counters in `counters.cc` and reset the interval.
-	self->actors.add(traceCounters("StorageMetrics",
-	                               self->thisServerID,
-	                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                               &self->counters.cc,
-	                               self->thisServerID.toString() + "/StorageMetrics",
-	                               [self = self](TraceEvent& te) {
-		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
-		                               te.detail("Tag", self->tag.toString());
-		                               StorageBytes sb = self->storage.getStorageBytes();
-		                               te.detail("KvstoreBytesUsed", sb.used);
-		                               te.detail("KvstoreBytesFree", sb.free);
-		                               te.detail("KvstoreBytesAvailable", sb.available);
-		                               te.detail("KvstoreBytesTotal", sb.total);
-		                               te.detail("KvstoreBytesTemp", sb.temp);
-		                               if (self->isTss()) {
-			                               te.detail("TSSPairID", self->tssPairID);
-			                               te.detail("TSSJointID",
-			                                         UID(self->thisServerID.first() ^ self->tssPairID.get().first(),
-			                                             self->thisServerID.second() ^ self->tssPairID.get().second()));
-		                               } else if (self->isSSWithTSSPair()) {
-			                               te.detail("SSPairID", self->ssPairID);
-			                               te.detail("TSSJointID",
-			                                         UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
-			                                             self->thisServerID.second() ^ self->ssPairID.get().second()));
-		                               }
-	                               }));
+	self->actors.add(self->counters.cc.traceCounters(
+	    "StorageMetrics",
+	    self->thisServerID,
+	    SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	    self->thisServerID.toString() + "/StorageMetrics",
+	    [self = self](TraceEvent& te) {
+		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    te.detail("Tag", self->tag.toString());
+		    StorageBytes sb = self->storage.getStorageBytes();
+		    te.detail("KvstoreBytesUsed", sb.used);
+		    te.detail("KvstoreBytesFree", sb.free);
+		    te.detail("KvstoreBytesAvailable", sb.available);
+		    te.detail("KvstoreBytesTotal", sb.total);
+		    te.detail("KvstoreBytesTemp", sb.temp);
+		    if (self->isTss()) {
+			    te.detail("TSSPairID", self->tssPairID);
+			    te.detail("TSSJointID",
+			              UID(self->thisServerID.first() ^ self->tssPairID.get().first(),
+			                  self->thisServerID.second() ^ self->tssPairID.get().second()));
+		    } else if (self->isSSWithTSSPair()) {
+			    te.detail("SSPairID", self->ssPairID);
+			    te.detail("TSSJointID",
+			              UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
+			                  self->thisServerID.second() ^ self->ssPairID.get().second()));
+		    }
+	    }));
 
-	loop {
-		choose {
-			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (!req.tenantInfo.present() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->actors.add(waitMetricsTenantAware(self, req));
-				}
-			}
-			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.splitMetrics(req);
-				}
-			}
-			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-				StorageBytes sb = self->storage.getStorageBytes();
-				self->metrics.getStorageMetrics(
-				    req, sb, self->counters.bytesInput.getRate(), self->versionLag, self->lastUpdate);
-			}
-			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.getReadHotRanges(req);
-				}
-			}
-			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->getSplitPoints(req);
-				}
-			}
-			when(wait(doPollMetrics)) {
-				self->metrics.poll();
-				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
-			}
-		}
-	}
+	wait(serveStorageMetricsRequests(self, ssi));
+	return Void();
 }
 
 ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {

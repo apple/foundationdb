@@ -30,7 +30,7 @@
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/MutationTracking.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -405,10 +405,6 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	    .detail("Offset", asset.offset)
 	    .detail("Length", asset.len);
 
-	// Ensure data blocks in the same file are processed in order
-	wait(processedFileOffset->whenAtLeast(asset.offset));
-	ASSERT(processedFileOffset->get() == asset.offset);
-
 	state Arena tempArena;
 	state StringRefReader reader(buf, restore_corrupted_data());
 	try {
@@ -430,8 +426,9 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			const uint8_t* message = reader.consume(msgSize);
 
 			// Skip mutations out of the version range
-			if (!asset.isInVersionRange(msgVersion.version))
+			if (!asset.isInVersionRange(msgVersion.version)) {
 				continue;
+			}
 
 			state VersionedMutationsMap::iterator it;
 			bool inserted;
@@ -452,6 +449,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
 				cc->oldLogMutations += 1;
+				wait(yield()); // avoid potential stack overflows
 				continue;
 			}
 
@@ -459,6 +457,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			if (mutation.param1 >= asset.range.end ||
 			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
+				wait(yield()); // avoid potential stack overflows
 				continue;
 			}
 
@@ -509,7 +508,6 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 		    .detail("BlockLen", asset.len);
 		throw;
 	}
-	processedFileOffset->set(asset.offset + asset.len);
 	return Void();
 }
 
@@ -526,8 +524,19 @@ ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
 	state int readFileRetries = 0;
 	loop {
 		try {
+			// Ensure data blocks in the same file are processed in order
+			wait(processedFileOffset->whenAtLeast(asset.offset));
+			ASSERT(processedFileOffset->get() == asset.offset);
+
 			wait(_parsePartitionedLogFileOnLoader(
 			    pRangeVersions, processedFileOffset, kvOpsIter, samplesIter, cc, bc, asset, cx));
+			processedFileOffset->set(asset.offset + asset.len);
+
+			TraceEvent("FastRestoreLoaderDecodingLogFileDone")
+			    .detail("BatchIndex", asset.batchIndex)
+			    .detail("Filename", asset.filename)
+			    .detail("Offset", asset.offset)
+			    .detail("Length", asset.len);
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
