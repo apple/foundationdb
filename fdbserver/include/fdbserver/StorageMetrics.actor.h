@@ -228,5 +228,9 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 	}
 }
 
+// For both the mutation log and the versioned map.
+inline int mvccStorageBytes(int64_t size) {
+	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 + (MutationRef::OVERHEAD_BYTES + size) * 2;
+}
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_STORAGEMETRICS_H

@@ -535,8 +535,7 @@ const int VERSION_OVERHEAD =
                                                                               // overhead for map
 // For both the mutation log and the versioned map.
 static int mvccStorageBytes(MutationRef const& m) {
-	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
-	       (MutationRef::OVERHEAD_BYTES + m.param1.size() + m.param2.size()) * 2;
+	return mvccStorageBytes(m.param1.size() + m.param2.size());
 }
 
 struct FetchInjectionInfo {

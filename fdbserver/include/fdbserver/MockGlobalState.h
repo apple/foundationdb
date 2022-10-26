@@ -133,6 +133,23 @@ public:
 
 	Future<Void> run();
 
+	// data operation APIs - change the metrics
+
+	// Set key with a new value, the total bytes change from oldBytes to bytes
+	void set(KeyRef key, int64_t bytes, int64_t oldBytes);
+	// Insert key with a new value, the total bytes is `bytes`
+	void insert(KeyRef key, int64_t bytes);
+	// Clear key and its value of which the size is bytes
+	void clear(KeyRef key, int64_t bytes);
+	// Clear range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
+	void clearRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
+
+	// modify the metrics as like doing an n-bytes read op
+	// Read key and cause bytes read overhead
+	void get(KeyRef key, int64_t bytes);
+	// Read range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
+	void getRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
+
 protected:
 	void threeWayShardSplitting(KeyRangeRef outerRange,
 	                            KeyRangeRef innerRange,
@@ -140,6 +157,11 @@ protected:
 	                            bool restrictSize);
 
 	void twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize, bool restrictSize);
+
+	// Assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
+	int64_t estimateRangeTotalBytes(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
+	// Update the storage metrics as if we write the MVCC storage with a mutation of `size` bytes.
+	void notifyMvccStorageCost(KeyRef key, int64_t size);
 };
 
 class MockGlobalStateImpl;

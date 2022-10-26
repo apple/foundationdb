@@ -250,6 +250,68 @@ Future<Void> MockStorageServer::run() {
 	return serveStorageMetricsRequests(this, ssi);
 }
 
+void MockStorageServer::set(KeyRef key, int64_t bytes, int64_t oldBytes) {
+	notifyMvccStorageCost(key, bytes);
+}
+
+void MockStorageServer::insert(KeyRef key, int64_t bytes) {
+	notifyMvccStorageCost(key, bytes);
+}
+
+void MockStorageServer::clear(KeyRef key, int64_t bytes) {
+	notifyMvccStorageCost(key, bytes);
+}
+
+void MockStorageServer::clearRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes) {
+	notifyMvccStorageCost(range.begin, range.begin.size() + range.end.size());
+
+	auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
+}
+
+void MockStorageServer::get(KeyRef key, int64_t bytes) {
+	// If the read yields no value, randomly sample the empty read.
+	int64_t bytesReadPerKSecond = std::max(bytes, SERVER_KNOBS->EMPTY_READ_PENALTY);
+	metrics.notifyBytesReadPerKSecond(key, bytesReadPerKSecond);
+}
+
+void MockStorageServer::getRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes) {
+	auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
+	// For performance concerns, the cost of a range read is billed to the start key and end key of the
+	// range.
+	if (totalByteSize > 0) {
+		int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
+		metrics.notifyBytesReadPerKSecond(range.begin, bytesReadPerKSecond);
+		metrics.notifyBytesReadPerKSecond(range.end, bytesReadPerKSecond);
+	}
+}
+
+int64_t MockStorageServer::estimateRangeTotalBytes(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes) {
+	int64_t totalByteSize = 0;
+	auto ranges = serverKeys.intersectingRanges(range);
+
+	// use the beginShardBytes as partial size
+	if (ranges.begin().begin() < range.begin) {
+		ranges.pop_front();
+		totalByteSize += beginShardBytes;
+	}
+	// use the endShardBytes as partial size
+	if (ranges.end().begin() < range.end) {
+		totalByteSize += endShardBytes;
+	}
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		totalByteSize += it->cvalue().shardSize;
+	}
+	return totalByteSize;
+}
+
+void MockStorageServer::notifyMvccStorageCost(KeyRef key, int64_t size) {
+	// update write bandwidth and iops as mock the cost of writing mvcc storage
+	StorageMetrics s;
+	s.bytesPerKSecond = mvccStorageBytes(size) / 2;
+	s.iosPerKSecond = 1;
+	metrics.notify(key, s);
+}
+
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;
