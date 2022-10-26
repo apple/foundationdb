@@ -305,7 +305,6 @@ int populate(Database db,
 						const auto rc =
 						    waitAndHandleError(systemTx, blobbifyResults[i - (batch * batch_size)], "BLOBBIFY_TENANT");
 						if (rc == FutureRC::OK) {
-							// Read the tenant metadata for the prefix and issue a range clear
 							if (!blobbifyResults[i - (batch * batch_size)].get()) {
 								fmt::print("Blobbifying tenant {0} failed!\n", i);
 								return -1;
