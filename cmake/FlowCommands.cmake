@@ -76,38 +76,11 @@ function(generate_coverage_xml)
   add_dependencies(coverage_${target_name} coveragetool)
 endfunction()
 
-# This function asserts that `versions.h` does not exist in the source
-# directory. It does this in the prebuild phase of the target.
-# This is an ugly hack that should make sure that cmake isn't used with
-# a source directory in which FDB was previously built with `make`.
-function(assert_no_version_h target)
-
-  message(STATUS "Check versions.h on ${target}")
-  set(target_name "${target}_versions_h_check")
-
-  if (DEFINED ENV{VERBOSE})
-    add_custom_target("${target_name}"
-      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-      -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-      COMMAND echo
-      "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-      -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-      COMMENT "Check old build system wasn't used in source dir")
-  else()
-    add_custom_target("${target_name}"
-      COMMAND "${CMAKE_COMMAND}" -DFILE="${CMAKE_SOURCE_DIR}/versions.h"
-      -P "${CMAKE_SOURCE_DIR}/cmake/AssertFileDoesntExist.cmake"
-      COMMENT "Check old build system wasn't used in source dir")
-  endif()
-
-  add_dependencies(${target} ${target_name})
-endfunction()
-
 add_custom_target(strip_targets)
 add_dependencies(packages strip_targets)
 
 function(strip_debug_symbols target)
-  if (WIN32)
+  if(WIN32)
     return()
   endif()
   get_target_property(target_type ${target} TYPE)
@@ -146,7 +119,7 @@ function(strip_debug_symbols target)
       COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
       COMMENT "Copy debug symbols to ${out_name}.debug")
-    add_custom_target(strip_${target} DEPENDS  "${out_file}.debug")
+    add_custom_target(strip_${target} DEPENDS "${out_file}.debug")
   else()
     add_custom_target(strip_${target})
     add_dependencies(strip_${target} strip_only_${target})
@@ -171,7 +144,7 @@ function(copy_headers)
   foreach(f IN LISTS CP_SRCS)
     is_prefix(bd "${CMAKE_CURRENT_BINARY_DIR}" "${f}")
     is_prefix(sd "${CMAKE_CURRENT_SOURCE_DIR}" "${f}")
-    if (bd OR sd)
+    if(bd OR sd)
       continue()
     endif()
     is_header(hdr "${f}")
@@ -180,7 +153,7 @@ function(copy_headers)
     endif()
     get_filename_component(fname ${f} NAME)
     get_filename_component(dname ${f} DIRECTORY)
-    if (dname)
+    if(dname)
       make_directory(${incl_dir}/${dname})
     endif()
     set(fpath "${incl_dir}/${dname}/${fname}")
@@ -309,9 +282,6 @@ function(add_flow_target)
 
     add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})
     add_dependencies(${AFT_NAME} ${AFT_NAME}_actors)
-    if(NOT WIN32)
-      assert_no_version_h(${AFT_NAME}_actors)
-    endif()
     generate_coverage_xml(${AFT_NAME})
     if(strip_target)
       strip_debug_symbols(${AFT_NAME})
