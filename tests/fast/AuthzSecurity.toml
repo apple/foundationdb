@@ -1,5 +1,6 @@
 [configuration]
 allowDefaultTenant = false
+tenantModes = ['optional', 'required']
 
 [[test]]
 testTitle = 'TenantCreation'

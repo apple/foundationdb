@@ -39,7 +39,7 @@
 FDB_BOOLEAN_PARAM(PositiveTestcase);
 
 struct AuthzSecurityWorkload : TestWorkload {
-	static constexpr auto NAME = "AuthzSecurityWorkload";
+	static constexpr auto NAME = "AuthzSecurity";
 	int actorCount;
 	double testDuration;
 
@@ -51,16 +51,17 @@ struct AuthzSecurityWorkload : TestWorkload {
 	Standalone<StringRef> signedTokenAnotherTenant;
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
-	    publicNonTenantRequestPositive, tLogReadNegative;
+	    publicNonTenantRequestPositive, tLogReadNegative, tLogReadReplyUnset;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
 
 	AuthzSecurityWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), crossTenantGetPositive("CrossTenantGetPositive"),
 	    crossTenantGetNegative("CrossTenantGetNegative"), crossTenantCommitPositive("CrossTenantCommitPositive"),
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
-	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative") {
+	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
+		tLogReadReplyUnset("TLogReadReplyUnset") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
-		actorCount = getOption(options, "actorsPerClient"_sr, 1);
+		actorCount = getOption(options, "actorsPerClient"_sr, 20);
 		tenant = getOption(options, "tenantA"_sr, "authzSecurityTestTenant"_sr);
 		anotherTenant = getOption(options, "tenantB"_sr, "authzSecurityTestTenant"_sr);
 		tLogConfigKey = getOption(options, "tLogConfigKey"_sr, "TLogInterface"_sr);
@@ -80,6 +81,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    [this](Database cx) { return testCrossTenantCommitDisallowed(PositiveTestcase::False, cx, this); });
 		testFunctions.push_back(
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(cx, this); });
+		testFunctions.push_back(
+		    [this](Database cx) { return testTLogReadDisallowed(cx, this); });
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -106,6 +109,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(crossTenantCommitNegative.getMetric());
 		m.push_back(publicNonTenantRequestPositive.getMetric());
 		m.push_back(tLogReadNegative.getMetric());
+		m.push_back(tLogReadReplyUnset.getMetric());
 	}
 
 	void setAuthToken(Transaction& tr, Standalone<StringRef> token) {
@@ -311,23 +315,38 @@ struct AuthzSecurityWorkload : TestWorkload {
 		}
 		waitForAll(replies);
 		for (auto i = 0u; i < logs.size(); i++) {
-			if (!replies[i].isError()) {
-				TraceEvent(SevError, "AuthzExpectedErrorNotFound").detail("TLogIndex", i).log();
-			} else {
-				Error const& e = replies[i].getError();
-				if (e.code() != error_code_unauthorized_attempt && e.code() != error_code_actor_cancelled) {
+			const auto& reply = replies[i];
+			ASSERT(reply.isValid());
+			if (reply.canGet()) {
+				TLogPeekReply r = reply.getValue();
+				TraceEvent(SevError, "AuthzExpectedErrorNotFound")
+					.detail("TLogIndex", i)
+					.detail("Messages", r.messages.toString())
+					.detail("End", r.end)
+					.detail("Popped", r.popped)
+					.detail("MaxKnownVersion", r.maxKnownVersion)
+					.detail("MinKnownCommitVersion", r.minKnownCommittedVersion)
+					.detail("Begin", r.begin)
+					.detail("OnlySpilled", r.onlySpilled).log();
+			} else if (reply.isReady()) {
+				ASSERT(reply.isError());
+				Error e = reply.getError();
+				if (e.code() == error_code_unauthorized_attempt) {
+					++self->tLogReadNegative;
+				} else if (e.code() != error_code_actor_cancelled) {
 					TraceEvent(SevError, "AuthzSecurityUnexpectedError").detail("Error", e.name()).log();
 				}
+			} else {
+				// not set
+				++self->tLogReadReplyUnset;
 			}
 		}
-		++self->tLogReadNegative;
 		return Void();
 	}
 
 	ACTOR Future<Void> runTestClient(Database cx, AuthzSecurityWorkload* self) {
 		try {
 			loop { wait(deterministicRandom()->randomChoice(self->testFunctions)(cx)); }
-			// loop { wait(self->testTLogReadDisallowed(cx, self)); }
 		} catch (Error& e) {
 			TraceEvent(SevError, "AuthzSecurityClient").error(e);
 			throw;
