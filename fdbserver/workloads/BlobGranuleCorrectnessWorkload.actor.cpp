@@ -249,6 +249,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 	}
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
+
 	ACTOR Future<TenantMapEntry> setUpTenant(Database cx, TenantName name) {
 		if (BGW_DEBUG) {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
