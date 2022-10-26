@@ -322,6 +322,9 @@ public:
 	// Log physicalShard
 	void logPhysicalShardCollection();
 
+	// Checks if a physical shard exists.
+	bool physicalShardExists(uint64_t physicalShardID);
+
 private:
 	// Track physicalShard metrics by tracking keyRange metrics
 	void updatePhysicalShardMetricsByKeyRange(KeyRange keyRange,
