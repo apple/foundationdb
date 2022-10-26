@@ -1,5 +1,4 @@
 [configuration]
-allowDefaultTenant = true
 tenantModes = ['required']
 
 [[knobs]]

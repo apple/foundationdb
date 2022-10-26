@@ -215,7 +215,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		state Future<Void> status = statusLoop(cx, tag.toString());
-
+		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
@@ -224,7 +224,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                   configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -474,6 +475,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
+				state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 				try {
 					// Note the "partitionedLog" must be false, because we change
 					// the configuration to disable backup workers before restore.
@@ -484,7 +486,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION &&
+					                                           configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 					                                       StopWhenDone::True,
 					                                       UsePartitionedLog::False);
 				} catch (Error& e) {
