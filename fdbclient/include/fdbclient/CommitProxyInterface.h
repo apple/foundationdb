@@ -61,6 +61,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
+	RequestStream<struct StorageQuotaEnforcementRequest> storageQuotaEnforcementReq;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -87,6 +88,8 @@ struct CommitProxyInterface {
 			exclusionSafetyCheckReq =
 			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			storageQuotaEnforcementReq =
+			    RequestStream<struct StorageQuotaEnforcementRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 
@@ -545,6 +548,20 @@ struct GetDDMetricsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, shardLimit, reply);
+	}
+};
+
+struct StorageQuotaEnforcementRequest {
+	constexpr static FileIdentifier file_identifier = 5427685; // TODO(kejriwal)
+	std::vector<TenantName> tenants;
+	ReplyPromise<Void> reply;
+
+	StorageQuotaEnforcementRequest() {}
+	explicit StorageQuotaEnforcementRequest(std::vector<TenantName> tenants) : tenants(tenants) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tenants, reply);
 	}
 };
 

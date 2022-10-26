@@ -2469,6 +2469,13 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 	}
 }
 
+ACTOR Future<Void> storageQuotaEnforcementUpdate(StorageQuotaEnforcementRequest req, ProxyCommitData* commitData) {
+	TraceEvent("StorageQuotaEnforcementUpdateBegin").log();
+	commitData->tenantsOverStorageQuota = req.tenants;
+	TraceEvent("StorageQuotaEnforcementUpdateFinish").log();
+	return Void();
+}
+
 namespace {
 
 struct TransactionStateResolveContext {
@@ -2797,6 +2804,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		}
 		when(TxnStateRequest request = waitNext(proxy.txnState.getFuture())) {
 			addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
+		}
+		when(StorageQuotaEnforcementRequest storageQuotaEnforcementReq =
+		         waitNext(proxy.storageQuotaEnforcementReq.getFuture())) {
+			addActor.send(storageQuotaEnforcementUpdate(storageQuotaEnforcementReq, &commitData));
 		}
 	}
 }

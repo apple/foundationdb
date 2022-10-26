@@ -565,6 +565,21 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 	}
 }
 
+// Periodically send the list of tenants that are currently over storage quota to the commit proxies
+ACTOR Future<Void> sendTenantsOverStorageQuota(Database cx, Reference<TenantCache> ddTenantCache) {
+	loop {
+		try {
+			wait(sendStorageQuotaEnforcementRequest(cx, ddTenantCache->getTenantsOverQuota()));
+			// TODO(kejriwal): Maybe have a dedicated knob?
+			wait(delay(std::min(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL,
+			                    SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL)));
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "SendTenantsOverStorageQuotaError").error(e);
+			// TODO(kejriwal)
+		}
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList) {
@@ -685,6 +700,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    &normalDDQueueErrors()));
 				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageUsage(),
 				                                    "StorageUsageTracker",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(sendTenantsOverStorageQuota(cx, ddTenantCache.get()),
+				                                    "SendTenantsOverStorageQuota",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
 			}
