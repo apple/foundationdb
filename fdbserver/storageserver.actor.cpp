@@ -1879,7 +1879,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
-	state ReadType type = req.options.present() ? req.options.get().type : ReadType::NORMAL;
+	state ReadType readType = req.options.present() ? req.options.get().type : ReadType::NORMAL;
 
 	try {
 		++data->counters.getValueQueries;
@@ -1891,7 +1891,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
 
-		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)type])));
+		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)readType])));
 
 		// Track time from requestTime through now as read queueing wait time
 		state double queueWaitEnd = g_network->timer();
@@ -3753,7 +3753,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state Optional<ReadOptions> options = req.options;
-	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
+	state ReadType readType = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -3769,11 +3769,11 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
-	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
-		type = ReadType::NORMAL;
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && readType == ReadType::FETCH) {
+		readType = ReadType::NORMAL;
 	}
 
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)readType]));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -4818,7 +4818,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state Optional<ReadOptions> options = req.options;
-	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
+	state ReadType readType = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -5033,7 +5033,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state Optional<ReadOptions> options = req.options;
-	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
+	state ReadType readType = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -5048,12 +5048,12 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(delay(0, TaskPriority::DefaultEndpoint));
-	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
-		type = ReadType::NORMAL;
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && readType == ReadType::FETCH) {
+		readType = ReadType::NORMAL;
 	}
 
-	state int readPriority = data->readPriorityRanks[(int)type];
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
+	state int readPriority = data->readPriorityRanks[(int)readType];
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
