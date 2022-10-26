@@ -393,6 +393,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	state double rateLimiterStartTime = now();
 	state int64_t bytesReadInthisRound = 0;
 	state bool resume = !(restart || shuffleShards);
+	state bool testResult = true;
 
 	state double dbSize = 100e12;
 	if (g_network->isSimulated()) {
@@ -710,7 +711,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 									    (!storageServerInterfaces[j].isTss() &&
 									     !storageServerInterfaces[firstValidServer].isTss())) {
 										testFailure("Data inconsistent", performQuiescentChecks, true);
-										return false;
+										testResult = false;
 									}
 								}
 							}
@@ -949,7 +950,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	}
 
 	*bytesReadInPrevRound = bytesReadInthisRound;
-	return true;
+	return testResult;
 }
 
 ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {

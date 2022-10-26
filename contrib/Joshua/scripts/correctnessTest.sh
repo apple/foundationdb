@@ -4,6 +4,6 @@
 export ASAN_OPTIONS="detect_leaks=0"
 
 OLDBINDIR="${OLDBINDIR:-/app/deploy/global_data/oldBinaries}"
-#mono bin/TestHarness.exe joshua-run "${OLDBINDIR}" false
+mono bin/TestHarness.exe joshua-run "${OLDBINDIR}" false
 
-python3 -m test_harness.app -s ${JOSHUA_SEED} --old-binaries-path ${OLDBINDIR}
+# python3 -m test_harness.app -s ${JOSHUA_SEED} --old-binaries-path ${OLDBINDIR}
