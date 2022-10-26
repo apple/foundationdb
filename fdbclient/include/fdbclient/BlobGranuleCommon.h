@@ -313,4 +313,15 @@ struct BlobManifest {
 	}
 };
 
+// Defines blob restore status
+struct BlobRestoreStatus {
+	constexpr static FileIdentifier file_identifier = 378657;
+	int progress;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, progress);
+	}
+};
+
 #endif

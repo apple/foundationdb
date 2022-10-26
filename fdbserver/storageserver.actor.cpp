@@ -6138,6 +6138,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Tra
 	loop {
 		try {
 			Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tr->readBlobGranules(keys, 0, readVersion));
+			TraceEvent(SevDebug, "ReadBlobGranules").detail("Keys", keys).detail("Chunks", chunks.size());
 			return chunks;
 		} catch (Error& e) {
 			if (retryCount >= maxRetryCount) {
@@ -6169,10 +6170,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
-			TraceEvent("ReadBlobData")
-			    .detail("Rows", rows.size())
-			    .detail("ChunkRange", chunkRange.toString())
-			    .detail("Keys", keys.toString());
+			TraceEvent(SevDebug, "ReadBlobData").detail("Rows", rows.size()).detail("ChunkRange", chunkRange);
 			if (rows.size() == 0) {
 				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
@@ -6185,7 +6183,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "ReadBlobDataFailure")
 		    .suppressFor(5.0)
-		    .detail("Keys", keys.toString())
+		    .detail("Keys", keys)
 		    .detail("FetchVersion", fetchVersion)
 		    .detail("Error", e.what());
 		tr->reset();
@@ -6994,7 +6992,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to ensure
 		// change feed mutations get applied correctly
 		state std::vector<Key> changeFeedsToFetch;
-		if (!isFullRestoreMode()) {
+		state bool isFullRestore = wait(isFullRestoreMode(data->cx, keys));
+		if (!isFullRestore) {
 			std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
 			changeFeedsToFetch = _cfToFetch;
 		}
@@ -7072,7 +7071,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
-			if (SERVER_KNOBS->FETCH_USING_BLOB) {
+			if (isFullRestore) {
 				hold = tryGetRangeFromBlob(results, &tr, keys, fetchVersion, data->blobConn);
 			} else {
 				hold = tryGetRange(results, &tr, keys);
@@ -7110,7 +7109,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 							               data->thisServerID);
 						}
 					}
-
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 
 					// Write this_block to storage
