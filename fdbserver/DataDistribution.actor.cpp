@@ -482,8 +482,7 @@ public:
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
 			if (meta.ranges.empty()) {
-				TraceEvent(SevWarnAlways, "EmptyDataMoveRange", self->ddId)
-				    .detail("DataMoveMetaData", meta.toString());
+				TraceEvent(SevWarnAlways, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
 				continue;
 			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
