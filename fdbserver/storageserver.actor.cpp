@@ -3316,7 +3316,6 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	state GetValueReqAndResultRef getValue;
 	state double getValueStart = g_network->timer();
 	getValue.key = key;
-	state Optional<ReadOptions> options = pOriginalReq->options;
 
 	if (data->shards[key]->isReadable()) {
 		try {
@@ -3326,7 +3325,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    key,
 			                    version,
 			                    pOriginalReq->tags,
-			                    options,
+			                    pOriginalReq->options,
 			                    VersionVector());
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
@@ -3967,6 +3966,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		// TODO: Use a lower level API may be better?
 		GetKeyValuesRequest req;
 		req.spanContext = pOriginalReq->spanContext;
+		req.options = pOriginalReq->options;
 		req.arena = *a;
 		req.begin = getRange.begin;
 		req.end = getRange.end;
@@ -4835,8 +4835,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
 
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
-
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
@@ -4943,6 +4941,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
+			// Only take the ssLock for the readRange operation and unlock before the subqueries because each
+			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
+			// read options which will each acquire the ssLock.
+			state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)readType]));
 			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
 			                                                     version,
 			                                                     KeyRangeRef(begin, end),
@@ -4951,6 +4953,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			                                                     span.context,
 			                                                     options,
 			                                                     tenantPrefix));
+			lock.release();
 
 			state GetMappedKeyValuesReply r;
 			try {
