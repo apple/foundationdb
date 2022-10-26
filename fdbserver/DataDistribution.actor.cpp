@@ -53,6 +53,20 @@
 #include "fdbserver/DDSharedContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
+	return ShardSizeBounds{
+		.max = StorageMetrics{ .bytes = -1,
+		                       .bytesPerKSecond = StorageMetrics::infinity,
+		                       .iosPerKSecond = StorageMetrics::infinity,
+		                       .bytesReadPerKSecond = StorageMetrics::infinity },
+		.min = StorageMetrics{ .bytes = -1, .bytesPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
+		.permittedError = StorageMetrics{ .bytes = -1,
+		                                  .bytesPerKSecond = StorageMetrics::infinity,
+		                                  .iosPerKSecond = StorageMetrics::infinity,
+		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
+	};
+}
+
 struct DDAudit {
 	DDAudit(UID id, KeyRange range, AuditType type)
 	  : id(id), range(range), type(type), auditMap(AuditPhase::Invalid, allKeys.end), actors(true) {}
@@ -285,8 +299,6 @@ public:
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-
-	StorageQuotaInfo storageQuotaInfo;
 
 	Promise<Void> initialized;
 
@@ -542,27 +554,6 @@ public:
 	}
 };
 
-ACTOR Future<Void> storageQuotaTracker(Database cx, StorageQuotaInfo* storageQuotaInfo) {
-	loop {
-		state Transaction tr(cx);
-		loop {
-			try {
-				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-				TraceEvent("StorageQuota_ReadCurrentQuotas").detail("Size", currentQuotas.size());
-				for (auto const kv : currentQuotas) {
-					Key const key = kv.key.removePrefix(storageQuotaPrefix);
-					uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
-					storageQuotaInfo->quotaMap[key] = quota;
-				}
-				wait(delay(5.0));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-}
-
 // Periodically check and log the physicalShard status; clean up empty physicalShard;
 ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection> self) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
@@ -683,14 +674,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			actors.push_back(reportErrorsExcept(storageQuotaTracker(cx, &self->storageQuotaInfo),
-			                                    "StorageQuotaTracker",
-			                                    self->ddId,
-			                                    &normalDDQueueErrors()));
-
 			if (ddIsTenantAware) {
 				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
 				                                    "DDTenantCacheMonitor",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageQuota(),
+				                                    "StorageQuotaTracker",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
 				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageUsage(),

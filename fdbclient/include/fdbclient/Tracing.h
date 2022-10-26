@@ -274,16 +274,3 @@ struct ITracer {
 };
 
 void openTracer(TracerType type);
-
-template <class T>
-struct SpannedDeque : Deque<T> {
-	Span span;
-	explicit SpannedDeque(Location loc) : span(loc) {}
-	SpannedDeque(SpannedDeque&& other) : Deque<T>(std::move(other)), span(std::move(other.span)) {}
-	SpannedDeque(SpannedDeque const&) = delete;
-	SpannedDeque& operator=(SpannedDeque const&) = delete;
-	SpannedDeque& operator=(SpannedDeque&& other) {
-		*static_cast<Deque<T>*>(this) = std::move(other);
-		span = std::move(other.span);
-	}
-};

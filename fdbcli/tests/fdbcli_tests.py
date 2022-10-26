@@ -109,7 +109,7 @@ def quota(logger):
     command = 'quota clear green'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
-    assert output == ''
+    assert output == 'Successfully cleared quota.'
 
     command = 'quota get green total_throughput'
     output = run_fdbcli_command(command)
@@ -120,17 +120,17 @@ def quota(logger):
     command = 'quota set red total_throughput 49152'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
-    assert output == ''
+    assert output == 'Successfully updated quota.'
 
     command = 'quota set green total_throughput 32768'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
-    assert output == ''
+    assert output == 'Successfully updated quota.'
 
     command = 'quota set green reserved_throughput 16384'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
-    assert output == ''
+    assert output == 'Successfully updated quota.'
 
     command = 'quota get green total_throughput'
     output = run_fdbcli_command(command)
@@ -145,7 +145,7 @@ def quota(logger):
     command = 'quota clear green'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
-    assert output == ''
+    assert output == 'Successfully cleared quota.'
 
     command = 'quota get green total_throughput'
     output = run_fdbcli_command(command)

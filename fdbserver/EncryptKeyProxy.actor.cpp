@@ -388,6 +388,15 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 		try {
 			KmsConnLookupEKsByKeyIdsReq keysByIdsReq;
 			for (const auto& item : lookupCipherInfoMap) {
+				// TODO: Currently getEncryptCipherKeys does not pass the domain name, once that is fixed we can remove
+				// the check on the empty domain name
+				if (!item.second.domainName.empty()) {
+					if (item.second.domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+						ASSERT(item.second.domainName == FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+					} else if (item.second.domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+						ASSERT(item.second.domainName == FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+					}
+				}
 				keysByIdsReq.encryptKeyInfos.emplace_back_deep(
 				    keysByIdsReq.arena, item.second.domainId, item.second.baseCipherId, item.second.domainName);
 			}
@@ -527,6 +536,11 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 		try {
 			KmsConnLookupEKsByDomainIdsReq keysByDomainIdReq;
 			for (const auto& item : lookupCipherDomains) {
+				if (item.second.domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+					ASSERT(item.second.domainName == FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+				} else if (item.second.domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+					ASSERT(item.second.domainName == FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+				}
 				keysByDomainIdReq.encryptDomainInfos.emplace_back_deep(
 				    keysByDomainIdReq.arena, item.second.domainId, item.second.domainName);
 			}

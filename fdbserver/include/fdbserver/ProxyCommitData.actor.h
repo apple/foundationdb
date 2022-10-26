@@ -156,7 +156,7 @@ struct ProxyStats {
 		specialCounter(cc, "NumTenants", [pTenantMap]() { return pTenantMap ? pTenantMap->size() : 0; });
 		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
-		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		logger = cc.traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ProxyMetrics");
 	}
 };
 

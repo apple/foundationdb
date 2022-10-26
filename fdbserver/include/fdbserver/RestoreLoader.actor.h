@@ -93,11 +93,11 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex)
 	  : vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0), counters(this, nodeID, batchIndex) {
-		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
-		                            nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
-		                            &counters.cc,
-		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
+		pollMetrics =
+		    counters.cc.traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
+		                              nodeID,
+		                              SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                              nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
 
