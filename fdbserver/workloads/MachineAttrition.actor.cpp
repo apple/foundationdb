@@ -62,6 +62,7 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 }
 
 struct MachineAttritionWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "Attrition";
 	bool enabled;
 	int machinesToKill = 2, machinesToLeave = 1, workersToKill = 2, workersToLeave = 1;
 	double testDuration = 10.0, suspendDuration = 1.0, liveDuration = 5.0;
@@ -155,7 +156,6 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		return machines;
 	}
 
-	std::string description() const override { return "MachineAttritionWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
@@ -468,6 +468,6 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	}
 };
 
-WorkloadFactory<MachineAttritionWorkload> MachineAttritionWorkloadFactory("Attrition");
+WorkloadFactory<MachineAttritionWorkload> MachineAttritionWorkloadFactory;
 // TODO: Enable MachineAttritionWorkload injection once this is bug-free
 // FailureInjectorFactory<MachineAttritionWorkload> MachineAttritionFailureWorkloadFactory;

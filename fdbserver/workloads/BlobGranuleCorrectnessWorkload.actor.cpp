@@ -28,7 +28,6 @@
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
@@ -186,6 +185,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
  * are written to blob, and can validate that the granule data is correct at any desired version.
  */
 struct BlobGranuleCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BlobGranuleCorrectnessWorkload";
 	bool doSetup;
 	double testDuration;
 
@@ -265,7 +265,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		return entry.get();
 	}
 
-	std::string description() const override { return "BlobGranuleCorrectnessWorkload"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, BlobGranuleCorrectnessWorkload* self) {
@@ -1030,4 +1029,4 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<BlobGranuleCorrectnessWorkload> BlobGranuleCorrectnessWorkloadFactory("BlobGranuleCorrectnessWorkload");
+WorkloadFactory<BlobGranuleCorrectnessWorkload> BlobGranuleCorrectnessWorkloadFactory;

@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RandomCloggingWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "RandomClogging";
+
 	bool enabled;
 	double testDuration = 10.0;
 	double scale = 1.0, clogginess = 1.0;
@@ -57,12 +59,6 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 		iterate = random.random01() < 0.5;
 	}
 
-	std::string description() const override {
-		if (g_simulator == g_network)
-			return "RandomClogging";
-		else
-			return "NoRC";
-	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (g_network->isSimulated() && enabled) {
@@ -146,5 +142,5 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 	}
 };
 
-WorkloadFactory<RandomCloggingWorkload> RandomCloggingWorkloadFactory("RandomClogging");
+WorkloadFactory<RandomCloggingWorkload> RandomCloggingWorkloadFactory;
 FailureInjectorFactory<RandomCloggingWorkload> RandomCloggingFailureInjectionFactory;

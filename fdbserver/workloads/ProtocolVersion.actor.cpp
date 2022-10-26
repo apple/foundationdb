@@ -22,9 +22,9 @@
 #include "flow/actorcompiler.h" // This must be the last include
 
 struct ProtocolVersionWorkload : TestWorkload {
-	ProtocolVersionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	static constexpr auto NAME = "ProtocolVersion";
 
-	std::string description() const override { return "ProtocolVersionWorkload"; }
+	ProtocolVersionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
@@ -50,4 +50,4 @@ struct ProtocolVersionWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ProtocolVersionWorkload> ProtocolVersionWorkloadFactory("ProtocolVersion");
+WorkloadFactory<ProtocolVersionWorkload> ProtocolVersionWorkloadFactory;

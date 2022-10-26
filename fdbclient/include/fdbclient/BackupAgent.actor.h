@@ -196,6 +196,7 @@ public:
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        LockDB = LockDB::True,
+	                        UnlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,

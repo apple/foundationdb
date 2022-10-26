@@ -56,6 +56,21 @@ struct BlobMetadataDetailsRef {
 			base = StringRef(arena, from.base.get());
 		}
 	}
+
+	explicit BlobMetadataDetailsRef(Arena& ar,
+	                                BlobMetadataDomainId domainId,
+	                                BlobMetadataDomainNameRef domainName,
+	                                Optional<StringRef> base,
+	                                VectorRef<StringRef> partitions,
+	                                double refreshAt,
+	                                double expireAt)
+	  : domainId(domainId), domainName(ar, domainName), partitions(ar, partitions), refreshAt(refreshAt),
+	    expireAt(expireAt) {
+		if (base.present()) {
+			base = StringRef(ar, base.get());
+		}
+	}
+
 	explicit BlobMetadataDetailsRef(BlobMetadataDomainId domainId,
 	                                BlobMetadataDomainNameRef domainName,
 	                                Optional<StringRef> base,

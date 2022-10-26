@@ -1,6 +1,3 @@
-[configuration]
-storageEngineExcludeTypes = [3]
-
 [[test]]
 testTitle='CloggedConfigureDatabaseTest'
 clearAfterTest=false

@@ -103,6 +103,59 @@ def maintenance(logger):
     output3 = run_fdbcli_command('maintenance')
     assert output3 == no_maintenance_output
 
+@enable_logging()
+def quota(logger):
+    # Should be a noop
+    command = 'quota clear green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully cleared quota.'
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '<empty>'
+
+    # Ignored update
+    command = 'quota set red total_throughput 49152'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully updated quota.'
+
+    command = 'quota set green total_throughput 32768'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully updated quota.'
+
+    command = 'quota set green reserved_throughput 16384'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully updated quota.'
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '32768'
+
+    command = 'quota get green reserved_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '16384'
+
+    command = 'quota clear green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully cleared quota.'
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '<empty>'
+
+    # Too few arguments, should log help message
+    command = 'quota get green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
 
 @enable_logging()
 def setclass(logger):
@@ -1035,6 +1088,7 @@ if __name__ == '__main__':
         integer_options()
         tls_address_suffix()
         knobmanagement()
+        quota()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

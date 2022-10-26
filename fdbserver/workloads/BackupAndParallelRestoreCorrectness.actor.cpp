@@ -33,6 +33,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupAndParallelRestoreCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag;
@@ -136,8 +137,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "BackupAndParallelRestoreCorrectness"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -216,7 +215,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		state Future<Void> status = statusLoop(cx, tag.toString());
-
+		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
@@ -225,7 +224,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                   configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -475,6 +475,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
+				state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 				try {
 					// Note the "partitionedLog" must be false, because we change
 					// the configuration to disable backup workers before restore.
@@ -485,7 +486,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION &&
+					                                           configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 					                                       StopWhenDone::True,
 					                                       UsePartitionedLog::False);
 				} catch (Error& e) {
@@ -791,5 +793,4 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 int BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests = 0;
 
-WorkloadFactory<BackupAndParallelRestoreCorrectnessWorkload> BackupAndParallelRestoreCorrectnessWorkloadFactory(
-    "BackupAndParallelRestoreCorrectness");
+WorkloadFactory<BackupAndParallelRestoreCorrectnessWorkload> BackupAndParallelRestoreCorrectnessWorkloadFactory;

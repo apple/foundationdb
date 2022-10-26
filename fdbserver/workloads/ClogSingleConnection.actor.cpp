@@ -29,6 +29,7 @@ class ClogSingleConnectionWorkload : public TestWorkload {
 	Optional<double> clogDuration; // If empty, clog forever
 
 public:
+	static constexpr auto NAME = "ClogSingleConnection";
 	ClogSingleConnectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		auto minDelay = getOption(options, "minDelay"_sr, 0.0);
 		auto maxDelay = getOption(options, "maxDelay"_sr, 10.0);
@@ -39,9 +40,6 @@ public:
 		}
 	}
 
-	std::string description() const override {
-		return g_network->isSimulated() ? "ClogSingleConnection" : "NoClogging";
-	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -68,4 +66,4 @@ public:
 	}
 };
 
-WorkloadFactory<ClogSingleConnectionWorkload> ClogSingleConnectionWorkloadFactory("ClogSingleConnection");
+WorkloadFactory<ClogSingleConnectionWorkload> ClogSingleConnectionWorkloadFactory;

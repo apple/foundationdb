@@ -29,6 +29,7 @@
 // If a transaction commits multiple times or doesn't commit, that probably indicates a problem with
 // `determineCommitStatus` in NativeAPI.
 struct AutomaticIdempotencyWorkload : TestWorkload {
+	static constexpr auto NAME = "AutomaticIdempotencyCorrectness";
 	int64_t numTransactions;
 	Key keyPrefix;
 
@@ -36,8 +37,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		numTransactions = getOption(options, "numTransactions"_sr, 1000);
 		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "automaticIdempotencyKeyPrefix"_sr));
 	}
-
-	std::string description() const override { return "AutomaticIdempotency"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -92,4 +91,4 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<AutomaticIdempotencyWorkload> AutomaticIdempotencyWorkloadFactory("AutomaticIdempotencyCorrectness");
+WorkloadFactory<AutomaticIdempotencyWorkload> AutomaticIdempotencyWorkloadFactory;

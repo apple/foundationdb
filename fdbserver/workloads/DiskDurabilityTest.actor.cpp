@@ -26,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskDurabilityTest : TestWorkload {
+	static constexpr auto NAME = "DiskDurabilityTest";
 	bool enabled;
 	std::string filename;
 	KeyRange range, metrics;
@@ -38,7 +39,6 @@ struct DiskDurabilityTest : TestWorkload {
 		metrics = prefixRange(prefix);
 	}
 
-	std::string description() const override { return "DiskDurabilityTest"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -184,4 +184,4 @@ struct DiskDurabilityTest : TestWorkload {
 		}
 	}
 };
-WorkloadFactory<DiskDurabilityTest> DiskDurabilityTestFactory("DiskDurabilityTest");
+WorkloadFactory<DiskDurabilityTest> DiskDurabilityTestFactory;

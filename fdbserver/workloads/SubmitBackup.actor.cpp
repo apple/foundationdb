@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -27,7 +28,8 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct SubmitBackupWorkload final : TestWorkload {
+struct SubmitBackupWorkload : TestWorkload {
+	static constexpr auto NAME = "SubmitBackup";
 
 	FileBackupAgent backupAgent;
 
@@ -49,12 +51,11 @@ struct SubmitBackupWorkload final : TestWorkload {
 		incremental.set(getOption(options, "incremental"_sr, false));
 	}
 
-	static constexpr const char* DESCRIPTION = "SubmitBackup";
-
 	ACTOR static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
 		wait(delay(self->delayFor));
-		Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
+		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
@@ -63,7 +64,8 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
-			                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                        configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));
@@ -76,11 +78,10 @@ struct SubmitBackupWorkload final : TestWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return DESCRIPTION; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory(SubmitBackupWorkload::DESCRIPTION);
+WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory;

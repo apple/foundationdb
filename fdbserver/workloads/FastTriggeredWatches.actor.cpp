@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
+	static constexpr auto NAME = "FastTriggeredWatches";
 	// Tests the time it takes for a watch to be fired after the value has changed in the storage server
 	int nodes, keyBytes;
 	double testDuration;
@@ -41,8 +42,6 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		defaultValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
-
-	std::string description() const override { return "Watches"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0)
@@ -182,4 +181,4 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<FastTriggeredWatchesWorkload> FastTriggeredWatchesWorkloadFactory("FastTriggeredWatches");
+WorkloadFactory<FastTriggeredWatchesWorkload> FastTriggeredWatchesWorkloadFactory;

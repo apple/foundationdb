@@ -372,6 +372,7 @@ enum Op {
 };
 
 struct ChangeFeedOperationsWorkload : TestWorkload {
+	static constexpr auto NAME = "ChangeFeedOperations";
 	// test settings
 	double testDuration;
 	int operationsPerSecond;
@@ -513,7 +514,6 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "ChangeFeedOperationsWorkload"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, ChangeFeedOperationsWorkload* self) {
@@ -772,4 +772,4 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ChangeFeedOperationsWorkload> ChangeFeedOperationsWorkloadFactory("ChangeFeedOperations");
+WorkloadFactory<ChangeFeedOperationsWorkload> ChangeFeedOperationsWorkloadFactory;
