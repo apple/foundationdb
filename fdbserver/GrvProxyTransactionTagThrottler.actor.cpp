@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbserver/GrvProxyTransactionTagThrottler.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
@@ -28,11 +29,29 @@ void GrvProxyTransactionTagThrottler::DelayedRequest::updateProxyTagThrottledDur
 	req.proxyTagThrottledDuration = now() - startTime;
 }
 
+bool GrvProxyTransactionTagThrottler::DelayedRequest::isMaxThrottled() const {
+	return now() - startTime > CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION;
+}
+
 void GrvProxyTransactionTagThrottler::TagQueue::setRate(double rate) {
 	if (rateInfo.present()) {
 		rateInfo.get().setRate(rate);
 	} else {
 		rateInfo = GrvTransactionRateInfo(rate);
+	}
+}
+
+bool GrvProxyTransactionTagThrottler::TagQueue::isMaxThrottled() const {
+	return !requests.empty() && requests.front().isMaxThrottled();
+}
+
+void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests() {
+	CODE_PROBE(true, "GrvProxyTransactionTagThrottler rejecting requests");
+	while (!requests.empty()) {
+		auto& delayedReq = requests.front();
+		delayedReq.updateProxyTagThrottledDuration();
+		delayedReq.req.reply.sendError(proxy_tag_throttled());
+		requests.pop_front();
 	}
 }
 
@@ -73,6 +92,7 @@ void GrvProxyTransactionTagThrottler::addRequest(GetReadVersionRequest const& re
 		// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
 		// unexpected behaviour, because only one tag is used for throttling.
 		TraceEvent(SevWarnAlways, "GrvProxyTransactionTagThrottler_MultipleTags")
+		    .suppressFor(1.0)
 		    .detail("NumTags", req.tags.size())
 		    .detail("UsingTag", printable(tag));
 	}
@@ -140,6 +160,11 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 				// Cannot release any more transaction from this tag (don't push the tag queue handle back into
 				// pqOfQueues)
 				CODE_PROBE(true, "GrvProxyTransactionTagThrottler throttling transaction");
+				if (tagQueueHandle.queue->isMaxThrottled()) {
+					// Requests in this queue have been throttled too long and errors
+					// should be sent to clients.
+					tagQueueHandle.queue->rejectRequests();
+				}
 				break;
 			} else {
 				if (tagQueueHandle.nextSeqNo < nextQueueSeqNo) {

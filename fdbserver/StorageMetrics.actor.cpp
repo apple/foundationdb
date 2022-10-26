@@ -19,7 +19,7 @@
  */
 
 #include "flow/UnitTest.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {

@@ -53,6 +53,20 @@
 #include "fdbserver/DDSharedContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
+	return ShardSizeBounds{
+		.max = StorageMetrics{ .bytes = -1,
+		                       .bytesPerKSecond = StorageMetrics::infinity,
+		                       .iosPerKSecond = StorageMetrics::infinity,
+		                       .bytesReadPerKSecond = StorageMetrics::infinity },
+		.min = StorageMetrics{ .bytes = -1, .bytesPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
+		.permittedError = StorageMetrics{ .bytes = -1,
+		                                  .bytesPerKSecond = StorageMetrics::infinity,
+		                                  .iosPerKSecond = StorageMetrics::infinity,
+		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
+	};
+}
+
 struct DDAudit {
 	DDAudit(UID id, KeyRange range, AuditType type)
 	  : id(id), range(range), type(type), auditMap(AuditPhase::Invalid, allKeys.end), actors(true) {}
