@@ -1,5 +1,5 @@
 /*
- * GlobalTagThrottling.actor.cpp
+ * ThroughputQuota.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,42 +23,46 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-class GlobalTagThrottlingWorkload : public TestWorkload {
+// This workload sets the throughput quota of a tag during the setup phase
+class ThroughputQuotaWorkload : public TestWorkload {
 	TransactionTag transactionTag;
 	double reservedQuota{ 0.0 };
 	double totalQuota{ 0.0 };
 
-	ACTOR static Future<Void> setup(GlobalTagThrottlingWorkload* self, Database cx) {
+	ACTOR static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				TraceEvent("GlobalTagThrottlingWorkload_SettingTagQuota")
-				    .detail("Tag", self->transactionTag)
+				TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
+				    .detail("Tag", printable(self->transactionTag))
 				    .detail("ReservedQuota", self->reservedQuota)
 				    .detail("TotalQuota", self->totalQuota);
 				ThrottleApi::setTagQuota(tr, self->transactionTag, self->reservedQuota, self->totalQuota);
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("GlobalTagThrottlingWorkload_SetupError").error(e);
+				TraceEvent("ThroughputQuotaWorkload_SetupError").error(e);
 				wait(tr->onError(e));
 			}
 		};
 	}
 
 public:
-	static constexpr auto NAME = "GlobalTagThrottling";
-	explicit GlobalTagThrottlingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	static constexpr auto NAME = "ThroughputQuota";
+	explicit ThroughputQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
 		reservedQuota = getOption(options, "reservedQuota"_sr, 0.0);
 		totalQuota = getOption(options, "totalQuota"_sr, 0.0);
 	}
 
-	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
+	Future<Void> setup(Database const& cx) override {
+		DatabaseContext::debugUseTags = true;
+		return clientId ? Void() : setup(this, cx);
+	}
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<GlobalTagThrottlingWorkload> GlobalTagThrottlingWorkloadFactory;
+WorkloadFactory<ThroughputQuotaWorkload> ThroughputQuotaWorkloadFactory;

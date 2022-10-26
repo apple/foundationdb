@@ -1479,16 +1479,6 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
-KeyRangeRef toRelativeRange(KeyRangeRef range, KeyRef prefix) {
-	if (prefix.empty()) {
-		return range;
-	} else {
-		KeyRef begin = range.begin.startsWith(prefix) ? range.begin.removePrefix(prefix) : allKeys.begin;
-		KeyRef end = range.end.startsWith(prefix) ? range.end.removePrefix(prefix) : allKeys.end;
-		return KeyRangeRef(begin, end);
-	}
-}
-
 ACTOR Future<UID> getClusterId(Database db) {
 	while (!db->clientInfo->get().clusterId.isValid()) {
 		wait(db->clientInfo->onChange());
@@ -1925,7 +1915,8 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional
 	auto range =
 	    isBackward ? locationCache.rangeContainingKeyBefore(resolvedKey) : locationCache.rangeContaining(resolvedKey);
 	if (range->value()) {
-		return KeyRangeLocationInfo(tenantEntry, toRelativeRange(range->range(), tenantEntry.prefix), range->value());
+		return KeyRangeLocationInfo(
+		    tenantEntry, toPrefixRelativeRange(range->range(), tenantEntry.prefix), range->value());
 	}
 
 	return Optional<KeyRangeLocationInfo>();
@@ -1962,7 +1953,8 @@ bool DatabaseContext::getCachedLocations(const Optional<TenantNameRef>& tenantNa
 			result.clear();
 			return false;
 		}
-		result.emplace_back(tenantEntry, toRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
+		result.emplace_back(
+		    tenantEntry, toPrefixRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
 		}
@@ -2978,7 +2970,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 
 					return KeyRangeLocationInfo(
 					    rep.tenantEntry,
-					    KeyRange(toRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
+					    KeyRange(toPrefixRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
 					    locationInfo);
 				}
 			}
@@ -3123,7 +3115,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 						// efficient to save the map pairs and insert them all at once.
 						results.emplace_back(
 						    rep.tenantEntry,
-						    (toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+						    (toPrefixRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
 						    cx->setCachedLocation(
 						        tenant.name, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
 						wait(yield());
@@ -6558,7 +6550,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
-			    e.code() != error_code_tenant_not_found) {
+			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -6999,6 +6991,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 				                               &GrvProxyInterface::getConsistentReadVersion,
 				                               req,
 				                               cx->taskID))) {
+					CODE_PROBE(v.proxyTagThrottledDuration > 0.0,
+					           "getConsistentReadVersion received GetReadVersionReply delayed by proxy tag throttling");
 					if (tags.size() != 0) {
 						auto& priorityThrottledTags = cx->throttledTags[priority];
 						for (auto& tag : tags) {
@@ -7033,7 +7027,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled &&
-			    e.code() != error_code_grv_proxy_memory_limit_exceeded)
+			    e.code() != error_code_grv_proxy_memory_limit_exceeded && e.code() != error_code_proxy_tag_throttled)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
 			if (e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
 				wait(delayJittered(5.0));
@@ -7484,7 +7478,7 @@ Future<Void> Transaction::onError(Error const& e) {
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
 	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
-	    e.code() == error_code_blob_granule_request_failed) {
+	    e.code() == error_code_blob_granule_request_failed || e.code() == error_code_proxy_tag_throttled) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
@@ -7724,6 +7718,35 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 	}
 }
 
+ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
+                                                                      KeyRange keys,
+                                                                      std::vector<KeyRangeLocationInfo> locations,
+                                                                      StorageMetrics min,
+                                                                      StorageMetrics max,
+                                                                      StorageMetrics permittedError) {
+	try {
+		Future<StorageMetrics> fx;
+		if (locations.size() > 1) {
+			fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
+		} else {
+			WaitMetricsRequest req(tenantInfo, keys, min, max);
+			fx = loadBalance(locations[0].locations->locations(),
+			                 &StorageServerInterface::waitMetrics,
+			                 req,
+			                 TaskPriority::DataDistribution);
+		}
+		StorageMetrics x = wait(fx);
+		return x;
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
+		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+			throw;
+		}
+	}
+	return Optional<StorageMetrics>();
+}
+
 ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     Database cx,
     KeyRange keys,
@@ -7753,38 +7776,26 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 		}
 
 		// SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better
-		// solution to this.
-		if (locations.size() < shardLimit) {
-			try {
-				Future<StorageMetrics> fx;
-				if (locations.size() > 1) {
-					fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
-				} else {
-					WaitMetricsRequest req(tenantInfo, keys, min, max);
-					fx = loadBalance(locations[0].locations->locations(),
-					                 &StorageServerInterface::waitMetrics,
-					                 req,
-					                 TaskPriority::DataDistribution);
-				}
-				StorageMetrics x = wait(fx);
-				return std::make_pair(x, -1);
-			} catch (Error& e) {
-				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-					throw;
-				}
-				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-			}
-		} else {
+		// solution to this. How could this happen?
+		if (locations.size() >= shardLimit) {
 			TraceEvent(SevWarn, "WaitStorageMetricsPenalty")
 			    .detail("Keys", keys)
-			    .detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
+			    .detail("Limit", shardLimit)
+			    .detail("LocationSize", locations.size())
 			    .detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
 			cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+			continue;
 		}
+
+		Optional<StorageMetrics> res =
+		    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+		if (res.present()) {
+			return std::make_pair(res, -1);
+		}
+		cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 
@@ -8645,6 +8656,56 @@ Future<Void> DatabaseContext::splitStorageMetricsStream(const PromiseStream<Key>
 	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated, minSplitBytes);
 }
 
+ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+    std::vector<KeyRangeLocationInfo> locations,
+    KeyRange keys,
+    StorageMetrics limit,
+    StorageMetrics estimated,
+    Optional<int> minSplitBytes) {
+	state StorageMetrics used;
+	state Standalone<VectorRef<KeyRef>> results;
+	results.push_back_deep(results.arena(), keys.begin);
+	//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
+	try {
+		state int i = 0;
+		for (; i < locations.size(); i++) {
+			SplitMetricsRequest req(
+			    locations[i].range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
+			SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
+			                                         &StorageServerInterface::splitMetrics,
+			                                         req,
+			                                         TaskPriority::DataDistribution));
+			if (res.splits.size() && res.splits[0] <= results.back()) { // split points are out of order, possibly
+				                                                        // because of moving data, throw error to retry
+				ASSERT_WE_THINK(false); // FIXME: This seems impossible and doesn't seem to be covered by testing
+				throw all_alternatives_failed();
+			}
+			if (res.splits.size()) {
+				results.append(results.arena(), res.splits.begin(), res.splits.size());
+				results.arena().dependsOn(res.splits.arena());
+			}
+			used = res.used;
+
+			//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
+		}
+
+		if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) && results.size() > 1) {
+			results.resize(results.arena(), results.size() - 1);
+		}
+
+		if (keys.end <= locations.back().range.end) {
+			results.push_back_deep(results.arena(), keys.end);
+		}
+		return results;
+	} catch (Error& e) {
+		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+			TraceEvent(SevError, "SplitStorageMetricsError").error(e);
+			throw;
+		}
+	}
+	return Optional<Standalone<VectorRef<KeyRef>>>();
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
@@ -8663,61 +8724,24 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 		                              Optional<UID>(),
 		                              UseProvisionalProxies::False,
 		                              latestVersion));
-		state StorageMetrics used;
-		state Standalone<VectorRef<KeyRef>> results;
 
 		// SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better
 		// solution to this.
 		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
 			wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			cx->invalidateCache(Key(), keys);
-		} else {
-			results.push_back_deep(results.arena(), keys.begin);
-			try {
-				//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
-
-				state int i = 0;
-				for (; i < locations.size(); i++) {
-					SplitMetricsRequest req(
-					    locations[i].range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
-					SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
-					                                         &StorageServerInterface::splitMetrics,
-					                                         req,
-					                                         TaskPriority::DataDistribution));
-					if (res.splits.size() &&
-					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of
-						                                   // moving data, throw error to retry
-						ASSERT_WE_THINK(
-						    false); // FIXME: This seems impossible and doesn't seem to be covered by testing
-						throw all_alternatives_failed();
-					}
-					if (res.splits.size()) {
-						results.append(results.arena(), res.splits.begin(), res.splits.size());
-						results.arena().dependsOn(res.splits.arena());
-					}
-					used = res.used;
-
-					//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
-				}
-
-				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) &&
-				    results.size() > 1) {
-					results.resize(results.arena(), results.size() - 1);
-				}
-
-				if (keys.end <= locations.back().range.end) {
-					results.push_back_deep(results.arena(), keys.end);
-				}
-				return results;
-			} catch (Error& e) {
-				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-					TraceEvent(SevError, "SplitStorageMetricsError").error(e);
-					throw;
-				}
-				cx->invalidateCache(Key(), keys);
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-			}
+			continue;
 		}
+
+		Optional<Standalone<VectorRef<KeyRef>>> results =
+		    wait(splitStorageMetricsWithLocations(locations, keys, limit, estimated, minSplitBytes));
+
+		if (results.present()) {
+			return results.get();
+		}
+
+		cx->invalidateCache(Key(), keys);
+		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 
@@ -10540,6 +10564,76 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 }
 
 // BlobGranule API.
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, KeyRange range, int batchLimit) {
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
+	state Key beginKey = range.begin;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			state RangeResult results = wait(
+			    krmGetRangesUnaligned(tr, blobRangeKeys.begin, KeyRangeRef(beginKey, range.end), 2 * batchLimit + 2));
+
+			blobRanges.arena().dependsOn(results.arena());
+			for (int i = 0; i < results.size() - 1; i++) {
+				if (results[i].value == blobRangeActive) {
+					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
+				}
+				if (blobRanges.size() == batchLimit) {
+					return blobRanges;
+				}
+			}
+
+			if (!results.more) {
+				return blobRanges;
+			}
+			beginKey = results.back().key;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobbifiedRanges(Transaction* tr,
+                                                                     KeyRange range,
+                                                                     int rangeLimit,
+                                                                     Optional<TenantName> tenantName) {
+	state TenantMapEntry tme;
+
+	loop {
+		try {
+			if (tenantName.present()) {
+				wait(store(tme, blobGranuleGetTenantEntry(tr, range.begin, tenantName)));
+				range = range.withPrefix(tme.prefix);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
+	if (!tenantName.present()) {
+		return blobRanges;
+	}
+
+	// Strip tenant prefix out.
+	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
+	for (auto& blobRange : blobRanges) {
+		// Filter out blob ranges that span tenants for some reason.
+		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
+			TraceEvent("ListBlobbifiedRangeSpansTenants")
+			    .suppressFor(/*seconds=*/5)
+			    .detail("Tenant", tenantName.get())
+			    .detail("Range", blobRange);
+			continue;
+		}
+		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
+	}
+	return tenantBlobRanges;
+}
+
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,
@@ -10582,10 +10676,13 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			}
 
 			// must be aligned to blob range(s)
-			state Future<Optional<Value>> beginPresent = tr.get(purgeRange.begin.withPrefix(blobRangeKeys.begin));
-			state Future<Optional<Value>> endPresent = tr.get(purgeRange.end.withPrefix(blobRangeKeys.begin));
-			wait(success(beginPresent) && success(endPresent));
-			if (!beginPresent.get().present() || !endPresent.get().present()) {
+			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedBegin =
+			    getBlobbifiedRanges(&tr, KeyRangeRef(purgeRange.begin, purgeRange.begin), 2, {});
+			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedEnd =
+			    getBlobbifiedRanges(&tr, KeyRangeRef(purgeRange.end, purgeRange.end), 2, {});
+			wait(success(blobbifiedBegin) && success(blobbifiedEnd));
+			if ((!blobbifiedBegin.get().empty() && blobbifiedBegin.get().front().begin < purgeRange.begin) ||
+			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().back().end > purgeRange.end)) {
 				TraceEvent("UnalignedPurge")
 				    .detail("Range", range)
 				    .detail("Version", purgeVersion)
@@ -10662,39 +10759,6 @@ Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }
 
-ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Reference<ReadYourWritesTransaction> tr,
-                                                               KeyRange range,
-                                                               int batchLimit) {
-	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
-	state Key beginKey = range.begin;
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-			state RangeResult results = wait(
-			    krmGetRangesUnaligned(tr, blobRangeKeys.begin, KeyRangeRef(beginKey, range.end), 2 * batchLimit + 2));
-
-			blobRanges.arena().dependsOn(results.arena());
-			for (int i = 0; i < results.size() - 1; i++) {
-				if (results[i].value == blobRangeActive) {
-					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
-				}
-				if (blobRanges.size() == batchLimit) {
-					return blobRanges;
-				}
-			}
-
-			if (!results.more) {
-				return blobRanges;
-			}
-			beginKey = results.back().key;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
 ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
                                      KeyRange range,
                                      bool active,
@@ -10716,7 +10780,7 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 				range = range.withPrefix(tenantEntry.prefix);
 			}
 
-			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 1));
+			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(&tr->getTransaction(), range, 1));
 
 			if (active) {
 				// Idempotent request.
@@ -10764,47 +10828,19 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Refer
                                                                            KeyRange range,
                                                                            int rangeLimit,
                                                                            Optional<TenantName> tenantName) {
+
 	state Database db(cx);
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	state TenantMapEntry tme;
+	state Transaction tr(db);
 
-	loop {
-		try {
-			if (tenantName.present()) {
-				wait(store(tme, blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName)));
-				range = range.withPrefix(tme.prefix);
-			}
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
+	Standalone<VectorRef<KeyRangeRef>> blobbifiedRanges = wait(getBlobbifiedRanges(&tr, range, rangeLimit, tenantName));
 
-	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
-	if (!tenantName.present()) {
-		return blobRanges;
-	}
-
-	// Strip tenant prefix out.
-	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
-	for (auto& blobRange : blobRanges) {
-		// Filter out blob ranges that span tenants for some reason.
-		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
-			TraceEvent("ListBlobbifiedRangeSpansTenants")
-			    .suppressFor(/*seconds=*/5)
-			    .detail("Tenant", tenantName.get())
-			    .detail("Range", blobRange);
-			continue;
-		}
-		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
-	}
-	return tenantBlobRanges;
+	return blobbifiedRanges;
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range,
-                                                                                 int rowLimit,
+                                                                                 int rangeLimit,
                                                                                  Optional<TenantName> tenantName) {
-	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rowLimit, tenantName);
+	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenantName);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {
