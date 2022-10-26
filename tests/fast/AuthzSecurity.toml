@@ -1,7 +1,5 @@
 [configuration]
 allowDefaultTenant = false
-allowDisablingTenants = false
-buggify = false
 
 [[test]]
 testTitle = 'TenantCreation'
