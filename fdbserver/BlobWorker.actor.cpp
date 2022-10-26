@@ -1187,7 +1187,6 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			}
 			retries++;
 			CODE_PROBE(true, "Granule initial snapshot failed");
-			// FIXME: why can't we supress error event?
 			TraceEvent(retries < 10 ? SevDebug : SevWarn, "BlobGranuleInitialSnapshotRetry", bwData->id)
 			    .error(err)
 			    .detail("Granule", metadata->keyRange)
