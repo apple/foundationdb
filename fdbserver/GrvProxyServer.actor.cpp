@@ -721,7 +721,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		reply.proxyId = grvProxyData->dbgid;
 		reply.proxyTagThrottledDuration = request.proxyTagThrottledDuration;
 
-		if (!request.tags.empty()) {
+		if (request.isTagged()) {
 			auto& priorityThrottledTags = clientThrottledTags[request.priority];
 			for (auto tag : request.tags) {
 				auto tagItr = priorityThrottledTags.find(tag.first);

@@ -182,6 +182,8 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 	new SpecialCounter<F>(collection, name, std::move(f));
 }
 
+FDB_DECLARE_BOOLEAN_PARAM(Filtered);
+
 class LatencyBands {
 	std::map<double, std::unique_ptr<Counter>> bands;
 	std::unique_ptr<Counter> filteredCount;
@@ -203,7 +205,7 @@ public:
 	    double loggingInterval,
 	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
 	void addThreshold(double value);
-	void addMeasurement(double measurement, bool filtered = false);
+	void addMeasurement(double measurement, int count = 1, Filtered = Filtered::False);
 	void clearBands();
 	~LatencyBands();
 };

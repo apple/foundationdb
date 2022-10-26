@@ -138,6 +138,8 @@ void LatencyBands::insertBand(double value) {
 	bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
 }
 
+FDB_DEFINE_BOOLEAN_PARAM(Filtered);
+
 LatencyBands::LatencyBands(std::string const& name,
                            UID id,
                            double loggingInterval,
@@ -158,13 +160,13 @@ void LatencyBands::addThreshold(double value) {
 	}
 }
 
-void LatencyBands::addMeasurement(double measurement, bool filtered) {
+void LatencyBands::addMeasurement(double measurement, int count, Filtered filtered) {
 	if (filtered && filteredCount) {
-		++(*filteredCount);
+		(*filteredCount) += count;
 	} else if (bands.size() > 0) {
 		auto itr = bands.upper_bound(measurement);
 		ASSERT(itr != bands.end());
-		++(*itr->second);
+		(*itr->second) += count;
 	}
 }
 

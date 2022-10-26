@@ -1910,7 +1910,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			bool filter = self->maxTransactionBytes >
 			              pProxyCommitData->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(
 			                  std::numeric_limits<int>::max());
-			pProxyCommitData->stats.commitLatencyBands.addMeasurement(duration, filter);
+			pProxyCommitData->stats.commitLatencyBands.addMeasurement(duration, 1, Filtered(filter));
 		}
 	}
 
