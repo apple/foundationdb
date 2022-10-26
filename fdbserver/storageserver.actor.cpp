@@ -3768,7 +3768,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
-
 	state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
 
 	// Track time from requestTime through now as read queueing wait time
@@ -5136,6 +5135,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		} else {
 			loop {
 				wait(req.reply.onReady());
+				state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
 
 				if (version < data->oldestVersion.get()) {
 					throw transaction_too_old();
@@ -5153,8 +5153,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				    .detail("ReqLimit", req.limit)
 				    .detail("Begin", begin.printable())
 				    .detail("End", end.printable());
-
-				state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
 
 				GetKeyValuesReply _r = wait(readRange(data,
 				                                      version,
@@ -5259,7 +5257,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
-
 	state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
 
 	// Track time from requestTime through now as read queueing wait time
