@@ -2,11 +2,16 @@
 set -Eeuo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 reset=$(tput sgr0)
+red=$(tput setaf 1)
 blue=$(tput setaf 4)
 
-function logg() {
+function logg () {
     printf "${blue}##### $(date +"%H:%M:%S") #  %-56.55s #####${reset}\n" "${1}"
 }
+
+ function loge () {
+     printf "${red}##### $(date +"%H:%M:%S") #  %-56.55s #####${reset}\n" "${1}"
+ }
 
 function pushd () {
     command pushd "$@" > /dev/null
@@ -16,7 +21,19 @@ function popd () {
     command popd > /dev/null
 }
 
-function create_fake_website_directory() {
+function error_exit () {
+     echo "${red}################################################################################${reset}"
+     loge "${0} FAILED"
+     echo "${red}################################################################################${reset}"
+ }
+
+ trap error_exit ERR
+
+ function create_fake_website_directory () {
+     if [ ${#} -ne 1 ]; then
+         loge "INCORRECT NUMBER OF ARGS FOR ${FUNCNAME[0]}"
+     fi
+     local stripped_binaries_and_from_where="${1}"
     fdb_binaries=( 'fdbbackup' 'fdbcli' 'fdbserver' 'fdbmonitor' )
     logg "PREPARING WEBSITE"
     website_directory="${script_dir}/website"
@@ -112,7 +129,7 @@ function create_fake_website_directory() {
     fdb_website="file:///tmp/website"
 }
 
-function compile_ycsb() {
+function compile_ycsb () {
     logg "COMPILING YCSB"
     if [ "${use_development_java_bindings}" == "true" ]; then
         logg "INSTALL JAVA BINDINGS"
@@ -150,7 +167,13 @@ function compile_ycsb() {
     popd || exit 128
 }
 
-function build_and_push_images(){
+function build_and_push_images () {
+     if [ ${#} -ne 3 ]; then
+         loge "INCORRECT NUMBER OF ARGS FOR ${FUNCNAME[0]}"
+     fi
+     local dockerfile_name="${1}"
+     local use_development_java_bindings="${2}"
+     local push_docker_images="${3}"
     declare -a tags_to_push=()
     for image in "${image_list[@]}"; do
         logg "BUILDING ${image}"
@@ -237,16 +260,12 @@ image_list=(
 )
 registry=""
 tag_base="foundationdb/"
-# THESE CONTROL THE PATH OF FUNCTIONS THAT ARE CALLED BELOW
-stripped_binaries_and_from_where="stripped_local" # MUST BE ONE OF ( "unstripped_artifactory" "stripped_artifactory" "unstripped_local" "stripped_local" )
-dockerfile_name="Dockerfile"
-use_development_java_bindings="false"
-push_docker_images="false"
 
 if [ -n "${OKTETO_NAMESPACE+x}" ]; then
     logg "RUNNING IN OKTETO/AWS"
     # these are defaults for the Apple development environment
-    aws_region=$(curl -s "http://169.254.169.254/latest/meta-data/placement/region")
+    imdsv2_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+    aws_region=$(curl -H "X-aws-ec2-metadata-token: ${imdsv2_token}" "http://169.254.169.254/latest/meta-data/placement/region")
     aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
     build_output_directory="${HOME}/build_output"
     fdb_library_versions=( "${fdb_version}" )
@@ -257,19 +276,23 @@ if [ -n "${OKTETO_NAMESPACE+x}" ]; then
     else
         tag_postfix="${OKTETO_NAME:-dev}"
     fi
-    stripped_binaries_and_from_where="unstripped_local" # MUST BE ONE OF ( "unstripped_artifactory" "stripped_artifactory" "unstripped_local" "stripped_local" )
-    dockerfile_name="Dockerfile.eks"
-    use_development_java_bindings="true"
-    push_docker_images="true"
+
+    # build regular images
+     create_fake_website_directory stripped_local
+     build_and_push_images Dockerfile true true
+
+     # build debug images
+     create_fake_website_directory unstripped_local
+     build_and_push_images Dockerfile.eks true true
 else
     echo "Dear ${USER}, you probably need to edit this file before running it. "
     echo "${0} has a very narrow set of situations where it will be successful,"
     echo "or even useful, when executed unedited"
     exit 1
+    # this set of options will creat standard images from a local build
+    # create_fake_website_directory stripped_local
+    # build_and_push_images Dockerfile false false
 fi
-
-create_fake_website_directory
-build_and_push_images
 
 echo "${blue}################################################################################${reset}"
 logg "COMPLETED ${0}"
