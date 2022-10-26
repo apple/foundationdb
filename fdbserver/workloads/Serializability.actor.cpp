@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SerializabilityWorkload : TestWorkload {
+	static constexpr auto NAME = "Serializability";
+
 	double testDuration;
 	bool adjacentKeys;
 	int nodes;
@@ -82,8 +84,6 @@ struct SerializabilityWorkload : TestWorkload {
 			    .detail("ValueSizeMax", valueSizeRange.second)
 			    .detail("MaxClearSize", maxClearSize);
 	}
-
-	std::string description() const override { return "Serializability"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -531,4 +531,4 @@ struct SerializabilityWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SerializabilityWorkload> SerializabilityWorkloadFactory("Serializability");
+WorkloadFactory<SerializabilityWorkload> SerializabilityWorkloadFactory;

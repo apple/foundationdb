@@ -138,6 +138,9 @@ ACTOR Future<int> setDDMode(Database cx, int mode);
 
 ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
+// Start an audit on range of the specific type.
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type);
+
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
@@ -161,8 +164,8 @@ bool schemaMatch(json_spirit::mValue const& schema,
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Set and get the storage quota per tenant
-void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota);
-ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName);
+void setStorageQuota(Transaction& tr, StringRef tenantName, int64_t quota);
+ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantName);
 
 #include "flow/unactorcompiler.h"
 #endif

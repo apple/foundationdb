@@ -39,6 +39,7 @@
 FDB_BOOLEAN_PARAM(PositiveTestcase);
 
 struct AuthzSecurityWorkload : TestWorkload {
+	static constexpr auto NAME = "AuthzSecurityWorkload";
 	int actorCount;
 	double testDuration;
 
@@ -80,8 +81,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 		testFunctions.push_back(
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(cx, this); });
 	}
-
-	std::string description() const override { return "AuthzSecurityWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
@@ -336,4 +335,4 @@ struct AuthzSecurityWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<AuthzSecurityWorkload> AuthzSecurityWorkloadFactory("AuthzSecurity", true);
+WorkloadFactory<AuthzSecurityWorkload> AuthzSecurityWorkloadFactory(UntrustedMode::True);

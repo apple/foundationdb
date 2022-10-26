@@ -342,7 +342,7 @@ void TSS_traceMismatch(TraceEvent& event,
 // change feed
 template <>
 bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
-	ASSERT(false);
+	// We duplicate for load, no need to validate replies
 	return true;
 }
 

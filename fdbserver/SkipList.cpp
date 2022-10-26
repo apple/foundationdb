@@ -816,14 +816,14 @@ struct TransactionInfo {
 	bool reportConflictingKeys;
 };
 
-void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
+void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOldestVersion) {
 	const int t = transactionCount++;
 
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
 	info->reportConflictingKeys = tr.report_conflicting_keys;
 
-	if (tr.read_snapshot < cs->oldestVersion && tr.read_conflict_ranges.size()) {
+	if (tr.read_snapshot < newOldestVersion && tr.read_conflict_ranges.size()) {
 		info->tooOld = true;
 	} else {
 		info->tooOld = false;
@@ -1143,7 +1143,7 @@ void skipListTest() {
 		t = timer();
 		ConflictBatch batch(cs);
 		for (const auto& tr : trs) {
-			batch.addTransaction(tr);
+			batch.addTransaction(tr, version);
 		}
 		g_add += timer() - t;
 

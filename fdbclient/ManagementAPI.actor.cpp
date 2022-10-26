@@ -2356,6 +2356,21 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	loop {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+
+		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(TriggerAuditRequest(type, range)));
+		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
+		return auditId;
+	}
+}
+
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 	state ReadYourWritesTransaction tr(cx);
 
@@ -2544,19 +2559,19 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
-void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota) {
+void setStorageQuota(Transaction& tr, StringRef tenantName, int64_t quota) {
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	auto key = storageQuotaKey(tenantName);
-	tr.set(key, BinaryWriter::toValue<uint64_t>(quota, Unversioned()));
+	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
 }
 
-ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
+ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
 	if (!v.present()) {
-		return Optional<uint64_t>();
+		return Optional<int64_t>();
 	}
-	return BinaryReader::fromStringRef<uint64_t>(v.get(), Unversioned());
+	return BinaryReader::fromStringRef<int64_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {

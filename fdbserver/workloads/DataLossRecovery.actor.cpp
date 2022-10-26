@@ -42,6 +42,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct DataLossRecoveryWorkload : TestWorkload {
+	static constexpr auto NAME = "DataLossRecovery";
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
@@ -59,11 +60,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		pass = false;
 	}
 
-	std::string description() const override { return "DataLossRecovery"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
 
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
@@ -269,4 +268,4 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory("DataLossRecovery");
+WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory;

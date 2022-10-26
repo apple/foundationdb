@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LeakTLogInterfaceWorkload : TestWorkload {
+	static constexpr auto NAME = "LeakTLogInterface";
 	TenantName tenant;
 	Standalone<StringRef> fieldName;
 
@@ -35,7 +36,6 @@ struct LeakTLogInterfaceWorkload : TestWorkload {
 		fieldName = getOption(options, "key"_sr, "TLogInterface"_sr);
 	}
 
-	std::string description() const override { return "LeakTLogInterface"; }
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
 	Future<Void> start(Database const& cx) override { return Void(); }
@@ -63,4 +63,4 @@ struct LeakTLogInterfaceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<LeakTLogInterfaceWorkload> LeakTLogInterfaceWorkload("LeakTLogInterface");
+WorkloadFactory<LeakTLogInterfaceWorkload> LeakTLogInterfaceWorkload;

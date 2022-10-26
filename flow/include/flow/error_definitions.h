@@ -129,6 +129,9 @@ ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different clu
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
 ERROR( please_reboot_kv_store, 1219, "Need to reboot the storage engine")
 ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
+ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
+ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
+ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -203,7 +206,7 @@ ERROR( key_not_tuple, 2041, "The key cannot be parsed as a tuple" );
 ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
 ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
-ERROR( invalid_throttle_quota_value, 2045, "Failed to deserialize or initialize throttle quota value" )
+ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )

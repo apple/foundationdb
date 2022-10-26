@@ -1,0 +1,16 @@
+[configuration]
+config = 'triple'
+storageEngineType = 5
+generateFearless = true
+allowDefaultTenant = false
+machineCount = 45
+
+[[knobs]]
+shard_encode_location_metadata = true
+
+[[test]]
+testTitle = 'ValidateStorageWorkload'
+useDB = true
+
+    [[test.workload]]
+    testName = 'ValidateStorageWorkload'

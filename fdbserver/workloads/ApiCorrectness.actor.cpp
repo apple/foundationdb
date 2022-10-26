@@ -31,6 +31,7 @@ enum OperationType { SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CL
 
 // A workload that executes the NativeAPIs functions and verifies that their outcomes are correct
 struct ApiCorrectnessWorkload : ApiWorkload {
+	static constexpr auto NAME = "ApiCorrectness";
 
 private:
 // Enable to track the activity on a particular key
@@ -136,8 +137,6 @@ public:
 	}
 
 	~ApiCorrectnessWorkload() override {}
-
-	std::string description() const override { return "ApiCorrectness"; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Number of Random Operations Performed", numRandomOperations.getValue(), Averaged::False);
@@ -765,4 +764,4 @@ public:
 	}
 };
 
-WorkloadFactory<ApiCorrectnessWorkload> ApiCorrectnessWorkloadFactory("ApiCorrectness");
+WorkloadFactory<ApiCorrectnessWorkload> ApiCorrectnessWorkloadFactory;

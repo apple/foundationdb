@@ -75,6 +75,7 @@ enum ArgKind {
 	ARG_STREAMING_MODE,
 	ARG_DISABLE_RYW,
 	ARG_CLIENT_THREADS_PER_VERSION,
+	ARG_DISABLE_CLIENT_BYPASS,
 	ARG_JSON_REPORT,
 	ARG_BG_FILE_PATH, // if blob granule files are stored locally, mako will read and materialize them if this is set
 	ARG_EXPORT_PATH,
@@ -137,6 +138,7 @@ struct Arguments {
 	int async_xacts;
 	int mode;
 	int rows; /* is 2 billion enough? */
+	double load_factor;
 	int row_digits;
 	int seconds;
 	int iteration;
@@ -169,6 +171,7 @@ struct Arguments {
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
 	int64_t client_threads_per_version;
+	bool disable_client_bypass;
 	int disable_ryw;
 	char json_output_path[PATH_MAX];
 	bool bg_materialize_files;

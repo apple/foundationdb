@@ -895,7 +895,7 @@ public:
 							if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
 								std::pair<std::vector<ShardsAffectedByTeamFailure::Team>,
 								          std::vector<ShardsAffectedByTeamFailure::Team>>
-								    teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
+								    teams = self->shardsAffectedByTeamFailure->getTeamsForFirstShard(shards[i]);
 								for (int j = 0; j < teams.first.size() + teams.second.size(); j++) {
 									// t is the team in primary DC or the remote DC
 									auto& t =

@@ -130,7 +130,7 @@ public:
 		}
 	}
 
-	void clear(KeyRangeRef range, const Arena* arena) override {
+	void clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0)
 			return;
@@ -287,6 +287,8 @@ public:
 	}
 
 	void enableSnapshot() override { disableSnapshot = false; }
+
+	int uncommittedBytes() { return queue.totalSize(); }
 
 private:
 	enum OpType {
@@ -731,12 +733,15 @@ private:
 				    .detail("Commits", dbgCommitCount)
 				    .detail("TimeTaken", now() - startt);
 
-				self->semiCommit();
-
-				// Make sure cipher keys are ready before recovery finishes.
+				// Make sure cipher keys are ready before recovery finishes. The semiCommit below also require cipher
+				// keys.
 				if (self->enableEncryption) {
 					wait(updateCipherKeys(self));
 				}
+
+				CODE_PROBE(self->enableEncryption && self->uncommittedBytes() > 0,
+				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled");
+				self->semiCommit();
 
 				return Void();
 			} catch (Error& e) {

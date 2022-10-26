@@ -45,6 +45,8 @@ enum {
 };
 enum { OP_COUNT, OP_RANGE };
 struct MakoWorkload : TestWorkload {
+	static constexpr auto NAME = "Mako";
+
 	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes, csSize,
 	    csCount, csPartitionSize, csStepSizeInPartition;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency,
@@ -163,12 +165,6 @@ struct MakoWorkload : TestWorkload {
 				csKeys.emplace_back(format((keyPrefix + "_crc32c_%u_%u").c_str(), i, rowCount));
 			}
 		}
-	}
-
-	std::string description() const override {
-		// Mako is a simple workload to measure the performance of FDB.
-		// The primary purpose of this benchmark is to generate consistent performance results
-		return "Mako";
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -885,4 +881,4 @@ struct MakoWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<MakoWorkload> MakoloadFactory("Mako");
+WorkloadFactory<MakoWorkload> MakoloadFactory;

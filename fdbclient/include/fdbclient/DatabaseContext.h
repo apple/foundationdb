@@ -298,13 +298,19 @@ public:
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
-	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
-	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
-	                                                                    StorageMetrics const& min,
-	                                                                    StorageMetrics const& max,
-	                                                                    StorageMetrics const& permittedError,
-	                                                                    int shardLimit,
-	                                                                    int expectedShardCount);
+	// Pass a valid `trState` with `hasTenant() == true` to make the function tenant-aware.
+	Future<StorageMetrics> getStorageMetrics(
+	    KeyRange const& keys,
+	    int shardLimit,
+	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
+	    KeyRange const& keys,
+	    StorageMetrics const& min,
+	    StorageMetrics const& max,
+	    StorageMetrics const& permittedError,
+	    int shardLimit,
+	    int expectedShardCount,
+	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
 	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
 	                                       KeyRange const& keys,
 	                                       StorageMetrics const& limit,
@@ -388,10 +394,14 @@ public:
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
-	Future<bool> blobbifyRange(KeyRange range);
-	Future<bool> unblobbifyRange(KeyRange range);
-	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
-	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
+	Future<bool> blobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
+	Future<bool> unblobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
+	                                                                int rangeLimit,
+	                                                                Optional<TenantName> tenantName = {});
+	Future<Version> verifyBlobRange(const KeyRange& range,
+	                                Optional<Version> version,
+	                                Optional<TenantName> tenantName = {});
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -544,8 +554,17 @@ public:
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
+
+	// Blob Granule Read metrics. Omit from logging if not used.
+	bool anyBGReads;
+	CounterCollection ccBG;
 	Counter bgReadInputBytes;
 	Counter bgReadOutputBytes;
+	Counter bgReadSnapshotRows;
+	Counter bgReadRowsCleared;
+	Counter bgReadRowsInserted;
+	Counter bgReadRowsUpdated;
+	ContinuousSample<double> bgLatencies, bgGranulesPerRequest;
 
 	// Change Feed metrics. Omit change feed metrics from logging if not used
 	bool usedAnyChangeFeeds;
@@ -558,7 +577,7 @@ public:
 	Counter feedPopsFallback;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
+	    bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
@@ -587,7 +606,6 @@ public:
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 	bool blobGranuleNoMaterialize = false;
-	bool anyBlobGranuleRequests = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

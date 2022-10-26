@@ -25,6 +25,8 @@
 #include "flow/FileIdentifier.h"
 
 using BlobMetadataDomainId = int64_t;
+using BlobMetadataDomainNameRef = StringRef;
+using BlobMetadataDomainName = Standalone<BlobMetadataDomainNameRef>;
 
 /*
  * There are 3 cases for blob metadata.
@@ -38,26 +40,54 @@ using BlobMetadataDomainId = int64_t;
 struct BlobMetadataDetailsRef {
 	constexpr static FileIdentifier file_identifier = 6685526;
 	BlobMetadataDomainId domainId;
+	BlobMetadataDomainNameRef domainName;
 	Optional<StringRef> base;
 	VectorRef<StringRef> partitions;
 
+	// cache options
+	double refreshAt;
+	double expireAt;
+
 	BlobMetadataDetailsRef() {}
 	BlobMetadataDetailsRef(Arena& arena, const BlobMetadataDetailsRef& from)
-	  : domainId(from.domainId), partitions(arena, from.partitions) {
+	  : domainId(from.domainId), domainName(arena, from.domainName), partitions(arena, from.partitions),
+	    refreshAt(from.refreshAt), expireAt(from.expireAt) {
 		if (from.base.present()) {
 			base = StringRef(arena, from.base.get());
 		}
 	}
-	explicit BlobMetadataDetailsRef(BlobMetadataDomainId domainId,
-	                                Optional<StringRef> base,
-	                                VectorRef<StringRef> partitions)
-	  : domainId(domainId), base(base), partitions(partitions) {}
 
-	int expectedSize() const { return sizeof(BlobMetadataDetailsRef) + partitions.expectedSize(); }
+	explicit BlobMetadataDetailsRef(Arena& ar,
+	                                BlobMetadataDomainId domainId,
+	                                BlobMetadataDomainNameRef domainName,
+	                                Optional<StringRef> base,
+	                                VectorRef<StringRef> partitions,
+	                                double refreshAt,
+	                                double expireAt)
+	  : domainId(domainId), domainName(ar, domainName), partitions(ar, partitions), refreshAt(refreshAt),
+	    expireAt(expireAt) {
+		if (base.present()) {
+			base = StringRef(ar, base.get());
+		}
+	}
+
+	explicit BlobMetadataDetailsRef(BlobMetadataDomainId domainId,
+	                                BlobMetadataDomainNameRef domainName,
+	                                Optional<StringRef> base,
+	                                VectorRef<StringRef> partitions,
+	                                double refreshAt,
+	                                double expireAt)
+	  : domainId(domainId), domainName(domainName), base(base), partitions(partitions), refreshAt(refreshAt),
+	    expireAt(expireAt) {}
+
+	int expectedSize() const {
+		return sizeof(BlobMetadataDetailsRef) + domainName.size() + (base.present() ? base.get().size() : 0) +
+		       partitions.expectedSize();
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, domainId, base, partitions);
+		serializer(ar, domainId, domainName, base, partitions, refreshAt, expireAt);
 	}
 };
 

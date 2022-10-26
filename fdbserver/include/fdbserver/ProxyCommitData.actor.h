@@ -156,7 +156,7 @@ struct ProxyStats {
 		specialCounter(cc, "NumTenants", [pTenantMap]() { return pTenantMap ? pTenantMap->size() : 0; });
 		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
-		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		logger = cc.traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ProxyMetrics");
 	}
 };
 
@@ -294,8 +294,7 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()),
-	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client)) {
+	    lastResolverReset(now()), isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

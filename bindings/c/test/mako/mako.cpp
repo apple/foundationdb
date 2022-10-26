@@ -321,7 +321,16 @@ int populate(Database db,
 		const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 		const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 		auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
+		double required_keys = (key_end - key_begin + 1) * args.load_factor;
 		for (auto i = key_begin; i <= key_end; i++) {
+			// Choose required_keys out of (key_end -i + 1) randomly, so the probability is required_keys / (key_end - i
+			// + 1). Generate a random number in range [0, 1), if the generated number is smaller or equal to
+			// required_keys / (key_end - i + 1), then choose this key.
+			double r = rand() / (1.0 + RAND_MAX);
+			if (r > required_keys / (key_end - i + 1)) {
+				continue;
+			}
+			--required_keys;
 			/* sequential keys */
 			genKey(keystr.data(), KEY_PREFIX, args, i);
 			/* random values */
@@ -875,6 +884,16 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		}
 	}
 
+	if (args.disable_client_bypass) {
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+		if (err) {
+			logr.error("network::setOption (FDB_NET_OPTION_DISABLE_CLIENT_BYPASS): {}",
+			           args.disable_client_bypass,
+			           err.what());
+			return -1;
+		}
+	}
+
 	/* Network thread must be setup before doing anything */
 	logr.debug("network::setup()");
 	network::setup();
@@ -974,6 +993,7 @@ int initArguments(Arguments& args) {
 	args.async_xacts = 0;
 	args.mode = MODE_INVALID;
 	args.rows = 100000;
+	args.load_factor = 1.0;
 	args.row_digits = digits(args.rows);
 	args.seconds = 30;
 	args.iteration = 0;
@@ -1005,6 +1025,7 @@ int initArguments(Arguments& args) {
 		args.txnspec.ops[i][OP_COUNT] = 0;
 	}
 	args.client_threads_per_version = 0;
+	args.disable_client_bypass = false;
 	args.disable_ryw = 0;
 	args.json_output_path[0] = '\0';
 	args.stats_export_path[0] = '\0';
@@ -1155,6 +1176,7 @@ void usage() {
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "    --async_xacts", "Specify number of concurrent transactions to be run in async mode");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
+	printf("%-24s %s\n", "-l, --load_factor=LOAD_FACTOR", "Specify load factor");
 	printf("%-24s %s\n", "-s, --seconds=SECONDS", "Specify the test duration in seconds\n");
 	printf("%-24s %s\n", "", "This option cannot be specified with --iteration.");
 	printf("%-24s %s\n", "-i, --iteration=ITERS", "Specify the number of iterations.\n");
@@ -1188,6 +1210,8 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
+	printf(
+	    "%-24s %s\n", "    --disable_client_bypass", "Disable client-bypass forcing mako to use multi-version client");
 	printf("%-24s %s\n", "    --json_report=PATH", "Output stats to the specified json file (Default: mako.json)");
 	printf("%-24s %s\n",
 	       "    --bg_file_path=PATH",
@@ -1215,6 +1239,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "threads", required_argument, NULL, 't' },
 			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
 			{ "rows", required_argument, NULL, 'r' },
+			{ "load_factor", required_argument, NULL, 'l' },
 			{ "seconds", required_argument, NULL, 's' },
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
@@ -1248,6 +1273,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			{ "version", no_argument, NULL, ARG_VERSION },
 			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "disable_client_bypass", no_argument, NULL, ARG_DISABLE_CLIENT_BYPASS },
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
@@ -1289,6 +1315,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case 'r':
 			args.rows = atoi(optarg);
 			args.row_digits = digits(args.rows);
+			break;
+		case 'l':
+			args.load_factor = atof(optarg);
 			break;
 		case 's':
 			args.seconds = atoi(optarg);
@@ -1446,6 +1475,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_CLIENT_THREADS_PER_VERSION:
 			args.client_threads_per_version = atoi(optarg);
 			break;
+		case ARG_DISABLE_CLIENT_BYPASS:
+			args.disable_client_bypass = true;
+			break;
 		case ARG_DISABLE_RYW:
 			args.disable_ryw = 1;
 			break;
@@ -1504,6 +1536,10 @@ int validateArguments(Arguments const& args) {
 	}
 	if (args.rows <= 0) {
 		logr.error("--rows must be a positive integer");
+		return -1;
+	}
+	if (args.load_factor <= 0 || args.load_factor > 1) {
+		logr.error("--load_factor must be in range (0, 1]");
 		return -1;
 	}
 	if (args.key_length < 0) {
@@ -2101,6 +2137,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"async_xacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"mode\": %d,", args.mode);
 		fmt::fprintf(fp, "\"rows\": %d,", args.rows);
+		fmt::fprintf(fp, "\"load_factor\": %lf,", args.load_factor);
 		fmt::fprintf(fp, "\"seconds\": %d,", args.seconds);
 		fmt::fprintf(fp, "\"iteration\": %d,", args.iteration);
 		fmt::fprintf(fp, "\"tpsmax\": %d,", args.tpsmax);
