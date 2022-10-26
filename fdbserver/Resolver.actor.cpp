@@ -35,7 +35,7 @@
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -188,7 +188,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
 
-		logger = traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ResolverMetrics");
+		logger = cc.traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ResolverMetrics");
 	}
 	~Resolver() { destroyConflictSet(conflictSet); }
 };

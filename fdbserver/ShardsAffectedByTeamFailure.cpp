@@ -40,8 +40,14 @@ int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
 }
 
 std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
-ShardsAffectedByTeamFailure::getTeamsFor(KeyRangeRef keys) {
+ShardsAffectedByTeamFailure::getTeamsForFirstShard(KeyRangeRef keys) {
 	return shard_teams[keys.begin];
+}
+
+std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
+
+ShardsAffectedByTeamFailure::getTeamsFor(KeyRef key) {
+	return shard_teams[key];
 }
 
 void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
@@ -235,4 +241,8 @@ void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, c
 		}
 	}
 	check();
+}
+
+auto ShardsAffectedByTeamFailure::intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges {
+	return shard_teams.intersectingRanges(keyRange);
 }

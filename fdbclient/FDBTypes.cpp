@@ -22,6 +22,16 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
 
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix) {
+	if (prefix.empty()) {
+		return range;
+	} else {
+		KeyRef begin = range.begin.startsWith(prefix) ? range.begin.removePrefix(prefix) : allKeys.begin;
+		KeyRef end = range.end.startsWith(prefix) ? range.end.removePrefix(prefix) : allKeys.end;
+		return KeyRangeRef(begin, end);
+	}
+}
+
 KeyRef keyBetween(const KeyRangeRef& keys) {
 	int pos = 0; // will be the position of the first difference between keys.begin and keys.end
 	int minSize = std::min(keys.begin.size(), keys.end.size());
