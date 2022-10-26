@@ -83,7 +83,9 @@ public:
 
 	void addRequest(GetReadVersionRequest const&);
 
+	void addLatencyBandThreshold(double value);
+
 public: // testing
 	// Returns number of tags tracked
-	uint32_t size();
+	uint32_t size() const;
 };

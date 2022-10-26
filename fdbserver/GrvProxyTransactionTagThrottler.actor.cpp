@@ -219,7 +219,12 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 	ASSERT_EQ(transactionsReleased.capacity(), transactionsReleasedInitialCapacity);
 }
 
-uint32_t GrvProxyTransactionTagThrottler::size() {
+void GrvProxyTransactionTagThrottler::addLatencyBandThreshold(double value) {
+	CODE_PROBE(size() > 0, "GrvProxyTransactionTagThrottler adding latency bands while actively throttling");
+	latencyBandsMap.addThreshold(value);
+}
+
+uint32_t GrvProxyTransactionTagThrottler::size() const {
 	return queues.size();
 }
 
