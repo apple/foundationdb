@@ -518,17 +518,10 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, 
 
 	int accumulatedRows = 0;
 	int accumulatedBytes = 0;
-	// TODO: Pass read timeout.
-	const int readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
 	rocksdb::Status s;
-	auto options = getReadOptions();
-	// TODO: define single shard read timeout.
-	const uint64_t deadlineMircos = shard->db->GetEnv()->NowMicros() + readRangeTimeout * 1000000;
-	options.deadline = std::chrono::microseconds(deadlineMircos / 1000000);
 
 	// When using a prefix extractor, ensure that keys are returned in order even if they cross
 	// a prefix boundary.
-	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 	if (rowLimit >= 0) {
 		ReadIterator readIter = shard->readIterPool->getIterator();
 		auto cursor = readIter.iter;
@@ -2217,6 +2210,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				if (result.size() >= abs(a.rowLimit) || accumulatedBytes >= a.byteLimit) {
 					break;
 				}
+
+				double time = timer_monotonic();
+				if (time - a.startTime > readRangeTimeout) {
+					TraceEvent(SevInfo, "ShardedRocksDBTimeout")
+					    .detail("Action", "ReadRange")
+					    .detail("NumShards", a.shardRanges.size());
+					a.result.sendError(transaction_too_old());
+					return;
+				}
 			}
 
 			result.more =
@@ -2229,6 +2231,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				double currTime = timer_monotonic();
 				rocksDBMetrics->getReadRangeActionHistogram(threadIndex)->sampleSeconds(currTime - readBeginTime);
 				rocksDBMetrics->getReadRangeLatencyHistogram(threadIndex)->sampleSeconds(currTime - a.startTime);
+				if (a.shardRanges.size() > 1) {
+					TraceEvent(SevInfo, "ShardedRocksDB").detail("ReadRangeShards", a.shardRanges.size());
+				}
 			}
 
 			sample();
