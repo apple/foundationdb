@@ -1894,7 +1894,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
-		state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
+		state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
 		// Track time from requestTime through now as read queueing wait time
 		state double queueWaitEnd = g_network->timer();
@@ -3768,7 +3768,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
-	state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
+	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -4829,6 +4829,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
+	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -4937,11 +4938,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
-			// Only take the ssLock for the readRange operation and unlock before the subqueries because each
-			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
-			// read options which will each acquire the ssLock.
-			state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
-
 			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
 			                                                     version,
 			                                                     KeyRangeRef(begin, end),
@@ -4950,7 +4946,11 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			                                                     span.context,
 			                                                     req.options,
 			                                                     tenantPrefix));
-			lock.release();
+
+			// Unlock read lock before the subqueries because each
+			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
+			// read options which will each acquire the ssLock.
+			readLock.release();
 
 			state GetMappedKeyValuesReply r;
 			try {
@@ -5135,7 +5135,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		} else {
 			loop {
 				wait(req.reply.onReady());
-				state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
+				state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
 				if (version < data->oldestVersion.get()) {
 					throw transaction_too_old();
@@ -5162,7 +5162,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                                      span.context,
 				                                      req.options,
 				                                      tenantPrefix));
-				lock.release();
+				readLock.release();
 				GetKeyValuesStreamReply r(_r);
 
 				if (req.options.present() && req.options.get().debugID.present())
@@ -5257,7 +5257,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
-	state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
+	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
