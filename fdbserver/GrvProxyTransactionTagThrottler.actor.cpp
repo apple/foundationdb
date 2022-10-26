@@ -59,7 +59,6 @@ void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& 
 	}
 }
 
-// FIXME: Use knobs
 GrvProxyTransactionTagThrottler::GrvProxyTransactionTagThrottler()
   : latencyBandsMap("GrvProxyTagThrottler",
                     deterministicRandom()->randomUniqueID(),
