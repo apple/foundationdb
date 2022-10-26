@@ -1103,8 +1103,12 @@ public:
 	Reference<ClientInfo> getLocalClient();
 	void runOnExternalClients(int threadId,
 	                          std::function<void(Reference<ClientInfo>)>,
-	                          bool runOnFailedClients = false);
-	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients = false);
+	                          bool runOnFailedClients = false,
+	                          bool failOnError = false);
+	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>,
+	                                    bool runOnFailedClients = false,
+	                                    bool failOnError = false);
+	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
 
@@ -1151,6 +1155,7 @@ private:
 	bool disableBypass;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
+	bool ignoreExternalClientFailures;
 	ApiVersion apiVersion;
 
 	int nextThread = 0;

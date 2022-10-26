@@ -251,6 +251,11 @@ func (o NetworkOptions) SetFutureVersionClientLibrary(param string) error {
 	return o.setOpt(66, []byte(param))
 }
 
+// Ignore the failure to initialize some of the external clients
+func (o NetworkOptions) SetIgnoreExternalClientFailures() error {
+	return o.setOpt(67, nil)
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
