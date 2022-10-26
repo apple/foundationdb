@@ -183,5 +183,7 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 // Make a range containing only the idempotency key associated with version and highOrderBatchIndex
 KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex);
 
+void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
+
 #include "flow/unactorcompiler.h"
 #endif

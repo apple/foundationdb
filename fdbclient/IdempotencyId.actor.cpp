@@ -96,13 +96,9 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 		uint8_t lowOrderBatchIndex;
 		reader >> lowOrderBatchIndex;
 		if (candidate == needle) {
-			BinaryReader reader(kv.key.begin(), kv.key.size(), Unversioned());
-			reader.readBytes(idempotencyIdKeys.begin.size());
 			Version commitVersion;
-			reader >> commitVersion;
-			commitVersion = bigEndian64(commitVersion);
 			uint8_t highOrderBatchIndex;
-			reader >> highOrderBatchIndex;
+			decodeIdempotencyKey(kv.key, commitVersion, highOrderBatchIndex);
 			return CommitResult{ commitVersion,
 				                 static_cast<uint16_t>((uint16_t(highOrderBatchIndex) << 8) |
 				                                       uint16_t(lowOrderBatchIndex)) };
@@ -198,4 +194,12 @@ KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t
 	ASSERT_EQ(dst - second.begin(), size);
 
 	return KeyRangeRef(second.removeSuffix("\x00"_sr), second);
+}
+
+void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex) {
+	BinaryReader reader(key, Unversioned());
+	reader.readBytes(idempotencyIdKeys.begin.size());
+	reader >> commitVersion;
+	commitVersion = bigEndian64(commitVersion);
+	reader >> highOrderBatchIndex;
 }

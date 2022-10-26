@@ -110,13 +110,9 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		RangeResult result = wait(tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!result.more);
 		for (const auto& [k, v] : result) {
-			BinaryReader reader(k, Unversioned());
-			reader.readBytes(idempotencyIdKeys.begin.size());
 			Version commitVersion;
-			reader >> commitVersion;
-			commitVersion = bigEndian64(commitVersion);
 			uint8_t highOrderBatchIndex;
-			reader >> highOrderBatchIndex;
+			decodeIdempotencyKey(k, commitVersion, highOrderBatchIndex);
 			BinaryReader valReader(v, IncludeVersion());
 			int64_t timestamp; // ignored
 			valReader >> timestamp;
