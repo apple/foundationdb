@@ -1,0 +1,32 @@
+pipeline {
+    agent { label 'regular-memory-node-c7' }
+
+    options {
+        timestamps()
+    }
+
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('build and test') {
+            steps {
+                println("test step 1")
+            }
+        }
+    }
+    post {
+        failure {
+            script {
+                println("Failure handler")
+            }
+        }
+        always {
+            script {
+                println("Always handler")
+            }
+        }
+    }
+}
