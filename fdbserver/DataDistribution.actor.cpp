@@ -1479,8 +1479,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 }
 
 ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
-                                                std::shared_ptr<DDAudit> audit,
-                                                KeyRange range) {
+                                             std::shared_ptr<DDAudit> audit,
+                                             KeyRange range) {
 	TraceEvent(SevDebug, "DDLoadAndDispatchAuditRangeBegin", self->ddId)
 	    .detail("AuditID", audit->id)
 	    .detail("Range", range)
