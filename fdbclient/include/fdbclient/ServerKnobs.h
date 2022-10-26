@@ -636,6 +636,8 @@ public:
 	// Global tag throttler forgets about throughput from a tag once no new transactions from that
 	// tag have been received for this duration (in seconds):
 	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
+	// Interval at which latency bands are logged for each tag on grv proxy
+	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

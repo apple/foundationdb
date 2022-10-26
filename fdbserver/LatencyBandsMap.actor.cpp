@@ -38,10 +38,10 @@ LatencyBands* LatencyBandsMap::getLatencyBands(TransactionTag tag) {
 	return &result;
 }
 
-void LatencyBandsMap::addMeasurement(TransactionTag tag, double value) {
+void LatencyBandsMap::addMeasurement(TransactionTag tag, double value, int count) {
 	auto* bands = getLatencyBands(tag);
 	if (bands) {
-		bands->addMeasurement(value);
+		bands->addMeasurement(value, count);
 	}
 }
 

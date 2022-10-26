@@ -43,7 +43,7 @@ public:
 	LatencyBandsMap(std::string const& name, UID id, double loggingInterval, int maxSize)
 	  : name(name), id(id), loggingInterval(loggingInterval), maxSize(maxSize) {}
 
-	void addMeasurement(TransactionTag tag, double measurement);
+	void addMeasurement(TransactionTag tag, double measurement, int count = 1);
 	void addThreshold(double value);
 	void clear();
 };
