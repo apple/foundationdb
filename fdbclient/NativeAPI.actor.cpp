@@ -6150,6 +6150,7 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
                                                                   IdempotencyIdRef idempotencyId) {
 	state Transaction tr(trState->cx);
 	state int retries = 0;
+	state Version expiredVersion;
 	state Span span("NAPI:determineCommitStatus"_loc, trState->spanContext);
 	tr.span.setParent(span.context);
 	loop {
@@ -6159,11 +6160,22 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 			tr.trState->authToken = trState->authToken;
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			Optional<Value> expiredVal = wait(tr.get(idempotencyIdsExpiredVersion));
+			if (expiredVal.present()) {
+				expiredVersion =
+				    ObjectReader::fromStringRef<IdempotencyIdsExpiredVersion>(expiredVal.get(), Unversioned()).expired;
+				if (expiredVersion >= minPossibleCommitVersion) {
+					throw commit_unknown_result_fatal();
+				}
+			} else {
+				expiredVersion = 0;
+			}
 			Version rv = wait(tr.getReadVersion());
 			TraceEvent("DetermineCommitStatusAttempt")
 			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
 			    .detail("Retries", retries)
 			    .detail("ReadVersion", rv)
+			    .detail("ExpiredVersion", expiredVersion)
 			    .detail("MinPossibleCommitVersion", minPossibleCommitVersion)
 			    .detail("MaxPossibleCommitVersion", maxPossibleCommitVersion);
 			KeyRange possibleRange =
@@ -6407,6 +6419,12 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
+		// Only gets filled in in the happy path where we don't have to commit on the first proxy or use provisional
+		// proxies
+		state int alternativeChosen = -1;
+		// Only valid if alternativeChosen >= 0
+		state Reference<CommitProxyInfo> proxiesUsed;
+
 		if (trState->options.commitOnFirstProxy) {
 			if (trState->cx->clientInfo->get().firstCommitProxy.present()) {
 				reply = throwErrorOr(brokenPromiseToMaybeDelivered(
@@ -6417,11 +6435,13 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 				                       : Never();
 			}
 		} else {
-			reply = basicLoadBalance(trState->cx->getCommitProxies(trState->useProvisionalProxies),
+			proxiesUsed = trState->cx->getCommitProxies(trState->useProvisionalProxies);
+			reply = basicLoadBalance(proxiesUsed,
 			                         &CommitProxyInterface::commit,
 			                         req,
 			                         TaskPriority::DefaultPromiseEndpoint,
-			                         AtMostOnce::True);
+			                         AtMostOnce::True,
+			                         &alternativeChosen);
 		}
 		state double grvTime = now();
 		choose {
@@ -6471,6 +6491,12 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 						                                       ci.version,
 						                                       req,
 						                                       trState->tenant()));
+					if (trState->automaticIdempotency && alternativeChosen >= 0) {
+						// Automatic idempotency means we're responsible for best effort idempotency id clean up
+						proxiesUsed->getInterface(alternativeChosen)
+						    .expireIdempotencyId.send(ExpireIdempotencyIdRequest{
+						        ci.version, uint8_t(ci.txnBatchId >> 8), trState->getTenantInfo() });
+					}
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -6956,11 +6982,16 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		tr.idempotencyId = IdempotencyIdRef(tr.arena, IdempotencyIdRef(value.get()));
+		trState->automaticIdempotency = false;
 		break;
 	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
 		validateOptionValueNotPresent(value);
-		tr.idempotencyId = IdempotencyIdRef(
-		    tr.arena, IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+		if (!tr.idempotencyId.valid()) {
+			tr.idempotencyId = IdempotencyIdRef(
+			    tr.arena,
+			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+		}
+		trState->automaticIdempotency = true;
 		break;
 
 	default:

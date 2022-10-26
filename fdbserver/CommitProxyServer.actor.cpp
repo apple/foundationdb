@@ -28,7 +28,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/IdempotencyId.h"
+#include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -1616,6 +1616,13 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                            self->toCommit.writeTypedMessage(idempotencyIdSet);
 	                            });
 
+	for (const auto& m : pProxyCommitData->idempotencyClears) {
+		auto& tags = pProxyCommitData->tagsForKey(m.param1);
+		self->toCommit.addTags(tags);
+		self->toCommit.writeTypedMessage(m);
+	}
+	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
+
 	self->toCommit.saveTags(self->writtenTags);
 
 	pProxyCommitData->stats.mutations += self->mutationCount;
@@ -1864,10 +1871,14 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
 
 	std::fill(self->nextTr.begin(), self->nextTr.end(), 0);
+	std::unordered_map<uint8_t, int16_t> idCountsForKey;
 	for (int t = 0; t < self->trs.size(); t++) {
 		auto& tr = self->trs[t];
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
 			ASSERT_WE_THINK(self->commitVersion != invalidVersion);
+			if (self->trs[t].idempotencyId.valid()) {
+				idCountsForKey[uint8_t(t >> 8)] += 1;
+			}
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
 		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
@@ -1912,6 +1923,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			                  std::numeric_limits<int>::max());
 			pProxyCommitData->stats.commitLatencyBands.addMeasurement(duration, filter);
 		}
+	}
+
+	for (auto [highOrderBatchIndex, count] : idCountsForKey) {
+		pProxyCommitData->expireIdempotencyKeyValuePair.send(
+		    ExpireIdempotencyKeyValuePairRequest{ self->commitVersion, count, highOrderBatchIndex });
 	}
 
 	++pProxyCommitData->stats.commitBatchOut;
@@ -2470,6 +2486,91 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 }
 
 namespace {
+struct ExpireServerEntry {
+	int64_t timeReceived;
+	int expectedCount = 0;
+	int receivedCount = 0;
+	bool initialized = false;
+};
+
+struct IdempotencyKey {
+	Version version;
+	uint8_t highOrderBatchIndex;
+	bool operator==(const IdempotencyKey& other) const {
+		return version == other.version && highOrderBatchIndex == other.highOrderBatchIndex;
+	}
+};
+
+} // namespace
+
+namespace std {
+template <>
+struct hash<IdempotencyKey> {
+	std::size_t operator()(const IdempotencyKey& key) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<Version>{}(key.version));
+		boost::hash_combine(seed, std::hash<uint8_t>{}(key.highOrderBatchIndex));
+		return seed;
+	}
+};
+
+} // namespace std
+
+ACTOR static Future<Void> idempotencyIdsExpireServer(
+    Database db,
+    PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
+    FutureStream<ExpireIdempotencyKeyValuePairRequest> expireIdempotencyKeyValuePair,
+    Standalone<VectorRef<MutationRef>>* idempotencyClears) {
+	state std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
+	state std::unordered_map<IdempotencyKey, ExpireServerEntry>::iterator iter;
+	state int64_t purgeBefore;
+	state IdempotencyKey key;
+	state ExpireServerEntry* status = nullptr;
+	state Future<Void> purgeOld = Void();
+	loop {
+		choose {
+			when(ExpireIdempotencyIdRequest req = waitNext(expireIdempotencyId.getFuture())) {
+				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
+				status = &idStatus[key];
+				status->receivedCount += 1;
+			}
+			when(ExpireIdempotencyKeyValuePairRequest req = waitNext(expireIdempotencyKeyValuePair)) {
+				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
+				status = &idStatus[key];
+				status->expectedCount = req.idempotencyIdCount;
+			}
+			when(wait(purgeOld)) {
+				purgeOld = delay(10);
+				purgeBefore = now() - 10;
+				for (iter = idStatus.begin(); iter != idStatus.end();) {
+					// We have exclusive access to idStatus in this when block, so iter will still be valid after the
+					// wait
+					wait(yield());
+					if (iter->second.timeReceived < purgeBefore) {
+						iter = idStatus.erase(iter);
+					} else {
+						++iter;
+					}
+				}
+				continue;
+			}
+		}
+		if (status->initialized) {
+			if (status->receivedCount == status->expectedCount) {
+				auto keyRange =
+				    makeIdempotencySingleKeyRange(idempotencyClears->arena(), key.version, key.highOrderBatchIndex);
+				idempotencyClears->push_back(idempotencyClears->arena(),
+				                             MutationRef(MutationRef::ClearRange, keyRange.begin, keyRange.end));
+				idStatus.erase(key);
+			}
+		} else {
+			status->timeReceived = now();
+			status->initialized = true;
+		}
+	}
+}
+
+namespace {
 
 struct TransactionStateResolveContext {
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.
@@ -2733,6 +2834,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	addActor.send(idempotencyIdsExpireServer(openDBOnServer(db),
+	                                         proxy.expireIdempotencyId,
+	                                         commitData.expireIdempotencyKeyValuePair.getFuture(),
+	                                         &commitData.idempotencyClears));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

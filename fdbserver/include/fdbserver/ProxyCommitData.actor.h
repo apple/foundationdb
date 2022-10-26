@@ -160,6 +160,16 @@ struct ProxyStats {
 	}
 };
 
+struct ExpireIdempotencyKeyValuePairRequest {
+	Version commitVersion = invalidVersion;
+	int16_t idempotencyIdCount = 0;
+	uint8_t batchIndexHighByte = 0;
+
+	ExpireIdempotencyKeyValuePairRequest() {}
+	ExpireIdempotencyKeyValuePairRequest(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
+	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
+};
+
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
@@ -225,6 +235,9 @@ struct ProxyCommitData {
 	int localTLogCount = -1;
 
 	bool isEncryptionEnabled = false;
+
+	PromiseStream<ExpireIdempotencyKeyValuePairRequest> expireIdempotencyKeyValuePair;
+	Standalone<VectorRef<MutationRef>> idempotencyClears;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to

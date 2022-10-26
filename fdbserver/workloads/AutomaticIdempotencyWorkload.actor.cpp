@@ -24,6 +24,20 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+struct ValueType {
+	static constexpr FileIdentifier file_identifier = 9556754;
+
+	Value idempotencyId;
+	int64_t createdTime;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, idempotencyId, createdTime);
+	}
+};
+} // namespace
+
 // This tests launches a bunch of transactions with idempotency ids (so they should be idempotent automatically). Each
 // transaction sets a version stamped key, and then we check that the right number of transactions were committed.
 // If a transaction commits multiple times or doesn't commit, that probably indicates a problem with
@@ -32,10 +46,14 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	static constexpr auto NAME = "AutomaticIdempotencyCorrectness";
 	int64_t numTransactions;
 	Key keyPrefix;
+	double automaticPercentage;
+
+	bool ok = true;
 
 	AutomaticIdempotencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numTransactions = getOption(options, "numTransactions"_sr, 1000);
-		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "automaticIdempotencyKeyPrefix"_sr));
+		numTransactions = getOption(options, "numTransactions"_sr, 2500);
+		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "/autoIdempotency/"_sr));
+		automaticPercentage = getOption(options, "automaticPercentage"_sr, 0.1);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -52,12 +70,20 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			TraceEvent("IdempotencyIdWorkloadTransaction").detail("Id", idempotencyId);
 			wait(runRYWTransaction(
 			    cx, [self = self, idempotencyId = idempotencyId](Reference<ReadYourWritesTransaction> tr) {
+				    // If we don't set AUTOMATIC_IDEMPOTENCY the idempotency id won't automatically get cleaned up, so
+				    // it should create work for the cleaner.
 				    tr->setOption(FDBTransactionOptions::IDEMPOTENCY_ID, idempotencyId);
+				    if (deterministicRandom()->random01() < self->automaticPercentage) {
+					    // We also want to exercise the automatic idempotency code path.
+					    tr->setOption(FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY);
+				    }
 				    uint32_t index = self->keyPrefix.size();
 				    Value suffix = makeString(14);
 				    memset(mutateString(suffix), 0, 10);
 				    memcpy(mutateString(suffix) + 10, &index, 4);
-				    tr->atomicOp(self->keyPrefix.withSuffix(suffix), idempotencyId, MutationRef::SetVersionstampedKey);
+				    tr->atomicOp(self->keyPrefix.withSuffix(suffix),
+				                 ObjectWriter::toValue(ValueType{ idempotencyId, int64_t(now()) }, Unversioned()),
+				                 MutationRef::SetVersionstampedKey);
 				    return Future<Void>(Void());
 			    }));
 		}
@@ -68,10 +94,50 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		if (clientId != 0) {
 			return true;
 		}
-		return runRYWTransaction(cx, [this](Reference<ReadYourWritesTransaction> tr) { return _check(this, tr); });
+		return testAll(this, cx);
 	}
 
-	ACTOR static Future<bool> _check(AutomaticIdempotencyWorkload* self, Reference<ReadYourWritesTransaction> tr) {
+	ACTOR static Future<bool> testAll(AutomaticIdempotencyWorkload* self, Database db) {
+		wait(runRYWTransaction(db,
+		                       [=](Reference<ReadYourWritesTransaction> tr) { return logIdempotencyIds(self, tr); }));
+		wait(runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) { return testIdempotency(self, tr); }));
+		return self->ok;
+	}
+
+	ACTOR static Future<Void> logIdempotencyIds(AutomaticIdempotencyWorkload* self,
+	                                            Reference<ReadYourWritesTransaction> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		RangeResult result = wait(tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY));
+		ASSERT(!result.more);
+		for (const auto& [k, v] : result) {
+			BinaryReader reader(k, Unversioned());
+			reader.readBytes(idempotencyIdKeys.begin.size());
+			Version commitVersion;
+			reader >> commitVersion;
+			commitVersion = bigEndian64(commitVersion);
+			uint8_t highOrderBatchIndex;
+			reader >> highOrderBatchIndex;
+			BinaryReader valReader(v, IncludeVersion());
+			int64_t timestamp; // ignored
+			valReader >> timestamp;
+			while (!valReader.empty()) {
+				uint8_t length;
+				valReader >> length;
+				StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
+				uint8_t lowOrderBatchIndex;
+				valReader >> lowOrderBatchIndex;
+				TraceEvent("IdempotencyIdWorkloadIdCommitted")
+				    .detail("CommitVersion", commitVersion)
+				    .detail("HighOrderBatchIndex", highOrderBatchIndex)
+				    .detail("Id", id);
+			}
+		}
+		return Void();
+	}
+
+	// Check that each transaction committed exactly once.
+	ACTOR static Future<Void> testIdempotency(AutomaticIdempotencyWorkload* self,
+	                                          Reference<ReadYourWritesTransaction> tr) {
 		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!result.more);
 		std::unordered_set<Value> ids;
@@ -79,13 +145,27 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		for (const auto& [k, v] : result) {
 			ids.emplace(v);
 		}
+		for (const auto& [k, rawValue] : result) {
+			auto v = ObjectReader::fromStringRef<ValueType>(rawValue, Unversioned());
+			BinaryReader reader(k, Unversioned());
+			reader.readBytes(self->keyPrefix.size());
+			Version commitVersion;
+			reader >> commitVersion;
+			commitVersion = bigEndian64(commitVersion);
+			uint8_t highOrderBatchIndex;
+			reader >> highOrderBatchIndex;
+			TraceEvent("IdempotencyIdWorkloadTransactionCommitted")
+			    .detail("CommitVersion", commitVersion)
+			    .detail("HighOrderBatchIndex", highOrderBatchIndex)
+			    .detail("Key", k)
+			    .detail("Id", v.idempotencyId)
+			    .detail("CreatedTime", v.createdTime);
+		}
 		if (ids.size() != self->clientCount * self->numTransactions) {
-			for (const auto& [k, v] : result) {
-				TraceEvent("IdempotencyIdWorkloadTransactionCommitted").detail("Id", v);
-			}
+			self->ok = false;
 		}
 		ASSERT_EQ(ids.size(), self->clientCount * self->numTransactions);
-		return true;
+		return Void();
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

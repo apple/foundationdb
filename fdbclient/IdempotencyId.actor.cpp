@@ -1,5 +1,5 @@
 /*
- * IdempotencyId.cpp
+ * IdempotencyId.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IdempotencyId.h"
+#include "fdbclient/IdempotencyId.actor.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // this has to be the last include
 
 struct IdempotencyIdKVBuilderImpl {
 	Optional<Version> commitVersion;
@@ -40,6 +42,7 @@ void IdempotencyIdKVBuilder::add(const IdempotencyIdRef& id, uint16_t batchIndex
 		ASSERT((batchIndex >> 8) == impl->batchIndexHighOrderByte.get());
 	} else {
 		impl->batchIndexHighOrderByte = batchIndex >> 8;
+		impl->value << int64_t(now());
 	}
 	StringRef s = id.asStringRefUnsafe();
 	impl->value << uint8_t(s.size());
@@ -53,19 +56,17 @@ Optional<KeyValue> IdempotencyIdKVBuilder::buildAndClear() {
 		return {};
 	}
 
-	BinaryWriter key{ Unversioned() };
-	key.serializeBytes(idempotencyIdKeys.begin);
-	key << bigEndian64(impl->commitVersion.get());
-	key << impl->batchIndexHighOrderByte.get();
-
 	Value v = impl->value.toValue();
+
+	KeyRef key =
+	    makeIdempotencySingleKeyRange(v.arena(), impl->commitVersion.get(), impl->batchIndexHighOrderByte.get()).begin;
 
 	impl->value = BinaryWriter(IncludeVersion());
 	impl->batchIndexHighOrderByte = Optional<uint8_t>();
 
 	Optional<KeyValue> result = KeyValue();
 	result.get().arena() = v.arena();
-	result.get().key = key.toValue(result.get().arena());
+	result.get().key = key;
 	result.get().value = v;
 	return result;
 }
@@ -86,6 +87,8 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 
 	// Even if id is a substring of value, it may still not actually contain it.
 	BinaryReader reader(kv.value.begin(), kv.value.size(), IncludeVersion());
+	int64_t timestamp; // ignored
+	reader >> timestamp;
 	while (!reader.empty()) {
 		uint8_t length;
 		reader >> length;
@@ -172,4 +175,27 @@ TEST_CASE("/fdbclient/IdempotencyId/serialization") {
 		ASSERT(t == id);
 	}
 	return Void();
+}
+
+KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex) {
+	static const auto size =
+	    idempotencyIdKeys.begin.size() + sizeof(version) + sizeof(highOrderBatchIndex) + /*\x00*/ 1;
+
+	StringRef second = makeString(size, arena);
+	auto* dst = mutateString(second);
+
+	memcpy(dst, idempotencyIdKeys.begin.begin(), idempotencyIdKeys.begin.size());
+	dst += idempotencyIdKeys.begin.size();
+
+	version = bigEndian64(version);
+	memcpy(dst, &version, sizeof(version));
+	dst += sizeof(version);
+
+	*dst++ = highOrderBatchIndex;
+
+	*dst++ = 0;
+
+	ASSERT_EQ(dst - second.begin(), size);
+
+	return KeyRangeRef(second.removeSuffix("\x00"_sr), second);
 }
