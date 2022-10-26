@@ -1021,6 +1021,13 @@ public:
 
 	PriorityMultiLock ssLock;
 	std::vector<int> readPriorityRanks;
+
+	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
+		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
+		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
+		return ssLock.lock(readPriorityRanks[readType]);
+	}
+
 	FlowLock serveAuditStorageParallelismLock;
 
 	int64_t instanceID;
@@ -1870,7 +1877,6 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
-	state PriorityMultiLock::Lock lock;
 	Span span("SS:getValue"_loc, req.spanContext);
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -1878,8 +1884,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	span.addAttribute("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
-
-	state ReadType readType = req.options.present() ? req.options.get().type : ReadType::NORMAL;
 
 	try {
 		++data->counters.getValueQueries;
@@ -1890,8 +1894,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
-
-		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)readType])));
+		state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
 
 		// Track time from requestTime through now as read queueing wait time
 		state double queueWaitEnd = g_network->timer();
@@ -2587,21 +2590,17 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
-                                                                            bool atLatest,
-                                                                            UID streamUID /* for debugging */) {
+                                                                            bool atLatest) {
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state Version startVersion = data->version.get();
-	// TODO: Change feed reads should probably at least set cacheResult to false, possibly set a different ReadType as
-	// well, perhaps high priority?
-	state ReadOptions options;
 
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsBegin", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", streamUID)
+		    .detail("StreamUID", req.streamUID())
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
@@ -2639,7 +2638,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsDetails", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", streamUID)
+		    .detail("StreamUID", req.streamUID())
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
@@ -2690,13 +2689,15 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 
 		wait(data->changeFeedDiskReadsLock.take(TaskPriority::DefaultYield));
+		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
 		state FlowLock::Releaser holdingDiskReadsLock(data->changeFeedDiskReadsLock);
 		RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
 		                            1 << 30,
 		                            remainingDurableBytes,
-		                            options));
+		                            req.options));
+		ssReadLock.release();
 		holdingDiskReadsLock.release();
 
 		data->counters.kvScanBytes += res.logicalSize();
@@ -2740,7 +2741,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					           "is {4}) (emptyVersion={5}, emptyBefore={6})!\n",
 					           data->thisServerID.toString().substr(0, 4),
 					           req.rangeID.printable().substr(0, 6),
-					           streamUID.toString().substr(0, 8),
+					           req.streamUID().toString().substr(0, 8),
 					           memoryReply.mutations[memoryVerifyIdx].version,
 					           version,
 					           feedInfo->emptyVersion,
@@ -2782,7 +2783,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					           "disk! (durable validation = {4})\n",
 					           data->thisServerID.toString().substr(0, 4),
 					           req.rangeID.printable().substr(0, 6),
-					           streamUID.toString().substr(0, 8),
+					           req.streamUID().toString().substr(0, 8),
 					           version,
 					           durableValidationVersion);
 
@@ -2863,7 +2864,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		if (!ok) {
 			TraceEvent("ChangeFeedMutationsPopped", data->thisServerID)
 			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", streamUID)
+			    .detail("StreamUID", req.streamUID())
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
@@ -2880,7 +2881,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			for (auto& m : mutations.mutations) {
 				DEBUG_MUTATION("ChangeFeedSSRead", mutations.version, m, data->thisServerID)
 				    .detail("ChangeFeedID", req.rangeID)
-				    .detail("StreamUID", streamUID)
+				    .detail("StreamUID", req.streamUID())
 				    .detail("ReqBegin", req.begin)
 				    .detail("ReqEnd", req.end)
 				    .detail("ReqRange", req.range);
@@ -2907,7 +2908,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			fmt::print("ERROR: SS {0} CF {1} SQ {2} missing {3} @ {4} from request for [{5} - {6}) {7} - {8}\n",
 			           data->thisServerID.toString().substr(0, 4),
 			           req.rangeID.printable().substr(0, 6),
-			           streamUID.toString().substr(0, 8),
+			           req.streamUID().toString().substr(0, 8),
 			           foundVersion ? "key" : "version",
 			           DEBUG_CF_MISSING_VERSION,
 			           req.range.begin.printable(),
@@ -2928,7 +2929,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			fmt::print("DBG: SS {0} CF {1} SQ {2} correct @ {3} from request for [{4} - {5}) {6} - {7}\n",
 			           data->thisServerID.toString().substr(0, 4),
 			           req.rangeID.printable().substr(0, 6),
-			           streamUID.toString().substr(0, 8),
+			           req.streamUID().toString().substr(0, 8),
 			           DEBUG_CF_MISSING_VERSION,
 			           req.range.begin.printable(),
 			           req.range.end.printable(),
@@ -2942,7 +2943,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", streamUID)
+		    .detail("StreamUID", req.streamUID())
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
@@ -2960,14 +2961,14 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 }
 
 // Change feed stream must be sent an error as soon as it is moved away, or change feed can get incorrect results
-ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
+ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req) {
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 		req.reply.sendError(unknown_change_feed());
 		return Void();
 	}
 	state Promise<Void> moved;
-	feed->second->triggerOnMove(req.range, streamUID, moved);
+	feed->second->triggerOnMove(req.range, req.streamUID(), moved);
 	try {
 		wait(moved.getFuture());
 	} catch (Error& e) {
@@ -2976,7 +2977,7 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 
 		auto feed = data->uidChangeFeed.find(req.rangeID);
 		if (feed != data->uidChangeFeed.end()) {
-			feed->second->removeOnMoveTrigger(req.range, streamUID);
+			feed->second->removeOnMoveTrigger(req.range, req.streamUID());
 		}
 		return Void();
 	}
@@ -2987,7 +2988,7 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 	return Void();
 }
 
-ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
+ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req) {
 	state Span span("SS:getChangeFeedStream"_loc, req.spanContext);
 	state bool atLatest = false;
 	state bool removeUID = false;
@@ -3019,7 +3020,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		if (DEBUG_CF_TRACE) {
 			TraceEvent(SevDebug, "TraceChangeFeedStreamStart", data->thisServerID)
 			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", streamUID)
+			    .detail("StreamUID", req.streamUID())
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
@@ -3041,7 +3042,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		if (DEBUG_CF_TRACE) {
 			TraceEvent(SevDebug, "TraceChangeFeedStreamSentInitialEmpty", data->thisServerID)
 			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", streamUID)
+			    .detail("StreamUID", req.streamUID())
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
@@ -3053,12 +3054,12 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		loop {
 			Future<Void> onReady = req.reply.onReady();
 			if (atLatest && !onReady.isReady() && !removeUID) {
-				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
+				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.streamUID()] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				if (DEBUG_CF_TRACE) {
 					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedOnReady", data->thisServerID)
 					    .detail("FeedID", req.rangeID)
-					    .detail("StreamUID", streamUID)
+					    .detail("StreamUID", req.streamUID())
 					    .detail("Range", req.range)
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
@@ -3069,17 +3070,18 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				removeUID = true;
 			}
 			wait(onReady);
+
 			// keep this as not state variable so it is freed after sending to reduce memory
 			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, req, false, atLatest, streamUID);
+			    getChangeFeedMutations(data, req, false, atLatest);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
-				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
+				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.streamUID()] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
 				if (DEBUG_CF_TRACE) {
 					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedMutations", data->thisServerID)
 					    .detail("FeedID", req.rangeID)
-					    .detail("StreamUID", streamUID)
+					    .detail("StreamUID", req.streamUID())
 					    .detail("Range", req.range)
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
@@ -3102,10 +3104,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
 			if (removeUID) {
 				if (gotAll || req.begin == req.end) {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(streamUID);
+					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(req.streamUID());
 					removeUID = false;
 				} else {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
+					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.streamUID()] =
 					    feedReply.mutations.back().version;
 				}
 			}
@@ -3153,7 +3155,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		auto it = data->changeFeedClientVersions.find(req.reply.getEndpoint().getPrimaryAddress());
 		if (it != data->changeFeedClientVersions.end()) {
 			if (removeUID) {
-				it->second.erase(streamUID);
+				it->second.erase(req.streamUID());
 			}
 			if (it->second.empty()) {
 				data->changeFeedClientVersions.erase(it);
@@ -3751,8 +3753,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<ReadOptions> options = req.options;
-	state ReadType readType = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -3768,11 +3768,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
-	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && readType == ReadType::FETCH) {
-		readType = ReadType::NORMAL;
-	}
 
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)readType]));
+	state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -3820,10 +3817,11 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		state Future<Key> fBegin =
 		    req.begin.isFirstGreaterOrEqual()
 		        ? Future<Key>(req.begin.getKey())
-		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, options);
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
-		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, options);
+		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, req.options);
+		state Future<Key> fEnd =
+		    req.end.isFirstGreaterOrEqual()
+		        ? Future<Key>(req.end.getKey())
+		        : findKey(data, req.end, version, searchRange, &offset2, span.context, req.options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -3871,7 +3869,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                                      req.limit,
 			                                      &remainingLimitBytes,
 			                                      span.context,
-			                                      options,
+			                                      req.options,
 			                                      tenantPrefix));
 			const double duration = g_network->timer() - kvReadRange;
 			data->counters.kvReadRangeLatencySample.addMeasurement(duration);
@@ -4817,8 +4815,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<ReadOptions> options = req.options;
-	state ReadType readType = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4882,10 +4878,11 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		state Future<Key> fBegin =
 		    req.begin.isFirstGreaterOrEqual()
 		        ? Future<Key>(req.begin.getKey())
-		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, options);
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
-		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, options);
+		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, req.options);
+		state Future<Key> fEnd =
+		    req.end.isFirstGreaterOrEqual()
+		        ? Future<Key>(req.end.getKey())
+		        : findKey(data, req.end, version, searchRange, &offset2, span.context, req.options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -4944,14 +4941,15 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			// Only take the ssLock for the readRange operation and unlock before the subqueries because each
 			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
 			// read options which will each acquire the ssLock.
-			state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)readType]));
+			state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
+
 			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
 			                                                     version,
 			                                                     KeyRangeRef(begin, end),
 			                                                     req.limit,
 			                                                     &remainingLimitBytes,
 			                                                     span.context,
-			                                                     options,
+			                                                     req.options,
 			                                                     tenantPrefix));
 			lock.release();
 
@@ -5035,8 +5033,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<ReadOptions> options = req.options;
-	state ReadType readType = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -5051,12 +5047,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(delay(0, TaskPriority::DefaultEndpoint));
-	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && readType == ReadType::FETCH) {
-		readType = ReadType::NORMAL;
-	}
-
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
-	state int readPriority = data->readPriorityRanks[(int)readType];
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5100,10 +5090,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		state Future<Key> fBegin =
 		    req.begin.isFirstGreaterOrEqual()
 		        ? Future<Key>(req.begin.getKey())
-		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, options);
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
-		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, options);
+		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, req.options);
+		state Future<Key> fEnd =
+		    req.end.isFirstGreaterOrEqual()
+		        ? Future<Key>(req.end.getKey())
+		        : findKey(data, req.end, version, searchRange, &offset2, span.context, req.options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5162,14 +5153,18 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				    .detail("ReqLimit", req.limit)
 				    .detail("Begin", begin.printable())
 				    .detail("End", end.printable());
+
+				state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
+
 				GetKeyValuesReply _r = wait(readRange(data,
 				                                      version,
 				                                      KeyRangeRef(begin, end),
 				                                      req.limit,
 				                                      &byteLimit,
 				                                      span.context,
-				                                      options,
+				                                      req.options,
 				                                      tenantPrefix));
+				lock.release();
 				GetKeyValuesStreamReply r(_r);
 
 				if (req.options.present() && req.options.get().debugID.present())
@@ -5229,10 +5224,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					end = lastKey;
 				}
 
-				lock.release();
-				wait(store(lock, data->ssLock.lock(readPriority)));
-
 				data->transactionTagCounter.addRequest(req.tags, resultSize);
+				// lock.release();
 			}
 		}
 	} catch (Error& e) {
@@ -5251,18 +5244,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, req.spanContext);
-	state PriorityMultiLock::Lock lock;
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	state int64_t resultSize = 0;
-	state ReadOptions options;
-	state ReadType readType = ReadType::NORMAL;
-
-	if (req.options.present()) {
-		options = req.options.get();
-		readType = options.type;
-	}
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
@@ -5275,7 +5260,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
 
-	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)readType])));
+	state PriorityMultiLock::Lock lock = wait(data->getReadLock(req.options));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -5296,13 +5281,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
 
 		state int offset;
-		Key absoluteKey = wait(findKey(data,
-		                               req.sel,
-		                               version,
-		                               searchRange,
-		                               &offset,
-		                               req.spanContext,
-		                               req.options.present() ? options : Optional<ReadOptions>()));
+		Key absoluteKey = wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, req.options));
 
 		data->checkChangeCounter(changeCounter,
 		                         KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), absoluteKey),
@@ -6124,7 +6103,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              KeyRange range,
                                              Version emptyVersion,
                                              Version beginVersion,
-                                             Version endVersion) {
+                                             Version endVersion,
+                                             ReadOptions readOptions) {
 
 	state Version startVersion = beginVersion;
 	startVersion = std::max(startVersion, emptyVersion + 1);
@@ -6145,8 +6125,14 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	}
 
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
-	state Future<Void> feed = data->cx->getChangeFeedStream(
-	    feedResults, rangeId, startVersion, endVersion, range, SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES, true);
+	state Future<Void> feed = data->cx->getChangeFeedStream(feedResults,
+	                                                        rangeId,
+	                                                        startVersion,
+	                                                        endVersion,
+	                                                        range,
+	                                                        SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES,
+	                                                        true,
+	                                                        readOptions);
 
 	state Version firstVersion = invalidVersion;
 	state Version lastVersion = invalidVersion;
@@ -6322,7 +6308,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
                                       Reference<ChangeFeedInfo> changeFeedInfo,
                                       Version beginVersion,
-                                      Version endVersion) {
+                                      Version endVersion,
+                                      ReadOptions readOptions) {
 	wait(delay(0)); // allow this actor to be cancelled by removals
 
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
@@ -6365,7 +6352,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			                                                 changeFeedInfo->range,
 			                                                 changeFeedInfo->emptyVersion,
 			                                                 beginVersion,
-			                                                 endVersion));
+			                                                 endVersion,
+			                                                 readOptions));
 			data->fetchingChangeFeeds.insert(changeFeedInfo->id);
 			return maxFetched;
 		} catch (Error& e) {
@@ -6660,7 +6648,8 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
                                                                    Version endVersion,
                                                                    PromiseStream<Key> destroyedFeeds,
                                                                    std::vector<Key>* feedIds,
-                                                                   std::unordered_set<Key> newFeedIds) {
+                                                                   std::unordered_set<Key> newFeedIds,
+                                                                   ReadOptions readOptions) {
 	state std::unordered_map<Key, Version> feedMaxFetched;
 	if (feedIds->empty() && newFeedIds.empty()) {
 		return feedMaxFetched;
@@ -6674,7 +6663,8 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			auto feedIt = data->uidChangeFeed.find(feedId);
 			// feed may have been moved away or deleted after move was scheduled, do nothing in that case
 			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
-				feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, beginVersion, endVersion);
+				feedFetches[feedIt->second->id] =
+				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, readOptions);
 			}
 		}
 		for (auto& feedId : newFeedIds) {
@@ -6682,7 +6672,7 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			// we just read the change feed data map earlier in fetchKeys without yielding, so these feeds must exist
 			ASSERT(feedIt != data->uidChangeFeed.end());
 			ASSERT(!feedIt->second->removing);
-			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion);
+			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, readOptions);
 		}
 
 		loop {
@@ -6744,6 +6734,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	                                             data->currentRunningFetchKeys,
 	                                             data->counters.bytesFetched,
 	                                             data->counters.kvFetched);
+
+	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by a
+	// knob
+	state ReadOptions readOptions = ReadOptions(
+	    fetchKeysID, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get for
 	// this key range, that apply to change feeds we don't know about yet because their metadata hasn't been fetched yet
@@ -6835,9 +6830,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		state int debug_nextRetryToLog = 1;
 		state Error lastError;
 
-		// it is used to inform the storage that the rangeRead is for Fetch
-		state ReadOptions options = ReadOptions(fetchKeysID, ReadType::FETCH);
-
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
 		data->cx->invalidateCache(Key(), keys);
@@ -6846,6 +6838,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.trState->readOptions = readOptions;
+
 			// fetchVersion = data->version.get();
 			// A quick fix:
 			// By default, we use data->version as the fetchVersion.
@@ -6894,7 +6888,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
 			tr.trState->taskID = TaskPriority::FetchKeys;
-			tr.trState->readOptions = options;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (SERVER_KNOBS->FETCH_USING_BLOB) {
@@ -7056,7 +7049,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		                                                                                   fetchVersion + 1,
 		                                                                                   destroyedFeeds,
 		                                                                                   &changeFeedsToFetch,
-		                                                                                   std::unordered_set<Key>());
+		                                                                                   std::unordered_set<Key>(),
+		                                                                                   readOptions);
 
 		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
 		state Future<Void> dataArrive = data->version.whenAtLeast(fetchVersion);
@@ -7121,7 +7115,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		                        shard->transferredVersion,
 		                        destroyedFeeds,
 		                        &changeFeedsToFetch,
-		                        newChangeFeeds);
+		                        newChangeFeeds,
+		                        readOptions);
 
 		TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -9582,9 +9577,13 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 	state int totalFetches = 0;
 	state int totalKeys = 0;
 	state int totalBytes = 0;
+	state ReadOptions readOptions(UID(), ReadType::NORMAL, CacheResult::False);
+
 	loop {
-		RangeResult bs = wait(storage->readRange(
-		    KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES));
+		RangeResult bs = wait(storage->readRange(KeyRangeRef(begin, end),
+		                                         SERVER_KNOBS->STORAGE_LIMIT_BYTES,
+		                                         SERVER_KNOBS->STORAGE_LIMIT_BYTES,
+		                                         readOptions));
 		if (results) {
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
 			data->bytesRestored += bs.logicalSize();
@@ -10528,7 +10527,7 @@ ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
 	loop {
 		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
 		// must notify change feed that its shard is moved away ASAP
-		self->actors.add(changeFeedStreamQ(self, req, req.debugUID) || stopChangeFeedOnMove(self, req, req.debugUID));
+		self->actors.add(changeFeedStreamQ(self, req) || stopChangeFeedOnMove(self, req));
 	}
 }
 

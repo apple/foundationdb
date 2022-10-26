@@ -382,7 +382,8 @@ public:
 	                                 Version end = std::numeric_limits<Version>::max(),
 	                                 KeyRange range = allKeys,
 	                                 int replyBufferSize = -1,
-	                                 bool canReadPopped = true);
+	                                 bool canReadPopped = true,
+	                                 ReadOptions readOptions = ReadOptions());
 
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);

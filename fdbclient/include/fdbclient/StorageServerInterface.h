@@ -890,16 +890,21 @@ struct ChangeFeedStreamRequest {
 	KeyRange range;
 	int replyBufferSize = -1;
 	bool canReadPopped = true;
-	UID debugUID; // This is only used for debugging and tracing, but being able to link a client + server side stream
-	              // is so useful for testing, and this is such small overhead compared to streaming large amounts of
-	              // change feed data, it is left in the interface
+	Optional<ReadOptions> options;
+
+	UID streamUID() const {
+		if (options.present()) {
+			return options.get().debugID.orDefault(UID());
+		}
+		return UID();
+	}
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, debugUID, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, options, arena);
 	}
 };
 
