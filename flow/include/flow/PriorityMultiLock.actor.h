@@ -33,8 +33,10 @@
 
 #define PRIORITYMULTILOCK_DEBUG 0
 
-#if PRIORITYMULTILOCK_DEBUG
-#define pml_debug_printf(...) printf(__VA_ARGS__)
+#if PRIORITYMULTILOCK_DEBUG || !defined(NO_INTELLISENSE)
+#define pml_debug_printf(...)                                                                                          \
+	if (now() > 0)                                                                                                     \
+	printf(__VA_ARGS__)
 #else
 #define pml_debug_printf(...)
 #endif
@@ -82,7 +84,7 @@ public:
 	  : PriorityMultiLock(concurrency, parseStringToVector<int>(launchLimits, ',')) {}
 
 	PriorityMultiLock(int concurrency, std::vector<int> launchLimitsByPriority)
-	  : concurrency(concurrency), available(concurrency), waiting(0), totalActiveLaunchLimits(0) {
+	  : concurrency(concurrency), available(concurrency), waiting(0), totalActiveLaunchLimits(0), releaseDebugID(0) {
 
 		priorities.resize(launchLimitsByPriority.size());
 		for (int i = 0; i < priorities.size(); ++i) {
@@ -92,7 +94,7 @@ public:
 		fRunner = runner(this);
 	}
 
-	~PriorityMultiLock() {}
+	~PriorityMultiLock() { kill(); }
 
 	Future<Lock> lock(int priority = 0) {
 		Priority& p = priorities[priority];
@@ -125,14 +127,11 @@ public:
 	}
 
 	void kill() {
-		for (int i = 0; i < runners.size(); ++i) {
-			if (!runners[i].isReady()) {
-				runners[i].cancel();
-			}
-		}
+		brokenOnDestruct.reset();
+		// handleRelease will not free up any execution slots when it ends via cancel
+		fRunner.cancel();
+		available = 0;
 		runners.clear();
-		brokenOnDestruct.sendError(broken_promise());
-		waiting = 0;
 		priorities.clear();
 	}
 
@@ -144,23 +143,31 @@ public:
 			}
 		}
 
-		std::string s =
-		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d  ",
-		           this,
-		           concurrency,
-		           available,
-		           concurrency - available,
-		           waiting,
-		           runners.size(),
-		           runnersDone);
+		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d "
+		                       "runnersDone=%d activeLimits=%d ",
+		                       this,
+		                       concurrency,
+		                       available,
+		                       concurrency - available,
+		                       waiting,
+		                       runners.size(),
+		                       runnersDone,
+		                       totalActiveLaunchLimits);
 
 		for (int i = 0; i < priorities.size(); ++i) {
 			s += format("p%d:{%s} ", i, priorities[i].toString(this).c_str());
 		}
 
 		s += "}";
+
+		if (concurrency - available != runners.size() - runnersDone) {
+			pml_debug_printf("%s\n", s.c_str());
+			ASSERT_EQ(concurrency - available, runners.size() - runnersDone);
+		}
+
 		return s;
 	}
+
 	int maxPriority() const { return priorities.size() - 1; }
 
 	int totalWaiters() const { return waiting; }
@@ -179,9 +186,8 @@ public:
 
 private:
 	struct Waiter {
-		Waiter() : queuedTime(now()) {}
+		Waiter() {}
 		Promise<Lock> lockPromise;
-		double queuedTime;
 	};
 
 	// Total execution slots allowed across all priorities
@@ -223,22 +229,31 @@ private:
 	AsyncTrigger wakeRunner;
 	Promise<Void> brokenOnDestruct;
 
+	// Used for debugging, can roll over without issue
+	unsigned int releaseDebugID;
+
 	ACTOR static Future<Void> handleRelease(PriorityMultiLock* self, Future<Void> f, Priority* priority) {
+		state [[maybe_unused]] unsigned int id = self->releaseDebugID++;
+
+		pml_debug_printf("%f handleRelease self=%p id=%u start \n", now(), self, id);
 		try {
 			wait(f);
+			pml_debug_printf("%f handleRelease self=%p id=%u success\n", now(), self, id);
 		} catch (Error& e) {
+			pml_debug_printf("%f handleRelease self=%p id=%u error %s\n", now(), self, id, e.what());
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
 		}
 
-		++self->available;
-		priority->runners -= 1;
-
 		pml_debug_printf("lock release line %d priority %d  %s\n",
 		                 __LINE__,
 		                 (int)(priority - &self->priorities.front()),
 		                 self->toString().c_str());
+
+		pml_debug_printf("%f handleRelease self=%p id=%u releasing\n", now(), self, id);
+		++self->available;
+		priority->runners -= 1;
 
 		// If there are any waiters or if the runners array is getting large, trigger the runner loop
 		if (self->waiting > 0 || self->runners.size() > 1000) {
@@ -282,7 +297,7 @@ private:
 			    "runner loop waitTrigger line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 			wait(self->wakeRunner.onTrigger());
 			pml_debug_printf(
-			    "runner loop wake line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+			    "%f runner loop wake line %d  priority=%d  %s\n", now(), __LINE__, priority, self->toString().c_str());
 
 			if (++sinceYield == 100) {
 				sinceYield = 0;
