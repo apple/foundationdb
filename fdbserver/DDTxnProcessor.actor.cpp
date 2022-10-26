@@ -336,11 +336,11 @@ class DDTxnProcessorImpl {
 					std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
 					std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
 
-					auto ranges = result->dataMoveMap.intersectingRanges(meta.range);
+					auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
-					result->dataMoveMap.insert(meta.range, std::move(dataMove));
+					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
 					++numDataMoves;
 				}
 

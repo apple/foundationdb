@@ -769,7 +769,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 	} else if (metaData->format == RocksDB) {
 		std::shared_ptr<rocksdb::SstFileWriter> writer =
 		    std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options());
-		wait(fetchCheckpointRange(cx, metaData, metaData->range, dir, writer, cFun));
+		wait(fetchCheckpointRange(cx, metaData, metaData->ranges.front(), dir, writer, cFun));
 	}
 
 	return *metaData;
