@@ -1287,7 +1287,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					TraceEvent(SevVerbose, "StartMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
-					ASSERT(dataMove.ranges.front().begin == keys.begin);
+					ASSERT(!dataMove.ranges.empty() && dataMove.ranges.front().begin == keys.begin);
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 						TraceEvent(SevVerbose, "StartMoveShardsDataMove", relocationIntervalId)
 						    .detail("DataMoveBeingDeleted", dataMoveId);
@@ -1629,6 +1629,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						throw data_move_cancelled();
 					}
 					ASSERT(dataMove.getPhase() == DataMoveMetaData::Running);
+					ASSERT(!dataMove.ranges.empty());
 					range = dataMove.ranges.front();
 				} else {
 					TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeleted", relocationIntervalId)
@@ -2230,6 +2231,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
 							if (val.present()) {
 								state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
+								ASSERT(!dataMove.ranges.empty());
 								TraceEvent(SevVerbose, "RemoveRangeFoundDataMove", serverID)
 								    .detail("DataMoveMetaData", dataMove.toString());
 								if (range == dataMove.ranges.front()) {
@@ -2351,6 +2353,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
+					ASSERT(!dataMove.ranges.empty());
 					TraceEvent(SevVerbose, "CleanUpDataMoveMetaData", dataMoveId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveMetaData", dataMove.toString());

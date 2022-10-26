@@ -315,6 +315,11 @@ class DDTxnProcessorImpl {
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
+					if (meta.ranges.empty()) {
+						TraceEvent(SevWarnAlways, "EmptyDataMoveRange", distributorId)
+						    .detail("DataMoveMetaData", meta.toString());
+						continue;
+					}
 					for (const UID& id : meta.src) {
 						auto& dc = server_dc[id];
 						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {

@@ -751,6 +751,8 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 	    .detail("InitialState", initialState.toString())
 	    .detail("CheckpointDir", dir);
 
+	ASSERT(!initialState.ranges.empty());
+
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
 
 	if (metaData->format == RocksDBColumnFamily) {

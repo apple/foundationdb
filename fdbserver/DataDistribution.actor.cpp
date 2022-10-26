@@ -76,7 +76,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 		return;
 	}
 
-	ASSERT(this->meta.ranges.front().contains(range));
+	ASSERT(!this->meta.ranges.empty() && this->meta.ranges.front().contains(range));
 
 	if (!shard.hasDest) {
 		TraceEvent(SevError, "DataMoveValidationError")
@@ -481,6 +481,11 @@ public:
 
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
+			if (meta.ranges.empty()) {
+				TraceEvent(SevWarnAlways, "EmptyDataMoveRange", self->ddId)
+				    .detail("DataMoveMetaData", meta.toString());
+				continue;
+			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
