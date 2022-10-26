@@ -71,6 +71,20 @@ private:
 	ACTOR static Future<Void> loadManagementClusterMetadata(MetaclusterConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> managementTr = self->managementDb->createTransaction();
 		state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenantListReady;
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenantListOther;
+
+		state std::vector<TenantState> readyFilter;
+		state std::vector<TenantState> otherFilter;
+
+		readyFilter.push_back(TenantState::READY);
+		otherFilter.push_back(TenantState::REGISTERING);
+		otherFilter.push_back(TenantState::REMOVING);
+		otherFilter.push_back(TenantState::UPDATING_CONFIGURATION);
+		otherFilter.push_back(TenantState::RENAMING_FROM);
+		otherFilter.push_back(TenantState::RENAMING_TO);
+		otherFilter.push_back(TenantState::ERROR);
+		otherFilter.push_back(TenantState::INVALID);
 
 		loop {
 			try {
@@ -101,6 +115,12 @@ private:
 				     store(tenantList,
 				           MetaclusterAPI::listTenantsTransaction(
 				               managementTr, ""_sr, "\xff\xff"_sr, metaclusterMaxTenants)) &&
+				     store(tenantListReady,
+				           MetaclusterAPI::listTenantsTransaction(
+				               managementTr, ""_sr, "\xff\xff"_sr, metaclusterMaxTenants, readyFilter)) &&
+				     store(tenantListOther,
+				           MetaclusterAPI::listTenantsTransaction(
+				               managementTr, ""_sr, "\xff\xff"_sr, metaclusterMaxTenants, otherFilter)) &&
 				     store(self->managementMetadata.tenantGroups,
 				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(
 				               managementTr, {}, {}, metaclusterMaxTenants)) &&
@@ -112,6 +132,8 @@ private:
 				wait(safeThreadFutureToFuture(managementTr->onError(e)));
 			}
 		}
+
+		ASSERT(tenantListReady.size() + tenantListOther.size() == tenantList.size());
 
 		self->managementMetadata.tenantMap = std::map<TenantName, TenantMapEntry>(tenantList.begin(), tenantList.end());
 

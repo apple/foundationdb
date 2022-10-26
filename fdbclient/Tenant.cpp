@@ -64,6 +64,8 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 		return "renaming to";
 	case TenantState::ERROR:
 		return "error";
+	case TenantState::INVALID:
+		return "invalid";
 	default:
 		UNREACHABLE();
 	}
@@ -87,7 +89,7 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::ERROR;
 	}
 
-	UNREACHABLE();
+	return TenantState::INVALID;
 }
 
 std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState) {

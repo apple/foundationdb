@@ -397,7 +397,7 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 			"<NAME>", "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>>"
 		};
 		return std::vector<const char*>(opts.begin() + std::min<int>(1, tokens.size() - 2), opts.end());
-	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
+	} else if (tokencmp(tokens[1], "list") && tokens.size() < 6) {
 		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]", "[state=<STATE1>,<STATE2>,...]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "get") && tokens.size() < 4) {
