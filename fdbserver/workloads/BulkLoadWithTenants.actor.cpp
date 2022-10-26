@@ -33,8 +33,8 @@ struct BulkSetupWorkload : TestWorkload {
 	int nodeCount;
 	double transactionsPerSecond;
 	Key keyPrefix;
-	double maxNumTenants;
-	double minNumTenants;
+	double maxNumTenantsPerClient;
+	double minNumTenantsPerClient;
 	std::vector<TenantName> tenantNames;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -42,9 +42,9 @@ struct BulkSetupWorkload : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		// maximum and minimum number of tenants per client
-		maxNumTenants = getOption(options, "maxNumTenants"_sr, 0);
-		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
-		ASSERT(minNumTenants <= maxNumTenants);
+		maxNumTenantsPerClient = getOption(options, "maxNumTenantsPerClient"_sr, 0);
+		minNumTenantsPerClient = getOption(options, "minNumTenantsPerClient"_sr, 0);
+		ASSERT(minNumTenantsPerClient <= maxNumTenantsPerClient);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -58,19 +58,22 @@ struct BulkSetupWorkload : TestWorkload {
 	ACTOR static Future<Void> _setup(BulkSetupWorkload* workload, Database cx) {
 		// create a bunch of tenants (between min and max tenants)
 		state int numTenantsToCreate =
-		    deterministicRandom()->randomInt(workload->minNumTenants, workload->maxNumTenants + 1);
+		    deterministicRandom()->randomInt(workload->minNumTenantsPerClient, workload->maxNumTenantsPerClient + 1);
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
-		std::vector<Future<Void>> tenantFutures;
-		for (int i = 0; i < numTenantsToCreate; i++) {
-			TenantMapEntry entry;
-			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
-			workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d_%04d", workload->clientId, i)));
-			TraceEvent("CreatingTenant")
-			    .detail("Tenant", workload->tenantNames.back())
-			    .detail("TenantGroup", entry.tenantGroup);
-			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), workload->tenantNames.back())));
+		if (numTenantsToCreate > 0) {
+			std::vector<Future<Void>> tenantFutures;
+			for (int i = 0; i < numTenantsToCreate; i++) {
+				TenantMapEntry entry;
+				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d_%04d", workload->clientId, i)));
+				TraceEvent("CreatingTenant")
+				    .detail("Tenant", workload->tenantNames.back())
+				    .detail("TenantGroup", entry.tenantGroup);
+				tenantFutures.push_back(
+				    success(TenantAPI::createTenant(cx.getReference(), workload->tenantNames.back())));
+			}
+			wait(waitForAll(tenantFutures));
 		}
-		wait(waitForAll(tenantFutures));
 		return Void();
 	}
 
