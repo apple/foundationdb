@@ -45,5 +45,5 @@ public:
 
 	void addMeasurement(TransactionTag tag, double measurement, int count = 1);
 	void addThreshold(double value);
-	void clear();
+	int size() const { return map.size(); }
 };

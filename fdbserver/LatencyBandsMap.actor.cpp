@@ -52,10 +52,6 @@ void LatencyBandsMap::addThreshold(double value) {
 	}
 }
 
-void LatencyBandsMap::clear() {
-	map.clear();
-}
-
 TEST_CASE("/fdbserver/LatencyBandsMap/Simple") {
 	state LatencyBandsMap latencyBandsMap("TestLatencyBandsMap", deterministicRandom()->randomUniqueID(), 10.0, 100);
 	state Standalone<VectorRef<TransactionTagRef>> tags;
@@ -81,5 +77,6 @@ TEST_CASE("/fdbserver/LatencyBandsMap/MaxSize") {
 	latencyBandsMap.addMeasurement("a"_sr, deterministicRandom()->random01());
 	latencyBandsMap.addMeasurement("b"_sr, deterministicRandom()->random01());
 	latencyBandsMap.addMeasurement("c"_sr, deterministicRandom()->random01());
+	ASSERT_EQ(latencyBandsMap.size(), 2);
 	return Void();
 }
