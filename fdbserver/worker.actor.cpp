@@ -2267,7 +2267,25 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					CODE_PROBE(true, "Recruited while already a blob migrator.");
 				} else {
 					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltBlobMigrator);
+					DUMPTOKEN(recruited.ssi.getValue);
+					DUMPTOKEN(recruited.ssi.getKey);
+					DUMPTOKEN(recruited.ssi.getKeyValues);
+					DUMPTOKEN(recruited.ssi.getMappedKeyValues);
+					DUMPTOKEN(recruited.ssi.getShardState);
+					DUMPTOKEN(recruited.ssi.waitMetrics);
+					DUMPTOKEN(recruited.ssi.splitMetrics);
+					DUMPTOKEN(recruited.ssi.getReadHotRanges);
+					DUMPTOKEN(recruited.ssi.getRangeSplitPoints);
+					DUMPTOKEN(recruited.ssi.getStorageMetrics);
+					DUMPTOKEN(recruited.ssi.waitFailure);
+					DUMPTOKEN(recruited.ssi.getQueuingMetrics);
+					DUMPTOKEN(recruited.ssi.getKeyValueStoreType);
+					DUMPTOKEN(recruited.ssi.watchValue);
+					DUMPTOKEN(recruited.ssi.getKeyValuesStream);
+					DUMPTOKEN(recruited.ssi.changeFeedStream);
+					DUMPTOKEN(recruited.ssi.changeFeedPop);
+					DUMPTOKEN(recruited.ssi.changeFeedVersionUpdate);
 
 					Future<Void> blobMigratorProcess = blobMigrator(recruited, dbInfo);
 					errorForwarders.add(forwardError(errors,
@@ -2802,6 +2820,7 @@ static std::set<int> const& normalWorkerErrors() {
 	if (s.empty()) {
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_please_reboot_delete);
+		s.insert(error_code_local_config_changed);
 	}
 	return s;
 }

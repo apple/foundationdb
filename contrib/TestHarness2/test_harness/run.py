@@ -303,6 +303,7 @@ class TestRun:
         self.stats: str | None = stats
         self.expected_unseed: int | None = expected_unseed
         self.use_valgrind: bool = config.use_valgrind
+        self.long_running: bool = config.long_running
         self.old_binary_path: Path = config.old_binaries_path
         self.buggify_enabled: bool = buggify_enabled
         self.fault_injection_enabled: bool = True
@@ -375,7 +376,7 @@ class TestRun:
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=self.temp_path,
                                    text=True, env=env)
         did_kill = False
-        timeout = 20 * config.kill_seconds if self.use_valgrind else config.kill_seconds
+        timeout = 20 * config.kill_seconds if self.use_valgrind or self.long_running else config.kill_seconds
         err_out: str
         try:
             _, err_out = process.communicate(timeout=timeout)

@@ -87,7 +87,7 @@ BlobCipherMetrics::BlobCipherMetrics()
                   CounterSet(cc, "Backup"),
                   CounterSet(cc, "Test") }) {
 	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
-	traceFuture = traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL, &cc);
+	traceFuture = cc.traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL);
 }
 
 std::string toString(BlobCipherMetrics::UsageType type) {
