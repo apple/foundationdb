@@ -59,6 +59,8 @@
 #include "shm.hpp"
 #include "stats.hpp"
 #include "time.hpp"
+#include "rapidjson/document.h"
+#include "rapidjson/error/en.h"
 
 namespace mako {
 
@@ -88,14 +90,29 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 	}
 	// Create Tenant Transaction
 	int tenant_id = (id == -1) ? urand(0, args.active_tenants - 1) : id;
+	Transaction tr;
+	std::string tenantStr;
 	// If provided tenants array, use it
 	if (tenants) {
-		return tenants[tenant_id].createTransaction();
+		tr = tenants[tenant_id].createTransaction();
+	} else {
+		tenantStr = "tenant" + std::to_string(tenant_id);
+		BytesRef tenant_name = toBytesRef(tenantStr);
+		Tenant t = db.openTenant(tenant_name);
+		tr = t.createTransaction();
 	}
-	std::string tenantStr = "tenant" + std::to_string(tenant_id);
-	BytesRef tenant_name = toBytesRef(tenantStr);
-	Tenant t = db.openTenant(tenant_name);
-	return t.createTransaction();
+	if (!args.authorization_tokens.empty()) {
+		// lookup token based on tenant name and, if found, set authz token to transaction
+		if (tenantStr.empty())
+			tenantStr = "tenant" + std::to_string(tenant_id);
+		auto tokenMapItr = args.authorization_tokens.find(tenantStr);
+		if (tokenMapItr != args.authorization_tokens.end()) {
+			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, tokenMapItr->second);
+		} else {
+			logr.warn("Authorization token map is not empty, but could not find token for tenant '{}'", tenantStr);
+		}
+	}
+	return tr;
 }
 
 uint64_t byteswapHelper(uint64_t input) {
@@ -321,7 +338,16 @@ int populate(Database db,
 		const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 		const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 		auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
+		double required_keys = (key_end - key_begin + 1) * args.load_factor;
 		for (auto i = key_begin; i <= key_end; i++) {
+			// Choose required_keys out of (key_end -i + 1) randomly, so the probability is required_keys / (key_end - i
+			// + 1). Generate a random number in range [0, 1), if the generated number is smaller or equal to
+			// required_keys / (key_end - i + 1), then choose this key.
+			double r = rand() / (1.0 + RAND_MAX);
+			if (r > required_keys / (key_end - i + 1)) {
+				continue;
+			}
+			--required_keys;
 			/* sequential keys */
 			genKey(keystr.data(), KEY_PREFIX, args, i);
 			/* random values */
@@ -806,6 +832,18 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
 	}
 
+	if (args.tls_certificate_file.has_value()) {
+		network::setOption(FDB_NET_OPTION_TLS_CERT_PATH, args.tls_certificate_file.value());
+	}
+
+	if (args.tls_key_file.has_value()) {
+		network::setOption(FDB_NET_OPTION_TLS_KEY_PATH, args.tls_key_file.value());
+	}
+
+	if (args.tls_ca_file.has_value()) {
+		network::setOption(FDB_NET_OPTION_TLS_CA_PATH, args.tls_ca_file.value());
+	}
+
 	/* enable flatbuffers if specified */
 	if (args.flatbuffers) {
 #ifdef FDB_NET_OPTION_USE_FLATBUFFERS
@@ -973,56 +1011,55 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 }
 
 /* initialize the parameters with default values */
-int initArguments(Arguments& args) {
-	memset(&args, 0, sizeof(Arguments)); /* zero-out everything */
-	args.num_fdb_clusters = 0;
-	args.num_databases = 1;
-	args.api_version = maxApiVersion();
-	args.json = 0;
-	args.num_processes = 1;
-	args.num_threads = 1;
-	args.async_xacts = 0;
-	args.mode = MODE_INVALID;
-	args.rows = 100000;
-	args.row_digits = digits(args.rows);
-	args.seconds = 30;
-	args.iteration = 0;
-	args.tpsmax = 0;
-	args.tpsmin = -1;
-	args.tpsinterval = 10;
-	args.tpschange = TPS_SIN;
-	args.sampling = 1000;
-	args.key_length = 32;
-	args.value_length = 16;
-	args.active_tenants = 0;
-	args.total_tenants = 0;
-	args.tenant_batch_size = 10000;
-	args.zipf = 0;
-	args.commit_get = 0;
-	args.verbose = 1;
-	args.flatbuffers = 0; /* internal */
-	args.knobs[0] = '\0';
-	args.log_group[0] = '\0';
-	args.prefixpadding = 0;
-	args.trace = 0;
-	args.tracepath[0] = '\0';
-	args.traceformat = 0; /* default to client's default (XML) */
-	args.streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
-	args.txntrace = 0;
-	args.txntagging = 0;
-	memset(args.txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
+Arguments::Arguments() {
+	num_fdb_clusters = 0;
+	num_databases = 1;
+	api_version = maxApiVersion();
+	json = 0;
+	num_processes = 1;
+	num_threads = 1;
+	async_xacts = 0;
+	mode = MODE_INVALID;
+	rows = 100000;
+	load_factor = 1.0;
+	row_digits = digits(rows);
+	seconds = 30;
+	iteration = 0;
+	tpsmax = 0;
+	tpsmin = -1;
+	tpsinterval = 10;
+	tpschange = TPS_SIN;
+	sampling = 1000;
+	key_length = 32;
+	value_length = 16;
+	active_tenants = 0;
+	total_tenants = 0;
+	tenant_batch_size = 10000;
+	zipf = 0;
+	commit_get = 0;
+	verbose = 1;
+	flatbuffers = 0; /* internal */
+	knobs[0] = '\0';
+	log_group[0] = '\0';
+	prefixpadding = 0;
+	trace = 0;
+	tracepath[0] = '\0';
+	traceformat = 0; /* default to client's default (XML) */
+	streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
+	txntrace = 0;
+	txntagging = 0;
+	memset(txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
 	for (auto i = 0; i < MAX_OP; i++) {
-		args.txnspec.ops[i][OP_COUNT] = 0;
+		txnspec.ops[i][OP_COUNT] = 0;
 	}
-	args.client_threads_per_version = 0;
-	args.disable_client_bypass = false;
-	args.disable_ryw = 0;
-	args.json_output_path[0] = '\0';
-	args.stats_export_path[0] = '\0';
-	args.bg_materialize_files = false;
-	args.bg_file_path[0] = '\0';
-	args.distributed_tracer_client = 0;
-	return 0;
+	client_threads_per_version = 0;
+	disable_client_bypass = false;
+	disable_ryw = 0;
+	json_output_path[0] = '\0';
+	stats_export_path[0] = '\0';
+	bg_materialize_files = false;
+	bg_file_path[0] = '\0';
+	distributed_tracer_client = 0;
 }
 
 /* parse transaction specification */
@@ -1166,6 +1203,7 @@ void usage() {
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "    --async_xacts", "Specify number of concurrent transactions to be run in async mode");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
+	printf("%-24s %s\n", "-l, --load_factor=LOAD_FACTOR", "Specify load factor");
 	printf("%-24s %s\n", "-s, --seconds=SECONDS", "Specify the test duration in seconds\n");
 	printf("%-24s %s\n", "", "This option cannot be specified with --iteration.");
 	printf("%-24s %s\n", "-i, --iteration=ITERS", "Specify the number of iterations.\n");
@@ -1199,6 +1237,8 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
+	printf(
+	    "%-24s %s\n", "    --disable_client_bypass", "Disable client-bypass forcing mako to use multi-version client");
 	printf("%-24s %s\n", "    --json_report=PATH", "Output stats to the specified json file (Default: mako.json)");
 	printf("%-24s %s\n",
 	       "    --bg_file_path=PATH",
@@ -1226,6 +1266,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "threads", required_argument, NULL, 't' },
 			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
 			{ "rows", required_argument, NULL, 'r' },
+			{ "load_factor", required_argument, NULL, 'l' },
 			{ "seconds", required_argument, NULL, 's' },
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
@@ -1265,6 +1306,10 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
 			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
 			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
+			{ "tls_certificate_file", required_argument, NULL, ARG_TLS_CERTIFICATE_FILE },
+			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
+			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
+			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1301,6 +1346,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case 'r':
 			args.rows = atoi(optarg);
 			args.row_digits = digits(args.rows);
+			break;
+		case 'l':
+			args.load_factor = atof(optarg);
 			break;
 		case 's':
 			args.seconds = atoi(optarg);
@@ -1498,6 +1546,45 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.distributed_tracer_client = -1;
 			}
 			break;
+		case ARG_TLS_CERTIFICATE_FILE:
+			args.tls_certificate_file = std::string(optarg);
+			break;
+		case ARG_TLS_KEY_FILE:
+			args.tls_key_file = std::string(optarg);
+			break;
+		case ARG_TLS_CA_FILE:
+			args.tls_ca_file = std::string(optarg);
+			break;
+		case ARG_AUTHORIZATION_TOKEN_FILE: {
+			std::string tokenFilename(optarg);
+			std::ifstream ifs(tokenFilename);
+			std::ostringstream oss;
+			oss << ifs.rdbuf();
+			rapidjson::Document d;
+			d.Parse(oss.str().c_str());
+			if (d.HasParseError()) {
+				logr.error("Failed to parse authorization token JSON file '{}': {} at offset {}",
+				           tokenFilename,
+				           GetParseError_En(d.GetParseError()),
+				           d.GetErrorOffset());
+				return -1;
+			} else if (!d.IsObject()) {
+				logr.error("Authorization token JSON file '{}' must contain a JSON object", tokenFilename);
+				return -1;
+			}
+			for (auto itr = d.MemberBegin(); itr != d.MemberEnd(); ++itr) {
+				if (!itr->value.IsString()) {
+					logr.error("Token '{}' is not a string", itr->name.GetString());
+					return -1;
+				}
+				args.authorization_tokens.insert_or_assign(
+				    std::string(itr->name.GetString(), itr->name.GetStringLength()),
+				    std::string(itr->value.GetString(), itr->value.GetStringLength()));
+			}
+			logr.info("Added {} tenant authorization tokens to map from file '{}'",
+			          args.authorization_tokens.size(),
+			          tokenFilename);
+		} break;
 		}
 	}
 
@@ -1508,88 +1595,96 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 	return 0;
 }
 
-int validateArguments(Arguments const& args) {
-	if (args.mode == MODE_INVALID) {
+int Arguments::validate() {
+	if (mode == MODE_INVALID) {
 		logr.error("--mode has to be set");
 		return -1;
 	}
-	if (args.verbose < VERBOSE_NONE || args.verbose > VERBOSE_DEBUG) {
+	if (verbose < VERBOSE_NONE || verbose > VERBOSE_DEBUG) {
 		logr.error("--verbose must be between 0 and 3");
 		return -1;
 	}
-	if (args.rows <= 0) {
+	if (rows <= 0) {
 		logr.error("--rows must be a positive integer");
 		return -1;
 	}
-	if (args.key_length < 0) {
+	if (load_factor <= 0 || load_factor > 1) {
+		logr.error("--load_factor must be in range (0, 1]");
+		return -1;
+	}
+	if (key_length < 0) {
 		logr.error("--keylen must be a positive integer");
 		return -1;
 	}
-	if (args.value_length < 0) {
+	if (value_length < 0) {
 		logr.error("--vallen must be a positive integer");
 		return -1;
 	}
-	if (args.num_fdb_clusters > NUM_CLUSTERS_MAX) {
+	if (num_fdb_clusters > NUM_CLUSTERS_MAX) {
 		logr.error("Mako is not supported to do work to more than {} clusters", NUM_CLUSTERS_MAX);
 		return -1;
 	}
-	if (args.num_databases > NUM_DATABASES_MAX) {
+	if (num_databases > NUM_DATABASES_MAX) {
 		logr.error("Mako is not supported to do work to more than {} databases", NUM_DATABASES_MAX);
 		return -1;
 	}
-	if (args.num_databases < args.num_fdb_clusters) {
-		logr.error("--num_databases ({}) must be >= number of clusters({})", args.num_databases, args.num_fdb_clusters);
+	if (num_databases < num_fdb_clusters) {
+		logr.error("--num_databases ({}) must be >= number of clusters({})", num_databases, num_fdb_clusters);
 		return -1;
 	}
-	if (args.num_threads < args.num_databases) {
-		logr.error("--threads ({}) must be >= number of databases ({})", args.num_threads, args.num_databases);
+	if (num_threads < num_databases) {
+		logr.error("--threads ({}) must be >= number of databases ({})", num_threads, num_databases);
 		return -1;
 	}
-	if (args.key_length < 4 /* "mako" */ + args.row_digits) {
+	if (key_length < 4 /* "mako" */ + row_digits) {
 		logr.error("--keylen must be larger than {} to store \"mako\" prefix "
 		           "and maximum row number",
-		           4 + args.row_digits);
+		           4 + row_digits);
 		return -1;
 	}
-	if (args.active_tenants > args.total_tenants) {
+	if (active_tenants > total_tenants) {
 		logr.error("--active_tenants must be less than or equal to --total_tenants");
 		return -1;
 	}
-	if (args.tenant_batch_size < 1) {
+	if (tenant_batch_size < 1) {
 		logr.error("--tenant_batch_size must be at least 1");
 		return -1;
 	}
-	if (args.mode == MODE_RUN) {
-		if ((args.seconds > 0) && (args.iteration > 0)) {
+	if (mode == MODE_RUN) {
+		if ((seconds > 0) && (iteration > 0)) {
 			logr.error("Cannot specify seconds and iteration together");
 			return -1;
 		}
-		if ((args.seconds == 0) && (args.iteration == 0)) {
+		if ((seconds == 0) && (iteration == 0)) {
 			logr.error("Must specify either seconds or iteration");
 			return -1;
 		}
-		if (args.txntagging < 0) {
+		if (txntagging < 0) {
 			logr.error("--txntagging must be a non-negative integer");
 			return -1;
 		}
 	}
 
 	// ensure that all of the files provided to mako are valid and exist
-	if (args.mode == MODE_REPORT) {
-		if (!args.num_report_files) {
+	if (mode == MODE_REPORT) {
+		if (!num_report_files) {
 			logr.error("No files to merge");
 		}
-		for (int i = 0; i < args.num_report_files; i++) {
+		for (int i = 0; i < num_report_files; i++) {
 			struct stat buffer;
-			if (stat(args.report_files[i], &buffer) != 0) {
-				logr.error("Couldn't open file {}", args.report_files[i]);
+			if (stat(report_files[i], &buffer) != 0) {
+				logr.error("Couldn't open file {}", report_files[i]);
 				return -1;
 			}
 		}
 	}
-	if (args.distributed_tracer_client < 0) {
-		logr.error("--disibuted_tracer_client must specify either (disabled, network_lossy, log_file)");
+	if (distributed_tracer_client < 0) {
+		logr.error("--distributed_tracer_client must specify either (disabled, network_lossy, log_file)");
 		return -1;
+	}
+
+	if (!authorization_tokens.empty() && !tls_ca_file.has_value()) {
+		logr.warn("Authorization tokens are being used without explicit TLS CA file configured");
 	}
 	return 0;
 }
@@ -2116,6 +2211,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"async_xacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"mode\": %d,", args.mode);
 		fmt::fprintf(fp, "\"rows\": %d,", args.rows);
+		fmt::fprintf(fp, "\"load_factor\": %lf,", args.load_factor);
 		fmt::fprintf(fp, "\"seconds\": %d,", args.seconds);
 		fmt::fprintf(fp, "\"iteration\": %d,", args.iteration);
 		fmt::fprintf(fp, "\"tpsmax\": %d,", args.tpsmax);
@@ -2240,11 +2336,6 @@ int main(int argc, char* argv[]) {
 
 	auto rc = int{};
 	auto args = Arguments{};
-	rc = initArguments(args);
-	if (rc < 0) {
-		logr.error("initArguments failed");
-		return -1;
-	}
 	rc = parseArguments(argc, argv, args);
 	if (rc < 0) {
 		/* usage printed */
@@ -2260,7 +2351,7 @@ int main(int argc, char* argv[]) {
 		args.total_tenants = args.active_tenants;
 	}
 
-	rc = validateArguments(args);
+	rc = args.validate();
 	if (rc < 0)
 		return -1;
 	logr.setVerbosity(args.verbose);

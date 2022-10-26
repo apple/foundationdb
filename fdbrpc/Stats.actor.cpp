@@ -24,8 +24,8 @@
 Counter::Counter(std::string const& name, CounterCollection& collection)
   : name(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
     interval_start_value(0) {
-	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
-	collection.counters.push_back(this);
+	metric.init(collection.getName() + "." + (char)toupper(name.at(0)) + name.substr(1), collection.getId());
+	collection.addCounter(this);
 }
 
 void Counter::operator+=(Value delta) {
@@ -88,36 +88,48 @@ void CounterCollection::logToTraceEvent(TraceEvent& te) const {
 	}
 }
 
-ACTOR Future<Void> traceCounters(std::string traceEventName,
-                                 UID traceEventID,
-                                 double interval,
-                                 CounterCollection* counters,
-                                 std::string trackLatestName,
-                                 std::function<void(TraceEvent&)> decorator) {
-	wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
+class CounterCollectionImpl {
+public:
+	ACTOR static Future<Void> traceCounters(CounterCollection* counters,
+	                                        std::string traceEventName,
+	                                        UID traceEventID,
+	                                        double interval,
+	                                        std::string trackLatestName,
+	                                        std::function<void(TraceEvent&)> decorator) {
+		wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
 
-	for (ICounter* c : counters->counters)
-		c->resetInterval();
+		for (ICounter* c : counters->counters)
+			c->resetInterval();
 
-	state Reference<EventCacheHolder> traceEventHolder;
-	if (!trackLatestName.empty()) {
-		traceEventHolder = makeReference<EventCacheHolder>(trackLatestName);
-	}
-
-	state double last_interval = now();
-
-	loop {
-		TraceEvent te(traceEventName.c_str(), traceEventID);
-		te.detail("Elapsed", now() - last_interval);
-
-		counters->logToTraceEvent(te);
-		decorator(te);
-
+		state Reference<EventCacheHolder> traceEventHolder;
 		if (!trackLatestName.empty()) {
-			te.trackLatest(traceEventHolder->trackingKey);
+			traceEventHolder = makeReference<EventCacheHolder>(trackLatestName);
 		}
 
-		last_interval = now();
-		wait(delay(interval, TaskPriority::FlushTrace));
+		state double last_interval = now();
+
+		loop {
+			TraceEvent te(traceEventName.c_str(), traceEventID);
+			te.detail("Elapsed", now() - last_interval);
+
+			counters->logToTraceEvent(te);
+			decorator(te);
+
+			if (!trackLatestName.empty()) {
+				te.trackLatest(traceEventHolder->trackingKey);
+			}
+
+			last_interval = now();
+			wait(delay(interval, TaskPriority::FlushTrace));
+		}
 	}
+};
+
+Future<Void> CounterCollection::traceCounters(std::string const& traceEventName,
+                                              UID traceEventID,
+                                              double interval,
+                                              std::string const& trackLatestName,
+                                              std::function<void(TraceEvent&)> const& decorator) {
+	return CounterCollectionImpl::traceCounters(
+	    this, traceEventName, traceEventID, interval, trackLatestName, decorator);
 }

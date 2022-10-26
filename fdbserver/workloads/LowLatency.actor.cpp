@@ -28,6 +28,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
+	static constexpr auto NAME = "LowLatency";
+
 	double testDuration;
 	double maxGRVLatency;
 	double maxCommitLatency;
@@ -46,8 +48,6 @@ struct LowLatencyWorkload : TestWorkload {
 		testWrites = getOption(options, "testWrites"_sr, true);
 		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
-
-	std::string description() const override { return "LowLatency"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
@@ -120,4 +120,4 @@ struct LowLatencyWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<LowLatencyWorkload> LowLatencyWorkloadFactory("LowLatency");
+WorkloadFactory<LowLatencyWorkload> LowLatencyWorkloadFactory;

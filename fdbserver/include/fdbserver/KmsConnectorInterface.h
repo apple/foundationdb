@@ -186,6 +186,8 @@ struct KmsConnLookupDomainIdsReqInfoRef {
 	EncryptCipherDomainNameRef domainName;
 
 	KmsConnLookupDomainIdsReqInfoRef() : domainId(INVALID_ENCRYPT_DOMAIN_ID) {}
+	explicit KmsConnLookupDomainIdsReqInfoRef(Arena& arena, const KmsConnLookupDomainIdsReqInfoRef& from)
+	  : domainId(from.domainId), domainName(StringRef(arena, from.domainName)) {}
 	explicit KmsConnLookupDomainIdsReqInfoRef(Arena& arena, const EncryptCipherDomainId dId, StringRef name)
 	  : domainId(dId), domainName(StringRef(arena, name)) {}
 	explicit KmsConnLookupDomainIdsReqInfoRef(const EncryptCipherDomainId dId, StringRef name)

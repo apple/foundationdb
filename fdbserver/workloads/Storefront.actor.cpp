@@ -31,6 +31,8 @@
 typedef uint64_t orderID;
 
 struct StorefrontWorkload : TestWorkload {
+	static constexpr auto NAME = "Storefront";
+
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
 	int actorCount, itemCount, maxOrderSize;
 	// bool isFulfilling;
@@ -50,8 +52,6 @@ struct StorefrontWorkload : TestWorkload {
 		itemCount = getOption(options, "itemCount"_sr, transactionsPerSecond * clientCount * maxOrderSize);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.9);
 	}
-
-	std::string description() const override { return "StorefrontWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, itemCount, Promise<double>()); }
 
@@ -288,4 +288,4 @@ struct StorefrontWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StorefrontWorkload> StorefrontWorkloadFactory("Storefront");
+WorkloadFactory<StorefrontWorkload> StorefrontWorkloadFactory;

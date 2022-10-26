@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct StreamingReadWorkload : TestWorkload {
+	static constexpr auto NAME = "StreamingRead";
+
 	int actorCount, keyBytes, valueBytes, readsPerTransaction, nodeCount;
 	int rangesPerTransaction;
 	bool readSequentially;
@@ -52,8 +54,6 @@ struct StreamingReadWorkload : TestWorkload {
 		constantValue = Value(format(valueFormat.c_str(), 42));
 		readSequentially = getOption(options, "readSequentially"_sr, false);
 	}
-
-	std::string description() const override { return "StreamingRead"; }
 
 	Future<Void> setup(Database const& cx) override {
 		return bulkSetup(cx, this, nodeCount, Promise<double>(), true, warmingDelay);
@@ -150,4 +150,4 @@ struct StreamingReadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StreamingReadWorkload> StreamingReadWorkloadFactory("StreamingRead");
+WorkloadFactory<StreamingReadWorkload> StreamingReadWorkloadFactory;

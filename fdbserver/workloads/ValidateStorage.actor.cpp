@@ -42,6 +42,8 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct ValidateStorage : TestWorkload {
+	static constexpr auto NAME = "ValidateStorageWorkload";
+
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	FlowLock cleanUpDataMoveParallelismLock;
@@ -56,8 +58,6 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
-
-	std::string description() const override { return "ValidateStorage"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -206,4 +206,4 @@ struct ValidateStorage : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ValidateStorage> ValidateStorageFactory("ValidateStorageWorkload");
+WorkloadFactory<ValidateStorage> ValidateStorageFactory;

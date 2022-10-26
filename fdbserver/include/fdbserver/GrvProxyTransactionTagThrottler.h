@@ -46,15 +46,19 @@ class GrvProxyTransactionTagThrottler {
 		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
 
 		void updateProxyTagThrottledDuration();
+		bool isMaxThrottled() const;
 	};
 
 	struct TagQueue {
 		Optional<GrvTransactionRateInfo> rateInfo;
 		Deque<DelayedRequest> requests;
 
-		explicit TagQueue(double rate = 0.0) : rateInfo(rate) {}
+		TagQueue() = default;
+		explicit TagQueue(double rate) : rateInfo(rate) {}
 
 		void setRate(double rate);
+		bool isMaxThrottled() const;
+		void rejectRequests();
 	};
 
 	// Track the budgets for each tag
@@ -68,8 +72,8 @@ public:
 	// If a request is ready to be executed, it is sent to the deque
 	// corresponding to its priority. If not, the request remains queued.
 	void releaseTransactions(double elapsed,
-	                         SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-	                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
+	                         Deque<GetReadVersionRequest>& outBatchPriority,
+	                         Deque<GetReadVersionRequest>& outDefaultPriority);
 
 	void addRequest(GetReadVersionRequest const&);
 

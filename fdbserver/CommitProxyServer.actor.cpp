@@ -24,9 +24,11 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/BuildIdempotencyIdMutations.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IdempotencyId.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -663,6 +665,8 @@ struct CommitBatchContext {
 
 	// Cipher keys to be used to encrypt mutations
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+
+	IdempotencyIdKVBuilder idempotencyKVBuilder;
 
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
@@ -1595,6 +1599,22 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeDuration,
 		                        &self->computeStart));
 	}
+
+	buildIdempotencyIdMutations(self->trs,
+	                            self->idempotencyKVBuilder,
+	                            self->commitVersion,
+	                            self->committed,
+	                            ConflictBatch::TransactionCommitted,
+	                            self->locked,
+	                            [&](const KeyValue& kv) {
+		                            MutationRef idempotencyIdSet;
+		                            idempotencyIdSet.type = MutationRef::Type::SetValue;
+		                            idempotencyIdSet.param1 = kv.key;
+		                            idempotencyIdSet.param2 = kv.value;
+		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
+		                            self->toCommit.addTags(tags);
+		                            self->toCommit.writeTypedMessage(idempotencyIdSet);
+	                            });
 
 	self->toCommit.saveTags(self->writtenTags);
 

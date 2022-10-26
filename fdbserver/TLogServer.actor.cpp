@@ -652,10 +652,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		          context);
 		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
-		persistentDataVersion.init("TLog.PersistentDataVersion"_sr, cc.id);
-		persistentDataDurableVersion.init("TLog.PersistentDataDurableVersion"_sr, cc.id);
-		version.initMetric("TLog.Version"_sr, cc.id);
-		queueCommittedVersion.initMetric("TLog.QueueCommittedVersion"_sr, cc.id);
+		persistentDataVersion.init("TLog.PersistentDataVersion"_sr, cc.getId());
+		persistentDataDurableVersion.init("TLog.PersistentDataDurableVersion"_sr, cc.getId());
+		version.initMetric("TLog.Version"_sr, cc.getId());
+		queueCommittedVersion.initMetric("TLog.QueueCommittedVersion"_sr, cc.getId());
 
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "QueueCommittedVersion", [this]() { return this->queueCommittedVersion.get(); });
@@ -1093,9 +1093,16 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
 	logData->persistentDataVersion = newPersistentDataVersion;
 
+	// In some rare simulation tests, particularly with log_spill:=1 configured, the TLOG_MAX_CREATE_DURATION limit is
+	// exceeded, causing SevError trace events and simulation test failure. Increasing the value is a workaround to
+	// avoid these failures.
+	state double tLogMaxCreateDuration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION;
+	if (g_network->isSimulated() && logData->logSpillType == TLogSpillType::VALUE) {
+		tLogMaxCreateDuration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION * 2;
+	}
 	// SOMEDAY: This seems to be running pretty often, should we slow it down???
 	// This needs a timeout since nothing prevents I/O operations from hanging indefinitely.
-	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration));
 
 	wait(delay(0, TaskPriority::UpdateStorage));
 
@@ -2923,26 +2930,26 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 	logData->addActor.send(waitFailureServer(tli.waitFailure.getFuture()));
 	logData->addActor.send(logData->removed);
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
-	logData->addActor.send(traceCounters("TLogMetrics",
-	                                     logData->logId,
-	                                     SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                                     &logData->cc,
-	                                     logData->logId.toString() + "/TLogMetrics",
-	                                     [self = self](TraceEvent& te) {
-		                                     StorageBytes sbTlog = self->persistentData->getStorageBytes();
-		                                     te.detail("KvstoreBytesUsed", sbTlog.used);
-		                                     te.detail("KvstoreBytesFree", sbTlog.free);
-		                                     te.detail("KvstoreBytesAvailable", sbTlog.available);
-		                                     te.detail("KvstoreBytesTotal", sbTlog.total);
-		                                     te.detail("KvstoreBytesTemp", sbTlog.temp);
+	logData->addActor.send(logData->cc.traceCounters("TLogMetrics",
+	                                                 logData->logId,
+	                                                 SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                                 logData->logId.toString() + "/TLogMetrics",
+	                                                 [self = self](TraceEvent& te) {
+		                                                 StorageBytes sbTlog = self->persistentData->getStorageBytes();
+		                                                 te.detail("KvstoreBytesUsed", sbTlog.used);
+		                                                 te.detail("KvstoreBytesFree", sbTlog.free);
+		                                                 te.detail("KvstoreBytesAvailable", sbTlog.available);
+		                                                 te.detail("KvstoreBytesTotal", sbTlog.total);
+		                                                 te.detail("KvstoreBytesTemp", sbTlog.temp);
 
-		                                     StorageBytes sbQueue = self->rawPersistentQueue->getStorageBytes();
-		                                     te.detail("QueueDiskBytesUsed", sbQueue.used);
-		                                     te.detail("QueueDiskBytesFree", sbQueue.free);
-		                                     te.detail("QueueDiskBytesAvailable", sbQueue.available);
-		                                     te.detail("QueueDiskBytesTotal", sbQueue.total);
-		                                     te.detail("QueueDiskBytesTemp", sbQueue.temp);
-	                                     }));
+		                                                 StorageBytes sbQueue =
+		                                                     self->rawPersistentQueue->getStorageBytes();
+		                                                 te.detail("QueueDiskBytesUsed", sbQueue.used);
+		                                                 te.detail("QueueDiskBytesFree", sbQueue.free);
+		                                                 te.detail("QueueDiskBytesAvailable", sbQueue.available);
+		                                                 te.detail("QueueDiskBytesTotal", sbQueue.total);
+		                                                 te.detail("QueueDiskBytesTemp", sbQueue.temp);
+	                                                 }));
 
 	logData->addActor.send(serveTLogInterface(self, tli, logData, warningCollectorInput));
 	logData->addActor.send(cleanupPeekTrackers(logData.getPtr()));

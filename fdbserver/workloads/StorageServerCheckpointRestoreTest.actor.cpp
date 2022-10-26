@@ -44,6 +44,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct SSCheckpointRestoreWorkload : TestWorkload {
+	static constexpr auto NAME = "SSCheckpointRestoreWorkload";
 	const bool enabled;
 	bool pass;
 
@@ -56,8 +57,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		pass = false;
 	}
 
-	std::string description() const override { return "SSCheckpoint"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -67,7 +66,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		return _start(this, cx);
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
 
 	ACTOR Future<Void> _start(SSCheckpointRestoreWorkload* self, Database cx) {
 		state Key key = "TestKey"_sr;
@@ -76,9 +75,11 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		state KeyRange testRange = KeyRangeRef(key, endKey);
 		state std::vector<CheckpointMetaData> records;
 
+		TraceEvent("TestCheckpointRestoreBegin");
 		int ignore = wait(setDDMode(cx, 0));
 		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
 
+		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);
 		// Create checkpoint.
 		state Transaction tr(cx);
 		state CheckpointFormat format = deterministicRandom()->coinflip() ? RocksDBColumnFamily : RocksDB;
@@ -246,4 +247,4 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SSCheckpointRestoreWorkload> SSCheckpointRestoreWorkloadFactory("SSCheckpointRestoreWorkload");
+WorkloadFactory<SSCheckpointRestoreWorkload> SSCheckpointRestoreWorkloadFactory;

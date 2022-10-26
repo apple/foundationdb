@@ -1679,6 +1679,9 @@ Key storageQuotaKey(StringRef tenantName) {
 	return tenantName.withPrefix(storageQuotaPrefix);
 }
 
+const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
+const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",

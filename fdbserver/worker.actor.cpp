@@ -23,6 +23,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/ApiVersion.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
@@ -561,6 +562,7 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
     Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
     Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>> const> bmInterf,
+    Reference<AsyncVar<Optional<BlobMigratorInterface>> const> blobMigratorInterf,
     Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
     Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
     Reference<AsyncVar<bool> const> degraded,
@@ -602,6 +604,7 @@ ACTOR Future<Void> registrationClient(
 		    ddInterf->get(),
 		    rkInterf->get(),
 		    bmInterf->get().present() ? bmInterf->get().get().second : Optional<BlobManagerInterface>(),
+		    blobMigratorInterf->get(),
 		    ekpInterf->get(),
 		    csInterf->get(),
 		    degraded->get(),
@@ -674,6 +677,7 @@ ACTOR Future<Void> registrationClient(
 			when(wait(rkInterf->onChange())) { break; }
 			when(wait(csInterf->onChange())) { break; }
 			when(wait(bmInterf->onChange())) { break; }
+			when(wait(blobMigratorInterf->onChange())) { break; }
 			when(wait(ekpInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
@@ -704,6 +708,10 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	}
 
 	if (dbi.blobManager.present() && dbi.blobManager.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.blobMigrator.present() && dbi.blobMigrator.get().address() == address) {
 		return true;
 	}
 
@@ -1651,6 +1659,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
 	state Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>> bmEpochAndInterf(
 	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
+	state Reference<AsyncVar<Optional<BlobMigratorInterface>>> blobMigratorInterf(
+	    new AsyncVar<Optional<BlobMigratorInterface>>());
 	state UID lastBMRecruitRequestId;
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
@@ -1977,6 +1987,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       ddInterf,
 		                                       rkInterf,
 		                                       bmEpochAndInterf,
+		                                       blobMigratorInterf,
 		                                       ekpInterf,
 		                                       csInterf,
 		                                       degraded,
@@ -2023,6 +2034,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID())
 						    .detail("BlobManagerID",
 						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
+						    .detail("BlobMigratorID",
+						            localInfo.blobMigrator.present() ? localInfo.blobMigrator.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
 						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID())
 						    .detail("IsEncryptionEnabled", localInfo.client.isEncryptionEnabled);
@@ -2241,6 +2254,49 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    Optional<std::pair<int64_t, BlobManagerInterface>>(std::pair(req.epoch, recruited)));
 				}
 				TraceEvent("BlobManagerReceived", req.reqId).detail("BlobManagerId", recruited.id());
+				req.reply.send(recruited);
+			}
+			when(InitializeBlobMigratorRequest req = waitNext(interf.blobMigrator.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobMigrator;
+
+				BlobMigratorInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+				if (blobMigratorInterf->get().present()) {
+					recruited = blobMigratorInterf->get().get();
+					CODE_PROBE(true, "Recruited while already a blob migrator.");
+				} else {
+					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.haltBlobMigrator);
+					DUMPTOKEN(recruited.ssi.getValue);
+					DUMPTOKEN(recruited.ssi.getKey);
+					DUMPTOKEN(recruited.ssi.getKeyValues);
+					DUMPTOKEN(recruited.ssi.getMappedKeyValues);
+					DUMPTOKEN(recruited.ssi.getShardState);
+					DUMPTOKEN(recruited.ssi.waitMetrics);
+					DUMPTOKEN(recruited.ssi.splitMetrics);
+					DUMPTOKEN(recruited.ssi.getReadHotRanges);
+					DUMPTOKEN(recruited.ssi.getRangeSplitPoints);
+					DUMPTOKEN(recruited.ssi.getStorageMetrics);
+					DUMPTOKEN(recruited.ssi.waitFailure);
+					DUMPTOKEN(recruited.ssi.getQueuingMetrics);
+					DUMPTOKEN(recruited.ssi.getKeyValueStoreType);
+					DUMPTOKEN(recruited.ssi.watchValue);
+					DUMPTOKEN(recruited.ssi.getKeyValuesStream);
+					DUMPTOKEN(recruited.ssi.changeFeedStream);
+					DUMPTOKEN(recruited.ssi.changeFeedPop);
+					DUMPTOKEN(recruited.ssi.changeFeedVersionUpdate);
+
+					Future<Void> blobMigratorProcess = blobMigrator(recruited, dbInfo);
+					errorForwarders.add(forwardError(errors,
+					                                 Role::BLOB_MIGRATOR,
+					                                 recruited.id(),
+					                                 setWhenDoneOrError(blobMigratorProcess,
+					                                                    blobMigratorInterf,
+					                                                    Optional<BlobMigratorInterface>())));
+					blobMigratorInterf->set(Optional<BlobMigratorInterface>(recruited));
+				}
+				TraceEvent("BlobMigrator_InitRequest", req.reqId).detail("BlobMigratorId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
@@ -2764,6 +2820,7 @@ static std::set<int> const& normalWorkerErrors() {
 	if (s.empty()) {
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_please_reboot_delete);
+		s.insert(error_code_local_config_changed);
 	}
 	return s;
 }
@@ -3546,6 +3603,7 @@ const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::BLOB_MANAGER("BlobManager", "BM");
 const Role Role::BLOB_WORKER("BlobWorker", "BW");
+const Role Role::BLOB_MIGRATOR("BlobMigrator", "MG");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");

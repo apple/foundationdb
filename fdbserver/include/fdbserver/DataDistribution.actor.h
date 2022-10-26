@@ -322,6 +322,9 @@ public:
 	// Log physicalShard
 	void logPhysicalShardCollection();
 
+	// Checks if a physical shard exists.
+	bool physicalShardExists(uint64_t physicalShardID);
+
 private:
 	// Track physicalShard metrics by tracking keyRange metrics
 	void updatePhysicalShardMetricsByKeyRange(KeyRange keyRange,
@@ -474,6 +477,8 @@ struct ShardSizeBounds {
 	bool operator==(ShardSizeBounds const& rhs) const {
 		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
 	}
+
+	static ShardSizeBounds shardSizeBoundsBeforeTrack();
 };
 
 // Gets the permitted size and IO bounds for a shard
@@ -481,10 +486,6 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
-
-struct StorageQuotaInfo {
-	std::map<Key, uint64_t> quotaMap;
-};
 
 #ifndef __INTEL_COMPILER
 #pragma endregion
