@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
-# entrypoint.py
+# sidecar.py
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2018-2021 Apple Inc. and the FoundationDB project authors
+# Copyright 2018-2022 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,24 +22,21 @@
 import argparse
 import hashlib
 import ipaddress
-import logging
 import json
+import logging
 import os
-import re
 import shutil
 import socket
 import ssl
-import stat
-import time
-import traceback
 import sys
 import tempfile
+import time
+from functools import partial
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
-
-from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -166,9 +163,7 @@ class Config(object):
         )
         parser.add_argument(
             "--require-not-empty",
-            help=(
-                "A file that must be present and non-empty " "in the input directory"
-            ),
+            help=("A file that must be present and non-empty in the input directory"),
             action="append",
         )
         args = parser.parse_args()
@@ -243,7 +238,7 @@ class Config(object):
         if self.main_container_version == self.primary_version:
             self.substitutions["BINARY_DIR"] = "/usr/bin"
         else:
-            self.substitutions["BINARY_DIR"] = target_path = str(
+            self.substitutions["BINARY_DIR"] = str(
                 Path("%s/bin/%s" % (args.main_container_conf_dir, self.primary_version))
             )
 
@@ -346,42 +341,16 @@ class ThreadingHTTPServerV6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
-class Server(BaseHTTPRequestHandler):
+class SidecarHandler(BaseHTTPRequestHandler):
+    # We don't want to load the ssl context for each request so we hold it as a static variable.
     ssl_context = None
 
-    @classmethod
-    def start(cls):
-        """
-        This method starts the server.
-        """
-        config = Config.shared()
-        colon_index = config.bind_address.rindex(":")
-        port_index = colon_index + 1
-        address = config.bind_address[:colon_index]
-        port = config.bind_address[port_index:]
-        log.info(f"Listening on {address}:{port}")
+    def __init__(self, config, *args, **kwargs):
+        self.config = config
+        self.ssl_context = self.__class__.ssl_context
+        super().__init__(*args, **kwargs)
 
-        if address.startswith("[") and address.endswith("]"):
-            server = ThreadingHTTPServerV6((address[1:-1], int(port)), cls)
-        else:
-            server = ThreadingHTTPServer((address, int(port)), cls)
-
-        if config.enable_tls:
-            context = Server.load_ssl_context()
-            server.socket = context.wrap_socket(server.socket, server_side=True)
-            observer = Observer()
-            event_handler = CertificateEventHandler()
-            for path in set(
-                [
-                    Path(config.certificate_file).parent.as_posix(),
-                    Path(config.key_file).parent.as_posix(),
-                ]
-            ):
-                observer.schedule(event_handler, path)
-            observer.start()
-
-        server.serve_forever()
-
+    # This method allows to trigger a reload of the ssl context and updates the static variable.
     @classmethod
     def load_ssl_context(cls):
         config = Config.shared()
@@ -390,6 +359,7 @@ class Server(BaseHTTPRequestHandler):
             cls.ssl_context.check_hostname = False
             cls.ssl_context.verify_mode = ssl.CERT_OPTIONAL
         cls.ssl_context.load_cert_chain(config.certificate_file, config.key_file)
+
         return cls.ssl_context
 
     def send_text(self, text, code=200, content_type="text/plain", add_newline=True):
@@ -407,16 +377,14 @@ class Server(BaseHTTPRequestHandler):
         self.wfile.write(response)
 
     def check_request_cert(self, path):
-        config = Config.shared()
-
         if path == "/ready":
             return True
 
-        if not config.enable_tls:
+        if not self.config.enable_tls:
             return True
 
         approved = self.check_cert(
-            self.connection.getpeercert(), config.peer_verification_rules
+            self.connection.getpeercert(), self.config.peer_verification_rules
         )
         if not approved:
             self.send_error(401, "Client certificate was not approved")
@@ -517,24 +485,33 @@ class Server(BaseHTTPRequestHandler):
             if not self.check_request_cert(self.path):
                 return
             if self.path.startswith("/check_hash/"):
+                file_path = os.path.relpath(self.path, "/check_hash")
                 try:
-                    self.send_text(check_hash(self.path[12:]), add_newline=False)
+                    self.send_text(
+                        self.check_hash(file_path),
+                        add_newline=False,
+                    )
                 except FileNotFoundError:
-                    self.send_error(404, "Path not found")
-                    self.end_headers()
+                    self.send_error(404, f"{file_path} not found")
+            if self.path.startswith("/is_present/"):
+                file_path = os.path.relpath(self.path, "/is_present")
+                if self.is_present(file_path):
+                    self.send_text("OK")
+                else:
+                    self.send_error(404, f"{file_path} not found")
             elif self.path == "/ready":
-                self.send_text(ready())
+                self.send_text("OK")
             elif self.path == "/substitutions":
-                self.send_text(get_substitutions())
+                self.send_text(self.get_substitutions())
             else:
                 self.send_error(404, "Path not found")
-                self.end_headers()
         except RequestException as e:
             self.send_error(400, e.message)
+        except (ConnectionResetError, BrokenPipeError) as ex:
+            log.error(f"connection was reset {ex}")
         except Exception as ex:
             log.error(f"Error processing request {ex}", exc_info=True)
             self.send_error(500)
-            self.end_headers()
 
     def do_POST(self):
         """
@@ -544,15 +521,15 @@ class Server(BaseHTTPRequestHandler):
             if not self.check_request_cert(self.path):
                 return
             if self.path == "/copy_files":
-                self.send_text(copy_files())
+                self.send_text(copy_files(self.config))
             elif self.path == "/copy_binaries":
-                self.send_text(copy_binaries())
+                self.send_text(copy_binaries(self.config))
             elif self.path == "/copy_libraries":
-                self.send_text(copy_libraries())
+                self.send_text(copy_libraries(self.config))
             elif self.path == "/copy_monitor_conf":
-                self.send_text(copy_monitor_conf())
+                self.send_text(copy_monitor_conf(self.config))
             elif self.path == "/refresh_certs":
-                self.send_text(refresh_certs())
+                self.send_text(self.refresh_certs())
             elif self.path == "/restart":
                 self.send_text("OK")
                 exit(1)
@@ -563,16 +540,38 @@ class Server(BaseHTTPRequestHandler):
             raise e
         except RequestException as e:
             self.send_error(400, e.message)
-        except e:
-            log.error("Error processing request", exc_info=True)
+        except (ConnectionResetError, BrokenPipeError) as ex:
+            log.error(f"connection was reset {ex}")
+        except Exception as ex:
+            log.error(f"Error processing request {ex}", exc_info=True)
             self.send_error(500)
-            self.end_headers()
 
     def log_message(self, format, *args):
         log.info(format % args)
 
+    def refresh_certs(self):
+        if not self.config.enable_tls:
+            raise RequestException("Server is not using TLS")
+        SidecarHandler.load_ssl_context()
+        return "OK"
+
+    def get_substitutions(self):
+        return json.dumps(self.config.substitutions)
+
+    def check_hash(self, filename):
+        with open(os.path.join(self.config.output_dir, filename), "rb") as contents:
+            m = hashlib.sha256()
+            m.update(contents.read())
+            return m.hexdigest()
+
+    def is_present(self, filename):
+        return os.path.exists(os.path.join(self.config.output_dir, filename))
+
 
 class CertificateEventHandler(FileSystemEventHandler):
+    def __init__(self):
+        FileSystemEventHandler.__init__(self)
+
     def on_any_event(self, event):
         if event.is_directory:
             return None
@@ -589,23 +588,15 @@ class CertificateEventHandler(FileSystemEventHandler):
         )
         time.sleep(10)
         log.info("Reloading certificates")
-        Server.load_ssl_context()
+        SidecarHandler.load_ssl_context()
 
 
-def check_hash(filename):
-    with open(os.path.join(Config.shared().output_dir, filename), "rb") as contents:
-        m = hashlib.sha256()
-        m.update(contents.read())
-        return m.hexdigest()
-
-
-def copy_files():
-    config = Config.shared()
+def copy_files(config):
     if config.require_not_empty:
         for filename in config.require_not_empty:
             path = os.path.join(config.input_dir, filename)
             if not os.path.isfile(path) or os.path.getsize(path) == 0:
-                raise Exception("No contents for file %s" % path)
+                raise Exception(f"No contents for file {path}")
 
     for filename in config.copy_files:
         tmp_file = tempfile.NamedTemporaryFile(
@@ -617,8 +608,7 @@ def copy_files():
     return "OK"
 
 
-def copy_binaries():
-    config = Config.shared()
+def copy_binaries(config):
     if config.main_container_version != config.primary_version:
         for binary in config.copy_binaries:
             path = Path(f"/usr/bin/{binary}")
@@ -638,8 +628,7 @@ def copy_binaries():
     return "OK"
 
 
-def copy_libraries():
-    config = Config.shared()
+def copy_libraries(config):
     for version in config.copy_libraries:
         path = Path(f"/var/fdb/lib/libfdb_c_{version}.so")
         if version == config.copy_libraries[0]:
@@ -658,8 +647,7 @@ def copy_libraries():
     return "OK"
 
 
-def copy_monitor_conf():
-    config = Config.shared()
+def copy_monitor_conf(config):
     if config.input_monitor_conf:
         with open(
             os.path.join(config.input_dir, config.input_monitor_conf)
@@ -683,35 +671,58 @@ def copy_monitor_conf():
     return "OK"
 
 
-def get_substitutions():
-    return json.dumps(Config.shared().substitutions)
-
-
-def ready():
-    return "OK"
-
-
-def refresh_certs():
-    if not Config.shared().enable_tls:
-        raise RequestException("Server is not using TLS")
-    Server.load_ssl_context()
-    return "OK"
-
-
 class RequestException(Exception):
     def __init__(self, message):
         super().__init__(message)
         self.message = message
 
 
+def start_sidecar_server(config):
+    """
+    This method starts the HTTP server with the sidecar handler.
+    """
+    colon_index = config.bind_address.rindex(":")
+    port_index = colon_index + 1
+    address = config.bind_address[:colon_index]
+    port = config.bind_address[port_index:]
+    log.info(f"Listening on {address}:{port}")
+
+    handler = partial(
+        SidecarHandler,
+        config,
+    )
+
+    if address.startswith("[") and address.endswith("]"):
+        server = ThreadingHTTPServerV6((address[1:-1], int(port)), handler)
+    else:
+        server = ThreadingHTTPServer((address, int(port)), handler)
+
+    if config.enable_tls:
+        context = SidecarHandler.load_ssl_context()
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        observer = Observer()
+        event_handler = CertificateEventHandler()
+        for path in set(
+            [
+                Path(config.certificate_file).parent.as_posix(),
+                Path(config.key_file).parent.as_posix(),
+            ]
+        ):
+            observer.schedule(event_handler, path)
+        observer.start()
+
+    server.serve_forever()
+
+
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)-15s %(levelname)s %(message)s")
-    copy_files()
-    copy_binaries()
-    copy_libraries()
-    copy_monitor_conf()
+    config = Config.shared()
+    copy_files(config)
+    copy_binaries(config)
+    copy_libraries(config)
+    copy_monitor_conf(config)
 
-    if Config.shared().init_mode:
+    if config.init_mode:
         sys.exit(0)
 
-    Server.start()
+    start_sidecar_server(config)
