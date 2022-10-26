@@ -122,7 +122,7 @@ public:
 				});
 			}
 
-			return map(file->write(data, length, offset), [this, pdata, offset, length](auto res) {
+			return map(file->write(data, length, offset), [pdata, offset, length](auto res) {
 				if (pdata != nullptr || !g_network->isSimulated()) {
 					return res;
 				}
