@@ -9884,10 +9884,10 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
 			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
 		}
-		req.options = ReadOptions(deterministicRandom()->randomUniqueID());
-		debugUIDs.push_back(req.streamUID());
-		mergeCursorUID =
-		    UID(mergeCursorUID.first() ^ req.streamUID().first(), mergeCursorUID.second() ^ req.streamUID().second());
+		UID id = deterministicRandom()->randomUniqueID();
+		req.options = ReadOptions(id);
+		debugUIDs.push_back(id);
+		mergeCursorUID = UID(mergeCursorUID.first() ^ id.first(), mergeCursorUID.second() ^ id.second());
 
 		results->streams.push_back(interfs[i].first.changeFeedStream.getReplyStream(req));
 		maybeDuplicateTSSChangeFeedStream(req,
