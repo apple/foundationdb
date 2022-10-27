@@ -276,10 +276,9 @@ private:
 
 using NotifiedVersionValue = NotifiedValue<NotifiedVersion>;
 
-// FIXME(swift): this isn't really a reference type but we can't create it unless a ref or copy constructor...
-struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
+struct CommitProxyVersionReplies {
   MAP_UInt64_GetCommitVersionReply replies;
-    NotifiedVersionValue latestRequestNum;
+    NotifiedVersion latestRequestNum;
 
 	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
@@ -291,16 +290,5 @@ struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
 
 	CommitProxyVersionReplies() : latestRequestNum(0) {}
 };
-
-// ==== ----------------------------------------------------------------------------------------------------------------
-
-using Map_UID_CommitProxyVersionReplies = std::map<UID, CommitProxyVersionReplies>;
-
-inline CommitProxyVersionReplies *_Nullable lookup_Map_UID_CommitProxyVersionReplies(Map_UID_CommitProxyVersionReplies &map, UID value) {
-    auto it = map.find(value);
-    if (it == map.end())
-        return nullptr;
-    return &(*it).second;
-}
 
 #endif
