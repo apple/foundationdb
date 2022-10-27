@@ -497,7 +497,7 @@ typedef void* flowGlobalType;
 typedef NetworkAddress (*NetworkAddressFuncPtr)();
 typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
-class SWIFT_CXX_REF_IMMORTAL TLSConfig;
+class TLSConfig;
 
 class SWIFT_CXX_REF_IMMORTAL INetwork;
 

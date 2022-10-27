@@ -665,7 +665,7 @@ private:
 };
 
 template <class V>
-class SWIFT_CXX_REF_IMMORTAL AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
+class AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
 public:
 	AsyncVar() : value() {}
 	AsyncVar(V const& v) : value(v) {}
