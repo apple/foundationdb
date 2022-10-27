@@ -31,6 +31,13 @@
     __attribute__((swift_attr("retain:immortal")))                                                                     \
 	__attribute__((swift_attr("release:immortal")))
 
+/// This annotation bridges immortal C++ singleton types
+/// that are always accessed via a pointer or a reference in C++ as immortal class types in Swift.
+#define SWIFT_CXX_IMMORTAL_SINGLETON_TYPE                                                                                        \
+    __attribute__((swift_attr("import_as_ref")))                                                                       \
+    __attribute__((swift_attr("retain:immortal")))                                                                     \
+    __attribute__((swift_attr("release:immortal")))
+
 #define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
 
 // ==== ----------------------------------------------------------------------------------------------------------------
