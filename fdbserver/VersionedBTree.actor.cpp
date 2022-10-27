@@ -4680,21 +4680,16 @@ public:
 
 		if (domainId.present()) {
 			ASSERT(keyProvider && keyProvider->enableEncryptionDomain());
-			// Temporarily disabling the check, since if a tenant is removed, where the key provider
-			// would not find the domain, the data for the tenant may still be in Redwood and being read.
-			// TODO(yiwu): re-enable the check.
-			/*
 			if (domainId.get() != keyProvider->getDefaultEncryptionDomainId() &&
 			    !keyProvider->keyFitsInDomain(domainId.get(), lowerBound, false)) {
-			    fprintf(stderr,
-			            "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
-			            ::toString(id).c_str(),
-			            ::toString(v).c_str(),
-			            ::toString(domainId).c_str(),
-			            lowerBound.printable().c_str());
-			    return false;
+				fprintf(stderr,
+				        "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
+				        ::toString(id).c_str(),
+				        ::toString(v).c_str(),
+				        ::toString(domainId).c_str(),
+				        lowerBound.printable().c_str());
+				return false;
 			}
-			*/
 		}
 
 		auto& b = boundariesByPageID[id.front()][v];
@@ -4742,45 +4737,40 @@ public:
 				        ::toString(b->second.domainId).c_str());
 				return false;
 			}
-			// Temporarily disabling the check, since if a tenant is removed, where the key provider
-			// would not find the domain, the data for the tenant may still be in Redwood and being read.
-			// TODO(yiwu): re-enable the check.
-			/*
 			ASSERT(domainId.present());
 			auto checkKeyFitsInDomain = [&]() -> bool {
-			    if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
-			        fprintf(stderr,
-			                "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
-			                ::toString(id).c_str(),
-			                ::toString(v).c_str(),
-			                ::toString(domainId).c_str(),
-			                cursor.get().key.printable().c_str());
-			        return false;
-			    }
-			    return true;
+				if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
+					fprintf(stderr,
+					        "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
+					        ::toString(id).c_str(),
+					        ::toString(v).c_str(),
+					        ::toString(domainId).c_str(),
+					        cursor.get().key.printable().c_str());
+					return false;
+				}
+				return true;
 			};
 			if (domainId.get() != keyProvider->getDefaultEncryptionDomainId()) {
-			    cursor.moveFirst();
-			    if (cursor.valid() && !checkKeyFitsInDomain()) {
-			        return false;
-			    }
-			    cursor.moveLast();
-			    if (cursor.valid() && !checkKeyFitsInDomain()) {
-			        return false;
-			    }
+				cursor.moveFirst();
+				if (cursor.valid() && !checkKeyFitsInDomain()) {
+					return false;
+				}
+				cursor.moveLast();
+				if (cursor.valid() && !checkKeyFitsInDomain()) {
+					return false;
+				}
 			} else {
-			    if (deterministicRandom()->random01() < domainPrefixScanProbability) {
-			        cursor.moveFirst();
-			        while (cursor.valid()) {
-			            if (!checkKeyFitsInDomain()) {
-			                return false;
-			            }
-			            cursor.moveNext();
-			        }
-			        domainPrefixScanCount++;
-			    }
+				if (deterministicRandom()->random01() < domainPrefixScanProbability) {
+					cursor.moveFirst();
+					while (cursor.valid()) {
+						if (!checkKeyFitsInDomain()) {
+							return false;
+						}
+						cursor.moveNext();
+					}
+					domainPrefixScanCount++;
+				}
 			}
-			*/
 		}
 
 		return true;
