@@ -492,8 +492,8 @@ public:
 	int64_t manualThrottleCount() const { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
-		throttlingRatios[ss.id] = ss.getThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
-		                                                SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
+		throttlingRatios[ss.id] = ss.getTagThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+		                                                   SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
 		for (const auto& busyReadTag : ss.busiestReadTags) {
 			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
 				throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);

@@ -1363,7 +1363,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	return updateCommitCostRequest;
 }
 
-Optional<double> StorageQueueInfo::getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
+Optional<double> StorageQueueInfo::getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
 	auto const storageQueue = getStorageQueueBytes();
 	if (storageQueue < storageTargetBytes - storageSpringBytes) {
 		return {};

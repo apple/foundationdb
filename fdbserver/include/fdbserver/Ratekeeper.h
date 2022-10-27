@@ -91,7 +91,7 @@ public:
 	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
 
 	// Determine the ratio (limit / current throughput) for throttling based on write queue size
-	Optional<double> getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
+	Optional<double> getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
 class TLogQueueInfo {
