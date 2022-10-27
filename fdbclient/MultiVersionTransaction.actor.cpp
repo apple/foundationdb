@@ -2170,6 +2170,10 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			    .detail("ConnectionRecord", connectionRecord);
 		}
 	}
+	// Verify the database has the necessary functionality to update the shared
+	// state. Avoid updating the shared state if the database is a
+	// configuration database, because a configuration database does not have
+	// access to typical system keys and does not need to be updated.
 	if (db.isValid() && dbProtocolVersion.present() &&
 	    MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap() && !isConfigDB) {
 		Future<std::string> updateResult =
