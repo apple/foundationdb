@@ -22,33 +22,60 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
-LatencyBands* LatencyBandsMap::getLatencyBands(TransactionTag tag) {
-	if (map.size() == maxSize && !map.count(tag)) {
-		CODE_PROBE(true, "LatencyBandsMap reached maxSize");
-		return nullptr;
-	}
-	auto const [it, inserted] =
-	    map.try_emplace(tag, name, id, loggingInterval, [tag](auto& te) { te.detail("Tag", printable(tag)); });
-	auto& result = it->second;
-	if (inserted) {
-		for (const auto& threshold : thresholds) {
-			result.addThreshold(threshold);
+class LatencyBandsMapImpl {
+public:
+	ACTOR static Future<Void> expireOldTagsActor(LatencyBandsMap* self) {
+		loop {
+			wait(delay(5.0));
+			for (auto it = self->map.begin(); it != self->map.end();) {
+				const auto& [tag, expirableBands] = *it;
+				if (now() - expirableBands.lastUpdated > SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER) {
+					CODE_PROBE(true, "LatencyBandsMap erasing expired tag");
+					it = self->map.erase(it);
+				} else {
+					++it;
+				}
+			}
 		}
 	}
-	return &result;
+};
+
+LatencyBandsMap::ExpirableBands::ExpirableBands(LatencyBands&& bands)
+  : latencyBands(std::move(bands)), lastUpdated(now()) {}
+
+Optional<LatencyBands*> LatencyBandsMap::getLatencyBands(TransactionTag tag) {
+	if (map.size() == maxSize && !map.count(tag)) {
+		CODE_PROBE(true, "LatencyBandsMap reached maxSize");
+		return {};
+	}
+	auto const [it, inserted] = map.try_emplace(
+	    tag, LatencyBands(name, id, loggingInterval, [tag](auto& te) { te.detail("Tag", printable(tag)); }));
+	auto& expirableBands = it->second;
+	if (inserted) {
+		for (const auto& threshold : thresholds) {
+			expirableBands.latencyBands.addThreshold(threshold);
+		}
+	}
+	expirableBands.lastUpdated = now();
+	return &expirableBands.latencyBands;
+}
+
+LatencyBandsMap::LatencyBandsMap(std::string const& name, UID id, double loggingInterval, int maxSize)
+  : name(name), id(id), loggingInterval(loggingInterval), maxSize(maxSize) {
+	expireOldTags = LatencyBandsMapImpl::expireOldTagsActor(this);
 }
 
 void LatencyBandsMap::addMeasurement(TransactionTag tag, double value, int count) {
-	auto* bands = getLatencyBands(tag);
-	if (bands) {
-		bands->addMeasurement(value, count);
+	auto bands = getLatencyBands(tag);
+	if (bands.present()) {
+		bands.get()->addMeasurement(value, count);
 	}
 }
 
 void LatencyBandsMap::addThreshold(double value) {
 	thresholds.push_back(value);
-	for (auto& [tag, bands] : map) {
-		bands.addThreshold(value);
+	for (auto& [tag, expirableBands] : map) {
+		expirableBands.latencyBands.addThreshold(value);
 	}
 }
 
@@ -77,6 +104,28 @@ TEST_CASE("/fdbserver/LatencyBandsMap/MaxSize") {
 	latencyBandsMap.addMeasurement("a"_sr, deterministicRandom()->random01());
 	latencyBandsMap.addMeasurement("b"_sr, deterministicRandom()->random01());
 	latencyBandsMap.addMeasurement("c"_sr, deterministicRandom()->random01());
+	ASSERT_EQ(latencyBandsMap.size(), 2);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/LatencyBandsMap/Expire") {
+	state LatencyBandsMap latencyBandsMap("TestLatencyBandsMap", deterministicRandom()->randomUniqueID(), 10.0, 100);
+	latencyBandsMap.addMeasurement("a"_sr, deterministicRandom()->random01());
+	latencyBandsMap.addMeasurement("b"_sr, deterministicRandom()->random01());
+	latencyBandsMap.addMeasurement("c"_sr, deterministicRandom()->random01());
+	latencyBandsMap.addThreshold(0.1);
+	latencyBandsMap.addThreshold(0.2);
+	latencyBandsMap.addThreshold(0.4);
+	ASSERT_EQ(latencyBandsMap.size(), 3);
+	state int waitIterations = 0;
+	loop {
+		wait(delay(1.0));
+		latencyBandsMap.addMeasurement("a"_sr, deterministicRandom()->random01());
+		latencyBandsMap.addMeasurement("b"_sr, deterministicRandom()->random01());
+		if (++waitIterations == 2 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER) {
+			break;
+		}
+	}
 	ASSERT_EQ(latencyBandsMap.size(), 2);
 	return Void();
 }

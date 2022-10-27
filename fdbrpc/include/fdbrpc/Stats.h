@@ -204,6 +204,10 @@ public:
 	    UID id,
 	    double loggingInterval,
 	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
+
+	LatencyBands(LatencyBands&&) = default;
+	LatencyBands& operator=(LatencyBands&&) = default;
+
 	void addThreshold(double value);
 	void addMeasurement(double measurement, int count = 1, Filtered = Filtered::False);
 	void clearBands();

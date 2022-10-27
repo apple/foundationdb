@@ -22,26 +22,37 @@
 
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Stats.h"
+#include "fdbserver/Knobs.h"
 
 class LatencyBandsMap {
+	friend class LatencyBandsMapImpl;
+
 	std::string name;
 	UID id;
 	double loggingInterval;
 	int maxSize;
+	Future<Void> expireOldTags;
 
-	TransactionTagMap<LatencyBands> map;
+	struct ExpirableBands {
+		LatencyBands latencyBands;
+		double lastUpdated;
+
+		explicit ExpirableBands(LatencyBands&&);
+	};
+
+	TransactionTagMap<ExpirableBands> map;
 	// Manually added thresholds (does not include "infinite" threshold automatically
 	// added by LatencyBands)
 	std::vector<double> thresholds;
 
-	// Get or create a LatencyBands object stored in map.
-	// Returns pointer to this object, or nullptr if object
+	// Get or create an LatencyBands object stored in map.
+	// Updates the lastUpdated field corresponding to this LatencyBands object.
+	// Returns pointer to this object, or an empty optional if object
 	// cannot be created.
-	LatencyBands* getLatencyBands(TransactionTag tag);
+	Optional<LatencyBands*> getLatencyBands(TransactionTag tag);
 
 public:
-	LatencyBandsMap(std::string const& name, UID id, double loggingInterval, int maxSize)
-	  : name(name), id(id), loggingInterval(loggingInterval), maxSize(maxSize) {}
+	LatencyBandsMap(std::string const& name, UID id, double loggingInterval, int maxSize);
 
 	void addMeasurement(TransactionTag tag, double measurement, int count = 1);
 	void addThreshold(double value);
