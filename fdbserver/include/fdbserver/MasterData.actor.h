@@ -32,6 +32,8 @@
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 #include "flow/swift_compat.h"
+// FIXME: Remove unsafe inc once https://github.com/apple/swift/issues/61627 is fixed.
+#include "flow/unsafe_swift_compat.h"
 #include "fdbclient/VersionVector.h"
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
@@ -74,7 +76,7 @@ class MasterDataActor;
 
 // FIXME (after the one below): Use SWIFT_CXX_REF once https://github.com/apple/swift/issues/61620 is fixed.
 // FIXME (before one above): Use SWIFT_CXX_REF_MASTERDATA once https://github.com/apple/swift/issues/61627 is fixed.
-struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterData> {
+struct UNSAFE_SWIFT_CXX_IMMORTAL_REF MasterData : NonCopyable, ReferenceCounted<MasterData> {
     UID dbgid;
 
     Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery

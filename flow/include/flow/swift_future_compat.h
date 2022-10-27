@@ -24,6 +24,7 @@
 #include "swift.h"
 #include "flow.h"
 #include "pthread.h"
+#include "unsafe_swift_compat.h"
 #include <stdint.h>
 
 // ==== ----------------------------------------------------------------------------------------------------------------
@@ -40,7 +41,7 @@ using CallbackVoid = Callback<Void>;
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
-struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackCInt : Callback<int> {
+struct UNSAFE_SWIFT_CXX_IMMORTAL_REF SwiftContinuationCallbackCInt : Callback<int> {
 private:
 	void* _Nonnull continuationBox;
 	void (*_Nonnull resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
@@ -87,7 +88,7 @@ public:
 	}
 };
 
-struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackVoid : Callback<Void> {
+struct UNSAFE_SWIFT_CXX_IMMORTAL_REF SwiftContinuationCallbackVoid : Callback<Void> {
 private:
 	void* continuationBox;
 	void (*resumeWithValue)(void* _Nonnull /*context*/, /*value*/ Void);
