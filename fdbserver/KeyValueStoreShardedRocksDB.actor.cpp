@@ -224,7 +224,7 @@ Error statusToError(const rocksdb::Status& s) {
 	if (s.IsIOError()) {
 		return io_error();
 	} else if (s.IsTimedOut()) {
-		return transaction_too_old();
+		return key_value_store_deadline_exceeded();
 	} else {
 		return unknown_error();
 	}
@@ -2016,7 +2016,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
 				    .detail("Timeout value", readValueTimeout);
-				a.result.sendError(transaction_too_old());
+				a.result.sendError(key_value_store_deadline_exceeded());
 				return;
 			}
 
@@ -2094,7 +2094,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("Timeout value", readValuePrefixTimeout);
-				a.result.sendError(transaction_too_old());
+				a.result.sendError(key_value_store_deadline_exceeded());
 				return;
 			}
 
@@ -2169,7 +2169,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
 				    .detail("Timeout value", readRangeTimeout);
-				a.result.sendError(transaction_too_old());
+				a.result.sendError(key_value_store_deadline_exceeded());
 				return;
 			}
 
@@ -2215,8 +2215,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				if (time - a.startTime > readRangeTimeout) {
 					TraceEvent(SevInfo, "ShardedRocksDBTimeout")
 					    .detail("Action", "ReadRange")
-					    .detail("NumShards", a.shardRanges.size());
-					a.result.sendError(transaction_too_old());
+					    .detail("ShardsRead", numShards)
+					    .detail("BytesRead", accumulatedBytes);
+					a.result.sendError(key_value_store_deadline_exceeded());
 					return;
 				}
 			}
