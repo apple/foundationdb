@@ -29,6 +29,53 @@ private:
 	n_coroutine::coroutine_handle<> h;
 };
 
+template <class T>
+struct CoroutineSingleCallback : public SingleCallback<T> {
+
+	CoroutineSingleCallback(n_coroutine::coroutine_handle<> h) : h(h) {}
+	~CoroutineSingleCallback() {
+		if (isSet) {
+			value().~T();
+		}
+	}
+
+	virtual void fire(T&& value) override {
+		std::cerr << "CoroutineSingleCallback::fire " << std::endl;
+
+		new (&value_storage) T(std::move(value));
+
+		isSet = true;
+
+		h.resume();
+	}
+
+	virtual void fire(T const& value) override {
+		std::cerr << "CoroutineSingleCallback::fire " << std::endl;
+
+		new (&value_storage) T(value);
+
+		isSet = true;
+
+		h.resume();
+	}
+
+	virtual void error(Error e) override { h.resume(); }
+
+	T& value() { return *(T*)&value_storage; }
+
+	T const& get() const {
+		assert(isSet);
+		return *(T const*)&value_storage;
+	}
+
+private:
+	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value_storage;
+
+	bool isSet;
+
+	n_coroutine::coroutine_handle<> h;
+};
+
 template <typename ReturnValue, typename... Args>
 struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 	struct promise_type : public Actor<ReturnValue> {
@@ -129,6 +176,8 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 
 					// If actor is cancelled, then throw actor_cancelled()
 					if (pt->actor_wait_state < 0) {
+						cb->remove();
+
 						throw actor_cancelled();
 					}
 
@@ -151,6 +200,78 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 			return AwaitableFuture{ future, this };
 		}
 
+		template <typename U>
+		auto await_transform(FutureStream<U> futureStream) {
+			struct AwaitableFutureStream : FutureStream<U> {
+
+				promise_type* pt = nullptr;
+
+				CoroutineSingleCallback<U>* cb = nullptr;
+
+				AwaitableFutureStream(FutureStream<U> fs, promise_type* pt) : FutureStream<U>(fs), pt(pt) {}
+				~AwaitableFutureStream() {
+					std::cout << " ~AwaitableFutureStream() " << std::endl;
+					if (cb) {
+						delete cb;
+						cb = nullptr;
+					}
+				}
+
+				bool await_ready() const {
+					std::cerr << "await_ready() " << (FutureStream<U>::isValid() && FutureStream<U>::isReady())
+					          << std::endl;
+					return FutureStream<U>::isValid() && FutureStream<U>::isReady();
+				}
+
+				void await_suspend(n_coroutine::coroutine_handle<> h) {
+					std::cerr << "await_suspend" << std::endl;
+
+					if (!cb) {
+						cb = new CoroutineSingleCallback<U>(h);
+					}
+
+					// Set wait_state and add callback
+					pt->actor_wait_state = 1;
+
+					FutureStream<U> fs = *this;
+
+					fs.addCallbackAndClear(cb);
+				}
+
+				U await_resume() {
+					std::cerr << "await_resume" << std::endl;
+
+					if (pt->actor_wait_state < 0) {
+						cb->remove();
+						throw actor_cancelled();
+					}
+
+					// Callback fired.
+					if (pt->actor_wait_state > 0) {
+						pt->actor_wait_state = 0;
+
+						cb->remove();
+
+						// Get value from callback
+						if (FutureStream<U>::isError()) {
+							throw FutureStream<U>::getError();
+						} else {
+							return cb->get();
+						}
+
+					} else { // actor_wait_state == 0. Queue was ready
+
+						if (FutureStream<U>::isError()) {
+							throw FutureStream<U>::getError();
+						} else {
+							return FutureStream<U>::pop();
+						}
+					}
+				}
+			};
+
+			return AwaitableFutureStream{ futureStream, this };
+		}
 		void cancel() override {
 			// std::cerr << "cancel()" << std::endl;
 
