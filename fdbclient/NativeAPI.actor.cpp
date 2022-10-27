@@ -6160,15 +6160,12 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 			tr.trState->authToken = trState->authToken;
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			Optional<Value> expiredVal = wait(tr.get(idempotencyIdsExpiredVersion));
-			if (expiredVal.present()) {
-				expiredVersion =
-				    ObjectReader::fromStringRef<IdempotencyIdsExpiredVersion>(expiredVal.get(), Unversioned()).expired;
-				if (expiredVersion >= minPossibleCommitVersion) {
-					throw commit_unknown_result_fatal();
-				}
-			} else {
-				expiredVersion = 0;
+			KeyBackedObjectProperty<IdempotencyIdsExpiredVersion, _Unversioned> expiredKey(idempotencyIdsExpiredVersion,
+			                                                                               Unversioned());
+			IdempotencyIdsExpiredVersion expiredVal = wait(expiredKey.getD(&tr));
+			expiredVersion = expiredVal.expired;
+			if (expiredVersion >= minPossibleCommitVersion) {
+				throw commit_unknown_result_fatal();
 			}
 			Version rv = wait(tr.getReadVersion());
 			TraceEvent("DetermineCommitStatusAttempt")
