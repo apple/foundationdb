@@ -584,7 +584,7 @@ void GlobalTagThrottler::removeExpiredTags() {
 	return impl->removeExpiredTags();
 }
 
-namespace GlobalTagThrottlerTesting {
+namespace {
 
 enum class LimitType { RESERVED, TOTAL };
 enum class OpType { READ, WRITE };
@@ -707,7 +707,7 @@ ACTOR Future<Void> runClient(GlobalTagThrottler* globalTagThrottler,
 }
 
 ACTOR template <class Check>
-Future<Void> monitor(GlobalTagThrottler* globalTagThrottler, Check check) {
+Future<Void> monitorActor(GlobalTagThrottler* globalTagThrottler, Check check) {
 	state int successes = 0;
 	loop {
 		wait(delay(1.0));
@@ -775,47 +775,41 @@ ACTOR Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottl
 	}
 }
 
-} // namespace GlobalTagThrottlerTesting
+} // namespace
 
 TEST_CASE("/GlobalTagThrottler/Simple") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 100.0 / 6.0);
-	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
+	state Future<Void> monitor =
+	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 100.0 / 6.0); });
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::WRITE);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 100.0 / 6.0);
-	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::WRITE);
+	state Future<Void> monitor =
+	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 100.0 / 6.0); });
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
@@ -824,76 +818,61 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue);
 	state std::vector<Future<Void>> futures;
 	state std::vector<Future<Void>> monitorFutures;
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag1, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ));
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag2, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ));
-	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
-	state Future<Void> monitor =
-	    GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
-		    return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag1, 100.0 / 6.0) &&
-		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 100.0 / 6.0);
-	    });
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 5.0, 6.0, OpType::READ));
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 5.0, 6.0, OpType::READ));
+	futures.push_back(updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
+		return targetRateIsNear(gtt, testTag1, 100.0 / 6.0) && targetRateIsNear(gtt, testTag2, 100.0 / 6.0);
+	});
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 20.0, 10.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 10.0);
-	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
+	state Future<Void> monitor =
+	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 10.0); });
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> client2 = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 100.0 / 6.0) &&
-		       GlobalTagThrottlerTesting::clientRateIsNear(gtt, testTag, 100.0 / 6.0);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
+	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
+		return targetRateIsNear(gtt, testTag, 100.0 / 6.0) && clientRateIsNear(gtt, testTag, 100.0 / 6.0);
 	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || client2 || updater, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 20.0, 10.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> client2 = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 20.0, 10.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 10.0) &&
-		       GlobalTagThrottlerTesting::clientRateIsNear(gtt, testTag, 5.0);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
+	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
+		return targetRateIsNear(gtt, testTag, 10.0) && clientRateIsNear(gtt, testTag, 5.0);
 	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
@@ -901,21 +880,17 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 // Global transaction rate should be 20.0, with a distribution of (5, 15) between the 2 clients
 TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 5.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> client2 = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 25.0, 5.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 20.0) &&
-		       GlobalTagThrottlerTesting::clientRateIsNear(gtt, testTag, 15.0);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 5.0, OpType::READ);
+	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 25.0, 5.0, OpType::READ);
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
+		return targetRateIsNear(gtt, testTag, 20.0) && clientRateIsNear(gtt, testTag, 15.0);
 	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
@@ -923,72 +898,61 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 // Test that the tag throttler can reach equilibrium, then adjust to a new equilibrium once the quota is changed
 TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0);
-	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
+	state Future<Void> monitor = monitorActor(
+	    &globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0); });
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	tagQuotaValue.totalQuota = 50.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, 50.0 / 6.0);
-	});
+	monitor =
+	    monitorActor(&globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 50.0 / 6.0); });
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0);
-	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
+	state Future<Void> monitor = monitorActor(
+	    &globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0); });
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	globalTagThrottler.removeQuota(testTag);
-	monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, {});
-	});
+	monitor = monitorActor(&globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, {}); });
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	state StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 50 / 6.0) && gtt.busyReadTagCount() == 1;
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, OpType::READ);
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
+		return targetRateIsNear(gtt, testTag, 50 / 6.0) && gtt.busyReadTagCount() == 1;
 	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	state StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue1;
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
@@ -998,24 +962,20 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
 	std::vector<Future<Void>> futures;
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ));
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ));
-	state Future<Void> monitor =
-	    GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
-		    return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag1, (50 / 6.0) / 3) &&
-		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 2 * (50 / 6.0) / 3) &&
-		           gtt.busyReadTagCount() == 2;
-	    });
-	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ));
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ));
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
+		return targetRateIsNear(gtt, testTag1, (50 / 6.0) / 3) && targetRateIsNear(gtt, testTag2, 2 * (50 / 6.0) / 3) &&
+		       gtt.busyReadTagCount() == 2;
+	});
+	futures.push_back(updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(3, 50);
+	state StorageServerCollection storageServers(3, 50);
 	state ThrottleApi::TagQuotaValue tagQuotaValue1;
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
@@ -1025,23 +985,20 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
 	std::vector<Future<Void>> futures;
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ, { 0, 1 }));
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ, { 1, 2 }));
-	state Future<Void> monitor =
-	    GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
-		    return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag1, 50 / 6.0) &&
-		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 50 / 6.0) && gtt.busyReadTagCount() == 2;
-	    });
-	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ, { 0, 1 }));
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
+		return targetRateIsNear(gtt, testTag1, 50 / 6.0) && targetRateIsNear(gtt, testTag2, 50 / 6.0) &&
+		       gtt.busyReadTagCount() == 2;
+	});
+	futures.push_back(updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(3, 50);
+	state StorageServerCollection storageServers(3, 50);
 	state ThrottleApi::TagQuotaValue tagQuotaValue1;
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
@@ -1051,35 +1008,29 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
 	std::vector<Future<Void>> futures;
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ, { 0 }));
-	futures.push_back(GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ, { 1, 2 }));
-	state Future<Void> monitor =
-	    GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
-		    return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag1, 50 / 6.0) &&
-		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 100 / 6.0) && gtt.busyReadTagCount() == 1;
-	    });
-	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ, { 0 }));
+	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
+		return targetRateIsNear(gtt, testTag1, 50 / 6.0) && targetRateIsNear(gtt, testTag2, 100 / 6.0) &&
+		       gtt.busyReadTagCount() == 1;
+	});
+	futures.push_back(updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	state StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalQuota = 100.0;
 	tagQuotaValue.reservedQuota = 70.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
-	    &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag, 70 / 6.0);
-	});
-	state Future<Void> updater =
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, OpType::READ);
+	state Future<Void> monitor =
+	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 70 / 6.0); });
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
@@ -1088,16 +1039,12 @@ TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
 // last transaction with that tag
 TEST_CASE("/GlobalTagThrottler/ExpireTags") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	state StorageServerCollection storageServers(10, 5);
 	TransactionTag testTag = "sampleTag1"_sr;
 
 	state Future<Void> client =
-	    timeout(GlobalTagThrottlerTesting::runClient(
-	                &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ),
-	            60.0,
-	            Void());
-	state Future<Void> updater = timeout(
-	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers), 60.0, Void());
+	    timeout(runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, OpType::READ), 60.0, Void());
+	state Future<Void> updater = timeout(updateGlobalTagThrottler(&globalTagThrottler, &storageServers), 60.0, Void());
 	wait(client && updater);
 	client.cancel();
 	updater.cancel();
@@ -1114,14 +1061,13 @@ TEST_CASE("/GlobalTagThrottler/ExpireTags") {
 // Test that the number of tags tracked does not grow beyond SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED
 TEST_CASE("/GlobalTagThrottler/TagLimit") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	state StorageServerCollection storageServers(10, 5);
 	std::vector<Future<Void>> futures;
 	for (int i = 0; i < 2 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED; ++i) {
 		Arena arena;
 		TransactionTag tag = makeString(8, arena);
 		deterministicRandom()->randomBytes(mutateString(tag), tag.size());
-		futures.push_back(GlobalTagThrottlerTesting::runClient(
-		    &globalTagThrottler, &storageServers, tag, 1.0, 6.0, GlobalTagThrottlerTesting::OpType::READ));
+		futures.push_back(runClient(&globalTagThrottler, &storageServers, tag, 1.0, 6.0, OpType::READ));
 	}
 	wait(timeout(waitForAll(futures), 60.0, Void()));
 	ASSERT_EQ(globalTagThrottler.tagsTracked(), SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED);
