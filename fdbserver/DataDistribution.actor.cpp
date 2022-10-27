@@ -1455,7 +1455,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "DDAuditStorageError", self->ddId)
 			    .errorUnsuppressed(e)
-			    .detail("AuditID", audit->id)
+			    .detail("AuditID", (audit == nullptr ? UID() : audit->id))
 			    .detail("Range", req.range)
 			    .detail("AuditType", req.type);
 			state Error err(e);
