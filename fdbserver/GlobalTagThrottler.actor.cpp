@@ -168,6 +168,7 @@ class GlobalTagThrottlerImpl {
 
 	Database db;
 	UID id;
+	int maxFallingBehind{ 0 };
 	uint64_t throttledTagChangeId{ 0 };
 	uint32_t lastBusyTagCount{ 0 };
 
@@ -332,7 +333,7 @@ class GlobalTagThrottlerImpl {
 	}
 
 	// Return the limiting transaction rate, aggregated across all storage servers.
-	// The limits from the worst SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND zones are
+	// The limits from the worst maxFallingBehind zones are
 	// ignored
 	Optional<double> getLimitingTps(TransactionTag tag) const {
 		// TODO: The algorithm for ignoring the worst zones can be made more efficient
@@ -349,16 +350,15 @@ class GlobalTagThrottlerImpl {
 				}
 			}
 		}
-		if (zoneIdToLimitingTps.size() < SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND) {
+		if (zoneIdToLimitingTps.size() <= maxFallingBehind) {
 			return {};
 		} else {
 			std::vector<double> zoneLimits;
 			for (const auto& [_, limit] : zoneIdToLimitingTps) {
 				zoneLimits.push_back(limit);
 			}
-			std::nth_element(
-			    zoneLimits.begin(), zoneLimits.begin() + SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, zoneLimits.end());
-			return zoneLimits[SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND];
+			std::nth_element(zoneLimits.begin(), zoneLimits.begin() + maxFallingBehind, zoneLimits.end());
+			return zoneLimits[maxFallingBehind];
 		}
 	}
 
@@ -435,7 +435,8 @@ class GlobalTagThrottlerImpl {
 	}
 
 public:
-	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
+	GlobalTagThrottlerImpl(Database db, UID id, int maxFallingBehind)
+	  : db(db), id(id), maxFallingBehind(maxFallingBehind) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 	void addRequests(TransactionTag tag, int count) {
 		auto it = tagStatistics.find(tag);
@@ -560,7 +561,8 @@ public:
 	uint32_t tagsTracked() const { return tagStatistics.size(); }
 };
 
-GlobalTagThrottler::GlobalTagThrottler(Database db, UID id) : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id)) {}
+GlobalTagThrottler::GlobalTagThrottler(Database db, UID id, int maxFallingBehind)
+  : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id, maxFallingBehind)) {}
 
 GlobalTagThrottler::~GlobalTagThrottler() = default;
 
@@ -807,8 +809,12 @@ ACTOR Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottl
 
 } // namespace
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota set to 100 bytes/second.
+// Client attempts 5 6-byte read transactions per second.
+// Limit should adjust to allow 100/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/Simple") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -822,8 +828,12 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 	return Void();
 }
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota set to 100 bytes/second.
+// Client attempts 5 6-byte write transactions per second.
+// Limit should adjust to allow 100/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -837,8 +847,12 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	return Void();
 }
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota set to 100 bytes/second for each tag.
+// 2 clients each attempt 5 6-byte read transactions per second.
+// Both limits should adjust to allow 100/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag1 = "sampleTag1"_sr;
@@ -858,8 +872,12 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 	return Void();
 }
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota set to 100 bytes/second.
+// Client attempts 20 10-byte read transactions per second.
+// Limit should adjust to allow 100/10 transactions per second.
 TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -873,8 +891,12 @@ TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 	return Void();
 }
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota set to 100 bytes/second.
+// 2 clients each attempt 5 6-byte transactions per second.
+// Limit should adjust to allow 100/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -890,8 +912,13 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	return Void();
 }
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota set to 100 bytes/second.
+// 2 clients each attempt 20 10-byte transactions per second.
+// Target rate should adjust to allow 100/10 transactions per second.
+// Each client is throttled to only perform 100/20 transactions per second.
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -907,9 +934,14 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 	return Void();
 }
 
-// Global transaction rate should be 20.0, with a distribution of (5, 15) between the 2 clients
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota set to 100 bytes/second.
+// One client attempts 5 5-byte read transactions per second.
+// Another client attempts 25 5-byte read transactions per second.
+// Target rate should adjust to allow 100/5 transactions per second.
+// This 20 transactions/second limit is split with a distribution of (5, 15) between the 2 clients.
 TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -925,9 +957,15 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 	return Void();
 }
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota is initially set to 100 bytes/second.
+// Client attempts 5 6-byte transactions per second.
 // Test that the tag throttler can reach equilibrium, then adjust to a new equilibrium once the quota is changed
+// Target rate should adjust to allow 100/6 transactions per second.
+// Total quota is modified to 50 bytes/second.
+// Target rate should adjust to allow 50/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
@@ -946,8 +984,14 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	return Void();
 }
 
+// 10 storage servers can handle 100 bytes/second each.
+// Total quota is initially set to 100 bytes/second.
+// Client attempts 5 6-byte read transactions per second.
+// Target limit adjusts to allow 100/6 transactions per second.
+// Then Quota is removed.
+// Target limit is removed as a result.
 TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
@@ -964,8 +1008,12 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	return Void();
 }
 
+// 10 storage servers can handle 5 bytes/second each.
+// Total quota is set to 100 bytes/second.
+// Client attempts 10 6-byte transactions per second
+// Target is adjusted to 50/6 transactions per second, to match the total capacity all storage servers.
 TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -980,8 +1028,14 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	return Void();
 }
 
+// 10 storage servers can handle 5 bytes/second each.
+// Total quota is set to 50 bytes/second for one tag, 100 bytes/second for another.
+// For each tag, a client attempts to execute 10 6-byte read transactions per second.
+// Target rates are adjusted to utilize the full 50 bytes/second capacity of the
+//   add storage servers. The two tags receive this capacity with a 2:1 ratio,
+//   matching the ratio of their total quotas.
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue1;
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
@@ -1003,8 +1057,14 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	return Void();
 }
 
+// 3 storage servers can handle 50 bytes/second each.
+// Total quota is set to 100 bytes/second for each tag.
+// Each client attempts 10 6-byte read transactions per second.
+// This workload is sent to 2 storage servers per client (with an overlap of one storage server).
+// Target rates for both tags are adjusted to 50/6 transactions per second to match the throughput
+//   that the busiest server can handle.
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(3, 50);
 	state ThrottleApi::TagQuotaValue tagQuotaValue1;
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
@@ -1026,8 +1086,15 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	return Void();
 }
 
+// 3 storage servers can handle 50 bytes/second each.
+// Total quota is set to 100 bytes/second for each tag.
+// One client attempts 10 6-byte read transactions per second, all directed towards a single storage server.
+// Another client, using a different tag, attempts 10 6-byte read transactions split across the other two storage
+// servers. Target rates adjust to 50/6 and 100/6 transactions per second for the two clients, based on the capacities
+// of the
+//   storage servers being accessed.
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(3, 50);
 	state ThrottleApi::TagQuotaValue tagQuotaValue1;
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
@@ -1049,8 +1116,14 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 	return Void();
 }
 
+// 10 storage servers can serve 5 bytes/second each.
+// Total quota is set to 100 bytes/second.
+// Reserved quota is set to 70 bytes/second.
+// A client attempts to execute 10 6-byte read transactions per second.
+// Despite the storage server only having capacity to serve 50/6 transactions per second,
+//   the reserved quota will ensure the target rate adjusts to 70/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
@@ -1068,7 +1141,7 @@ TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
 // Test that tags are expired iff a sufficient amount of time has passed since the
 // last transaction with that tag
 TEST_CASE("/GlobalTagThrottler/ExpireTags") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
 	TransactionTag testTag = "sampleTag1"_sr;
 
@@ -1090,7 +1163,7 @@ TEST_CASE("/GlobalTagThrottler/ExpireTags") {
 
 // Test that the number of tags tracked does not grow beyond SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED
 TEST_CASE("/GlobalTagThrottler/TagLimit") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
 	std::vector<Future<Void>> futures;
 	for (int i = 0; i < 2 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED; ++i) {

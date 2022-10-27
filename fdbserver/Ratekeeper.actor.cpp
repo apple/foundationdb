@@ -637,7 +637,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BW_LAG_BATCH),
     maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id);
+		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
