@@ -2540,8 +2540,8 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 				status->expectedCount = req.idempotencyIdCount;
 			}
 			when(wait(purgeOld)) {
-				purgeOld = delay(10);
-				purgeBefore = now() - 10;
+				purgeOld = delay(SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME);
+				purgeBefore = now() - SERVER_KNOBS->IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
 				for (iter = idStatus.begin(); iter != idStatus.end();) {
 					// We have exclusive access to idStatus in this when block, so iter will still be valid after the
 					// wait

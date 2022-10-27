@@ -989,6 +989,9 @@ public:
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
 	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
 
+	// Idempotency ids
+	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };
