@@ -161,12 +161,17 @@ class GlobalTagThrottlerImpl {
 		}
 	};
 
+	struct StorageServerInfo {
+		Optional<Standalone<StringRef>> zoneId;
+		Optional<double> throttlingRatio;
+	};
+
 	Database db;
 	UID id;
 	uint64_t throttledTagChangeId{ 0 };
 	uint32_t lastBusyTagCount{ 0 };
 
-	std::unordered_map<UID, Optional<double>> throttlingRatios;
+	std::unordered_map<UID, StorageServerInfo> ssInfos;
 	std::unordered_map<TransactionTag, PerTagStatistics> tagStatistics;
 	std::unordered_map<UID, std::unordered_map<TransactionTag, ThroughputCounters>> throughput;
 
@@ -304,12 +309,13 @@ class GlobalTagThrottlerImpl {
 	// Returns the desired cost for a storage server, based on its current
 	// cost and throttling ratio
 	Optional<double> getLimitingCost(UID storageServerId) const {
-		auto const throttlingRatio = tryGet(throttlingRatios, storageServerId);
+		auto const ssInfo = tryGet(ssInfos, storageServerId);
+		auto const throttlingRatio = ssInfo.present() ? ssInfo.get().throttlingRatio : Optional<double>{};
 		auto const currentCost = getCurrentCost(storageServerId);
-		if (!throttlingRatio.present() || !currentCost.present() || !throttlingRatio.get().present()) {
+		if (!throttlingRatio.present() || !currentCost.present()) {
 			return {};
 		}
-		return throttlingRatio.get().get() * currentCost.get();
+		return throttlingRatio.get() * currentCost.get();
 	}
 
 	// For a given storage server and tag combination, return the limiting transaction rate.
@@ -325,14 +331,35 @@ class GlobalTagThrottlerImpl {
 		return limitingCostForTag / averageTransactionCost.get();
 	}
 
-	// Return the limiting transaction rate, aggregated across all storage servers
+	// Return the limiting transaction rate, aggregated across all storage servers.
+	// The limits from the worst SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND zones are
+	// ignored
 	Optional<double> getLimitingTps(TransactionTag tag) const {
-		Optional<double> result;
-		for (const auto& [id, _] : throttlingRatios) {
-			auto const targetTpsForSS = getLimitingTps(id, tag);
-			result = getMin(result, targetTpsForSS);
+		// TODO: The algorithm for ignoring the worst zones can be made more efficient
+		std::map<Optional<Standalone<StringRef>>, double> zoneIdToLimitingTps;
+		for (const auto& [id, ssInfo] : ssInfos) {
+			auto const limitingTpsForSS = getLimitingTps(id, tag);
+			if (limitingTpsForSS.present()) {
+				auto it = zoneIdToLimitingTps.find(ssInfo.zoneId);
+				if (it != zoneIdToLimitingTps.end()) {
+					auto& limitingTpsForZone = it->second;
+					limitingTpsForZone = std::min<double>(limitingTpsForZone, limitingTpsForSS.get());
+				} else {
+					zoneIdToLimitingTps[ssInfo.zoneId] = limitingTpsForSS.get();
+				}
+			}
 		}
-		return result;
+		if (zoneIdToLimitingTps.size() < SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND) {
+			return {};
+		} else {
+			std::vector<double> zoneLimits;
+			for (const auto& [_, limit] : zoneIdToLimitingTps) {
+				zoneLimits.push_back(limit);
+			}
+			std::nth_element(
+			    zoneLimits.begin(), zoneLimits.begin() + SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, zoneLimits.end());
+			return zoneLimits[SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND];
+		}
 	}
 
 	Optional<double> getTps(TransactionTag tag, LimitType limitType, double averageTransactionCost) const {
@@ -492,8 +519,11 @@ public:
 	int64_t manualThrottleCount() const { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
-		throttlingRatios[ss.id] = ss.getTagThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
-		                                                   SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
+		auto& ssInfo = ssInfos[ss.id];
+		ssInfo.throttlingRatio = ss.getTagThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+		                                                  SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
+		ssInfo.zoneId = ss.locality.zoneId();
+
 		for (const auto& busyReadTag : ss.busiestReadTags) {
 			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
 				throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
