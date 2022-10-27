@@ -9305,7 +9305,7 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 		mismatchEvent.detail("EndKey", request.range.end);
 		mismatchEvent.detail("CanReadPopped", request.canReadPopped);
 		mismatchEvent.detail("PopVersion", popVersion);
-		mismatchEvent.detail("DebugUID", request.streamUID());
+		mismatchEvent.detail("DebugUID", request.id);
 
 		// mismatch info
 		mismatchEvent.detail("MatchesFound", matchesFound);
@@ -9331,7 +9331,7 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 			    "TSSMismatchChangeFeedStream");
 			summaryEvent.detail("TSSID", tssData.tssId)
 			    .detail("MismatchId", mismatchUID)
-			    .detail("FeedDebugUID", request.streamUID());
+			    .detail("FeedDebugUID", request.id);
 		}
 	}
 }
@@ -9856,7 +9856,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          Version* begin,
                                          Version end,
                                          int replyBufferSize,
-                                         bool canReadPopped) {
+                                         bool canReadPopped,
+                                         ReadOptions readOptions) {
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
@@ -9884,10 +9885,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
 			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
 		}
-		UID id = deterministicRandom()->randomUniqueID();
-		req.options = ReadOptions(id);
-		debugUIDs.push_back(id);
-		mergeCursorUID = UID(mergeCursorUID.first() ^ id.first(), mergeCursorUID.second() ^ id.second());
+		req.options = readOptions;
+		req.id = deterministicRandom()->randomUniqueID();
+
+		debugUIDs.push_back(req.id);
+		mergeCursorUID = UID(mergeCursorUID.first() ^ req.id.first(), mergeCursorUID.second() ^ req.id.second());
 
 		results->streams.push_back(interfs[i].first.changeFeedStream.getReplyStream(req));
 		maybeDuplicateTSSChangeFeedStream(req,
@@ -10102,12 +10104,10 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.canReadPopped = canReadPopped;
 	req.replyBufferSize = replyBufferSize;
 	req.options = readOptions;
-	if (!req.streamUID().isValid()) {
-		req.options.get().debugID = readOptions.debugID = deterministicRandom()->randomUniqueID();
-	}
+	req.id = deterministicRandom()->randomUniqueID();
 
 	if (DEBUG_CF_CLIENT_TRACE) {
-		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.streamUID())
+		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.id)
 		    .detail("FeedID", rangeID)
 		    .detail("Range", range)
 		    .detail("Begin", *begin)
@@ -10238,9 +10238,9 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 				CODE_PROBE(true, "Change feed merge cursor");
 				// TODO (jslocum): validate connectionFileChanged behavior
-				wait(
-				    mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
-				    cx->connectionFileChanged());
+				wait(mergeChangeFeedStream(
+				         db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped, readOptions) ||
+				     cx->connectionFileChanged());
 			} else {
 				CODE_PROBE(true, "Change feed single cursor");
 				StorageServerInterface interf = locations[0].locations->getInterface(chosenLocations[0]);

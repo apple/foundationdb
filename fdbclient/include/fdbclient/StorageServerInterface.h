@@ -890,21 +890,16 @@ struct ChangeFeedStreamRequest {
 	KeyRange range;
 	int replyBufferSize = -1;
 	bool canReadPopped = true;
+	UID id;
 	Optional<ReadOptions> options;
-
-	UID streamUID() const {
-		if (options.present()) {
-			return options.get().debugID.orDefault(UID());
-		}
-		return UID();
-	}
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, options, arena);
+		serializer(
+		    ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, id, options, arena);
 	}
 };
 

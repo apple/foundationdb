@@ -1649,13 +1649,13 @@ struct ReadOptions {
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
-
-	ReadOptions(Optional<UID> debugID,
+	ReadOptions(Optional<UID> debugID = Optional<UID>(),
 	            ReadType type = ReadType::NORMAL,
-	            CacheResult cache = CacheResult::False,
+	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
 	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

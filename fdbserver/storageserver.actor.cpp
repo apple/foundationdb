@@ -2600,7 +2600,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsBegin", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", req.streamUID())
+		    .detail("StreamUID", req.id)
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
@@ -2638,7 +2638,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsDetails", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", req.streamUID())
+		    .detail("StreamUID", req.id)
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
@@ -2741,7 +2741,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					           "is {4}) (emptyVersion={5}, emptyBefore={6})!\n",
 					           data->thisServerID.toString().substr(0, 4),
 					           req.rangeID.printable().substr(0, 6),
-					           req.streamUID().toString().substr(0, 8),
+					           req.id.toString().substr(0, 8),
 					           memoryReply.mutations[memoryVerifyIdx].version,
 					           version,
 					           feedInfo->emptyVersion,
@@ -2783,7 +2783,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					           "disk! (durable validation = {4})\n",
 					           data->thisServerID.toString().substr(0, 4),
 					           req.rangeID.printable().substr(0, 6),
-					           req.streamUID().toString().substr(0, 8),
+					           req.id.toString().substr(0, 8),
 					           version,
 					           durableValidationVersion);
 
@@ -2864,7 +2864,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		if (!ok) {
 			TraceEvent("ChangeFeedMutationsPopped", data->thisServerID)
 			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", req.streamUID())
+			    .detail("StreamUID", req.id)
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
@@ -2881,7 +2881,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			for (auto& m : mutations.mutations) {
 				DEBUG_MUTATION("ChangeFeedSSRead", mutations.version, m, data->thisServerID)
 				    .detail("ChangeFeedID", req.rangeID)
-				    .detail("StreamUID", req.streamUID())
+				    .detail("StreamUID", req.id)
 				    .detail("ReqBegin", req.begin)
 				    .detail("ReqEnd", req.end)
 				    .detail("ReqRange", req.range);
@@ -2908,7 +2908,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			fmt::print("ERROR: SS {0} CF {1} SQ {2} missing {3} @ {4} from request for [{5} - {6}) {7} - {8}\n",
 			           data->thisServerID.toString().substr(0, 4),
 			           req.rangeID.printable().substr(0, 6),
-			           req.streamUID().toString().substr(0, 8),
+			           req.id.toString().substr(0, 8),
 			           foundVersion ? "key" : "version",
 			           DEBUG_CF_MISSING_VERSION,
 			           req.range.begin.printable(),
@@ -2929,7 +2929,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			fmt::print("DBG: SS {0} CF {1} SQ {2} correct @ {3} from request for [{4} - {5}) {6} - {7}\n",
 			           data->thisServerID.toString().substr(0, 4),
 			           req.rangeID.printable().substr(0, 6),
-			           req.streamUID().toString().substr(0, 8),
+			           req.id.toString().substr(0, 8),
 			           DEBUG_CF_MISSING_VERSION,
 			           req.range.begin.printable(),
 			           req.range.end.printable(),
@@ -2943,7 +2943,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", req.streamUID())
+		    .detail("StreamUID", req.id)
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
@@ -2968,7 +2968,7 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 		return Void();
 	}
 	state Promise<Void> moved;
-	feed->second->triggerOnMove(req.range, req.streamUID(), moved);
+	feed->second->triggerOnMove(req.range, req.id, moved);
 	try {
 		wait(moved.getFuture());
 	} catch (Error& e) {
@@ -2977,7 +2977,7 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 
 		auto feed = data->uidChangeFeed.find(req.rangeID);
 		if (feed != data->uidChangeFeed.end()) {
-			feed->second->removeOnMoveTrigger(req.range, req.streamUID());
+			feed->second->removeOnMoveTrigger(req.range, req.id);
 		}
 		return Void();
 	}
@@ -3020,7 +3020,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		if (DEBUG_CF_TRACE) {
 			TraceEvent(SevDebug, "TraceChangeFeedStreamStart", data->thisServerID)
 			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", req.streamUID())
+			    .detail("StreamUID", req.id)
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
@@ -3042,7 +3042,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		if (DEBUG_CF_TRACE) {
 			TraceEvent(SevDebug, "TraceChangeFeedStreamSentInitialEmpty", data->thisServerID)
 			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", req.streamUID())
+			    .detail("StreamUID", req.id)
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
@@ -3054,12 +3054,12 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		loop {
 			Future<Void> onReady = req.reply.onReady();
 			if (atLatest && !onReady.isReady() && !removeUID) {
-				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.streamUID()] =
+				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				if (DEBUG_CF_TRACE) {
 					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedOnReady", data->thisServerID)
 					    .detail("FeedID", req.rangeID)
-					    .detail("StreamUID", req.streamUID())
+					    .detail("StreamUID", req.id)
 					    .detail("Range", req.range)
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
@@ -3075,13 +3075,13 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
 			    getChangeFeedMutations(data, req, false, atLatest);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
-				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.streamUID()] =
+				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
 				if (DEBUG_CF_TRACE) {
 					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedMutations", data->thisServerID)
 					    .detail("FeedID", req.rangeID)
-					    .detail("StreamUID", req.streamUID())
+					    .detail("StreamUID", req.id)
 					    .detail("Range", req.range)
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
@@ -3104,10 +3104,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
 			if (removeUID) {
 				if (gotAll || req.begin == req.end) {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(req.streamUID());
+					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(req.id);
 					removeUID = false;
 				} else {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.streamUID()] =
+					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 					    feedReply.mutations.back().version;
 				}
 			}
@@ -3155,7 +3155,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		auto it = data->changeFeedClientVersions.find(req.reply.getEndpoint().getPrimaryAddress());
 		if (it != data->changeFeedClientVersions.end()) {
 			if (removeUID) {
-				it->second.erase(req.streamUID());
+				it->second.erase(req.id);
 			}
 			if (it->second.empty()) {
 				data->changeFeedClientVersions.erase(it);
@@ -6005,7 +6005,6 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		    .detail("Error", e.what());
 		tr->reset();
 		tr->setVersion(fetchVersion);
-		tr->trState->taskID = TaskPriority::FetchKeys;
 		throw;
 	}
 	return Void();
@@ -6836,6 +6835,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.trState->readOptions = readOptions;
+			tr.trState->taskID = TaskPriority::FetchKeys;
 
 			// fetchVersion = data->version.get();
 			// A quick fix:
@@ -6884,7 +6884,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
-			tr.trState->taskID = TaskPriority::FetchKeys;
+
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (SERVER_KNOBS->FETCH_USING_BLOB) {
@@ -9574,7 +9574,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 	state int totalFetches = 0;
 	state int totalKeys = 0;
 	state int totalBytes = 0;
-	state ReadOptions readOptions(UID(), ReadType::NORMAL, CacheResult::False);
+	state ReadOptions readOptions(ReadType::NORMAL, CacheResult::False);
 
 	loop {
 		RangeResult bs = wait(storage->readRange(KeyRangeRef(begin, end),
