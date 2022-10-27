@@ -569,6 +569,9 @@ class Summary:
         self.handler.add_handler(('Severity', '30'), parse_warning)
 
         def parse_error(attrs: Dict[str, str]):
+            if 'ErrorIsInjectedFault' in attrs and attrs['ErrorIsInjectedFault'].lower() in ['1', 'true']:
+                # ignore injected errors. In newer fdb versions these will have a lower severity
+                return
             self.errors += 1
             self.error = True
             if self.errors > config.max_errors:

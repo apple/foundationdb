@@ -29,7 +29,7 @@
 #include "fdbserver/IClosable.h"
 #include "fdbserver/IPageEncryptionKeyProvider.actor.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
