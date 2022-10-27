@@ -1926,8 +1926,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	}
 
 	for (auto [highOrderBatchIndex, count] : idCountsForKey) {
-		pProxyCommitData->expireIdempotencyKeyValuePair.send(
-		    ExpireIdempotencyKeyValuePairRequest{ self->commitVersion, count, highOrderBatchIndex });
+		pProxyCommitData->expectedIdempotencyIdCountForKey.send(
+		    ExpectedIdempotencyIdCountForKey{ self->commitVersion, count, highOrderBatchIndex });
 	}
 
 	++pProxyCommitData->stats.commitBatchOut;
@@ -2519,7 +2519,7 @@ struct hash<IdempotencyKey> {
 ACTOR static Future<Void> idempotencyIdsExpireServer(
     Database db,
     PublicRequestStream<ExpireIdempotencyIdRequest> expireIdempotencyId,
-    FutureStream<ExpireIdempotencyKeyValuePairRequest> expireIdempotencyKeyValuePair,
+    PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey,
     Standalone<VectorRef<MutationRef>>* idempotencyClears) {
 	state std::unordered_map<IdempotencyKey, ExpireServerEntry> idStatus;
 	state std::unordered_map<IdempotencyKey, ExpireServerEntry>::iterator iter;
@@ -2533,10 +2533,15 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
 				status = &idStatus[key];
 				status->receivedCount += 1;
+				CODE_PROBE(status->expectedCount == 0, "ExpireIdempotencyIdRequest received before count is known");
+				if(status->expectedCount > 0) {
+					ASSERT_LE(status->receivedCount, status->expectedCount);
+				}
 			}
-			when(ExpireIdempotencyKeyValuePairRequest req = waitNext(expireIdempotencyKeyValuePair)) {
+			when(ExpectedIdempotencyIdCountForKey req = waitNext(expectedIdempotencyIdCountForKey.getFuture())) {
 				key = IdempotencyKey{ req.commitVersion, req.batchIndexHighByte };
 				status = &idStatus[key];
+				ASSERT_EQ(status->expectedCount, 0);
 				status->expectedCount = req.idempotencyIdCount;
 			}
 			when(wait(purgeOld)) {
@@ -2836,7 +2841,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
 	addActor.send(idempotencyIdsExpireServer(openDBOnServer(db),
 	                                         proxy.expireIdempotencyId,
-	                                         commitData.expireIdempotencyKeyValuePair.getFuture(),
+	                                         commitData.expectedIdempotencyIdCountForKey,
 	                                         &commitData.idempotencyClears));
 
 	// wait for txnStateStore recovery
