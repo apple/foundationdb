@@ -69,7 +69,7 @@ void swift_workaround_releaseMasterData(MasterData* _Nonnull rd) {
     rd->delref();
 }
 
-ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
+ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
   self->swiftImpl->getVersion(self.getPtr(), req, /*result=*/promise);
@@ -146,94 +146,6 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 }
 
 MasterData::~MasterData() {}
-
-#if ENABLE_ORIG_CXX
-ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
-	state Span span("M:getVersion"_loc, req.spanContext);
-	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
-	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
-
-	++self->getCommitVersionRequests;
-
-	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
-		// Request from invalid proxy (e.g. from duplicate recruitment request)
-		req.reply.send(Never());
-		return Void();
-	}
-
-	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up");
-	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
-
-	auto itr = proxyItr->second.replies.find(req.requestNum);
-	if (itr != proxyItr->second.replies.end()) {
-		CODE_PROBE(true, "Duplicate request for sequence");
-		req.reply.send(itr->second);
-	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
-		CODE_PROBE(true,
-		           "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
-		ASSERT(req.requestNum <
-		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
-		req.reply.send(Never());
-	} else {
-		GetCommitVersionReply rep;
-
-		if (self->version == invalidVersion) {
-			self->lastVersionTime = now();
-			self->version = self->recoveryTransactionVersion;
-			rep.prevVersion = self->lastEpochEnd;
-
-		} else {
-			double t1 = now();
-			if (BUGGIFY) {
-				t1 = self->lastVersionTime;
-			}
-
-			Version toAdd =
-			    std::max<Version>(1,
-			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
-
-			rep.prevVersion = self->version;
-			if (self->referenceVersion.present()) {
-				self->version = figureVersion(self->version,
-				                              g_network->timer(),
-				                              self->referenceVersion.get(),
-				                              toAdd,
-				                              SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
-				                              SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
-				ASSERT_GT(self->version, rep.prevVersion);
-			} else {
-				self->version = self->version + toAdd;
-			}
-
-			CODE_PROBE(self->version - rep.prevVersion == 1, "Minimum possible version gap");
-
-			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			CODE_PROBE(maxVersionGap, "Maximum possible version gap");
-			self->lastVersionTime = t1;
-
-			self->resolutionBalancer.setChangesInReply(req.requestingProxy, rep);
-		}
-
-		rep.version = self->version;
-		rep.requestNum = req.requestNum;
-
-		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
-		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
-		proxyItr->second.replies[req.requestNum] = rep;
-		ASSERT(rep.prevVersion >= 0);
-
-		req.reply.send(rep);
-
-		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
-		proxyItr->second.latestRequestNum.set(req.requestNum);
-	}
-
-	return Void();
-}
-#endif
-
-#define getVersion getVersionSwift
 
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
