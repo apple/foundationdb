@@ -33,7 +33,7 @@ template <class T>
 struct IsMetricHandle<MetricHandle<T>> : std::true_type {};
 
 template <class T, class ValueType = T>
-struct SWIFT_CXX_REF_IMMORTAL Notified {
+struct Notified {
 	explicit Notified(ValueType v = 0) { val = v; }
 
 	[[nodiscard]] Future<Void> whenAtLeast(const ValueType& limit) {

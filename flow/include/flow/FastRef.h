@@ -98,7 +98,7 @@ void delref(P* ptr) {
 }
 
 template <class P>
-class SWIFT_CXX_REF_IMMORTAL Reference {
+class Reference {
 public:
 	Reference() : ptr(nullptr) {}
 	explicit Reference(P* ptr) : ptr(ptr) {}
