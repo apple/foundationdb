@@ -337,16 +337,12 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		self->lastEpochEnd = req.lastEpochEnd;
 
 		if (req.commitProxies.size() > 0) {
+            std::vector<UID> registeredUIDs;
+            for (size_t j = 0; j < req.commitProxies.size(); ++j)
+                registeredUIDs.push_back(req.commitProxies[j].id());
             auto promise = Promise<Void>();
-			self->swiftImpl->clearLastCommitProxyVersionReplies(promise);
+            self->swiftImpl->registerLastCommitProxyVersionReplies(registeredUIDs, promise);
             wait(promise.getFuture());
-
-            // FIXME: Get this working:
-			/*for (auto& p : req.commitProxies) {
-                auto promise = Promise<Void>();
-                self->swiftImpl->registerLastCommitProxyVersionReply(p.id(), promise);
-                wait(promise.getFuture());
-			}*/
 		}
 		if (req.versionEpoch.present()) {
 			self->referenceVersion = req.versionEpoch.get();

@@ -151,6 +151,8 @@ inline void delrefMasterData(MasterData* ptr) {
 
 using ReferenceMasterData = Reference<MasterData>;
 
+using StdVectorOfUIDs = std::vector<UID>;
+
 // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
 void swift_workaround_retainMasterData(MasterData *rd);
 // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
@@ -159,6 +161,16 @@ void swift_workaround_releaseMasterData(MasterData *rd);
 // FIXME: Workaround for linker issue (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
+
+// FIXME: Remove after https://github.com/apple/swift/issues/61730 is fixed.
+inline void swift_workaround_vtable_link_issue_direct_call() {
+    MetricNameRef *nr = nullptr;
+    VersionMetric m(*nr, 0);
+    MetricKeyRef *mk = nullptr;
+    MetricUpdateBatch *b = nullptr;
+    m.flushData(*mk, 0, *b);
+    m.onEnable();
+}
 
 #include "flow/unactorcompiler.h"
 #endif

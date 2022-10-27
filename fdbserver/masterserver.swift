@@ -59,17 +59,17 @@ public class CommitProxyVersionReplies {
 }
 
 public actor MasterDataActor {
-    var lastCommitProxyVersionReplies: [UID: CommitProxyVersionReplies] = [:]
+    var lastCommitProxyVersionReplies: [Flow.UID: CommitProxyVersionReplies] = [:]
 
     init() {
     }
 
-    func clearLastCommitProxyVersionReplies() {
+    func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs) async {
         lastCommitProxyVersionReplies = [:]
-    }
-
-    func registerLastCommitProxyVersionReply(uid: UID) {
-        lastCommitProxyVersionReplies[uid] = CommitProxyVersionReplies()
+        // FIXME: Make this a for-in loop once we have automatic Sequence conformance.
+        for i in 0..<uids.size() {
+            lastCommitProxyVersionReplies[uids[i]] = CommitProxyVersionReplies()
+        }
     }
 
     func getVersion(cxxState myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
@@ -145,6 +145,7 @@ public actor MasterDataActor {
 
         assert(lastVersionReplies.latestRequestNum.get() == req.requestNum - 1)
         lastVersionReplies.latestRequestNum.set(Int(req.requestNum))
+        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> version: \(rep.version)")
         return rep
     }
 }
@@ -158,18 +159,10 @@ public struct MasterDataActorCxx {
     public init() {
         myself = MasterDataActor()
     }
-    
-    public func clearLastCommitProxyVersionReplies(result promise: PromiseVoid) {
-        Task {
-            await myself.clearLastCommitProxyVersionReplies()
-            var result = Flow.Void()
-            promise.send(&result)
-        }
-    }
 
-    public func registerLastCommitProxyVersionReply(uid: UID, result promise: PromiseVoid) {
+    public func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs, result promise: PromiseVoid) {
         Task {
-            await myself.registerLastCommitProxyVersionReply(uid: uid)
+            await myself.registerLastCommitProxyVersionReplies(uids: uids)
             var result = Flow.Void()
             promise.send(&result)
         }
@@ -195,5 +188,10 @@ public struct MasterDataActorCxx {
             swift_workaround_releaseMasterData(cxxState)
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
+    }
+
+    // FIXME: remove once https://github.com/apple/swift/issues/61730 is fixed.
+    public func workaround_swift_vtable_issue() {
+        swift_workaround_vtable_link_issue_direct_call()
     }
 }
