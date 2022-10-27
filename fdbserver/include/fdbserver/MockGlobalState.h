@@ -148,8 +148,6 @@ public:
 
 	// Set key with a new value, the total bytes change from oldBytes to bytes
 	void set(KeyRef key, int64_t bytes, int64_t oldBytes);
-	// Insert key with a new value, the total bytes is `bytes`
-	void insert(KeyRef key, int64_t bytes);
 	// Clear key and its value of which the size is bytes
 	void clear(KeyRef key, int64_t bytes);
 	// Clear range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
@@ -175,12 +173,17 @@ protected:
 
 	// Assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
 	int64_t estimateRangeTotalBytes(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
+	// Decrease the intersecting shard bytes as if delete the data
+	void clearRangeTotalBytes(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
+
 	// Update the storage metrics as if we write the MVCC storage with a mutation of `size` bytes.
 	void notifyMvccStorageCost(KeyRef key, int64_t size);
 
 	Future<Void> fetchKeys(const FetchKeysParams&);
 
 	void byteSampleApplySet(KeyRef key, int64_t kvSize);
+
+	void byteSampleApplyClear(KeyRangeRef range);
 };
 
 class MockGlobalStateImpl;

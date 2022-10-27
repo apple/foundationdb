@@ -255,7 +255,10 @@ void MockStorageServer::twoWayShardSplitting(KeyRangeRef range,
 void MockStorageServer::removeShard(KeyRangeRef range) {
 	auto ranges = serverKeys.containedRanges(range);
 	ASSERT(ranges.begin().range() == range);
+	auto rangeSize = sumRangeSize(range);
+	availableDiskSpace += rangeSize;
 	serverKeys.rawErase(range);
+	byteSampleApplyClear(range);
 	metrics.notifyNotReadable(range);
 }
 
@@ -295,20 +298,26 @@ Future<Void> MockStorageServer::run() {
 
 void MockStorageServer::set(KeyRef key, int64_t bytes, int64_t oldBytes) {
 	notifyMvccStorageCost(key, bytes);
+	byteSampleApplySet(key, bytes);
+	auto delta = oldBytes - bytes;
+	availableDiskSpace += delta;
+	serverKeys[key].shardSize += delta;
 }
 
-void MockStorageServer::insert(KeyRef key, int64_t bytes) {
-	notifyMvccStorageCost(key, bytes);
-}
-
-// TODO: finish clear implementation. Currently the clear operations are not used.
 void MockStorageServer::clear(KeyRef key, int64_t bytes) {
 	notifyMvccStorageCost(key, bytes);
+	KeyRange sr = singleKeyRange(key);
+	byteSampleApplyClear(sr);
+	availableDiskSpace += bytes;
+	serverKeys[key].shardSize -= bytes;
 }
 
 void MockStorageServer::clearRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes) {
 	notifyMvccStorageCost(range.begin, range.begin.size() + range.end.size());
-	// auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
+	byteSampleApplyClear(range);
+	auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
+	availableDiskSpace += totalByteSize;
+	clearRangeTotalBytes(range, beginShardBytes, endShardBytes);
 }
 
 void MockStorageServer::get(KeyRef key, int64_t bytes) {
@@ -347,6 +356,25 @@ int64_t MockStorageServer::estimateRangeTotalBytes(KeyRangeRef range, int64_t be
 	return totalByteSize;
 }
 
+void MockStorageServer::clearRangeTotalBytes(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes) {
+	auto ranges = serverKeys.intersectingRanges(range);
+
+	// use the beginShardBytes as partial size
+	if (ranges.begin().begin() < range.begin) {
+		auto delta = std::min(ranges.begin().value().shardSize, (uint64_t)beginShardBytes);
+		ranges.begin().value().shardSize -= delta;
+		ranges.pop_front();
+	}
+	// use the endShardBytes as partial size
+	if (ranges.end().begin() < range.end) {
+		auto delta = std::min(ranges.end().value().shardSize, (uint64_t)endShardBytes);
+		ranges.end().value().shardSize -= delta;
+	}
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		it->value().shardSize = 0;
+	}
+}
+
 void MockStorageServer::notifyMvccStorageCost(KeyRef key, int64_t size) {
 	// update write bandwidth and iops as mock the cost of writing mvcc storage
 	StorageMetrics s;
@@ -382,6 +410,33 @@ void MockStorageServer::byteSampleApplySet(KeyRef key, int64_t kvSize) {
 
 	if (delta)
 		metrics.notifyBytes(key, delta);
+}
+
+void MockStorageServer::byteSampleApplyClear(KeyRangeRef range) {
+	// Update byteSample in memory and (eventually) on disk via the mutationLog and notify waiting metrics
+
+	auto& byteSample = metrics.byteSample.sample;
+	bool any = false;
+
+	if (range.begin < allKeys.end) {
+		// NotifyBytes should not be called for keys past allKeys.end
+		KeyRangeRef searchRange = KeyRangeRef(range.begin, std::min(range.end, allKeys.end));
+
+		auto r = metrics.waitMetricsMap.intersectingRanges(searchRange);
+		for (auto shard = r.begin(); shard != r.end(); ++shard) {
+			KeyRangeRef intersectingRange = shard.range() & range;
+			int64_t bytes = byteSample.sumRange(intersectingRange.begin, intersectingRange.end);
+			metrics.notifyBytes(shard, -bytes);
+			any = any || bytes > 0;
+		}
+	}
+
+	if (range.end > allKeys.end && byteSample.sumRange(std::max(allKeys.end, range.begin), range.end) > 0)
+		any = true;
+
+	if (any) {
+		byteSample.eraseAsync(range.begin, range.end);
+	}
 }
 
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
