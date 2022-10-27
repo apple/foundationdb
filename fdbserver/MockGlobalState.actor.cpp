@@ -148,7 +148,7 @@ public:
 			}
 		}
 
-		self->setShardStatus(params.keys, MockShardStatus::TRANSFERRED, true);
+		self->setShardStatus(params.keys, MockShardStatus::FETCHED, true);
 		return Void();
 	}
 };
@@ -159,6 +159,17 @@ bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus s
 
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		if (it->cvalue().status != status)
+			return false;
+	}
+	return true;
+}
+
+bool MockStorageServer::allShardStatusIn(KeyRangeRef range, const std::set<MockShardStatus>& status) {
+	auto ranges = serverKeys.intersectingRanges(range);
+	ASSERT(!ranges.empty()); // at least the range is allKeys
+
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		if (!status.count(it->cvalue().status))
 			return false;
 	}
 	return true;
@@ -192,7 +203,7 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 		if (isStatusTransitionValid(oldStatus, status)) {
 			it.value() = ShardInfo{ status, newSize };
 		} else if (oldStatus == MockShardStatus::COMPLETED &&
-		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::TRANSFERRED)) {
+		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
 			CODE_PROBE(true, "Shard already on server");
 		} else {
 			TraceEvent(SevError, "MockShardStatusTransitionError")
@@ -413,7 +424,7 @@ void MockStorageServer::byteSampleApplySet(KeyRef key, int64_t kvSize) {
 }
 
 void MockStorageServer::byteSampleApplyClear(KeyRangeRef range) {
-	// Update byteSample in memory and (eventually) on disk via the mutationLog and notify waiting metrics
+	// Update byteSample and notify waiting metrics
 
 	auto& byteSample = metrics.byteSample.sample;
 	bool any = false;
@@ -483,7 +494,8 @@ bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shar
 
 	// check serverKeys
 	auto& mss = allServers.at(serverId);
-	if (!mss.allShardStatusEqual(shard, MockShardStatus::INFLIGHT)) {
+	if (!mss.allShardStatusIn(shard,
+	                          { MockShardStatus::INFLIGHT, MockShardStatus::COMPLETED, MockShardStatus::FETCHED })) {
 		return false;
 	}
 

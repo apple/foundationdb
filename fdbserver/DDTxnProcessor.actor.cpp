@@ -680,7 +680,7 @@ Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 }
 
 struct DDMockTxnProcessorImpl {
-	// return when all status become TRANSFERRED
+	// return when all status become FETCHED
 	ACTOR static Future<Void> checkFetchingState(DDMockTxnProcessor* self, std::vector<UID> ids, KeyRangeRef range) {
 		loop {
 			wait(delayJittered(1.0));
@@ -688,8 +688,7 @@ struct DDMockTxnProcessorImpl {
 			KeyRangeRef cloneRef;
 			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
 				    auto& server = selfP->mgs->allServers.at(id);
-				    return server.allShardStatusEqual(cloneRef, MockShardStatus::TRANSFERRED) ||
-				           server.allShardStatusEqual(cloneRef, MockShardStatus::COMPLETED);
+				    return server.allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
 			    })) {
 				break;
 			}

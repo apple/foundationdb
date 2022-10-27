@@ -35,7 +35,7 @@ enum class MockShardStatus {
 	EMPTY = 0, // data loss
 	COMPLETED,
 	INFLIGHT,
-	TRANSFERRED, // finish fetch Keys but not change the serverKey mapping. Only can be set by MSS itself.
+	FETCHED, // finish fetch but not change the serverKey mapping. Only can be set by MSS itself.
 	UNSET
 };
 
@@ -45,8 +45,8 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 	case MockShardStatus::EMPTY:
 		return to == MockShardStatus::COMPLETED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
 	case MockShardStatus::INFLIGHT:
-		return to == MockShardStatus::TRANSFERRED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
-	case MockShardStatus::TRANSFERRED:
+		return to == MockShardStatus::FETCHED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
+	case MockShardStatus::FETCHED:
 		return to == MockShardStatus::COMPLETED;
 	case MockShardStatus::COMPLETED:
 		return to == MockShardStatus::EMPTY;
@@ -80,7 +80,7 @@ public:
 	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
 
 	// control plane statistics associated with a real storage server
-	uint64_t usedDiskSpace = 0, availableDiskSpace = DEFAULT_DISK_SPACE;
+	uint64_t totalDiskSpace = DEFAULT_DISK_SPACE, availableDiskSpace = DEFAULT_DISK_SPACE;
 
 	// In-memory counterpart of the `serverKeys` in system keyspace
 	// the value ShardStatus is [InFlight, Completed, Empty] and metrics uint64_t is the shard size, the caveat is the
@@ -96,7 +96,8 @@ public:
 	MockStorageServer() = default;
 
 	MockStorageServer(StorageServerInterface ssi, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
-	  : usedDiskSpace(usedDiskSpace), availableDiskSpace(availableDiskSpace), ssi(ssi), id(ssi.id()) {}
+	  : totalDiskSpace(usedDiskSpace + availableDiskSpace), availableDiskSpace(availableDiskSpace), ssi(ssi),
+	    id(ssi.id()) {}
 
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
 	  : MockStorageServer(StorageServerInterface(id), availableDiskSpace, usedDiskSpace) {}
@@ -104,6 +105,7 @@ public:
 	decltype(serverKeys)::Ranges getAllRanges() { return serverKeys.ranges(); }
 
 	bool allShardStatusEqual(KeyRangeRef range, MockShardStatus status);
+	bool allShardStatusIn(KeyRangeRef range, const std::set<MockShardStatus>& status);
 
 	// change the status of range. This function may result in split to make the shard boundary align with range.begin
 	// and range.end. In this case, if restrictSize==true, the sum of the split shard size is strictly equal to the old
@@ -113,6 +115,7 @@ public:
 	// this function removed an aligned range from server
 	void removeShard(KeyRangeRef range);
 
+	// intersecting range size
 	uint64_t sumRangeSize(KeyRangeRef range) const;
 
 	void addActor(Future<Void> future) override;
@@ -144,7 +147,7 @@ public:
 
 	Future<Void> run();
 
-	// data operation APIs - change the metrics
+	// data operation APIs - change the metrics sample, disk space and shard size
 
 	// Set key with a new value, the total bytes change from oldBytes to bytes
 	void set(KeyRef key, int64_t bytes, int64_t oldBytes);
@@ -159,6 +162,7 @@ public:
 	// Read range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
 	void getRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
 
+	// trigger the asynchronous fetch keys operation
 	void signalFetchKeys(KeyRangeRef range, int64_t rangeTotalBytes);
 
 protected:
@@ -179,10 +183,14 @@ protected:
 	// Update the storage metrics as if we write the MVCC storage with a mutation of `size` bytes.
 	void notifyMvccStorageCost(KeyRef key, int64_t size);
 
+	// Randomly generate keys and kv size between the fetch range, updating the byte sample.
+	// Once the fetchKeys return, the shard status will become FETCHED.
 	Future<Void> fetchKeys(const FetchKeysParams&);
 
+	// Update byte sample as if set a key value pair of which the size is kvSize
 	void byteSampleApplySet(KeyRef key, int64_t kvSize);
 
+	// Update byte sample as if clear a whole range
 	void byteSampleApplyClear(KeyRangeRef range);
 };
 
@@ -223,7 +231,7 @@ public:
 	 * Shard is in-flight.
 	 * * In mgs.shardMapping,the destination teams is non-empty for a given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Completed
-	 * * For each MSS belonging to the destination teams, mss.serverKeys[shard] = InFlight|Completed
+	 * * For each MSS belonging to the destination teams, mss.serverKeys[shard] = InFlight | Fetched | Completed
 	 * Shard is lost.
 	 * * In mgs.shardMapping,  the destination teams is empty for the given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Empty
