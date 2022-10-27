@@ -680,14 +680,32 @@ Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 }
 
 struct DDMockTxnProcessorImpl {
+	// return when all status become TRANSFERRED
+	ACTOR static Future<Void> checkFetchingState(DDMockTxnProcessor* self, std::vector<UID> ids, KeyRangeRef range) {
+		loop {
+			wait(delayJittered(1.0));
+			DDMockTxnProcessor* selfP = self;
+			KeyRangeRef cloneRef;
+			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
+				    auto& server = selfP->mgs->allServers.at(id);
+				    return server.allShardStatusEqual(cloneRef, MockShardStatus::TRANSFERRED) ||
+				           server.allShardStatusEqual(cloneRef, MockShardStatus::COMPLETED);
+			    })) {
+				break;
+			}
+		}
+		if (BUGGIFY_WITH_PROB(0.5)) {
+			wait(delayJittered(5.0));
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
 		state std::map<UID, StorageServerInterface> tssMapping;
 		self->rawStartMovement(params, tssMapping);
 		ASSERT(tssMapping.empty());
 
-		if (BUGGIFY_WITH_PROB(0.5)) {
-			wait(delayJittered(5.0));
-		}
+		wait(checkFetchingState(self, params.destinationTeam, params.keys));
 
 		self->rawFinishMovement(params, tssMapping);
 		if (!params.dataMovementComplete.isSet())
@@ -877,8 +895,12 @@ void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, 
 	destTeams.emplace_back(params.destinationTeam, true);
 	mgs->shardMapping->moveShard(params.keys, destTeams);
 
+	auto randomRangeSize =
+	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+		auto& server = mgs->allServers.at(id);
+		server.setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+		server.signalFetchKeys(params.keys, randomRangeSize);
 	}
 }
 

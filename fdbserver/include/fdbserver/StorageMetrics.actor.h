@@ -156,7 +156,10 @@ struct ByteSampleInfo {
 
 // Determines whether a key-value pair should be included in a byte sample
 // Also returns size information about the sample
-ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
+ByteSampleInfo isKeyValueInSample(KeyRef key, int64_t totalKvSize);
+inline ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
+	return isKeyValueInSample(keyValue.key, keyValue.key.size() + keyValue.value.size());
+}
 
 class IStorageMetricsService {
 public:

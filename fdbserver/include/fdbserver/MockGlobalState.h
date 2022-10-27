@@ -35,6 +35,7 @@ enum class MockShardStatus {
 	EMPTY = 0, // data loss
 	COMPLETED,
 	INFLIGHT,
+	TRANSFERRED, // finish fetch Keys but not change the serverKey mapping. Only can be set by MSS itself.
 	UNSET
 };
 
@@ -42,8 +43,11 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 	switch (from) {
 	case MockShardStatus::UNSET:
 	case MockShardStatus::EMPTY:
-	case MockShardStatus::INFLIGHT:
 		return to == MockShardStatus::COMPLETED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
+	case MockShardStatus::INFLIGHT:
+		return to == MockShardStatus::TRANSFERRED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
+	case MockShardStatus::TRANSFERRED:
+		return to == MockShardStatus::COMPLETED;
 	case MockShardStatus::COMPLETED:
 		return to == MockShardStatus::EMPTY;
 	default:
@@ -52,8 +56,10 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 	return false;
 }
 
+class MockStorageServerImpl;
 class MockStorageServer : public IStorageMetricsService {
 	friend struct MockGlobalStateTester;
+	friend class MockStorageServerImpl;
 
 	ActorCollection actors;
 
@@ -64,6 +70,11 @@ public:
 
 		bool operator==(const ShardInfo& a) const { return shardSize == a.shardSize && status == a.status; }
 		bool operator!=(const ShardInfo& a) const { return !(a == *this); }
+	};
+
+	struct FetchKeysParams {
+		KeyRange keys;
+		int64_t totalRangeBytes;
 	};
 
 	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
@@ -150,7 +161,11 @@ public:
 	// Read range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
 	void getRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
 
+	void signalFetchKeys(KeyRangeRef range, int64_t rangeTotalBytes);
+
 protected:
+	PromiseStream<FetchKeysParams> fetchKeysRequests;
+
 	void threeWayShardSplitting(KeyRangeRef outerRange,
 	                            KeyRangeRef innerRange,
 	                            uint64_t outerRangeSize,
@@ -162,6 +177,10 @@ protected:
 	int64_t estimateRangeTotalBytes(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
 	// Update the storage metrics as if we write the MVCC storage with a mutation of `size` bytes.
 	void notifyMvccStorageCost(KeyRef key, int64_t size);
+
+	Future<Void> fetchKeys(const FetchKeysParams&);
+
+	void byteSampleApplySet(KeyRef key, int64_t kvSize);
 };
 
 class MockGlobalStateImpl;

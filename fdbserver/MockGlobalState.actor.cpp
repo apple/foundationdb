@@ -114,6 +114,43 @@ public:
 		}
 		return Void();
 	}
+
+	ACTOR static Future<Void> serveMockStorageServer(MockStorageServer* self) {
+		state ActorCollection actors;
+		loop choose {
+			when(MockStorageServer::FetchKeysParams params = waitNext(self->fetchKeysRequests.getFuture())) {
+				if (!self->allShardStatusEqual(params.keys, MockShardStatus::COMPLETED)) {
+					actors.add(waitFetchKeysFinish(self, params));
+				}
+			}
+			when(wait(actors.getResult())) { ASSERT(false); }
+		}
+	}
+	ACTOR static Future<Void> waitFetchKeysFinish(MockStorageServer* self, MockStorageServer::FetchKeysParams params) {
+		// between each chunk delay for random time, and finally set the fetchComplete signal.
+		ASSERT(params.totalRangeBytes > 0);
+		state int chunkCount = std::ceil(params.totalRangeBytes * 1.0 / SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		state Key lastKey = params.keys.begin;
+
+		state int i = 0;
+		for (; i < chunkCount; ++i) {
+			wait(delayJittered(0.01));
+			int remainBytes = (chunkCount == 1 ? params.totalRangeBytes : SERVER_KNOBS->FETCH_BLOCK_BYTES);
+
+			while (remainBytes >= lastKey.size()) {
+				int maxSize = std::min(remainBytes, 130000) + 1;
+				int randomSize = deterministicRandom()->randomInt(lastKey.size(), maxSize);
+
+				self->availableDiskSpace -= randomSize;
+				self->byteSampleApplySet(lastKey, randomSize);
+				remainBytes -= randomSize;
+				lastKey = randomKeyBetween(KeyRangeRef(lastKey, params.keys.end));
+			}
+		}
+
+		self->setShardStatus(params.keys, MockShardStatus::TRANSFERRED, true);
+		return Void();
+	}
 };
 
 bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus status) {
@@ -133,7 +170,6 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 	if (ranges.begin().range().contains(range)) {
 		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
-		return;
 	}
 	if (ranges.begin().begin() < range.begin) {
 		CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
@@ -155,7 +191,8 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 		auto oldStatus = it.value().status;
 		if (isStatusTransitionValid(oldStatus, status)) {
 			it.value() = ShardInfo{ status, newSize };
-		} else if (oldStatus == MockShardStatus::COMPLETED && status == MockShardStatus::INFLIGHT) {
+		} else if (oldStatus == MockShardStatus::COMPLETED &&
+		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::TRANSFERRED)) {
 			CODE_PROBE(true, "Shard already on server");
 		} else {
 			TraceEvent(SevError, "MockShardStatusTransitionError")
@@ -176,6 +213,9 @@ void MockStorageServer::threeWayShardSplitting(KeyRangeRef outerRange,
                                                uint64_t outerRangeSize,
                                                bool restrictSize) {
 	ASSERT(outerRange.contains(innerRange));
+	if (outerRange == innerRange) {
+		return;
+	}
 
 	Key left = outerRange.begin;
 	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
@@ -216,6 +256,7 @@ void MockStorageServer::removeShard(KeyRangeRef range) {
 	auto ranges = serverKeys.containedRanges(range);
 	ASSERT(ranges.begin().range() == range);
 	serverKeys.rawErase(range);
+	metrics.notifyNotReadable(range);
 }
 
 uint64_t MockStorageServer::sumRangeSize(KeyRangeRef range) const {
@@ -247,7 +288,9 @@ Future<Void> MockStorageServer::run() {
 	ssi.initEndpoints();
 	ssi.startAcceptingRequests();
 	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
-	return serveStorageMetricsRequests(this, ssi);
+	addActor(serveStorageMetricsRequests(this, ssi));
+	addActor(MockStorageServerImpl::serveMockStorageServer(this));
+	return actors.getResult();
 }
 
 void MockStorageServer::set(KeyRef key, int64_t bytes, int64_t oldBytes) {
@@ -258,14 +301,14 @@ void MockStorageServer::insert(KeyRef key, int64_t bytes) {
 	notifyMvccStorageCost(key, bytes);
 }
 
+// TODO: finish clear implementation. Currently the clear operations are not used.
 void MockStorageServer::clear(KeyRef key, int64_t bytes) {
 	notifyMvccStorageCost(key, bytes);
 }
 
 void MockStorageServer::clearRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes) {
 	notifyMvccStorageCost(range.begin, range.begin.size() + range.end.size());
-
-	auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
+	// auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
 }
 
 void MockStorageServer::get(KeyRef key, int64_t bytes) {
@@ -310,6 +353,35 @@ void MockStorageServer::notifyMvccStorageCost(KeyRef key, int64_t size) {
 	s.bytesPerKSecond = mvccStorageBytes(size) / 2;
 	s.iosPerKSecond = 1;
 	metrics.notify(key, s);
+}
+
+void MockStorageServer::signalFetchKeys(KeyRangeRef range, int64_t rangeTotalBytes) {
+	fetchKeysRequests.send({ KeyRange(range), rangeTotalBytes });
+}
+
+Future<Void> MockStorageServer::fetchKeys(const MockStorageServer::FetchKeysParams& param) {
+	return MockStorageServerImpl::waitFetchKeysFinish(this, param);
+}
+
+void MockStorageServer::byteSampleApplySet(KeyRef key, int64_t kvSize) {
+	// Update byteSample in memory and notify waiting metrics
+	ByteSampleInfo sampleInfo = isKeyValueInSample(key, kvSize);
+	auto& byteSample = metrics.byteSample.sample;
+
+	int64_t delta = 0;
+	auto old = byteSample.find(key);
+	if (old != byteSample.end())
+		delta = -byteSample.getMetric(old);
+
+	if (sampleInfo.inSample) {
+		delta += sampleInfo.sampledSize;
+		byteSample.insert(key, sampleInfo.sampledSize);
+	} else if (old != byteSample.end()) {
+		byteSample.erase(old);
+	}
+
+	if (delta)
+		metrics.notifyBytes(key, delta);
 }
 
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
