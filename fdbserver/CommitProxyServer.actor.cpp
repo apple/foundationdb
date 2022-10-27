@@ -1619,6 +1619,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	for (const auto& m : pProxyCommitData->idempotencyClears) {
 		auto& tags = pProxyCommitData->tagsForKey(m.param1);
 		self->toCommit.addTags(tags);
+		// TODO(nwijetunga): Encrypt these mutations
 		self->toCommit.writeTypedMessage(m);
 	}
 	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
@@ -2534,7 +2535,7 @@ ACTOR static Future<Void> idempotencyIdsExpireServer(
 				status = &idStatus[key];
 				status->receivedCount += 1;
 				CODE_PROBE(status->expectedCount == 0, "ExpireIdempotencyIdRequest received before count is known");
-				if(status->expectedCount > 0) {
+				if (status->expectedCount > 0) {
 					ASSERT_LE(status->receivedCount, status->expectedCount);
 				}
 			}
