@@ -69,14 +69,10 @@ void swift_workaround_releaseMasterData(MasterData* _Nonnull rd) {
     rd->delref();
 }
 
-ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
-  using namespace fdbserver_swift;
-
-  auto masterDataActor = MasterDataActor::init(self.getPtr());
-
+ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
-  masterDataActor.getVersion(req, /*result=*/promise);
+  self->swiftImpl->getVersion(self.getPtr(), req, /*result=*/promise);
   wait(promise.getFuture());
   return Void();
 }
@@ -87,91 +83,69 @@ void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
     latestRequestNum.set(v);
 }
 
-ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
-	state Span span("M:getVersion"_loc, req.spanContext);
-	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
-	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
+CounterValue::CounterValue(std::string const& name, CounterCollection& collection) : value(std::make_shared<Counter>(name, collection)) {}
 
-	++self->getCommitVersionRequests;
-
-	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
-		// Request from invalid proxy (e.g. from duplicate recruitment request)
-		req.reply.send(Never());
-		return Void();
-	}
-
-	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up");
-	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
-
-	auto itr = proxyItr->second.replies.find(req.requestNum);
-	if (itr != proxyItr->second.replies.end()) {
-		CODE_PROBE(true, "Duplicate request for sequence");
-		req.reply.send(itr->second);
-	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
-		CODE_PROBE(true,
-		           "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
-		ASSERT(req.requestNum <
-		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
-		req.reply.send(Never());
-	} else {
-		GetCommitVersionReply rep;
-
-		if (self->version == invalidVersion) {
-			self->lastVersionTime = now();
-			self->version = self->recoveryTransactionVersion;
-			rep.prevVersion = self->lastEpochEnd;
-
-		} else {
-			double t1 = now();
-			if (BUGGIFY) {
-				t1 = self->lastVersionTime;
-			}
-
-			Version toAdd =
-			    std::max<Version>(1,
-			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
-
-			rep.prevVersion = self->version;
-			if (self->referenceVersion.present()) {
-				self->version = figureVersion(self->version,
-				                              g_network->timer(),
-				                              self->referenceVersion.get(),
-				                              toAdd,
-				                              SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
-				                              SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
-				ASSERT_GT(self->version, rep.prevVersion);
-			} else {
-				self->version = self->version + toAdd;
-			}
-
-			CODE_PROBE(self->version - rep.prevVersion == 1, "Minimum possible version gap");
-
-			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			CODE_PROBE(maxVersionGap, "Maximum possible version gap");
-			self->lastVersionTime = t1;
-
-			self->resolutionBalancer.setChangesInReply(req.requestingProxy, rep);
-		}
-
-		rep.version = self->version;
-		rep.requestNum = req.requestNum;
-
-		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
-		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
-		proxyItr->second.replies[req.requestNum] = rep;
-		ASSERT(rep.prevVersion >= 0);
-
-		req.reply.send(rep);
-
-		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
-		proxyItr->second.latestRequestNum.set(req.requestNum);
-	}
-
-	return Void();
+void CounterValue::operator+=(Value delta) {
+    value->operator +=(delta);
 }
 
-#define getVersion getVersionSwift
+void CounterValue::operator++() {
+    value->operator ++();
+}
+void CounterValue::clear() {
+    value->clear();
+}
+
+MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
+           MasterInterface const& myInterface,
+           ServerCoordinators const& coordinators,
+           ClusterControllerFullInterface const& clusterController,
+           Standalone<StringRef> const& dbId,
+           PromiseStream<Future<Void>> addActor,
+           bool forceRecovery)
+  : dbgid(myInterface.id()),
+  lastEpochEnd(invalidVersion),
+  recoveryTransactionVersion(invalidVersion),
+    liveCommittedVersion(invalidVersion),
+  databaseLocked(false),
+  minKnownCommittedVersion(invalidVersion),
+    coordinators(coordinators),
+  version(invalidVersion),
+  lastVersionTime(0),
+  myInterface(myInterface),
+    resolutionBalancer(&version),
+  forceRecovery(forceRecovery),
+  cc("Master", dbgid.toString()),
+    getCommitVersionRequests("GetCommitVersionRequests", cc),
+    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
+    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+    versionVectorTagUpdates("VersionVectorTagUpdates",
+                            dbgid,
+                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
+    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
+    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
+                               dbgid,
+                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+    waitForPrevLatencies("WaitForPrevLatencies",
+                         dbgid,
+                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+    addActor(addActor) {
+    logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
+    if (forceRecovery && !myInterface.locality.dcId().present()) {
+        TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
+        forceRecovery = false;
+    }
+    balancer = resolutionBalancer.resolutionBalancing();
+    locality = tagLocalityInvalid;
+    // FIXME: can we make a cleaner init?
+    swiftImpl.reset(new fdbserver_swift::MasterDataActor((const fdbserver_swift::MasterDataActor&)fdbserver_swift::MasterDataActor::init()));
+}
+
+MasterData::~MasterData() {}
 
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
@@ -261,7 +235,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	loop {
-		UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
+		state UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
 		TraceEvent("UpdateRecoveryData", self->dbgid)
 		    .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
 		    .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
@@ -275,11 +249,12 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		self->lastEpochEnd = req.lastEpochEnd;
 
 		if (req.commitProxies.size() > 0) {
-			self->lastCommitProxyVersionReplies.clear();
-
-			for (auto& p : req.commitProxies) {
-				self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
-			}
+            std::vector<UID> registeredUIDs;
+            for (size_t j = 0; j < req.commitProxies.size(); ++j)
+                registeredUIDs.push_back(req.commitProxies[j].id());
+            auto promise = Promise<Void>();
+            self->swiftImpl->registerLastCommitProxyVersionReplies(registeredUIDs, promise);
+            wait(promise.getFuture());
 		}
 		if (req.versionEpoch.present()) {
 			self->referenceVersion = req.versionEpoch.get();

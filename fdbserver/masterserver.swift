@@ -8,6 +8,17 @@ func clamp(_ v: Version, lowerBound: Version, upperBound: Version) -> Version {
     return max(min(v, upperBound), lowerBound)
 }
 
+// FIXME: This should be synthesized?
+extension Swift.Optional where Wrapped == Version {
+    init(cxxOptional value: OptionalVersion) {
+        guard value.present() else {
+            self = nil
+            return
+        }
+        self = Version(value.__getUnsafe().pointee)
+    }
+}
+
 func figureVersion(current: Version,
                    now: Double,
                    reference: Version,
@@ -31,52 +42,62 @@ func figureVersion(current: Version,
                            upperBound: current + toAdd + maxOffset)
 }
 
-extension NotifiedVersion {
-    func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
+extension NotifiedVersionValue {
+    mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
         var f = self.whenAtLeast(limit)
         try await f.waitValue
     }
 }
 
-public actor MasterDataActor {
-    let myself: MasterData
+public class CommitProxyVersionReplies {
+    var replies: [UInt64: GetCommitVersionReply] = [:]
+    var latestRequestNum: NotifiedVersionValue
+    
+    public init() {
+        latestRequestNum = NotifiedVersionValue(0)
+    }
+}
 
-    init(data: MasterData) {
-        self.myself = data
+public actor MasterDataActor {
+    var lastCommitProxyVersionReplies: [Flow.UID: CommitProxyVersionReplies] = [:]
+
+    init() {
     }
 
-    /// Reply still done via req.reply
-    func getVersion(req: GetCommitVersionRequest) async {
-        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> ")
-        let requestingProxyUID: UID = req.requestingProxy
-        myself.getGetCommitVersionRequests() += 1
+    func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs) async {
+        lastCommitProxyVersionReplies = [:]
+        // FIXME: Make this a for-in loop once we have automatic Sequence conformance.
+        for i in 0..<uids.size() {
+            lastCommitProxyVersionReplies[uids[i]] = CommitProxyVersionReplies()
+        }
+    }
 
-        // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
+    func getVersion(cxxState myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
+        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> ")
+
+        myself.getCommitVersionRequests += 1
+
+        guard let lastVersionReplies = lastCommitProxyVersionReplies[req.requestingProxy] else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
-            req.reply.sendNever()
-            return
+            return nil
         }
 
         // CODE_PROBE(lastVersionReplies.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up")
-        try! await lastVersionReplies.getLatestRequestNumRef()
+        try! await lastVersionReplies.latestRequestNum
             .atLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
 
-        // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        if lastVersionReplies.replies.count(UInt(req.requestNum)) != 0 {
+        if let lastReply = lastVersionReplies.replies[req.requestNum] {
             // NOTE: CODE_PROBE is macro, won't be imported
             // CODE_PROBE(true, "Duplicate request for sequence")
-            let lastVersionNum = lastVersionReplies.replies.__atUnsafe(UInt(req.requestNum))
-            req.reply.sendCopy(lastVersionNum.pointee) // TODO(swift): we should not require those to be inout
-            return
-         } else if (req.requestNum <= lastVersionReplies.getLatestRequestNumRef().get()) {
+            return lastReply
+         } else if (req.requestNum <= lastVersionReplies.latestRequestNum.get()) {
              // NOTE: CODE_PROBE is macro, won't be imported
              // CODE_PROBE(true, "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
-             assert(req.requestNum < lastVersionReplies.getLatestRequestNumRef().get()) // The latest request can never be acknowledged
-             req.reply.sendNever()
-             return
+             assert(req.requestNum < lastVersionReplies.latestRequestNum.get())
+             // The latest request can never be acknowledged
+             return nil
         }
-        
+    
         var rep = GetCommitVersionReply()
 
         if (myself.version == invalidVersion) {
@@ -93,14 +114,10 @@ public actor MasterDataActor {
                           getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS,
                           Version(Double(getServerKnobs().VERSIONS_PER_SECOND) * (t1 - myself.lastVersionTime))))
             rep.prevVersion = myself.version
-            if myself.referenceVersion.present() {
-                // FIXME: myself.referenceVersion.get()
-                // FIXME: getMutating() ambiguity
-                let r = myself.referenceVersion
-                // FIXME: Do not use r.__getUnsafe
+            if let referenceVersion = Swift.Optional(cxxOptional: myself.referenceVersion) {
                 myself.version = figureVersion(current: myself.version,
                                                now: SwiftGNetwork.timer(),
-                              reference: Version(r.__getUnsafe().pointee),
+                              reference: referenceVersion,
                               toAdd: toAdd,
                               maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
                               maxVersionRateOffset: getServerKnobs().MAX_VERSION_RATE_OFFSET)
@@ -122,22 +139,14 @@ public actor MasterDataActor {
         rep.requestNum = req.requestNum
         // print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
 
-        //  FIXME: figure out how to map:
-        //            // lastVersionReplies.replies.erase(
-        //            //        lastVersionReplies.replies.begin(),
-        //            //        lastVersionReplies.replies.upper_bound(req.mostRecentProcessedRequestNum))
-        eraseReplies(&lastVersionReplies.replies, req.mostRecentProcessedRequestNum)
-        lastVersionReplies.replies[UInt(req.requestNum)] = rep
+        lastVersionReplies.replies = lastVersionReplies.replies.filter({ $0.0 > req.mostRecentProcessedRequestNum })
+        lastVersionReplies.replies[req.requestNum] = rep
         assert(rep.prevVersion >= 0)
 
+        assert(lastVersionReplies.latestRequestNum.get() == req.requestNum - 1)
+        lastVersionReplies.latestRequestNum.set(Int(req.requestNum))
         print("[swift] getVersion impl, requestNum: \(req.requestNum) -> version: \(rep.version)")
-        req.reply.send(&rep)
-
-        assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
-        // FIXME: link issue (rdar://101092732).
-        // lastVersionReplies.getLatestRequestNumRef().set(Int(req.requestNum))
-        swift_workaround_setLatestRequestNumber(lastVersionReplies.getLatestRequestNumRef(),
-                                                Version(req.requestNum))
+        return rep
     }
 }
 
@@ -147,24 +156,42 @@ public struct MasterDataActorCxx {
     let myself: MasterDataActor
 
     /// Mirror actor initializer, and initialize `myself`.
-    public init(data: MasterData) {
-        myself = MasterDataActor(data: data)
+    public init() {
+        myself = MasterDataActor()
+    }
+
+    public func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs, result promise: PromiseVoid) {
+        Task {
+            await myself.registerLastCommitProxyVersionReplies(uids: uids)
+            var result = Flow.Void()
+            promise.send(&result)
+        }
     }
 
     /// Promise type must match result type of the target function.
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
-    public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
+    public func getVersion(cxxState: MasterData, req: GetCommitVersionRequest, result promise: PromiseVoid) {
         // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-        swift_workaround_retainMasterData(myself.myself)
+        swift_workaround_retainMasterData(cxxState)
         Task {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
-            await myself.getVersion(req: req)
+            if let rep = await myself.getVersion(cxxState: cxxState, req: req) {
+                var repMut = rep
+                req.reply.send(&repMut)
+            } else {
+                req.reply.sendNever()
+            }
             var result = Flow.Void()
             promise.send(&result)
             // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-            swift_workaround_releaseMasterData(myself.myself)
+            swift_workaround_releaseMasterData(cxxState)
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
+    }
+
+    // FIXME: remove once https://github.com/apple/swift/issues/61730 is fixed.
+    public func workaround_swift_vtable_issue() {
+        swift_workaround_vtable_link_issue_direct_call()
     }
 }

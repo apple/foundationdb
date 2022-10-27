@@ -255,10 +255,31 @@ inline void eraseReplies(MAP_UInt64_GetCommitVersionReply &replies,
                   replies.upper_bound(untilUpperBound));
 }
 
+// Swift value type interface for Notified.
+template <class T>
+struct NotifiedValue {
+    using ValueType = decltype(std::declval<T>().get());
+    explicit NotifiedValue(ValueType v = 0) : value(std::make_shared<T>(v)) { }
+
+    [[nodiscard]] __attribute__((swift_attr("import_unsafe"))) Future<Void> whenAtLeast(const ValueType& limit) {
+        return value->whenAtLeast(limit);
+    }
+
+    [[nodiscard]] ValueType get() const { return value->get(); }
+
+    void set(const ValueType& v) {
+        value->set(v);
+    }
+private:
+    std::shared_ptr<T> value;
+};
+
+using NotifiedVersionValue = NotifiedValue<NotifiedVersion>;
+
 // FIXME(swift): this isn't really a reference type but we can't create it unless a ref or copy constructor...
 struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
   MAP_UInt64_GetCommitVersionReply replies;
-	NotifiedVersion latestRequestNum;
+    NotifiedVersionValue latestRequestNum;
 
 	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
@@ -269,11 +290,6 @@ struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
 	}
 
 	CommitProxyVersionReplies() : latestRequestNum(0) {}
-
-  inline NotifiedVersion& getLatestRequestNumRef() {
-    return latestRequestNum;
-  }
-
 };
 
 // ==== ----------------------------------------------------------------------------------------------------------------
