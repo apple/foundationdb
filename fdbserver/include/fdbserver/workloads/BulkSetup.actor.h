@@ -252,7 +252,8 @@ Future<Void> bulkSetup(Database cx,
 	    .detail("NodeCount", nodeCount)
 	    .detail("ValuesInconsequential", valuesInconsequential)
 	    .detail("PostSetupWarming", postSetupWarming)
-	    .detail("MaxKeyInsertRate", maxKeyInsertRate);
+	    .detail("MaxKeyInsertRate", maxKeyInsertRate)
+	    .detail("NumTenants", tenants.size());
 
 	// For bulk data schemes where the value of the key is not critical to operation, check to
 	//  see if the database has already been set up.

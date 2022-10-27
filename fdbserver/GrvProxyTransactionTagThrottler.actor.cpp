@@ -110,8 +110,8 @@ void GrvProxyTransactionTagThrottler::addRequest(GetReadVersionRequest const& re
 }
 
 void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
-                                                          SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-                                                          SpannedDeque<GetReadVersionRequest>& outDefaultPriority) {
+                                                          Deque<GetReadVersionRequest>& outBatchPriority,
+                                                          Deque<GetReadVersionRequest>& outDefaultPriority) {
 	// Pointer to a TagQueue with some extra metadata stored alongside
 	struct TagQueueHandle {
 		// Store pointers here to avoid frequent std::unordered_map lookups
@@ -295,8 +295,8 @@ ACTOR static Future<Void> mockFifoClient(GrvProxyTransactionTagThrottler* thrott
 }
 
 ACTOR static Future<Void> mockServer(GrvProxyTransactionTagThrottler* throttler) {
-	state SpannedDeque<GetReadVersionRequest> outBatchPriority("TestGrvProxyTransactionTagThrottler_Batch"_loc);
-	state SpannedDeque<GetReadVersionRequest> outDefaultPriority("TestGrvProxyTransactionTagThrottler_Default"_loc);
+	state Deque<GetReadVersionRequest> outBatchPriority;
+	state Deque<GetReadVersionRequest> outDefaultPriority;
 	loop {
 		state double elapsed = (0.009 + 0.002 * deterministicRandom()->random01());
 		wait(delay(elapsed));
@@ -419,8 +419,8 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup2") {
 	throttler.updateRates(TransactionTagMap<double>{});
 	ASSERT_EQ(throttler.size(), 1);
 	{
-		SpannedDeque<GetReadVersionRequest> outBatchPriority("TestGrvProxyTransactionTagThrottler_Batch"_loc);
-		SpannedDeque<GetReadVersionRequest> outDefaultPriority("TestGrvProxyTransactionTagThrottler_Default"_loc);
+		Deque<GetReadVersionRequest> outBatchPriority;
+		Deque<GetReadVersionRequest> outDefaultPriority;
 		throttler.releaseTransactions(0.1, outBatchPriority, outDefaultPriority);
 	}
 	// Calling updates cleans up the queues in throttler

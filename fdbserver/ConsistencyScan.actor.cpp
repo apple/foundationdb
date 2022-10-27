@@ -29,7 +29,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
