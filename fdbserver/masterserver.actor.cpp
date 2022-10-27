@@ -77,6 +77,13 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
   return Void();
 }
 
+ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	auto promise = Promise<Void>();
+	self->swiftImpl->waitForPrev(self.getPtr(), req, /*result=*/promise);
+	wait(promise.getFuture());
+	return Void();
+}
+
 // FIXME: remove once linker issue is fixed (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v) {
@@ -158,39 +165,28 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
-void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
+void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequest req) {
+	self.minKnownCommittedVersion = std::max(self.minKnownCommittedVersion, req.minKnownCommittedVersion);
 
-	if (req.version > self->liveCommittedVersion.get()) {
+	if (req.version > self.liveCommittedVersion.get()) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
 			int8_t primaryLocality =
-			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self->locality : tagLocalityInvalid;
-			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
-			self->versionVectorTagUpdates.addMeasurement(req.writtenTags.get().size());
+			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self.locality : tagLocalityInvalid;
+			self.ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
+			self.versionVectorTagUpdates.addMeasurement(req.writtenTags.get().size());
 		}
 		auto curTime = now();
 		// add debug here to change liveCommittedVersion to time bound of now()
-		debug_advanceVersionTimestamp(self->liveCommittedVersion.get(), curTime + CLIENT_KNOBS->MAX_VERSION_CACHE_LAG);
+		debug_advanceVersionTimestamp(self.liveCommittedVersion.get(), curTime + CLIENT_KNOBS->MAX_VERSION_CACHE_LAG);
 		// also add req.version but with no time bound
 		debug_advanceVersionTimestamp(req.version, std::numeric_limits<double>::max());
-		self->databaseLocked = req.locked;
-		self->proxyMetadataVersion = req.metadataVersion;
+		self.databaseLocked = req.locked;
+		self.proxyMetadataVersion = req.metadataVersion;
 		// Note the set call switches context to any waiters on liveCommittedVersion before continuing.
-		self->liveCommittedVersion.set(req.version);
+		self.liveCommittedVersion.set(req.version);
 	}
-	++self->reportLiveCommittedVersionRequests;
-}
-
-ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	state double startTime = now();
-	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
-	double latency = now() - startTime;
-	self->waitForPrevLatencies.addMeasurement(latency);
-	++self->waitForPrevCommitRequests;
-	updateLiveCommittedVersion(self, req);
-	req.reply.send(Void());
-	return Void();
+	++self.reportLiveCommittedVersionRequests;
 }
 
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
@@ -224,7 +220,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
 					self->addActor.send(waitForPrev(self, req));
 				} else {
-					updateLiveCommittedVersion(self, req);
+					updateLiveCommittedVersion(*self, req);
 					++self->nonWaitForPrevCommitRequests;
 					req.reply.send(Void());
 				}

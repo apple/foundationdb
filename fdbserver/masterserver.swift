@@ -45,7 +45,7 @@ func figureVersion(current: Version,
 extension NotifiedVersionValue {
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
         var f = self.whenAtLeast(limit)
-        try await f.waitValue
+        let _ = try await f.waitValue
     }
 }
 
@@ -148,6 +148,48 @@ public actor MasterDataActor {
         print("[swift] getVersion impl, requestNum: \(req.requestNum) -> version: \(rep.version)")
         return rep
     }
+
+    // ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+    func waitForPrev(cxxState myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Void? {
+        print("[swift] waitForPrev impl, version: \(req.version) -> ")
+
+        // state double startTime = now();
+        let startTime = now()
+
+        // wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+        // NOTE.  To fix: error: value of type 'MasterData' has no member 'liveCommittedVersion'
+        // change type of liveCommittedVersion from NotifiedVersion to NotifiedVersionValue
+        // To fix: note: C++ method 'get' that returns unsafe projection of type 'reference' not imported
+        // replace call to get() with __getUnsafe()
+        // TODO: Why doesn't the C++ code check to see if prevVersion is present?
+        //try! await myself.liveCommittedVersion.atLeast(req.prevVersion.__getUnsafe().pointee/* TODO: Sane way to reference an Optional<Int>? */)
+        if let prevVersion = Swift.Optional(cxxOptional: req.prevVersion) {
+            // TODO: Something is funky. pointee could be implicitly cast to an Int.  prevVersion is an Int64.
+            try! await myself.liveCommittedVersion.atLeast(Int(prevVersion))
+        }
+            
+
+        // double latency = now() - startTime;
+        let latency = now() - startTime
+
+        // self->waitForPrevLatencies.addMeasurement(latency);
+        myself.waitForPrevLatencies.addMeasurement(latency)
+
+        // ++self->waitForPrevCommitRequests;
+        // Note.  To fix: error: value of type 'MasterData' has no member 'waitForPrevCommitRequests'
+        // change the field type in MasterData from Counter to CounterValue
+        myself.waitForPrevCommitRequests += 1;
+
+        // updateLiveCommittedVersion(self, req);
+        // NOTE.  To fix: error: cannot find 'updateLiveCommittedVersion' in scope
+        // Add the C++ declaration to the .h...
+        // Note:  To fix. cannot convert value of type 'MasterData' to expected argument type '__CxxTemplateInst9ReferenceI10MasterDataE'
+        // Change the C++ method to take a raw C++ reference instead of an FDB Reference<Foo> 
+        updateLiveCommittedVersion(myself, req)
+
+        // req.reply.send(Void());
+        return Void()
+    }
 }
 
 /// Bridge type that wraps the target actor.
@@ -189,6 +231,27 @@ public struct MasterDataActorCxx {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
     }
+
+    public func waitForPrev(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {
+        // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift waitForPrev impl!")
+        // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+        swift_workaround_retainMasterData(cxxState)
+        Task {
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
+            if let rep = await myself.waitForPrev(cxxState: cxxState, req: req) {
+                var repMut = rep
+                req.reply.send(&repMut)
+            } else {
+                req.reply.sendNever()
+            }
+            var result = Flow.Void()
+            promise.send(&result)
+            // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
+            swift_workaround_releaseMasterData(cxxState)
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
+        }
+    }
+
 
     // FIXME: remove once https://github.com/apple/swift/issues/61730 is fixed.
     public func workaround_swift_vtable_issue() {
