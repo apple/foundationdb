@@ -133,13 +133,13 @@ repeat_immediate_steps:
 				updateErrorStats(err, iter.op);
 				if (iter.stepKind() != StepKind::ON_ERROR) {
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
-						restartIteration();
+						FutureRC rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
+						restartIteration(rc);
 					});
 				} else {
 					// blob granules op error
-					handleForOnError(tx, f, "BG_ON_ERROR");
-					restartIteration();
+					FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR");
+					restartIteration(rc);
 				}
 			} else {
 				// async step succeeded
@@ -206,8 +206,8 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				                       err.what());
 				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
-					handleForOnError(tx, f, "ON_ERROR");
-					restartIteration();
+					FutureRC rc = handleForOnError(tx, f, "ON_ERROR");
+					restartIteration(rc);
 				});
 			} else {
 				// commit successful
@@ -223,7 +223,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				stats.incrOpCount(OP_TRANSACTION);
 				tx.reset();
 				watch_tx.startFromStop();
-				restartIteration();
+				restartIteration(FutureRC::OK);
 			}
 		});
 	} else {
@@ -236,11 +236,14 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		stats.incrOpCount(OP_TRANSACTION);
 		watch_tx.startFromStop();
 		tx.reset();
-		restartIteration();
+		restartIteration(FutureRC::OK);
 	}
 }
-void ResumableStateForRunWorkload::restartIteration() {
+void ResumableStateForRunWorkload::restartIteration(FutureRC rc) {
 	// restart current iteration from beginning unless ended
+	if (rc == FutureRC::OK || rc == FutureRC::ABORT) {
+		total_xacts++;
+	}
 	if (ended()) {
 		signalEnd();
 	} else {

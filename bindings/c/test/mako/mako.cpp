@@ -656,8 +656,10 @@ int runWorkload(Database db,
 			logr.warn("runOneTransaction failed ({})", rc);
 		}
 
+		xacts++;
+		total_xacts++;
 		if (thread_iters != -1) {
-			if (thread_iters >= total_xacts) {
+			if (total_xacts >= thread_iters) {
 				/* xact limit reached */
 				break;
 			}
@@ -665,8 +667,6 @@ int runWorkload(Database db,
 			/* signal turned red, target duration reached */
 			break;
 		}
-		xacts++;
-		total_xacts++;
 	}
 	return rc;
 }
@@ -1045,7 +1045,7 @@ Arguments::Arguments() {
 	rows = 100000;
 	load_factor = 1.0;
 	row_digits = digits(rows);
-	seconds = 30;
+	seconds = 0;
 	iteration = 0;
 	tpsmax = 0;
 	tpsmin = -1;
@@ -2371,6 +2371,11 @@ int main(int argc, char* argv[]) {
 	// Allow specifying only the number of active tenants, in which case # active = # total
 	if (args.active_tenants > 0 && args.total_tenants == 0) {
 		args.total_tenants = args.active_tenants;
+	}
+
+	// set --seconds in case not ending condition has been set
+	if (args.seconds == 0 && args.iteration == 0) {
+		args.seconds = 30; // default value accodring to documentation
 	}
 
 	rc = args.validate();
