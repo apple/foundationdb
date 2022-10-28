@@ -232,7 +232,7 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 		    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
 		throw encrypt_header_metadata_mismatch();
 	}
-	// Validate encryption header 'cipherHeader' details sanity
+	// Validate encryption header 'cipherText' details sanity
 	if (!(header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() &&
 	      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() &&
 	      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt())) {
