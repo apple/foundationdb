@@ -2644,7 +2644,8 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
 			                        "",
 			                        "",
-			                        currentProtocolVersion());
+			                        currentProtocolVersion(),
+			                        false);
 		}
 
 		workers.push_back(data);

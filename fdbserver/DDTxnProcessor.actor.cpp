@@ -221,21 +221,6 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<UID> getClusterId(Database cx) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-				ASSERT(clusterId.present());
-				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
@@ -681,10 +666,6 @@ Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 
 Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const {
 	return DDTxnProcessorImpl::tryUpdateReplicasKeyForDc(cx, dcId, storageTeamSize);
-}
-
-Future<UID> DDTxnProcessor::getClusterId() const {
-	return DDTxnProcessorImpl::getClusterId(cx);
 }
 
 Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {

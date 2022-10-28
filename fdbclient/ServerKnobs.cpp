@@ -1002,8 +1002,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Blob Metadata
 	init( BLOB_METADATA_CACHE_TTL, isSimulated ? 120 : 24 * 60 * 60 );
 	if ( randomize && BUGGIFY) { BLOB_METADATA_CACHE_TTL = deterministicRandom()->randomInt(50, 100); }
-	init( BLOB_METADATA_REFRESH_INTERVAL,   isSimulated ? 60 : 60 * 60 );
-	if ( randomize && BUGGIFY) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
 
 	// HTTP KMS Connector
 	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");
@@ -1023,6 +1021,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
+
+	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
+	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.
+	init( IDEMPOTENCY_ID_IN_MEMORY_LIFETIME,                       10);
 
 	// clang-format on
 

@@ -92,8 +92,6 @@ void decodeKeyServersValue(RangeResult result,
                            UID& destID,
                            bool missingIsError = true);
 
-extern const KeyRef clusterIdKey;
-
 extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
@@ -510,6 +508,9 @@ extern const KeyRef latencyBandConfigKey;
 extern const KeyRangeRef timeKeeperPrefixRange;
 extern const KeyRef timeKeeperVersionKey;
 extern const KeyRef timeKeeperDisableKey;
+
+// Durable cluster ID key
+extern const KeyRef clusterIdKey;
 
 // Layer status metadata prefix
 extern const KeyRangeRef layerStatusMetaPrefixRange;

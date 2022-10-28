@@ -284,12 +284,10 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transaction/write_conflict_range/"_sr,
                                                             "\xff\xff/transaction/write_conflict_range/\xff\xff"_sr);
 
-const KeyRef clusterIdKey = "\xff/clusterId"_sr;
-
-extern const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
-extern const KeyRef auditPrefix = auditKeys.begin;
-extern const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
-extern const KeyRef auditRangePrefix = auditRanges.begin;
+const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
+const KeyRef auditPrefix = auditKeys.begin;
+const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
+const KeyRef auditRangePrefix = auditRanges.begin;
 
 const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
@@ -1088,6 +1086,11 @@ const KeyRef latencyBandConfigKey = "\xff\x02/latencyBandConfig"_sr;
 const KeyRangeRef timeKeeperPrefixRange("\xff\x02/timeKeeper/map/"_sr, "\xff\x02/timeKeeper/map0"_sr);
 const KeyRef timeKeeperVersionKey = "\xff\x02/timeKeeper/version"_sr;
 const KeyRef timeKeeperDisableKey = "\xff\x02/timeKeeper/disable"_sr;
+
+// Durable cluster ID key. Added "Key" to the end to differentiate from the key
+// "\xff/clusterId" which was stored in the txnStateStore in FDB 7.1, whereas
+// this key is stored in the database in 7.2+.
+const KeyRef clusterIdKey = "\xff/clusterIdKey"_sr;
 
 // Backup Log Mutation constant variables
 const KeyRef backupEnabledKey = "\xff/backupEnabled"_sr;
