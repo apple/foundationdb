@@ -246,3 +246,13 @@ void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, c
 auto ShardsAffectedByTeamFailure::intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges {
 	return shard_teams.intersectingRanges(keyRange);
 }
+
+std::vector<UID> ShardsAffectedByTeamFailure::getSourceServerIdsFor(KeyRef key) {
+	auto teamPair = getTeamsFor(key);
+	std::set<UID> res;
+	auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
+	for (auto& team : srcTeams) {
+		res.insert(team.servers.begin(), team.servers.end());
+	}
+	return std::vector<UID>(res.begin(), res.end());
+}

@@ -86,6 +86,8 @@ public:
 
 	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRef key);
 
+	std::vector<UID> getSourceServerIdsFor(KeyRef key);
+
 	// Shard boundaries are modified in defineShard and the content of what servers correspond to each shard is a copy
 	// or union of the shards already there
 	void defineShard(KeyRangeRef keys);

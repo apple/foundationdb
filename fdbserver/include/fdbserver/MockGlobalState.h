@@ -80,7 +80,7 @@ public:
 	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
 
 	// control plane statistics associated with a real storage server
-	uint64_t totalDiskSpace = DEFAULT_DISK_SPACE, availableDiskSpace = DEFAULT_DISK_SPACE;
+	uint64_t totalDiskSpace = DEFAULT_DISK_SPACE, usedDiskSpace = DEFAULT_DISK_SPACE;
 
 	// In-memory counterpart of the `serverKeys` in system keyspace
 	// the value ShardStatus is [InFlight, Completed, Empty] and metrics uint64_t is the shard size, the caveat is the
@@ -96,8 +96,7 @@ public:
 	MockStorageServer() = default;
 
 	MockStorageServer(StorageServerInterface ssi, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
-	  : totalDiskSpace(usedDiskSpace + availableDiskSpace), availableDiskSpace(availableDiskSpace), ssi(ssi),
-	    id(ssi.id()) {}
+	  : totalDiskSpace(usedDiskSpace + availableDiskSpace), usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
 
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
 	  : MockStorageServer(StorageServerInterface(id), availableDiskSpace, usedDiskSpace) {}
@@ -154,13 +153,15 @@ public:
 	// Clear key and its value of which the size is bytes
 	void clear(KeyRef key, int64_t bytes);
 	// Clear range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
-	void clearRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
+	// return the total range size
+	int64_t clearRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
 
 	// modify the metrics as like doing an n-bytes read op
 	// Read key and cause bytes read overhead
 	void get(KeyRef key, int64_t bytes);
-	// Read range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
-	void getRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
+	// Read range, assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`,
+	// return the total range size;
+	int64_t getRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
 
 	// trigger the asynchronous fetch keys operation
 	void signalFetchKeys(KeyRangeRef range, int64_t rangeTotalBytes);
@@ -280,6 +281,26 @@ public:
 	                                                               Optional<UID> debugID,
 	                                                               UseProvisionalProxies useProvisionalProxies,
 	                                                               Version version) override;
+
+	// data ops
+	// MGS finds the shard X contains this key, randomly generates a N-bytes read operation on that shard, which may
+	// change the read sampling stats of shard X. return the random size of value
+	int64_t get(KeyRef key);
+	// For the edge shards contains the range boundaries, randomly do N1 byte and N2 byte read operations. For other
+	// shards fully within the range, mock a full shard read op.
+	int64_t getRange(KeyRangeRef range);
+	// MGS finds the shard X contains this key, mock an N-bytes write to shard X, where N = valueSize + key.size().
+	// Return a random number representing the old kv size
+	int64_t set(KeyRef key, int valueSize, bool insert);
+	// MGS finds the shard X contains this key, randomly generate an N-byte clear operation.
+	// Return a random number representing the old kv size
+	int64_t clear(KeyRef key);
+	// Similar as getRange, but need to change shardTotalBytes because this is a clear operation.
+	int64_t clearRange(KeyRangeRef range);
+
+	// convenient shortcuts for test
+	std::vector<Future<Void>> runAllMockServers();
+	Future<Void> runMockServer(const UID& id);
 };
 
 #endif // FOUNDATIONDB_MOCKGLOBALSTATE_H
