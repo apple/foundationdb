@@ -196,7 +196,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
                                 ResolveTransactionBatchRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db) {
+                                Reference<AsyncVar<ServerDBInfo> const> db,
+                                std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys) {
 	state Optional<UID> debugID;
 	state Span span("R:resolveBatch"_loc, req.spanContext);
 
@@ -351,7 +352,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
-				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
+				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations, cipherKeys);
 			}
 			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
@@ -506,8 +507,10 @@ struct TransactionStateResolveContext {
 	}
 };
 
-ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext,
-                                                          Reference<AsyncVar<ServerDBInfo> const> db) {
+ACTOR Future<Void> processCompleteTransactionStateRequest(
+    TransactionStateResolveContext* pContext,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;
 
@@ -574,7 +577,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		bool confChanges; // Ignore configuration changes for initial commits.
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
-		applyMetadataMutations(SpanContext(), resolverData, mutations);
+		applyMetadataMutations(SpanContext(), resolverData, mutations, cipherKeys);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
@@ -586,9 +589,11 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 	return Void();
 }
 
-ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext,
-                                                      TxnStateRequest request,
-                                                      Reference<AsyncVar<ServerDBInfo> const> db) {
+ACTOR Future<Void> processTransactionStateRequestPart(
+    TransactionStateResolveContext* pContext,
+    TxnStateRequest request,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys) {
 	ASSERT(pContext->pResolverData.getPtr() != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
@@ -615,7 +620,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(pContext, db));
+		wait(processCompleteTransactionStateRequest(pContext, db, cipherKeys));
 		pContext->processed = true;
 	}
 
@@ -675,9 +680,24 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 		}
 	}
 
+	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
+			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
+			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
+		};
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+		    wait(getLatestEncryptCipherKeys(db, metadataDomains, BlobCipherMetrics::TLOG));
+		cipherKeys = cks;
+	}
+
 	loop choose {
 		when(ResolveTransactionBatchRequest batch = waitNext(resolver.resolve.getFuture())) {
-			actors.add(resolveBatch(self, batch, db));
+			actors.add(
+			    resolveBatch(self,
+			                 batch,
+			                 db,
+			                 isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys : nullptr));
 		}
 		when(ResolutionMetricsRequest req = waitNext(resolver.metrics.getFuture())) {
 			++self->metricsRequests;
@@ -700,7 +720,11 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 		}
 		when(TxnStateRequest request = waitNext(resolver.txnState.getFuture())) {
 			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-				addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request, db));
+				addActor.send(processTransactionStateRequestPart(
+				    &transactionStateResolveContext,
+				    request,
+				    db,
+				    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys : nullptr));
 			} else {
 				ASSERT(false);
 			}

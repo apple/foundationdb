@@ -1266,6 +1266,12 @@ ACTOR Future<MutationRef> writeMutation(CommitBatchContext* self,
 	if (self->pProxyCommitData->isEncryptionEnabled) {
 		state EncryptCipherDomainId domainId = tenantId;
 		state MutationRef encryptedMutation;
+		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::DISABLED,
+		           "using disabled tenant mode");
+		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::OPTIONAL_TENANT,
+		           "using optional tenant mode");
+		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED,
+		           "using required tenant mode");
 
 		if (encryptedMutationOpt->present()) {
 			CODE_PROBE(true, "using already encrypted mutation");
@@ -1299,6 +1305,8 @@ ACTOR Future<MutationRef> writeMutation(CommitBatchContext* self,
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 			encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
 		}
+		ASSERT(encryptedMutation.isEncrypted());
+		CODE_PROBE(true, "encrypting non-metadata mutations");
 		self->toCommit.writeTypedMessage(encryptedMutation);
 		return encryptedMutation;
 	} else {
@@ -1473,12 +1481,12 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			if (!hasCandidateBackupKeys) {
 				continue;
 			}
-
 			if (m.type != MutationRef::Type::ClearRange) {
 				// Add the mutation to the relevant backup tag
 				for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
 					// If encryption is enabled make sure the mutation we are writing is also encrypted
 					ASSERT(!self->pProxyCommitData->isEncryptionEnabled || writtenMutation.isEncrypted());
+					CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
 					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
 				}
 			} else {
@@ -1500,6 +1508,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must be
 					// changed to account for clear ranges which span tenant boundaries
 					if (self->pProxyCommitData->isEncryptionEnabled) {
+						CODE_PROBE(true, "encrypting clear range backup mutation");
 						if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
 						    encryptedMutation.present()) {
 							backupMutation = encryptedMutation.get();
@@ -1510,6 +1519,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 							backupMutation =
 							    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
 						}
+						ASSERT(backupMutation.isEncrypted());
 					}
 
 					// Add the mutation to the relevant backup tag
@@ -1613,14 +1623,32 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                            idempotencyIdSet.param2 = kv.value;
 		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
 		                            self->toCommit.addTags(tags);
-		                            self->toCommit.writeTypedMessage(idempotencyIdSet);
+		                            if (self->pProxyCommitData->isEncryptionEnabled) {
+			                            CODE_PROBE(true, "encrypting idempotency mutation");
+			                            std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
+			                            Arena arena;
+			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
+			                                self->cipherKeys, p.second, arena, BlobCipherMetrics::TLOG);
+			                            self->toCommit.writeTypedMessage(encryptedMutation);
+		                            } else {
+			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
+		                            }
 	                            });
 
 	for (const auto& m : pProxyCommitData->idempotencyClears) {
 		auto& tags = pProxyCommitData->tagsForKey(m.param1);
 		self->toCommit.addTags(tags);
-		// TODO(nwijetunga): Encrypt these mutations
-		self->toCommit.writeTypedMessage(m);
+		if (self->pProxyCommitData->isEncryptionEnabled) {
+			CODE_PROBE(true, "encrypting idempotency clear mutation");
+			std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+			    getEncryptDetailsFromMutationRef(self->pProxyCommitData, m);
+			Arena arena;
+			MutationRef encryptedMutation = m.encrypt(self->cipherKeys, p.second, arena, BlobCipherMetrics::TLOG);
+			self->toCommit.writeTypedMessage(encryptedMutation);
+		} else {
+			self->toCommit.writeTypedMessage(m);
+		}
 	}
 	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
 
