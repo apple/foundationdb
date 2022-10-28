@@ -788,7 +788,7 @@ public:
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
 
-	bool isValid() const { return sav != nullptr; }
+	bool isValid() const { return sav != 0; }
 	bool isReady() const { return sav->isSet(); }
 	bool isError() const { return sav->isError(); }
 	// returns true if get can be called on this future (counterpart of canBeSet on Promises)
@@ -798,12 +798,16 @@ public:
 		return sav->error_state;
 	}
 
-	Future() : sav(nullptr) {}
+	Future() : sav(0) {}
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addFutureRef();
+		// if (sav->endpoint.isValid()) std::cout << "Future copied for " << sav->endpoint.key << std::endl;
 	}
-	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = nullptr; }
+	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
+		rhs.sav = 0;
+		// if (sav->endpoint.isValid()) std::cout << "Future moved for " << sav->endpoint.key << std::endl;
+	}
 	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
@@ -815,6 +819,7 @@ public:
 #endif
 
 	~Future() {
+		// if (sav && sav->endpoint.isValid()) std::cout << "Future destroyed for " << sav->endpoint.key << std::endl;
 		if (sav)
 			sav->delFutureRef();
 	}
@@ -830,7 +835,7 @@ public:
 			if (sav)
 				sav->delFutureRef();
 			sav = rhs.sav;
-			rhs.sav = nullptr;
+			rhs.sav = 0;
 		}
 	}
 	bool operator==(const Future& rhs) { return rhs.sav == sav; }
@@ -843,23 +848,25 @@ public:
 
 	void addCallbackAndClear(Callback<T>* cb) {
 		sav->addCallbackAndDelFutureRef(cb);
-		sav = nullptr;
+		sav = 0;
 	}
 
 	void addYieldedCallbackAndClear(Callback<T>* cb) {
 		sav->addYieldedCallbackAndDelFutureRef(cb);
-		sav = nullptr;
+		sav = 0;
 	}
 
 	void addCallbackChainAndClear(Callback<T>* cb) {
 		sav->addCallbackChainAndDelFutureRef(cb);
-		sav = nullptr;
+		sav = 0;
 	}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
-	explicit Future(SAV<T>* sav) : sav(sav) {}
+	explicit Future(SAV<T>* sav) : sav(sav) {
+		// if (sav->endpoint.isValid()) std::cout << "Future created for " << sav->endpoint.key << std::endl;
+	}
 
 private:
 	SAV<T>* sav;
