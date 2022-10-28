@@ -2689,8 +2689,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 
 		wait(data->changeFeedDiskReadsLock.take(TaskPriority::DefaultYield));
-		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
 		state FlowLock::Releaser holdingDiskReadsLock(data->changeFeedDiskReadsLock);
+		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
 		RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
