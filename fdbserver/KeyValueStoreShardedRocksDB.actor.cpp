@@ -2211,8 +2211,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 
-				double time = timer_monotonic();
-				if (time - a.startTime > readRangeTimeout) {
+				if (timer_monotonic() - a.startTime > readRangeTimeout) {
 					TraceEvent(SevInfo, "ShardedRocksDBTimeout")
 					    .detail("Action", "ReadRange")
 					    .detail("ShardsRead", numShards)
