@@ -123,56 +123,33 @@ repeat_immediate_steps:
 		f.then([this, state = shared_from_this()](Future f) {
 			if (auto postStepFn = opTable[iter.op].postStepFunction(iter.step))
 				postStepFn(f, tx, args, key1, key2, val);
-			if (iter.stepKind() != StepKind::ON_ERROR) {
-				if (auto err = f.error()) {
-					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
-					                       "ERROR",
-					                       "{}:{} returned '{}'",
-					                       iter.opName(),
-					                       iter.step,
-					                       err.what());
+			if (auto err = f.error()) {
+				logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+				                       "ERROR",
+				                       "{}:{} returned '{}'",
+				                       iter.opName(),
+				                       iter.step,
+				                       err.what());
+				updateErrorStats(err, iter.op);
+				if (iter.stepKind() != StepKind::ON_ERROR) {
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						const auto rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
-						if (rc == FutureRC::RETRY) {
-							stats.incrErrorCount(iter.op);
-						} else if (rc == FutureRC::CONFLICT) {
-							stats.incrConflictCount();
-						} else if (rc == FutureRC::ABORT) {
-							tx.reset();
-							signalEnd();
-							return;
-						}
-						// restart this iteration from beginning
-						iter = getOpBegin(args);
-						needs_commit = false;
-						postNextTick();
+						handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
+						restartIteration();
 					});
 				} else {
-					// async step succeeded
-					updateStepStats();
-					iter = getOpNext(args, iter);
-					if (iter == OpEnd) {
-						onTransactionSuccess();
-					} else {
-						postNextTick();
-					}
+					// blob granules op error
+					handleForOnError(tx, f, "BG_ON_ERROR");
+					restartIteration();
 				}
 			} else {
-				// blob granules op error
-				auto rc = handleForOnError(tx, f, "BG_ON_ERROR");
-				if (rc == FutureRC::RETRY) {
-					stats.incrErrorCount(iter.op);
-				} else if (rc == FutureRC::CONFLICT) {
-					stats.incrConflictCount();
-				} else if (rc == FutureRC::ABORT) {
-					tx.reset();
-					stopcount.fetch_add(1);
-					return;
+				// async step succeeded
+				updateStepStats();
+				iter = getOpNext(args, iter);
+				if (iter == OpEnd) {
+					onTransactionSuccess();
+				} else {
+					postNextTick();
 				}
-				iter = getOpBegin(args);
-				needs_commit = false;
-				// restart this iteration from beginning
-				postNextTick();
 			}
 		});
 	}
@@ -206,6 +183,16 @@ void ResumableStateForRunWorkload::updateStepStats() {
 	}
 }
 
+force_inline void ResumableStateForRunWorkload::updateErrorStats(fdb::Error& err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else {
+			stats.incrErrorCount(op);
+		}
+	}
+}
+
 void ResumableStateForRunWorkload::onTransactionSuccess() {
 	if (needs_commit || args.commit_get) {
 		// task completed, need to commit before finish
@@ -217,23 +204,10 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				                       "ERROR",
 				                       "Post-iteration commit returned error: {}",
 				                       err.what());
+				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
-					const auto rc = handleForOnError(tx, f, "ON_ERROR");
-					if (rc == FutureRC::CONFLICT)
-						stats.incrConflictCount();
-					else
-						stats.incrErrorCount(OP_COMMIT);
-					if (rc == FutureRC::ABORT) {
-						signalEnd();
-						return;
-					}
-					if (ended()) {
-						signalEnd();
-					} else {
-						iter = getOpBegin(args);
-						needs_commit = false;
-						postNextTick();
-					}
+					handleForOnError(tx, f, "ON_ERROR");
+					restartIteration();
 				});
 			} else {
 				// commit successful
@@ -249,13 +223,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				stats.incrOpCount(OP_TRANSACTION);
 				tx.reset();
 				watch_tx.startFromStop();
-				if (ended()) {
-					signalEnd();
-				} else {
-					// start next iteration
-					iter = getOpBegin(args);
-					postNextTick();
-				}
+				restartIteration();
 			}
 		});
 	} else {
@@ -268,13 +236,17 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		stats.incrOpCount(OP_TRANSACTION);
 		watch_tx.startFromStop();
 		tx.reset();
-		if (ended()) {
-			signalEnd();
-		} else {
-			iter = getOpBegin(args);
-			// start next iteration
-			postNextTick();
-		}
+		restartIteration();
+	}
+}
+void ResumableStateForRunWorkload::restartIteration() {
+	// restart current iteration from beginning unless ended
+	if (ended()) {
+		signalEnd();
+	} else {
+		iter = getOpBegin(args);
+		needs_commit = false;
+		postNextTick();
 	}
 }
 
