@@ -31,21 +31,15 @@ extern thread_local mako::Logger logr;
 
 namespace mako {
 
-enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
+enum class FutureRC { OK, RETRY, ABORT };
 
 template <class FutureType>
 force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	if (auto err = f.error()) {
-		if (err.is(1020 /*not_committed*/)) {
-			return FutureRC::CONFLICT;
-		} else if (err.retryable()) {
-			logr.warn("Retryable error '{}' found at on_error(), step: {}", err.what(), step);
-			return FutureRC::RETRY;
-		} else {
-			logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
-			tx.reset();
-			return FutureRC::ABORT;
-		}
+		assert(!(err.retryable()));
+		logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
+		tx.reset();
+		return FutureRC::ABORT;
 	} else {
 		return FutureRC::RETRY;
 	}
@@ -82,6 +76,26 @@ force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, st
 	// implicit backoff
 	auto follow_up = tx.onError(err);
 	return waitAndHandleForOnError(tx, follow_up, step);
+}
+
+template <class FutureType>
+force_inline bool waitFuture(FutureType& f, std::string_view step) {
+	assert(f);
+	auto err = fdb::Error{};
+	if ((err = f.blockUntilReady())) {
+		const auto retry = err.retryable();
+		logr.error("{} error '{}' found during step: {}", (retry ? "Retryable" : "Unretryable"), err.what(), step);
+		return false;
+	}
+	err = f.error();
+	if (err) {
+		if (err.retryable()) {
+			logr.warn("step {} returned '{}'", step, err.what());
+		} else {
+			logr.error("step {} returned '{}'", step, err.what());
+		}
+	}
+	return true;
 }
 
 } // namespace mako

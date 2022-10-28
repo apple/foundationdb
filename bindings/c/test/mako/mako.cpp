@@ -160,7 +160,7 @@ int cleanup(Database db, Arguments const& args) {
 			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
 			if (rc == FutureRC::OK) {
 				break;
-			} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
+			} else if (rc == FutureRC::RETRY) {
 				// tx already reset
 				continue;
 			} else {
@@ -422,6 +422,16 @@ int populate(Database db,
 	return 0;
 }
 
+force_inline void updateErrorStatsRunMode(ThreadStatistics& stats, const fdb::Error& err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else {
+			stats.incrErrorCount(op);
+		}
+	}
+}
+
 /* run one iteration of configured transaction */
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
@@ -447,22 +457,26 @@ transaction_begin:
 		auto f = opTable[op].stepFunction(step)(tx, args, key1, key2, val);
 		auto future_rc = FutureRC::OK;
 		if (f) {
-			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(tx, f, opTable[op].name());
-			} else {
-				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
+			if (!waitFuture(f, opTable[op].name())) {
+				// exceptional error while waiting on future
+				stats.incrErrorCount(op);
+				return -1;
+			}
+			if (auto err = f.error()) {
+				updateErrorStatsRunMode(stats, err, op);
+				if (step_kind != StepKind::ON_ERROR) {
+					auto follow_up = tx.onError(err);
+					future_rc = waitAndHandleForOnError(tx, follow_up, opTable[op].name());
+				} else {
+					future_rc = handleForOnError(tx, f, opTable[op].name());
+				}
 			}
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
 			postStepFn(f, tx, args, key1, key2, val);
 		watch_step.stop();
 		if (future_rc != FutureRC::OK) {
-			if (future_rc == FutureRC::CONFLICT) {
-				stats.incrConflictCount();
-			} else if (future_rc == FutureRC::RETRY) {
-				stats.incrErrorCount(op);
-			} else {
-				// abort
+			if (future_rc == FutureRC::ABORT) {
 				return -1;
 			}
 			// retry from first op
@@ -500,7 +514,19 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
+		auto rc = FutureRC::OK;
+
+		if (!waitFuture(f, "COMMIT_AT_TX_END")) {
+			// exceptional error while waiting on future
+			stats.incrErrorCount(OP_COMMIT);
+			return -1;
+		}
+		if (auto err = f.error()) {
+			updateErrorStatsRunMode(stats, err, OP_COMMIT);
+			auto follow_up = tx.onError(err);
+			rc = waitAndHandleForOnError(tx, follow_up, "COMMIT_AT_TX_END");
+		}
+
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
 		if (rc == FutureRC::OK) {
@@ -510,10 +536,6 @@ transaction_begin:
 			}
 			stats.incrOpCount(OP_COMMIT);
 		} else {
-			if (rc == FutureRC::CONFLICT)
-				stats.incrConflictCount();
-			else
-				stats.incrErrorCount(OP_COMMIT);
 			if (rc == FutureRC::ABORT) {
 				return -1;
 			}
