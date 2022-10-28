@@ -384,27 +384,10 @@ struct TLogData : NonCopyable {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
-	std::vector<KeyValue> holdKVUntilCommit;
-	std::vector<KeyRange> holdRangeUntilCommit;
-
-	void persistentSet(KeyValue kv) {
-		holdKVUntilCommit.push_back(kv);
-		persistentData->set(kv);
-	}
-
-	void persistentClear(KeyRange range) {
-		holdRangeUntilCommit.push_back(range);
-		persistentData->clear(range);
-	}
-
 	Future<Void> persistentCommit(FlowMutex::Lock lock);
 };
 
 ACTOR Future<Void> tLogPersistentCommit(TLogData* self, FlowMutex::Lock lock) {
-	state std::vector<KeyValue> holdKVUntilCommit = std::move(self->holdKVUntilCommit);
-	state std::vector<KeyRange> holdRangeUntilCommit = std::move(self->holdRangeUntilCommit);
-	self->holdKVUntilCommit = std::vector<KeyValue>();
-	self->holdRangeUntilCommit = std::vector<KeyRange>();
 	wait(delay(0, TaskPriority::UpdateStorage));
 	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
 	lock.release();
@@ -726,21 +709,22 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
 
 			Key logIdKey = BinaryWriter::toValue(logId, Unversioned());
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
-			tLogData->persistentClear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)));
+			tLogData->persistentData->clear(
+			    singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
+			tLogData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
-			tLogData->persistentClear(KeyRangeRef(msgKey, strinc(msgKey)));
+			tLogData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
 			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
-			tLogData->persistentClear(KeyRangeRef(msgRefKey, strinc(msgRefKey)));
+			tLogData->persistentData->clear(KeyRangeRef(msgRefKey, strinc(msgRefKey)));
 			Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
-			tLogData->persistentClear(KeyRangeRef(poppedKey, strinc(poppedKey)));
+			tLogData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
 		}
 
 		for (auto it = peekTracker.begin(); it != peekTracker.end(); ++it) {
@@ -879,7 +863,7 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 void updatePersistentPopped(TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data) {
 	if (!data->poppedRecently)
 		return;
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(persistTagPoppedKey(logData->logId, data->tag), persistTagPoppedValue(data->popped)));
 	data->poppedRecently = false;
 	data->persistentPopped = data->popped;
@@ -888,11 +872,11 @@ void updatePersistentPopped(TLogData* self, Reference<LogData> logData, Referenc
 		return;
 
 	if (logData->shouldSpillByValue(data->tag)) {
-		self->persistentClear(KeyRangeRef(persistTagMessagesKey(logData->logId, data->tag, Version(0)),
-		                                  persistTagMessagesKey(logData->logId, data->tag, data->popped)));
+		self->persistentData->clear(KeyRangeRef(persistTagMessagesKey(logData->logId, data->tag, Version(0)),
+		                                        persistTagMessagesKey(logData->logId, data->tag, data->popped)));
 	} else {
-		self->persistentClear(KeyRangeRef(persistTagMessageRefsKey(logData->logId, data->tag, Version(0)),
-		                                  persistTagMessageRefsKey(logData->logId, data->tag, data->popped)));
+		self->persistentData->clear(KeyRangeRef(persistTagMessageRefsKey(logData->logId, data->tag, Version(0)),
+		                                        persistTagMessageRefsKey(logData->logId, data->tag, data->popped)));
 	}
 
 	if (data->popped > logData->persistentDataVersion) {
@@ -1059,7 +1043,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self,
 						for (; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
 							wr << msg->second.toStringRef();
 						}
-						self->persistentSet(KeyValueRef(
+						self->persistentData->set(KeyValueRef(
 						    persistTagMessagesKey(logData->logId, tagData->tag, currentVersion), wr.toValue()));
 					} else {
 						// spill everything else by reference
@@ -1084,7 +1068,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self,
 						if ((wr.getLength() + sizeof(SpilledData) >
 						     SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH)) {
 							*(uint32_t*)wr.getData() = refSpilledTagCount;
-							self->persistentSet(KeyValueRef(
+							self->persistentData->set(KeyValueRef(
 							    persistTagMessageRefsKey(logData->logId, tagData->tag, lastVersion), wr.toValue()));
 							tagData->poppedLocation = std::min(tagData->poppedLocation, firstLocation);
 							refSpilledTagCount = 0;
@@ -1105,7 +1089,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self,
 				}
 				if (refSpilledTagCount > 0) {
 					*(uint32_t*)wr.getData() = refSpilledTagCount;
-					self->persistentSet(
+					self->persistentData->set(
 					    KeyValueRef(persistTagMessageRefsKey(logData->logId, tagData->tag, lastVersion), wr.toValue()));
 					tagData->poppedLocation = std::min(tagData->poppedLocation, firstLocation);
 				}
@@ -1117,14 +1101,14 @@ ACTOR Future<Void> updatePersistentData(TLogData* self,
 
 	auto locationIter = logData->versionLocation.lower_bound(newPersistentDataVersion);
 	if (locationIter != logData->versionLocation.end()) {
-		self->persistentSet(
+		self->persistentData->set(
 		    KeyValueRef(persistRecoveryLocationKey, BinaryWriter::toValue(locationIter->value.first, Unversioned())));
 	}
 
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
 	                BinaryWriter::toValue(newPersistentDataVersion, Unversioned())));
-	self->persistentSet(KeyValueRef(
+	self->persistentData->set(KeyValueRef(
 	    BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin),
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
 	logData->persistentDataVersion = newPersistentDataVersion;
@@ -1472,7 +1456,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-		loop { wait(updateStorage(self)); }
+	loop { wait(updateStorage(self)); }
 }
 
 void commitMessages(TLogData* self,
@@ -2388,28 +2372,28 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logData) {
 	FlowMutex::Lock lock = wait(self->persistentDataCommitLock.take());
 
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
 	                BinaryWriter::toValue(logData->version.get(), Unversioned())));
-	self->persistentSet(KeyValueRef(
+	self->persistentData->set(KeyValueRef(
 	    BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin),
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistLocalityKeys.begin),
 	                BinaryWriter::toValue(logData->locality, Unversioned())));
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistLogRouterTagsKeys.begin),
 	                BinaryWriter::toValue(logData->logRouterTags, Unversioned())));
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistTxsTagsKeys.begin),
 	                BinaryWriter::toValue(logData->txsTags, Unversioned())));
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistRecoveryCountKeys.begin),
 	                BinaryWriter::toValue(logData->recoveryCount, Unversioned())));
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistProtocolVersionKeys.begin),
 	                BinaryWriter::toValue(logData->protocolVersion, Unversioned())));
-	self->persistentSet(
+	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistTLogSpillTypeKeys.begin),
 	                BinaryWriter::toValue(logData->logSpillType, AssumeVersion(logData->protocolVersion))));
 
@@ -2652,7 +2636,8 @@ ACTOR Future<Void> updateDurableClusterID(TLogData* self) {
 			ASSERT(ccClusterId.isValid());
 
 			FlowMutex::Lock lock = wait(self->persistentDataCommitLock.take());
-			self->persistentSet(KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(ccClusterId, Unversioned())));
+			self->persistentData->set(
+			    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(ccClusterId, Unversioned())));
 			wait(self->persistentCommit(lock));
 
 			return Void();
@@ -3022,7 +3007,7 @@ ACTOR Future<Void> initPersistentStorage(TLogData* self) {
 	FlowMutex::Lock lock = wait(self->persistentDataCommitLock.take());
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
-	self->persistentSet(persistFormat);
+	self->persistentData->set(persistFormat);
 	wait(self->persistentCommit(lock));
 
 	TraceEvent("TLogInitPersistentStorageDone", self->dbgid);
@@ -3472,8 +3457,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
-				wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
-				                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 
 			TraceEvent("TLogRecover", self->dbgid)
 			    .detail("LogId", logData->logId)
