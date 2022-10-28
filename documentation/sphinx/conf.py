@@ -49,7 +49,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'FoundationDB'
-copyright = u'2013-2021 Apple, Inc and the FoundationDB project authors'
+copyright = u'2013-2022 Apple, Inc and the FoundationDB project authors'
 
 # Load the version information from 'versions.target'
 import xml.etree.ElementTree as ET
