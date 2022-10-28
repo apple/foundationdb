@@ -2163,14 +2163,14 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 	}
 }
 
-void DatabaseContext::addWatchCounter() {
+void DatabaseContext::addWatch() {
 	if (outstandingWatches >= maxOutstandingWatches)
 		throw too_many_watches();
 
 	++outstandingWatches;
 }
 
-void DatabaseContext::removeWatchCounter() {
+void DatabaseContext::removeWatch() {
 	--outstandingWatches;
 	ASSERT(outstandingWatches >= 0);
 }
@@ -2380,6 +2380,25 @@ Database Database::createSimulatedExtraDatabase(std::string connectionString, Op
 	Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 	db->defaultTenant = defaultTenant;
 	return db;
+}
+
+Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
+	const auto it = watchMap.find(std::make_pair(tenantId, key));
+	if (it == watchMap.end())
+		return Reference<WatchMetadata>();
+	return it->second;
+}
+
+void DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
+	watchMap[std::make_pair(metadata->parameters->tenant.tenantId, metadata->parameters->key)] = metadata;
+}
+
+void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key) {
+	watchMap.erase(std::make_pair(tenantId, key));
+}
+
+void DatabaseContext::clearWatchMetadata() {
+	watchMap.clear();
 }
 
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
@@ -3894,50 +3913,6 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	return Void();
 }
 
-namespace {
-
-// NOTE: Since an ACTOR could receive multiple exceptions for a single catch clause, e.g. broken promise together with
-// operation cancelled, If the decreaseWatchRefCount is placed at the catch clause, it might be triggered for multiple
-// times. One could check if the SAV isSet, but seems a more intuitive way is to use RAII-style constructor/destructor
-// pair. Yet the object has to be constructed after a wait statement, so it must be trivially-constructible. This
-// requires move-assignment operator implemented.
-class WatchRefCountUpdater {
-	Database cx;
-	int64_t tenantID;
-	KeyRef key;
-	Version version;
-
-public:
-	WatchRefCountUpdater() = default;
-
-	WatchRefCountUpdater(const Database& cx_, const int64_t tenantID_, KeyRef key_, const Version& ver)
-	  : cx(cx_), tenantID(tenantID_), key(key_), version(ver) {}
-
-	WatchRefCountUpdater& operator=(WatchRefCountUpdater&& other) {
-		// Since this class is only used by watchValueMap, and it is used *AFTER* a wait statement, this class is first
-		// initialized by default constructor, then, after the wait, this function is called to assign the actual
-		// database, key, etc., to re-initialize this object. At this stage, the reference count can be increased. And
-		// since the database object is moved, the rvalue will have null reference to the DatabaseContext and will not
-		// reduce the reference count.
-		cx = std::move(other.cx);
-		tenantID = std::move(other.tenantID);
-		key = std::move(other.key);
-		version = std::move(other.version);
-
-		cx->increaseWatchRefCount(tenantID, key, version);
-
-		return *this;
-	}
-
-	~WatchRefCountUpdater() {
-		if (cx.getReference()) {
-			cx->decreaseWatchRefCount(tenantID, key, version);
-		}
-	}
-};
-
-} // namespace
-
 ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  TenantInfo tenant,
                                  Key key,
@@ -3949,7 +3924,6 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<UID> debugID,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
-	state WatchRefCountUpdater watchRefCountUpdater(cx, tenant.tenantId, key, ver);
 
 	wait(getWatchFuture(cx,
 	                    makeReference<WatchParameters>(
@@ -5482,11 +5456,11 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 			}
 		}
 	} catch (Error& e) {
-		cx->removeWatchCounter();
+		cx->removeWatch();
 		throw;
 	}
 
-	cx->removeWatchCounter();
+	cx->removeWatch();
 	return Void();
 }
 
@@ -5497,7 +5471,7 @@ Future<Version> Transaction::getRawReadVersion() {
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
 
-	trState->cx->addWatchCounter();
+	trState->cx->addWatch();
 	watches.push_back(watch);
 	return ::watch(
 	    watch,
@@ -6168,6 +6142,7 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
                                                                   IdempotencyIdRef idempotencyId) {
 	state Transaction tr(trState->cx);
 	state int retries = 0;
+	state Version expiredVersion;
 	state Span span("NAPI:determineCommitStatus"_loc, trState->spanContext);
 	tr.span.setParent(span.context);
 	loop {
@@ -6177,11 +6152,19 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 			tr.trState->authToken = trState->authToken;
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			KeyBackedObjectProperty<IdempotencyIdsExpiredVersion, _Unversioned> expiredKey(idempotencyIdsExpiredVersion,
+			                                                                               Unversioned());
+			IdempotencyIdsExpiredVersion expiredVal = wait(expiredKey.getD(&tr));
+			expiredVersion = expiredVal.expired;
+			if (expiredVersion >= minPossibleCommitVersion) {
+				throw commit_unknown_result_fatal();
+			}
 			Version rv = wait(tr.getReadVersion());
 			TraceEvent("DetermineCommitStatusAttempt")
 			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
 			    .detail("Retries", retries)
 			    .detail("ReadVersion", rv)
+			    .detail("ExpiredVersion", expiredVersion)
 			    .detail("MinPossibleCommitVersion", minPossibleCommitVersion)
 			    .detail("MaxPossibleCommitVersion", maxPossibleCommitVersion);
 			KeyRange possibleRange =
@@ -6425,6 +6408,12 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
+		// Only gets filled in in the happy path where we don't have to commit on the first proxy or use provisional
+		// proxies
+		state int alternativeChosen = -1;
+		// Only valid if alternativeChosen >= 0
+		state Reference<CommitProxyInfo> proxiesUsed;
+
 		if (trState->options.commitOnFirstProxy) {
 			if (trState->cx->clientInfo->get().firstCommitProxy.present()) {
 				reply = throwErrorOr(brokenPromiseToMaybeDelivered(
@@ -6435,11 +6424,13 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 				                       : Never();
 			}
 		} else {
-			reply = basicLoadBalance(trState->cx->getCommitProxies(trState->useProvisionalProxies),
+			proxiesUsed = trState->cx->getCommitProxies(trState->useProvisionalProxies);
+			reply = basicLoadBalance(proxiesUsed,
 			                         &CommitProxyInterface::commit,
 			                         req,
 			                         TaskPriority::DefaultPromiseEndpoint,
-			                         AtMostOnce::True);
+			                         AtMostOnce::True,
+			                         &alternativeChosen);
 		}
 		state double grvTime = now();
 		choose {
@@ -6489,6 +6480,12 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 						                                       ci.version,
 						                                       req,
 						                                       trState->tenant()));
+					if (trState->automaticIdempotency && alternativeChosen >= 0) {
+						// Automatic idempotency means we're responsible for best effort idempotency id clean up
+						proxiesUsed->getInterface(alternativeChosen)
+						    .expireIdempotencyId.send(ExpireIdempotencyIdRequest{
+						        ci.version, uint8_t(ci.txnBatchId >> 8), trState->getTenantInfo() });
+					}
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -6974,11 +6971,16 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		tr.idempotencyId = IdempotencyIdRef(tr.arena, IdempotencyIdRef(value.get()));
+		trState->automaticIdempotency = false;
 		break;
 	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
 		validateOptionValueNotPresent(value);
-		tr.idempotencyId = IdempotencyIdRef(
-		    tr.arena, IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+		if (!tr.idempotencyId.valid()) {
+			tr.idempotencyId = IdempotencyIdRef(
+			    tr.arena,
+			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
+		}
+		trState->automaticIdempotency = true;
 		break;
 
 	default:

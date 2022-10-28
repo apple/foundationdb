@@ -334,7 +334,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					                     dataMoveId,
 					                     moveKeysLock,
 					                     &self->cleanUpDataMoveParallelismLock,
-					                     dataMove.range,
+					                     dataMove.ranges.front(),
 					                     &ddEnabledState));
 					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
 				}
