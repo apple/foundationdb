@@ -157,7 +157,7 @@ public:
 	WatchMetadata(Reference<const WatchParameters> parameters)
 	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
 
-	~WatchMetadata() { /*watchFutureSS.cancel();*/ }
+	~WatchMetadata() { watchFutureSS.cancel(); }
 };
 
 struct MutationAndVersionStream {
@@ -350,11 +350,11 @@ public:
 	void deleteWatchMetadata(int64_t tenant, KeyRef key);
 
 	// Increases reference count to the given watch. Returns the number of references to the watch.
-	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
+	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key);
 
 	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
 	// removed. Returns the number of references to the watch.
-	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
+	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key);
 
 	void clearWatchMetadata();
 
@@ -730,17 +730,7 @@ private:
 
 	WatchMap_t watchMap;
 
-	// The reason of using a multiset of Versions as counter instead of a simpler integer counter is due to the
-	// possible race condition:
-	//
-	//    1. A watch to key A is set, the watchValueMap ACTOR, noted as X, starts waiting.
-	//    2. All watches are cleared due to connection string change.
-	//    3. The watch to key A is restarted with watchValueMap ACTOR Y.
-	//    4. X receives the cancel exception, and tries to dereference the counter. This causes Y gets cancelled.
-	//
-	// By introducing versions, this race condition is solved.
-	using WatchCounterMapValue = std::multiset<Version>;
-	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
+	using WatchCounterMap_t = std::unordered_map<WatchMapKey, int32_t, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
 };
