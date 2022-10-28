@@ -170,7 +170,6 @@ static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
 static const KeyRef persistTssPairID = PERSIST_PREFIX "tssPairID"_sr;
 static const KeyRef persistSSPairID = PERSIST_PREFIX "ssWithTSSPairID"_sr;
 static const KeyRef persistTssQuarantine = PERSIST_PREFIX "tssQ"_sr;
-static const KeyRef persistClusterIdKey = PERSIST_PREFIX "clusterId"_sr;
 
 // (Potentially) change with the durable version or when fetchKeys completes
 static const KeyRef persistVersion = PERSIST_PREFIX "Version"_sr;
@@ -974,7 +973,6 @@ public:
 	Reference<ILogSystem> logSystem;
 	Reference<ILogSystem::IPeekCursor> logCursor;
 
-	Promise<UID> clusterId;
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
 	Version initialClusterVersion = 1;
@@ -9367,9 +9365,6 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 	if (data->tssPairID.present()) {
 		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
 	}
-	ASSERT(data->clusterId.getFuture().isReady() && data->clusterId.getFuture().get().isValid());
-	storage->set(
-	    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId.getFuture().get(), Unversioned())));
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 
 	if (shardAware) {
@@ -9674,54 +9669,9 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 	return Void();
 }
 
-// Reads the cluster ID from the transaction state store.
-ACTOR Future<UID> getClusterId(StorageServer* self) {
-	state ReadYourWritesTransaction tr(self->cx);
-	loop {
-		try {
-			self->cx->invalidateCache(Key(), systemKeys);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-			ASSERT(clusterId.present());
-			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// Read the cluster ID from the transaction state store and persist it to local
-// storage. This function should only be necessary during an upgrade when the
-// prior FDB version did not support cluster IDs. The normal path for storage
-// server recruitment will include the cluster ID in the initial recruitment
-// message.
-ACTOR Future<Void> persistClusterId(StorageServer* self) {
-	state Transaction tr(self->cx);
-	loop {
-		try {
-			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-			if (clusterId.present()) {
-				auto uid = BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-				self->storage.writeKeyValue(
-				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(uid, Unversioned())));
-				// Purposely not calling commit here, and letting the recurring
-				// commit handle save this value to disk
-				self->clusterId.send(uid);
-			}
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
 ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* storage) {
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fID = storage->readValue(persistID);
-	state Future<Optional<Value>> fClusterID = storage->readValue(persistClusterIdKey);
 	state Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
 	state Future<Optional<Value>> fssPairID = storage->readValue(persistSSPairID);
 	state Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
@@ -9742,8 +9692,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
-	wait(waitForAll(std::vector{
-	    fFormat, fID, fClusterID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
+	wait(waitForAll(
+	    std::vector{ fFormat, fID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned,
 	                             fShardAvailable,
 	                             fChangeFeeds,
@@ -9782,14 +9732,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (fssPairID.get().present()) {
 		data->setSSWithTssPair(BinaryReader::fromStringRef<UID>(fssPairID.get().get(), Unversioned()));
 		data->bytesRestored += fssPairID.get().expectedSize();
-	}
-
-	if (fClusterID.get().present()) {
-		data->clusterId.send(BinaryReader::fromStringRef<UID>(fClusterID.get().get(), Unversioned()));
-		data->bytesRestored += fClusterID.get().expectedSize();
-	} else {
-		CODE_PROBE(true, "storage server upgraded to version supporting cluster IDs");
-		data->actors.add(persistClusterId(data));
 	}
 
 	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
@@ -10952,7 +10894,6 @@ ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
-                                 UID clusterId,
                                  Version startVersion,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
@@ -10962,7 +10903,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
-	self.clusterId.send(clusterId);
 	self.initialClusterVersion = startVersion;
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
@@ -11109,32 +11049,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		wait(delay(0));
 		ErrorOr<Void> e = wait(errorOr(f));
 		if (e.isError()) {
-			Error e = f.getError();
-
-			throw e;
-			// TODO: #5375
-			/*
-			            if (e.code() != error_code_worker_removed) {
-			                throw e;
-			            }
-			            state UID clusterId = wait(getClusterId(&self));
-			            ASSERT(self.clusterId.isValid());
-			            UID durableClusterId = wait(self.clusterId.getFuture());
-			            ASSERT(durableClusterId.isValid());
-			            if (clusterId == durableClusterId) {
-			                throw worker_removed();
-			            }
-			            // When a storage server connects to a new cluster, it deletes its
-			            // old data and creates a new, empty data file for the new cluster.
-			            // We want to avoid this and force a manual removal of the storage
-			            // servers' old data when being assigned to a new cluster to avoid
-			            // accidental data loss.
-			            TraceEvent(SevWarn, "StorageServerBelongsToExistingCluster")
-			                .detail("ServerID", ssi.id())
-			                .detail("ClusterID", durableClusterId)
-			                .detail("NewClusterID", clusterId);
-			            wait(Future<Void>(Never()));
-			*/
+			throw f.getError();
 		}
 
 		self.interfaceRegistered =

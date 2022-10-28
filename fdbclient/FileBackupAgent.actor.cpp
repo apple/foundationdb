@@ -1750,7 +1750,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		state bool done = false;
 		state int64_t nrKeys = 0;
-		state bool encryptionEnabled = false;
+		state Optional<bool> encryptionEnabled;
 
 		loop {
 			state RangeResultWithVersion values;
@@ -1816,7 +1816,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 						wait(taskBucket->keepRunning(tr, task) &&
 						     storeOrThrow(snapshotBeginVersion, backup.snapshotBeginVersion().get(tr)) &&
-						     storeOrThrow(encryptionEnabled, backup.enableSnapshotBackupEncryption().get(tr)) &&
+						     store(encryptionEnabled, backup.enableSnapshotBackupEncryption().get(tr)) &&
 						     store(snapshotRangeFileCount, backup.snapshotRangeFileCount().getD(tr)));
 
 						break;
@@ -1829,9 +1829,10 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				    wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 				outFile = f;
 
-				encryptionEnabled = encryptionEnabled && cx->clientInfo->get().isEncryptionEnabled;
+				const bool encrypted =
+				    encryptionEnabled.present() && encryptionEnabled.get() && cx->clientInfo->get().isEncryptionEnabled;
 				// Initialize range file writer and write begin key
-				if (encryptionEnabled) {
+				if (encrypted) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
 					if (!tenantCache.isValid()) {
 						tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);

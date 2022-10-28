@@ -1022,6 +1022,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
 
+	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
+	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.
+	init( IDEMPOTENCY_ID_IN_MEMORY_LIFETIME,                       10);
+
 	// clang-format on
 
 	if (clientKnobs) {
