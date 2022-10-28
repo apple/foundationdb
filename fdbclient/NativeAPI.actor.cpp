@@ -4015,6 +4015,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
+
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(
@@ -9356,7 +9357,7 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 		mismatchEvent.detail("EndKey", request.range.end);
 		mismatchEvent.detail("CanReadPopped", request.canReadPopped);
 		mismatchEvent.detail("PopVersion", popVersion);
-		mismatchEvent.detail("DebugUID", request.debugUID);
+		mismatchEvent.detail("DebugUID", request.id);
 
 		// mismatch info
 		mismatchEvent.detail("MatchesFound", matchesFound);
@@ -9382,7 +9383,7 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 			    "TSSMismatchChangeFeedStream");
 			summaryEvent.detail("TSSID", tssData.tssId)
 			    .detail("MismatchId", mismatchUID)
-			    .detail("FeedDebugUID", request.debugUID);
+			    .detail("FeedDebugUID", request.id);
 		}
 	}
 }
@@ -9907,7 +9908,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          Version* begin,
                                          Version end,
                                          int replyBufferSize,
-                                         bool canReadPopped) {
+                                         bool canReadPopped,
+                                         ReadOptions readOptions) {
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
@@ -9935,10 +9937,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
 			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
 		}
-		req.debugUID = deterministicRandom()->randomUniqueID();
-		debugUIDs.push_back(req.debugUID);
-		mergeCursorUID =
-		    UID(mergeCursorUID.first() ^ req.debugUID.first(), mergeCursorUID.second() ^ req.debugUID.second());
+		req.options = readOptions;
+		req.id = deterministicRandom()->randomUniqueID();
+
+		debugUIDs.push_back(req.id);
+		mergeCursorUID = UID(mergeCursorUID.first() ^ req.id.first(), mergeCursorUID.second() ^ req.id.second());
 
 		results->streams.push_back(interfs[i].first.changeFeedStream.getReplyStream(req));
 		maybeDuplicateTSSChangeFeedStream(req,
@@ -10141,7 +10144,8 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           Version* begin,
                                           Version end,
                                           int replyBufferSize,
-                                          bool canReadPopped) {
+                                          bool canReadPopped,
+                                          ReadOptions readOptions) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
 	state Optional<ChangeFeedTSSValidationData> tssData;
@@ -10151,10 +10155,11 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.range = range;
 	req.canReadPopped = canReadPopped;
 	req.replyBufferSize = replyBufferSize;
-	req.debugUID = deterministicRandom()->randomUniqueID();
+	req.options = readOptions;
+	req.id = deterministicRandom()->randomUniqueID();
 
 	if (DEBUG_CF_CLIENT_TRACE) {
-		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.debugUID)
+		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.id)
 		    .detail("FeedID", rangeID)
 		    .detail("Range", range)
 		    .detail("Begin", *begin)
@@ -10194,7 +10199,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             Version end,
                                             KeyRange range,
                                             int replyBufferSize,
-                                            bool canReadPopped) {
+                                            bool canReadPopped,
+                                            ReadOptions readOptions) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 	db->usedAnyChangeFeeds = true;
@@ -10284,14 +10290,22 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 				CODE_PROBE(true, "Change feed merge cursor");
 				// TODO (jslocum): validate connectionFileChanged behavior
-				wait(
-				    mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
-				    cx->connectionFileChanged());
+				wait(mergeChangeFeedStream(
+				         db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped, readOptions) ||
+				     cx->connectionFileChanged());
 			} else {
 				CODE_PROBE(true, "Change feed single cursor");
 				StorageServerInterface interf = locations[0].locations->getInterface(chosenLocations[0]);
-				wait(singleChangeFeedStream(
-				         db, interf, range, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
+				wait(singleChangeFeedStream(db,
+				                            interf,
+				                            range,
+				                            results,
+				                            rangeID,
+				                            &begin,
+				                            end,
+				                            replyBufferSize,
+				                            canReadPopped,
+				                            readOptions) ||
 				     cx->connectionFileChanged());
 			}
 		} catch (Error& e) {
@@ -10358,9 +10372,17 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
                                                   Version end,
                                                   KeyRange range,
                                                   int replyBufferSize,
-                                                  bool canReadPopped) {
-	return getChangeFeedStreamActor(
-	    Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range, replyBufferSize, canReadPopped);
+                                                  bool canReadPopped,
+                                                  ReadOptions readOptions) {
+	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this),
+	                                results,
+	                                rangeID,
+	                                begin,
+	                                end,
+	                                range,
+	                                replyBufferSize,
+	                                canReadPopped,
+	                                readOptions);
 }
 
 Version OverlappingChangeFeedsInfo::getFeedMetadataVersion(const KeyRangeRef& range) const {
