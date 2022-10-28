@@ -221,21 +221,6 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<UID> getClusterId(Database cx) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-				ASSERT(clusterId.present());
-				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
@@ -675,10 +660,6 @@ Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(const Optional<Key>& dcId,
 	return DDTxnProcessorImpl::tryUpdateReplicasKeyForDc(cx, dcId, storageTeamSize);
 }
 
-Future<UID> DDTxnProcessor::getClusterId() const {
-	return DDTxnProcessorImpl::getClusterId(cx);
-}
-
 Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
 	return DDTxnProcessorImpl::waitDDTeamInfoPrintSignal(cx);
 }
@@ -763,7 +744,7 @@ std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 		KeyRangeRef curRange = it->range();
 		DDShardInfo info(curRange.begin);
 
-		auto teams = mgs->shardMapping->getTeamsFor(curRange);
+		auto teams = mgs->shardMapping->getTeamsForFirstShard(curRange);
 		if (!teams.first.empty() && !teams.second.empty()) {
 			CODE_PROBE(true, "Mock InitialDataDistribution In-Flight shard");
 			info.hasDest = true;
@@ -816,7 +797,7 @@ Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
                                                      const Optional<UID>& tssPairID,
                                                      const MoveKeysLock& lock,
                                                      const DDEnabledState* ddEnabledState) const {
-	ASSERT(mgs->allShardRemovedFromServer(serverID));
+	ASSERT(mgs->allShardsRemovedFromServer(serverID));
 	mgs->allServers.erase(serverID);
 	return Void();
 }
@@ -862,16 +843,14 @@ Future<HealthMetrics> DDMockTxnProcessor::getHealthMetrics(bool detailed) const 
 	return Future<HealthMetrics>();
 }
 
-// FIXME: finish implementation
 Future<Standalone<VectorRef<KeyRef>>> DDMockTxnProcessor::splitStorageMetrics(
     const KeyRange& keys,
     const StorageMetrics& limit,
     const StorageMetrics& estimated,
     const Optional<int>& minSplitBytes) const {
-	return Future<Standalone<VectorRef<KeyRef>>>();
+	return mgs->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
 }
 
-// FIXME: finish implementation
 Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorageMetrics(
     const KeyRange& keys,
     const StorageMetrics& min,
@@ -879,7 +858,7 @@ Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorage
     const StorageMetrics& permittedError,
     int shardLimit,
     int expectedShardCount) const {
-	return Future<std::pair<Optional<StorageMetrics>, int>>();
+	return mgs->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
 }
 
 // FIXME: finish implementation
@@ -910,7 +889,7 @@ void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 	ASSERT(params.finishMoveKeysParallelismLock->take().isReady());
 
 	// get source and dest teams
-	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsFor(params.keys);
+	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(params.keys);
 
 	ASSERT_EQ(destTeams.size(), 0);
 	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {

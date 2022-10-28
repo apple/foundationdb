@@ -476,6 +476,8 @@ struct ShardSizeBounds {
 	bool operator==(ShardSizeBounds const& rhs) const {
 		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
 	}
+
+	static ShardSizeBounds shardSizeBoundsBeforeTrack();
 };
 
 // Gets the permitted size and IO bounds for a shard
