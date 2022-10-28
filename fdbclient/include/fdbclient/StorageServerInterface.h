@@ -890,7 +890,7 @@ struct ChangeFeedStreamRequest {
 	KeyRange range;
 	int replyBufferSize = -1;
 	bool canReadPopped = true;
-	UID id;
+	UID id; // This must be globally unique among ChangeFeedStreamRequest instances
 	Optional<ReadOptions> options;
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
