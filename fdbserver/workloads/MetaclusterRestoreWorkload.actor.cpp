@@ -52,13 +52,15 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	};
 
 	struct TenantData {
+		enum class CreateTime { BEFORE_BACKUP, DURING_BACKUP, AFTER_BACKUP };
+
 		ClusterName cluster;
 		Optional<TenantGroupName> tenantGroup;
-		bool beforeBackup = true;
+		CreateTime createTime = CreateTime::BEFORE_BACKUP;
 
 		TenantData() {}
-		TenantData(ClusterName cluster, Optional<TenantGroupName> tenantGroup, bool beforeBackup)
-		  : cluster(cluster), tenantGroup(tenantGroup), beforeBackup(beforeBackup) {}
+		TenantData(ClusterName cluster, Optional<TenantGroupName> tenantGroup, CreateTime createTime)
+		  : cluster(cluster), tenantGroup(tenantGroup), createTime(createTime) {}
 	};
 
 	Reference<IDatabase> managementDb;
@@ -72,6 +74,9 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	int maxTenants;
 	int maxTenantGroups;
 	int tenantGroupCapacity;
+
+	bool backupComplete = false;
+	double endTime = std::numeric_limits<double>::max();
 
 	MetaclusterRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
@@ -175,7 +180,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 
 		while (self->createdTenants.size() < self->initialTenants) {
-			wait(createTenant(self, true));
+			wait(createTenant(self, TenantData::CreateTime::BEFORE_BACKUP));
 		}
 
 		return Void();
@@ -232,7 +237,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> createTenant(MetaclusterRestoreWorkload* self, bool beforeBackup) {
+	ACTOR static Future<Void> createTenant(MetaclusterRestoreWorkload* self, TenantData::CreateTime createTime) {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
@@ -252,7 +257,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				wait(MetaclusterAPI::createTenant(self->managementDb, tenantName, tenantEntry));
 				TenantMapEntry createdEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenantName));
 				self->createdTenants[tenantName] =
-				    TenantData(createdEntry.assignedCluster.get(), createdEntry.tenantGroup, beforeBackup);
+				    TenantData(createdEntry.assignedCluster.get(), createdEntry.tenantGroup, createTime);
 				auto& dataDb = self->dataDbs[createdEntry.assignedCluster.get()];
 				dataDb.tenants.insert(tenantName);
 				if (createdEntry.tenantGroup.present()) {
@@ -393,6 +398,25 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> runOperations(MetaclusterRestoreWorkload* self) {
+		while (now() < self->endTime) {
+			state int operation = deterministicRandom()->randomInt(0, 4);
+			if (operation == 0) {
+				wait(createTenant(self,
+				                  self->backupComplete ? TenantData::CreateTime::AFTER_BACKUP
+				                                       : TenantData::CreateTime::DURING_BACKUP));
+			} else if (operation == 1) {
+				wait(deleteTenant(self));
+			} else if (operation == 2) {
+				wait(configureTenant(self));
+			} else if (operation == 3) {
+				wait(renameTenant(self));
+			}
+		}
+
+		return Void();
+	}
+
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
 			return _start(cx, this);
@@ -413,7 +437,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			clustersToRestore.insert(deterministicRandom()->randomChoice(self->dataDbIndex));
 		}
 
-		// TODO: partially completed operations before backup
+		state Future<Void> opsFuture = runOperations(self);
 
 		state std::map<ClusterName, Future<std::string>> backups;
 		for (auto cluster : clustersToRestore) {
@@ -424,20 +448,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			wait(success(f));
 		}
 
-		// Make random tenant mutations
-		state int tenantMutationNum;
-		for (tenantMutationNum = 0; tenantMutationNum < 100; ++tenantMutationNum) {
-			state int operation = deterministicRandom()->randomInt(0, 4);
-			if (operation == 0) {
-				wait(createTenant(self, false));
-			} else if (operation == 1) {
-				wait(deleteTenant(self));
-			} else if (operation == 2) {
-				wait(configureTenant(self));
-			} else if (operation == 3) {
-				wait(renameTenant(self));
-			}
-		}
+		self->backupComplete = true;
+		self->endTime = now() + 30.0;
+
+		wait(opsFuture);
 
 		std::vector<Future<Void>> restores;
 		for (auto [cluster, backupUrl] : backups) {
@@ -487,14 +501,16 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			std::map<TenantName, TenantMapEntry> tenantMap(tenants.begin(), tenants.end());
 			for (auto tenantName : clusterData.tenants) {
 				TenantData tenantData = self->createdTenants[tenantName];
-				if (tenantData.beforeBackup) {
+				auto tenantItr = tenantMap.find(tenantName);
+				if (tenantData.createTime == TenantData::CreateTime::BEFORE_BACKUP) {
 					++expectedTenantCount;
-					auto tenantItr = tenantMap.find(tenantName);
 					ASSERT(tenantItr != tenantMap.end());
 					ASSERT(tenantData.cluster == clusterName);
 					ASSERT(tenantItr->second.tenantGroup == tenantData.tenantGroup);
-				} else {
-					ASSERT(tenantMap.count(tenantName) == 0);
+				} else if (tenantData.createTime == TenantData::CreateTime::AFTER_BACKUP) {
+					ASSERT(tenantItr == tenantMap.end());
+				} else if (tenantItr != tenantMap.end()) {
+					++expectedTenantCount;
 				}
 			}
 
@@ -512,8 +528,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		std::map<TenantName, TenantMapEntry> tenantMap(tenants.begin(), tenants.end());
 		for (auto& [tenantName, tenantData] : self->createdTenants) {
 			TenantMapEntry const& entry = tenantMap[tenantName];
-			if (!tenantData.beforeBackup && self->dataDbs[tenantData.cluster].restored) {
-				ASSERT(entry.tenantState == TenantState::ERROR);
+			if (tenantData.createTime != TenantData::CreateTime::BEFORE_BACKUP &&
+			    self->dataDbs[tenantData.cluster].restored) {
+				ASSERT(entry.tenantState == TenantState::ERROR ||
+				       (entry.tenantState == TenantState::READY &&
+				        tenantData.createTime == TenantData::CreateTime::DURING_BACKUP));
 			} else {
 				ASSERT(entry.tenantState == TenantState::READY);
 			}
@@ -531,7 +550,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(MetaclusterRestoreWorkload* self) {
 		// The metacluster consistency check runs the tenant consistency check for each cluster
 		state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-		    self->managementDb, AllowPartialMetaclusterOperations::False);
+		    self->managementDb, AllowPartialMetaclusterOperations::True);
 
 		wait(metaclusterConsistencyCheck.run());
 
