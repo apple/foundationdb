@@ -749,7 +749,7 @@ Future<Void> monitorActor(GlobalTagThrottler* globalTagThrottler, Check check) {
 	loop {
 		wait(delay(1.0));
 		if (check(*globalTagThrottler)) {
-			if (++successes == 3) {
+			if (++successes == 10) {
 				return Void();
 			}
 		} else {
@@ -836,7 +836,7 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 // 10 storage servers can handle 100 bytes/second each.
 // Total quota set to 100 bytes/second.
 // Client attempts 5 6-byte write transactions per second.
-// Limit should adjust to allow 100/6 transactions per second.
+// Limit should adjust to allow 100/(6*<fungibility_ratio>) transactions per second.
 TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
@@ -845,8 +845,10 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::WRITE);
-	state Future<Void> monitor =
-	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 100.0 / 6.0); });
+	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
+		return targetRateIsNear(gtt, testTag, 100.0 / (6.0 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO));
+	});
+
 	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
