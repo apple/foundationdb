@@ -156,6 +156,8 @@ public:
 
 	WatchMetadata(Reference<const WatchParameters> parameters)
 	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
+
+	~WatchMetadata() { /*watchFutureSS.cancel();*/ }
 };
 
 struct MutationAndVersionStream {
