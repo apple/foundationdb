@@ -142,6 +142,8 @@ Here is a complete list of valid parameters:
 
  *multipart_min_part_size* (or *minps*) - Min part size for multipart uploads.
 
+ *enable_read_cache* (or *erc*) - Whether to enable read block cache.
+
  *read_block_size* (or *rbs*) - Block size in bytes to be used for reads.
 
  *read_ahead_blocks* (or *rab*) - Number of blocks to read ahead of requested offset.
