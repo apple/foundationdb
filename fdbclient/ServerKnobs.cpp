@@ -1002,8 +1002,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Blob Metadata
 	init( BLOB_METADATA_CACHE_TTL, isSimulated ? 120 : 24 * 60 * 60 );
 	if ( randomize && BUGGIFY) { BLOB_METADATA_CACHE_TTL = deterministicRandom()->randomInt(50, 100); }
-	init( BLOB_METADATA_REFRESH_INTERVAL,   isSimulated ? 60 : 60 * 60 );
-	if ( randomize && BUGGIFY) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
 
 	// HTTP KMS Connector
 	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");

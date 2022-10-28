@@ -260,7 +260,6 @@ struct RegisterMasterRequest {
 	std::vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
 	bool recoveryStalled;
-	UID clusterId;
 
 	ReplyPromise<Void> reply;
 
@@ -284,7 +283,6 @@ struct RegisterMasterRequest {
 		           priorCommittedLogServers,
 		           recoveryState,
 		           recoveryStalled,
-		           clusterId,
 		           reply);
 	}
 };
@@ -445,6 +443,7 @@ struct RegisterWorkerRequest {
 	bool requestDbInfo;
 	bool recoveredDiskFiles;
 	ConfigBroadcastInterface configBroadcastInterface;
+	Optional<UID> clusterId;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -463,13 +462,14 @@ struct RegisterWorkerRequest {
 	                      Optional<Version> lastSeenKnobVersion,
 	                      Optional<ConfigClassSet> knobConfigClassSet,
 	                      bool recoveredDiskFiles,
-	                      ConfigBroadcastInterface configBroadcastInterface)
+	                      ConfigBroadcastInterface configBroadcastInterface,
+	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
 	    blobMigratorInterf(mgInterf), encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf),
 	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet),
 	    requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
-	    configBroadcastInterface(configBroadcastInterface) {}
+	    configBroadcastInterface(configBroadcastInterface), clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -493,7 +493,8 @@ struct RegisterWorkerRequest {
 		           knobConfigClassSet,
 		           requestDbInfo,
 		           recoveredDiskFiles,
-		           configBroadcastInterface);
+		           configBroadcastInterface,
+		           clusterId);
 	}
 };
 
@@ -589,7 +590,6 @@ struct InitializeTLogRequest {
 	Version startVersion;
 	int logRouterTags;
 	int txsTags;
-	UID clusterId;
 	Version recoveryTransactionVersion;
 
 	ReplyPromise<struct TLogInterface> reply;
@@ -616,7 +616,6 @@ struct InitializeTLogRequest {
 		           logVersion,
 		           spillType,
 		           txsTags,
-		           clusterId,
 		           recoveryTransactionVersion);
 	}
 };
@@ -816,14 +815,12 @@ struct InitializeStorageRequest {
 	KeyValueStoreType storeType;
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
-	UID clusterId; // Unique cluster identifier. Only needed at recruitment, will be read from txnStateStore on recovery
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, clusterId, initialClusterVersion);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
 	}
 };
 
@@ -1129,7 +1126,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     ConfigDBType configDBType);
+                                     ConfigDBType configDBType,
+                                     Reference<AsyncVar<Optional<UID>>> clusterId);
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
@@ -1144,7 +1142,6 @@ class IPageEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
-                                 UID clusterId,
                                  Version startVersion,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
