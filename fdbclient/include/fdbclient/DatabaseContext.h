@@ -156,8 +156,6 @@ public:
 
 	WatchMetadata(Reference<const WatchParameters> parameters)
 	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
-
-	~WatchMetadata() { watchFutureSS.cancel(); }
 };
 
 struct MutationAndVersionStream {
@@ -330,32 +328,14 @@ public:
 	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	Future<ProtocolVersion> getClusterProtocol(Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>());
 
-	// Increases the counter of the number of watches in this DatabaseContext by 1. If the number of watches is too
-	// many, throws too_many_watches.
-	void addWatchCounter();
-
-	// Decrease the counter of the number of watches in this DatabaseContext by 1
-	void removeWatchCounter();
+	// Update the watch counter for the database
+	void addWatch();
+	void removeWatch();
 
 	// watch map operations
-
-	// Gets the watch metadata per tenant id and key
 	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
-
-	// Refreshes the watch metadata. If the same watch is used (this is determined by the tenant id and the key), the
-	// metadata will be updated.
 	void setWatchMetadata(Reference<WatchMetadata> metadata);
-
-	// Removes the watch metadata
 	void deleteWatchMetadata(int64_t tenant, KeyRef key);
-
-	// Increases reference count to the given watch. Returns the number of references to the watch.
-	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key);
-
-	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
-	// removed. Returns the number of references to the watch.
-	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key);
-
 	void clearWatchMetadata();
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
@@ -723,16 +703,8 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
-	using WatchMapKey = std::pair<int64_t, Key>;
-	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
-	using WatchMapValue = Reference<WatchMetadata>;
-	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
-
-	WatchMap_t watchMap;
-
-	using WatchCounterMap_t = std::unordered_map<WatchMapKey, int32_t, WatchMapKeyHasher>;
-	// Maps the number of the WatchMapKey being used.
-	WatchCounterMap_t watchCounterMap;
+	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
+	    watchMap;
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.
