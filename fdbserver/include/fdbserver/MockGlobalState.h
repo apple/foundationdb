@@ -21,10 +21,11 @@
 #ifndef FOUNDATIONDB_MOCKGLOBALSTATE_H
 #define FOUNDATIONDB_MOCKGLOBALSTATE_H
 
-#include "StorageMetrics.h"
+#include "StorageMetrics.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/KeyLocationService.h"
 #include "SimulatedCluster.h"
 #include "ShardsAffectedByTeamFailure.h"
 
@@ -51,8 +52,10 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 	return false;
 }
 
-class MockStorageServer {
+class MockStorageServer : public IStorageMetricsService {
 	friend struct MockGlobalStateTester;
+
+	ActorCollection actors;
 
 public:
 	struct ShardInfo {
@@ -73,8 +76,6 @@ public:
 	// size() and nthRange() would use the metrics as index instead
 	KeyRangeMap<ShardInfo> serverKeys;
 
-	// sampled metrics
-	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 
 	StorageServerInterface ssi; // serve RPC requests
@@ -103,6 +104,35 @@ public:
 
 	uint64_t sumRangeSize(KeyRangeRef range) const;
 
+	void addActor(Future<Void> future) override;
+
+	void getSplitPoints(SplitRangeRequest const& req) override;
+
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
+
+	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
+
+	template <class Reply>
+	static constexpr bool isLoadBalancedReply = std::is_base_of_v<LoadBalancedReply, Reply>;
+
+	template <class Reply>
+	typename std::enable_if_t<isLoadBalancedReply<Reply>, void> sendErrorWithPenalty(const ReplyPromise<Reply>& promise,
+	                                                                                 const Error& err,
+	                                                                                 double penalty) {
+		Reply reply;
+		reply.error = err;
+		reply.penalty = penalty;
+		promise.send(reply);
+	}
+
+	template <class Reply>
+	typename std::enable_if_t<!isLoadBalancedReply<Reply>, void>
+	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
+		promise.sendError(err);
+	}
+
+	Future<Void> run();
+
 protected:
 	void threeWayShardSplitting(KeyRangeRef outerRange,
 	                            KeyRangeRef innerRange,
@@ -112,8 +142,13 @@ protected:
 	void twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize, bool restrictSize);
 };
 
-class MockGlobalState {
+class MockGlobalStateImpl;
+
+class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
+	friend class MockGlobalStateImpl;
+
+	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
 
 public:
 	typedef ShardsAffectedByTeamFailure::Team Team;
@@ -162,7 +197,37 @@ public:
 	 * * mgs.shardMapping doesn’t have any information about X
 	 * * mgs.allServer[X] is existed
 	 */
-	bool allShardRemovedFromServer(const UID& serverId);
+	bool allShardsRemovedFromServer(const UID& serverId);
+
+	// SOMEDAY: NativeAPI::waitStorageMetrics should share the code in the future, this is a simpler version of it
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount);
+
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(const KeyRange& keys,
+	                                                          const StorageMetrics& limit,
+	                                                          const StorageMetrics& estimated,
+	                                                          const Optional<int>& minSplitBytes);
+
+	Future<KeyRangeLocationInfo> getKeyLocation(TenantInfo tenant,
+	                                            Key key,
+	                                            SpanContext spanContext,
+	                                            Optional<UID> debugID,
+	                                            UseProvisionalProxies useProvisionalProxies,
+	                                            Reverse isBackward,
+	                                            Version version) override;
+
+	Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(TenantInfo tenant,
+	                                                               KeyRange keys,
+	                                                               int limit,
+	                                                               Reverse reverse,
+	                                                               SpanContext spanContext,
+	                                                               Optional<UID> debugID,
+	                                                               UseProvisionalProxies useProvisionalProxies,
+	                                                               Version version) override;
 };
 
 #endif // FOUNDATIONDB_MOCKGLOBALSTATE_H

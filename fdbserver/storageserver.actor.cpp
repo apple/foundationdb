@@ -82,7 +82,7 @@
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SpanContextMessage.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "fdbserver/WaitFailure.h"
@@ -171,7 +171,6 @@ static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
 static const KeyRef persistTssPairID = PERSIST_PREFIX "tssPairID"_sr;
 static const KeyRef persistSSPairID = PERSIST_PREFIX "ssWithTSSPairID"_sr;
 static const KeyRef persistTssQuarantine = PERSIST_PREFIX "tssQ"_sr;
-static const KeyRef persistClusterIdKey = PERSIST_PREFIX "clusterId"_sr;
 
 // (Potentially) change with the durable version or when fetchKeys completes
 static const KeyRef persistVersion = PERSIST_PREFIX "Version"_sr;
@@ -643,7 +642,7 @@ struct BusiestWriteTagContext {
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
 
-struct StorageServer {
+struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
 private:
@@ -809,8 +808,8 @@ public:
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
 
-	double old_rate = 1.0;
-	double currentRate() {
+	mutable double old_rate = 1.0;
+	double currentRate() const {
 		auto versionLag = version.get() - durableVersion.get();
 		double res;
 		if (versionLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
@@ -975,7 +974,6 @@ public:
 	Reference<ILogSystem> logSystem;
 	Reference<ILogSystem::IPeekCursor> logCursor;
 
-	Promise<UID> clusterId;
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
 	Version initialClusterVersion = 1;
@@ -990,7 +988,6 @@ public:
 	Database cx;
 	ActorCollection actors;
 
-	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
 	AsyncVar<bool> byteSampleClearsTooLarge;
 	Future<Void> byteSampleRecovery;
@@ -1393,7 +1390,7 @@ public:
 	// This is the maximum version that might be read from storage (the minimum version is durableVersion)
 	Version storageVersion() const { return oldestVersion.get(); }
 
-	bool isReadable(KeyRangeRef const& keys) {
+	bool isReadable(KeyRangeRef const& keys) const override {
 		auto sh = shards.intersectingRanges(keys);
 		for (auto i = sh.begin(); i != sh.end(); ++i)
 			if (!i->value()->isReadable())
@@ -1419,10 +1416,10 @@ public:
 		}
 	}
 
-	Counter::Value queueSize() { return counters.bytesInput.getValue() - counters.bytesDurable.getValue(); }
+	Counter::Value queueSize() const { return counters.bytesInput.getValue() - counters.bytesDurable.getValue(); }
 
 	// penalty used by loadBalance() to balance requests among SSes. We prefer SS with less write queue size.
-	double getPenalty() {
+	double getPenalty() const override {
 		return std::max(std::max(1.0,
 		                         (queueSize() - (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER -
 		                                         2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
@@ -1516,7 +1513,7 @@ public:
 		}
 	}
 
-	void getSplitPoints(SplitRangeRequest const& req) {
+	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
 			Optional<TenantMapEntry> entry = getTenantEntry(version.get(), req.tenantInfo);
 			metrics.getSplitPoints(req, entry.map<Key>([](TenantMapEntry e) { return e.prefix; }));
@@ -1545,6 +1542,15 @@ public:
 			return true;
 		}
 		return false;
+	}
+
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
+
+	void addActor(Future<Void> future) override { actors.add(future); }
+
+	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
+		StorageBytes sb = storage.getStorageBytes();
+		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
 };
 
@@ -9368,9 +9374,6 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 	if (data->tssPairID.present()) {
 		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
 	}
-	ASSERT(data->clusterId.getFuture().isReady() && data->clusterId.getFuture().get().isValid());
-	storage->set(
-	    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId.getFuture().get(), Unversioned())));
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 
 	if (shardAware) {
@@ -9679,54 +9682,9 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 	return Void();
 }
 
-// Reads the cluster ID from the transaction state store.
-ACTOR Future<UID> getClusterId(StorageServer* self) {
-	state ReadYourWritesTransaction tr(self->cx);
-	loop {
-		try {
-			self->cx->invalidateCache(Key(), systemKeys);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-			ASSERT(clusterId.present());
-			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// Read the cluster ID from the transaction state store and persist it to local
-// storage. This function should only be necessary during an upgrade when the
-// prior FDB version did not support cluster IDs. The normal path for storage
-// server recruitment will include the cluster ID in the initial recruitment
-// message.
-ACTOR Future<Void> persistClusterId(StorageServer* self) {
-	state Transaction tr(self->cx);
-	loop {
-		try {
-			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-			if (clusterId.present()) {
-				auto uid = BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-				self->storage.writeKeyValue(
-				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(uid, Unversioned())));
-				// Purposely not calling commit here, and letting the recurring
-				// commit handle save this value to disk
-				self->clusterId.send(uid);
-			}
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
 ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* storage) {
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fID = storage->readValue(persistID);
-	state Future<Optional<Value>> fClusterID = storage->readValue(persistClusterIdKey);
 	state Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
 	state Future<Optional<Value>> fssPairID = storage->readValue(persistSSPairID);
 	state Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
@@ -9747,8 +9705,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
-	wait(waitForAll(std::vector{
-	    fFormat, fID, fClusterID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
+	wait(waitForAll(
+	    std::vector{ fFormat, fID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned,
 	                             fShardAvailable,
 	                             fChangeFeeds,
@@ -9787,14 +9745,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (fssPairID.get().present()) {
 		data->setSSWithTssPair(BinaryReader::fromStringRef<UID>(fssPairID.get().get(), Unversioned()));
 		data->bytesRestored += fssPairID.get().expectedSize();
-	}
-
-	if (fClusterID.get().present()) {
-		data->clusterId.send(BinaryReader::fromStringRef<UID>(fClusterID.get().get(), Unversioned()));
-		data->bytesRestored += fClusterID.get().expectedSize();
-	} else {
-		CODE_PROBE(true, "storage server upgraded to version supporting cluster IDs");
-		data->actors.add(persistClusterId(data));
 	}
 
 	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
@@ -10181,7 +10131,7 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #pragma region Core
 #endif
 
-ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsRequest req) {
+ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
 		wait(success(waitForVersionNoTooOld(self, latestVersion)));
 		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
@@ -10199,8 +10149,11 @@ ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsReques
 	return Void();
 }
 
+Future<Void> StorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	return waitMetricsTenantAware_internal(this, req);
+}
+
 ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
-	state Future<Void> doPollMetrics = Void();
 
 	wait(self->byteSampleRecovery);
 	TraceEvent("StorageServerRestoreDurableState", self->thisServerID).detail("RestoredBytes", self->bytesRestored);
@@ -10248,51 +10201,8 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		    }
 	    }));
 
-	loop {
-		choose {
-			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (!req.tenantInfo.present() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->actors.add(waitMetricsTenantAware(self, req));
-				}
-			}
-			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.splitMetrics(req);
-				}
-			}
-			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-				StorageBytes sb = self->storage.getStorageBytes();
-				self->metrics.getStorageMetrics(
-				    req, sb, self->counters.bytesInput.getRate(), self->versionLag, self->lastUpdate);
-			}
-			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.getReadHotRanges(req);
-				}
-			}
-			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->getSplitPoints(req);
-				}
-			}
-			when(wait(doPollMetrics)) {
-				self->metrics.poll();
-				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
-			}
-		}
-	}
+	wait(serveStorageMetricsRequests(self, ssi));
+	return Void();
 }
 
 ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
@@ -11012,7 +10922,6 @@ ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
-                                 UID clusterId,
                                  Version startVersion,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
@@ -11022,7 +10931,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
-	self.clusterId.send(clusterId);
 	self.initialClusterVersion = startVersion;
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
@@ -11172,32 +11080,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		wait(delay(0));
 		ErrorOr<Void> e = wait(errorOr(f));
 		if (e.isError()) {
-			Error e = f.getError();
-
-			throw e;
-			// TODO: #5375
-			/*
-			            if (e.code() != error_code_worker_removed) {
-			                throw e;
-			            }
-			            state UID clusterId = wait(getClusterId(&self));
-			            ASSERT(self.clusterId.isValid());
-			            UID durableClusterId = wait(self.clusterId.getFuture());
-			            ASSERT(durableClusterId.isValid());
-			            if (clusterId == durableClusterId) {
-			                throw worker_removed();
-			            }
-			            // When a storage server connects to a new cluster, it deletes its
-			            // old data and creates a new, empty data file for the new cluster.
-			            // We want to avoid this and force a manual removal of the storage
-			            // servers' old data when being assigned to a new cluster to avoid
-			            // accidental data loss.
-			            TraceEvent(SevWarn, "StorageServerBelongsToExistingCluster")
-			                .detail("ServerID", ssi.id())
-			                .detail("ClusterID", durableClusterId)
-			                .detail("NewClusterID", clusterId);
-			            wait(Future<Void>(Never()));
-			*/
+			throw f.getError();
 		}
 
 		self.interfaceRegistered =

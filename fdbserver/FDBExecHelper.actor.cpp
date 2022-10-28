@@ -170,7 +170,8 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	    ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
 	    self->dataFolder.c_str(),
 	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
-	    self->protocolVersion);
+	    self->protocolVersion,
+	    false);
 	wait(g_simulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();

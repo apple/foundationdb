@@ -18,29 +18,33 @@
  * limitations under the License.
  */
 
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BulkSetupWorkload : TestWorkload {
-	static constexpr auto NAME = "BulkSetup";
+	static constexpr auto NAME = "BulkLoadWithTenants";
 
-	std::vector<TenantName> tenantNames;
 	int nodeCount;
 	double transactionsPerSecond;
 	Key keyPrefix;
+	double maxNumTenantsPerClient;
+	double minNumTenantsPerClient;
+	std::vector<TenantName> tenantNames;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
-		std::vector<std::string> tenants = getOption(options, "tenants"_sr, std::vector<std::string>());
-		for (std::string tenant : tenants) {
-			tenantNames.push_back(TenantName(tenant));
-		}
+		// maximum and minimum number of tenants per client
+		maxNumTenantsPerClient = getOption(options, "maxNumTenantsPerClient"_sr, 0);
+		minNumTenantsPerClient = getOption(options, "minNumTenantsPerClient"_sr, 0);
+		ASSERT(minNumTenantsPerClient <= maxNumTenantsPerClient);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -50,6 +54,28 @@ struct BulkSetupWorkload : TestWorkload {
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
+
+	ACTOR static Future<Void> _setup(BulkSetupWorkload* workload, Database cx) {
+		// create a bunch of tenants (between min and max tenants)
+		state int numTenantsToCreate =
+		    deterministicRandom()->randomInt(workload->minNumTenantsPerClient, workload->maxNumTenantsPerClient + 1);
+		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
+		if (numTenantsToCreate > 0) {
+			std::vector<Future<Void>> tenantFutures;
+			for (int i = 0; i < numTenantsToCreate; i++) {
+				TenantMapEntry entry;
+				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d_%04d", workload->clientId, i)));
+				TraceEvent("CreatingTenant")
+				    .detail("Tenant", workload->tenantNames.back())
+				    .detail("TenantGroup", entry.tenantGroup);
+				tenantFutures.push_back(
+				    success(TenantAPI::createTenant(cx.getReference(), workload->tenantNames.back())));
+			}
+			wait(waitForAll(tenantFutures));
+		}
+		return Void();
+	}
 
 	Future<Void> start(Database const& cx) override {
 		return bulkSetup(cx,
@@ -65,8 +91,10 @@ struct BulkSetupWorkload : TestWorkload {
 		                 0.1,
 		                 0,
 		                 0,
-		                 this->tenantNames);
+		                 tenantNames);
 	}
+
+	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 };

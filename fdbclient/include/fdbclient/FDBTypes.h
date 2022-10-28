@@ -590,6 +590,8 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // The returned reference is valid as long as keys is valid.
 KeyRef keyBetween(const KeyRangeRef& keys);
 
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
+
 struct KeySelectorRef {
 private:
 	KeyRef key; // Find the last item less than key
