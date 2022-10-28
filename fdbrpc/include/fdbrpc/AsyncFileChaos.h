@@ -36,7 +36,8 @@ private:
 public:
 	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {
 		// We only allow chaos events on storage files
-		enabled = (file->getFilename().find("storage-") != std::string::npos);
+		enabled = file->getFilename().find("storage-") != std::string::npos &&
+		          file->getFilename().find("sqlite-wal") == std::string::npos;
 	}
 
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
