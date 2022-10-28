@@ -830,7 +830,7 @@ namespace SummarizeTest
             bool ok = false;
             string testFile = "Unknown";
             int testsPassed = 0, testCount = -1, warnings = 0, errors = 0;
-            bool testBeginFound = false, testEndFound = false, error = false;
+            bool testBeginFound = false, testEndFound = false, error = false, useRocksdb = false;
             string firstRetryableError = "";
             int stderrSeverity = (int)Magnesium.Severity.SevError;
 
@@ -950,6 +950,10 @@ namespace SummarizeTest
                                 errors++;
                                 error = true;
                             }
+                            if (ev.Type == "RocksDBNonDeterminism")
+                            {
+                                useRocksdb = true;
+                            }
                             if (ev.Type == "CodeCoverage" && !willRestart)
                             {
                                 bool covered = true;
@@ -1034,7 +1038,7 @@ namespace SummarizeTest
                 xout.Add(element);
             }
 
-            if (warnings > maxWarnings)
+            if ((!useRocksdb && warnings > maxWarnings) || (useRocksdb && warnings > 100))
             {
                 //error = true;
                 xout.Add(new XElement("WarningLimitExceeded",
