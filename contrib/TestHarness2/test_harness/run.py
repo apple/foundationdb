@@ -315,7 +315,7 @@ class TestRun:
         # state for the run
         self.retryable_error: bool = False
         self.summary: Summary = Summary(binary, uid=self.uid, stats=self.stats, expected_unseed=self.expected_unseed,
-                                        will_restart=will_restart)
+                                        will_restart=will_restart, long_running=config.long_running)
         self.run_time: int = 0
         self.success = self.run()
 
@@ -367,6 +367,13 @@ class TestRun:
             command += ['-b', 'on']
         if config.crash_on_error:
             command.append('--crash')
+        if self.long_running:
+            # disable simulation speedup
+            command += ['--knob-sim-speedup-after-seconds=36000']
+            # disable traceTooManyLines Error MAX_TRACE_LINES
+            command += ['--knob-max-trace-lines=1000000000']
+            # set the timeout to 10h
+            config.kill_seconds = 36000
 
         self.temp_path.mkdir(parents=True, exist_ok=True)
 
@@ -376,7 +383,7 @@ class TestRun:
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=self.temp_path,
                                    text=True, env=env)
         did_kill = False
-        timeout = 20 * config.kill_seconds if self.use_valgrind or self.long_running else config.kill_seconds
+        timeout = 20 * config.kill_seconds if self.use_valgrind else config.kill_seconds
         err_out: str
         try:
             _, err_out = process.communicate(timeout=timeout)

@@ -54,6 +54,10 @@ if __name__ == '__main__':
                     summary.valgrind_out_file = valgrind_file
                     summary.summarize_files(files)
                     summary.out.dump(sys.stdout)
+            elif config.long_running:
+                summary = Summary(Path('bin/fdbserver'), was_killed=True, long_running=True)
+                summary.summarize_files(files)
+                summary.out.dump(sys.stdout)
             else:
                 summary = Summary(Path('bin/fdbserver'), was_killed=True)
                 summary.summarize_files(files)
