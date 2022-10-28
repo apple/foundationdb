@@ -634,7 +634,7 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0; // total storage
-	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
+	int64_t writeBytesPerKSecond = 0; // network bandwidth (average over 10s) == write bandwidth through any IO devices
 
 	// FIXME: currently, iosPerKSecond is not used in DataDistribution calculations.
 	int64_t iosPerKSecond = 0;
@@ -643,33 +643,33 @@ struct StorageMetrics {
 	static const int64_t infinity = 1LL << 60;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
+		return bytes <= rhs.bytes && writeBytesPerKSecond <= rhs.writeBytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
 		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
 		bytes += rhs.bytes;
-		bytesPerKSecond += rhs.bytesPerKSecond;
+		writeBytesPerKSecond += rhs.writeBytesPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
 	}
 	void operator-=(const StorageMetrics& rhs) {
 		bytes -= rhs.bytes;
-		bytesPerKSecond -= rhs.bytesPerKSecond;
+		writeBytesPerKSecond -= rhs.writeBytesPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
 		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
 	}
 	template <class F>
 	void operator*=(F f) {
 		bytes *= f;
-		bytesPerKSecond *= f;
+		writeBytesPerKSecond *= f;
 		iosPerKSecond *= f;
 		bytesReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
+	bool allZero() const { return !bytes && !writeBytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
+		serializer(ar, bytes, writeBytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -697,14 +697,14 @@ struct StorageMetrics {
 	}
 
 	bool operator==(StorageMetrics const& rhs) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
+		return bytes == rhs.bytes && writeBytesPerKSecond == rhs.writeBytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
 		       bytesReadPerKSecond == rhs.bytesReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
+		return format("Bytes: %lld, BWritePerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
 		              bytes,
-		              bytesPerKSecond,
+		              writeBytesPerKSecond,
 		              iosPerKSecond,
 		              bytesReadPerKSecond);
 	}

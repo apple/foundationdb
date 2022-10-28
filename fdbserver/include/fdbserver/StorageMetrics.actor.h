@@ -79,12 +79,12 @@ struct StorageServerMetrics {
 	StorageMetricSample byteSample;
 
 	// FIXME: iops is not effectively tested, and is not used by data distribution
-	TransientStorageMetricSample iopsSample, bandwidthSample;
+	TransientStorageMetricSample iopsSample, bytesWriteSample;
 	TransientStorageMetricSample bytesReadSample;
 
 	StorageServerMetrics()
 	  : byteSample(0), iopsSample(SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE),
-	    bandwidthSample(SERVER_KNOBS->BANDWIDTH_UNITS_PER_SAMPLE),
+	    bytesWriteSample(SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE),
 	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE) {}
 
 	StorageMetrics getMetrics(KeyRangeRef const& keys) const;
@@ -229,11 +229,6 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 			}
 		}
 	}
-}
-
-// For both the mutation log and the versioned map.
-inline int mvccStorageBytes(int64_t size) {
-	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 + (MutationRef::OVERHEAD_BYTES + size) * 2;
 }
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_STORAGEMETRICS_H

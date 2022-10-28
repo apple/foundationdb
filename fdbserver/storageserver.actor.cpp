@@ -533,9 +533,13 @@ const int VERSION_OVERHEAD =
          sizeof(Reference<VersionedMap<KeyRef, ValueOrClearToRef>::PTreeT>)); // versioned map [ x2 for
                                                                               // createNewVersion(version+1) ], 64b
                                                                               // overhead for map
-// For both the mutation log and the versioned map.
+
+// Memory size for storing mutation in the mutation log and the versioned map.
 static int mvccStorageBytes(MutationRef const& m) {
-	return mvccStorageBytes(m.param1.size() + m.param2.size());
+	// Why * 2:
+	// - 1 insertion into version map costs 2 nodes in avg;
+	// - The mutation will be stored in both mutation log and versioned map;
+	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 + m.totalSize() * 2;
 }
 
 struct FetchInjectionInfo {
@@ -1960,7 +1964,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		/*
 		StorageMetrics m;
-		m.bytesPerKSecond = req.key.size() + (v.present() ? v.get().size() : 0);
+		m.writeBytesPerKSecond = req.key.size() + (v.present() ? v.get().size() : 0);
 		m.iosPerKSecond = 1;
 		data->metrics.notify(req.key, m);
 		*/
@@ -5610,7 +5614,7 @@ void applyMutation(StorageServer* self,
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
-	metrics.bytesPerKSecond = mvccStorageBytes(m) / 2;
+	metrics.writeBytesPerKSecond = m.totalSize(); // comparable to counter.mutationBytes
 	metrics.iosPerKSecond = 1;
 	self->metrics.notify(m.param1, metrics);
 
@@ -10070,12 +10074,12 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 						//  all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
-						  bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond ||
+						  bool b = ( m.bytes != metrics.bytes || m.writeBytesPerKSecond != metrics.writeBytesPerKSecond ||
 						  m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
 						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
 						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
-						  b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond,
-						  metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
+						  b, m.bytes, m.writeBytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.writeBytesPerKSecond,
+						  metrics.iosPerKSecond, c.bytes, c.writeBytesPerKSecond, c.iosPerKSecond);
 
 						  }*/
 					}

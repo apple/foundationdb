@@ -180,8 +180,8 @@ protected:
 	// Decrease the intersecting shard bytes as if delete the data
 	void clearRangeTotalBytes(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes);
 
-	// Update the storage metrics as if we write the MVCC storage with a mutation of `size` bytes.
-	void notifyMvccStorageCost(KeyRef key, int64_t size);
+	// Update the storage metrics as if we write a k-v pair of `size` bytes.
+	void notifyWriteMetrics(KeyRef key, int64_t size);
 
 	// Randomly generate keys and kv size between the fetch range, updating the byte sample.
 	// Once the fetchKeys return, the shard status will become FETCHED.

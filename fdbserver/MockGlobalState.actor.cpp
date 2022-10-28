@@ -308,7 +308,7 @@ Future<Void> MockStorageServer::run() {
 }
 
 void MockStorageServer::set(KeyRef key, int64_t bytes, int64_t oldBytes) {
-	notifyMvccStorageCost(key, bytes);
+	notifyWriteMetrics(key, bytes);
 	byteSampleApplySet(key, bytes);
 	auto delta = oldBytes - bytes;
 	availableDiskSpace += delta;
@@ -316,7 +316,7 @@ void MockStorageServer::set(KeyRef key, int64_t bytes, int64_t oldBytes) {
 }
 
 void MockStorageServer::clear(KeyRef key, int64_t bytes) {
-	notifyMvccStorageCost(key, bytes);
+	notifyWriteMetrics(key, bytes);
 	KeyRange sr = singleKeyRange(key);
 	byteSampleApplyClear(sr);
 	availableDiskSpace += bytes;
@@ -324,7 +324,7 @@ void MockStorageServer::clear(KeyRef key, int64_t bytes) {
 }
 
 void MockStorageServer::clearRange(KeyRangeRef range, int64_t beginShardBytes, int64_t endShardBytes) {
-	notifyMvccStorageCost(range.begin, range.begin.size() + range.end.size());
+	notifyWriteMetrics(range.begin, range.begin.size() + range.end.size());
 	byteSampleApplyClear(range);
 	auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
 	availableDiskSpace += totalByteSize;
@@ -386,10 +386,10 @@ void MockStorageServer::clearRangeTotalBytes(KeyRangeRef range, int64_t beginSha
 	}
 }
 
-void MockStorageServer::notifyMvccStorageCost(KeyRef key, int64_t size) {
-	// update write bandwidth and iops as mock the cost of writing mvcc storage
+void MockStorageServer::notifyWriteMetrics(KeyRef key, int64_t size) {
+	// update write bandwidth and iops as mock the cost of writing a mutation
 	StorageMetrics s;
-	s.bytesPerKSecond = mvccStorageBytes(size) / 2;
+	s.writeBytesPerKSecond = size + MutationRef::OVERHEAD_BYTES;
 	s.iosPerKSecond = 1;
 	metrics.notify(key, s);
 }

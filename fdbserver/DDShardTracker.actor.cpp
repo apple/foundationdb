@@ -41,9 +41,9 @@ enum BandwidthStatus { BandwidthStatusLow, BandwidthStatusNormal, BandwidthStatu
 enum ReadBandwidthStatus { ReadBandwidthStatusNormal, ReadBandwidthStatusHigh };
 
 BandwidthStatus getBandwidthStatus(StorageMetrics const& metrics) {
-	if (metrics.bytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)
+	if (metrics.writeBytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)
 		return BandwidthStatusHigh;
-	else if (metrics.bytesPerKSecond < SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC)
+	else if (metrics.writeBytesPerKSecond < SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC)
 		return BandwidthStatusLow;
 
 	return BandwidthStatusNormal;
@@ -176,7 +176,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 		bounds.max.bytes = maxShardSize;
 	}
 
-	bounds.max.bytesPerKSecond = bounds.max.infinity;
+	bounds.max.writeBytesPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
 	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
 
@@ -187,14 +187,14 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 		bounds.min.bytes = maxShardSize / SERVER_KNOBS->SHARD_BYTES_RATIO;
 	}
 
-	bounds.min.bytesPerKSecond = 0;
+	bounds.min.writeBytesPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
 	bounds.min.bytesReadPerKSecond = 0;
 
 	// The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last
 	// shard)
 	bounds.permittedError.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO / 3;
-	bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.writeBytesPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
 
@@ -222,18 +222,18 @@ ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
 		                            std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0));
 		bounds.permittedError.bytes = bytes * 0.1;
 		if (bandwidthStatus == BandwidthStatusNormal) { // Not high or low
-			bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
-			bounds.min.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
-			bounds.permittedError.bytesPerKSecond = bounds.min.bytesPerKSecond / 4;
+			bounds.max.writeBytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
+			bounds.min.writeBytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
+			bounds.permittedError.writeBytesPerKSecond = bounds.min.writeBytesPerKSecond / 4;
 		} else if (bandwidthStatus == BandwidthStatusHigh) { // > 10MB/sec for 100MB shard, proportionally lower
 			                                                 // for smaller shard, > 200KB/sec no matter what
-			bounds.max.bytesPerKSecond = bounds.max.infinity;
-			bounds.min.bytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
-			bounds.permittedError.bytesPerKSecond = bounds.min.bytesPerKSecond / 4;
+			bounds.max.writeBytesPerKSecond = bounds.max.infinity;
+			bounds.min.writeBytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
+			bounds.permittedError.writeBytesPerKSecond = bounds.min.writeBytesPerKSecond / 4;
 		} else if (bandwidthStatus == BandwidthStatusLow) { // < 10KB/sec
-			bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
-			bounds.min.bytesPerKSecond = 0;
-			bounds.permittedError.bytesPerKSecond = bounds.max.bytesPerKSecond / 4;
+			bounds.max.writeBytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
+			bounds.min.writeBytesPerKSecond = 0;
+			bounds.permittedError.writeBytesPerKSecond = bounds.max.writeBytesPerKSecond / 4;
 		} else {
 			ASSERT(false);
 		}
@@ -309,12 +309,12 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					/*TraceEvent("ShardSizeUpdate")
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.metrics.bytes)
-					    .detail("Bandwidth", metrics.metrics.bytesPerKSecond)
+					    .detail("Bandwidth", metrics.metrics.writeBytesPerKSecond)
 					    .detail("BandwidthStatus", getBandwidthStatus(metrics))
 					    .detail("BytesLower", bounds.min.bytes)
 					    .detail("BytesUpper", bounds.max.bytes)
-					    .detail("BandwidthLower", bounds.min.bytesPerKSecond)
-					    .detail("BandwidthUpper", bounds.max.bytesPerKSecond)
+					    .detail("BandwidthLower", bounds.min.writeBytesPerKSecond)
+					    .detail("BandwidthUpper", bounds.max.writeBytesPerKSecond)
 					    .detail("ShardSizePresent", shardSize->get().present())
 					    .detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 					    .detail("TrackerID", trackerID);*/
@@ -882,7 +882,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 
 	StorageMetrics splitMetrics;
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
-	splitMetrics.bytesPerKSecond =
+	splitMetrics.writeBytesPerKSecond =
 	    keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
 	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
@@ -905,7 +905,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	            bandwidthStatus == BandwidthStatusHigh     ? "High"
 	            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
 	                                                       : "Low")
-	    .detail("BytesPerKSec", metrics.bytesPerKSecond)
+	    .detail("BytesPerKSec", metrics.writeBytesPerKSecond)
 	    .detail("NumShards", numShards);
 
 	if (numShards > 1) {
@@ -1206,7 +1206,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 	    .detail("TrackerID", trackerID)
 	    .detail("MaxBytes", self()->maxShardSize->get().get())
 	    .detail("ShardSize", shardSize->get().get().bytes)
-	    .detail("BytesPerKSec", shardSize->get().get().bytesPerKSecond);*/
+	    .detail("BytesPerKSec", shardSize->get().get().writeBytesPerKSecond);*/
 
 	try {
 		loop {
