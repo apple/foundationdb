@@ -814,14 +814,20 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
 	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
-	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+
+	if (SERVER_KNOBS->BG_WRITE_MULTIPART) {
+		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+		wait(objectFile->append(serialized.begin(), serializedSize));
+		wait(objectFile->finish());
+	} else {
+		// TODO some way we can avoid copying to std::string?
+		state std::string fileContents = serialized.toString();
+		wait(writeBStore->writeEntireFile(fname, fileContents));
+	}
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.deltaFilesWritten;
 	bwData->stats.deltaBytesWritten += serializedSize;
-
-	wait(objectFile->append(serialized.begin(), serializedSize));
-	wait(objectFile->finish());
 
 	// free serialized since it is persisted in blob
 	serialized = Value();
@@ -1025,14 +1031,20 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
 	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
-	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+
+	if (SERVER_KNOBS->BG_WRITE_MULTIPART) {
+		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+		wait(objectFile->append(serialized.begin(), serializedSize));
+		wait(objectFile->finish());
+	} else {
+		// TODO some way we can avoid copying to std::string?
+		state std::string fileContents = serialized.toString();
+		wait(writeBStore->writeEntireFile(fname, fileContents));
+	}
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.snapshotFilesWritten;
 	bwData->stats.snapshotBytesWritten += serializedSize;
-
-	wait(objectFile->append(serialized.begin(), serializedSize));
-	wait(objectFile->finish());
 
 	// free serialized since it is persisted in blob
 	serialized = Value();
