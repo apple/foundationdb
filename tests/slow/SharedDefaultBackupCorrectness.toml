@@ -1,5 +1,6 @@
 [configuration]
-extraDatabaseMode = 'Single'
+extraDatabaseMode = 'Multiple'
+extraDatabaseCount = 2
 
 [[test]]
 testTitle = 'SharedDefaultBackupToFileThenDB'

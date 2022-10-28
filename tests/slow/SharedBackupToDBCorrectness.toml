@@ -1,5 +1,5 @@
 [configuration]
-extraDatabaseMode = 'LocalOrSingle'
+extraDatabaseMode = 'Single'
 
 [[test]]
 testTitle = 'BackupAndRestore'

@@ -1,3 +1,6 @@
+[configuration]
+extraDatabaseMode = 'Single'
+
 [[test]]
 testTitle = 'BackupAndRestore'
 clearAfterTest = false

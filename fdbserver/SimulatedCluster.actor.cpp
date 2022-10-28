@@ -598,10 +598,11 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	}
 
 	if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
-		ASSERT(g_simulator->extraDatabases.size() == 1);
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-		state Database drDatabase = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		int drDatabaseIndex = std::min<int>(1, g_simulator->extraDatabases.size() - 1);
+		state Database drDatabase =
+		    Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[drDatabaseIndex]);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
@@ -630,7 +631,7 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	throw internal_error();
 }
 
-enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2 };
+enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2, AgentBackup = 3 };
 
 // SOMEDAY: when a process can be rebooted in isolation from the other on that machine,
 //  a loop{} will be needed around the waiting on simulatedFDBD(). For now this simply
@@ -750,7 +751,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				}
 				if (runBackupAgents != AgentNone) {
 					futures.push_back(runBackup(connRecord));
-					futures.push_back(runDr(connRecord));
+					if (runBackupAgents != AgentBackup) {
+						futures.push_back(runDr(connRecord));
+					}
 				}
 
 				futures.push_back(success(onShutdown));
@@ -2454,7 +2457,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					                                                      baseFolder,
 					                                                      false,
 					                                                      machine == useSeedForMachine,
-					                                                      AgentNone,
+					                                                      AgentBackup,
 					                                                      sslOnly,
 					                                                      whitelistBinPaths,
 					                                                      protocolVersion,
