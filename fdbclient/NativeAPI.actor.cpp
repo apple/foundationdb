@@ -1577,6 +1577,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
+	if (g_network->isSimulated()) {
+		// Randomly trace transactions in simulation to enable testing of span
+		// ID propagation to the storage servers.
+		transactionTracingSample = deterministicRandom()->random01() < 0.01;
+	}
+
 	if (apiVersion.version() >= 700) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
