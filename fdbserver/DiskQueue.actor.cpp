@@ -1677,7 +1677,10 @@ TEST_CASE("performance/fdbserver/DiskQueue") {
 			}
 		}
 	}
-	loop {
+	while (loopCount < 4000) {
+		if (loopCount % 100 == 0) {
+			printf("loop count: %d\n", loopCount);
+		}
 		if (++loopCount % 2 == 0) {
 			state IDiskQueue::location frontLocation = locations.front();
 			locations.pop_front();
@@ -1692,4 +1695,7 @@ TEST_CASE("performance/fdbserver/DiskQueue") {
 		lastCommit = queue->commit();
 		wait(prevCommit);
 	}
+	queue->dispose();
+	wait(queue->onClosed());
+	return Void();
 }
