@@ -81,7 +81,7 @@ struct GetRateInfoReply {
 	// Depending on the value of SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES,
 	// one of these fields may be populated
 	Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>> clientThrottledTags;
-	Optional<PrioritizedTransactionTagMap<double>> proxyThrottledTags;
+	Optional<TransactionTagMap<double>> proxyThrottledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

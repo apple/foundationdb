@@ -103,6 +103,59 @@ def maintenance(logger):
     output3 = run_fdbcli_command('maintenance')
     assert output3 == no_maintenance_output
 
+@enable_logging()
+def quota(logger):
+    # Should be a noop
+    command = 'quota clear green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully cleared quota.'
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '<empty>'
+
+    # Ignored update
+    command = 'quota set red total_throughput 49152'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully updated quota.'
+
+    command = 'quota set green total_throughput 32768'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully updated quota.'
+
+    command = 'quota set green reserved_throughput 16384'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully updated quota.'
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '32768'
+
+    command = 'quota get green reserved_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '16384'
+
+    command = 'quota clear green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully cleared quota.'
+
+    command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '<empty>'
+
+    # Too few arguments, should log help message
+    command = 'quota get green'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
 
 @enable_logging()
 def setclass(logger):
@@ -333,6 +386,57 @@ def consistencycheck(logger):
     output3 = run_fdbcli_command('consistencycheck')
     assert output3 == consistency_check_on_output
 
+
+@enable_logging()
+def knobmanagement(logger):
+    # this test will set knobs and verify that the knobs are properly set
+    # must use begin/commit to avoid prompt for description
+
+    # Incorrect arguments
+    output = run_fdbcli_command('setknob')
+    assert output == "Usage: setknob <KEY> <VALUE> [CONFIG_CLASS]"
+    output = run_fdbcli_command('setknob', 'min_trace_severity')
+    assert output == "Usage: setknob <KEY> <VALUE> [CONFIG_CLASS]"
+    output = run_fdbcli_command('getknob')
+    assert output == "Usage: getknob <KEY> [CONFIG_CLASS]"
+    logger.debug("incorrect args passed")
+
+    # Invalid knob name
+    err = run_fdbcli_command_and_get_error('begin; setknob dummy_knob 20; commit \"fdbcli change\";')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0
+    logger.debug("invalid knob name passed")
+
+    # Invalid type for knob
+    err = run_fdbcli_command_and_get_error('begin; setknob min_trace_severity dummy-text; commit \"fdbcli change\";')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0
+    logger.debug("invalid knob type passed")
+
+    # Verifying we can't do a normal set, clear, get, getrange, clearrange 
+    # with a setknob
+    err = run_fdbcli_command_and_get_error('writemode on; begin; set foo bar; setknob max_metric_size 1000; commit;')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0
+
+    err = run_fdbcli_command_and_get_error('writemode on; begin; clear foo; setknob max_metric_size 1000; commit')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0 
+
+    # Various setknobs and verified by getknob
+    output = run_fdbcli_command('begin; setknob min_trace_severity 30; setknob max_metric_size 1000; \
+                                setknob tracing_udp_listener_addr 192.168.0.1;                       \
+                                setknob tracing_sample_rate 0.3;                                     \
+                                commit \"This is an fdbcli test for knobs\";')
+    assert "Committed" in output
+    output = run_fdbcli_command('getknob', 'min_trace_severity')
+    assert r"`min_trace_severity' is `30'" == output
+    output = run_fdbcli_command('getknob', 'max_metric_size')
+    assert r"`max_metric_size' is `1000'" == output
+    output = run_fdbcli_command('getknob', 'tracing_udp_listener_addr')
+    assert r"`tracing_udp_listener_addr' is `'192.168.0.1''" == output
+    output = run_fdbcli_command('getknob', 'tracing_sample_rate')
+    assert r"`tracing_sample_rate' is `0.300000'" == output
 
 @enable_logging()
 def cache_range(logger):
@@ -983,6 +1087,8 @@ if __name__ == '__main__':
         versionepoch()
         integer_options()
         tls_address_suffix()
+        knobmanagement()
+        quota()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

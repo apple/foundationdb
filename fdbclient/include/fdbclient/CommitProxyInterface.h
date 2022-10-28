@@ -30,6 +30,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
@@ -60,6 +61,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
+	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -86,6 +88,8 @@ struct CommitProxyInterface {
 			exclusionSafetyCheckReq =
 			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			expireIdempotencyId =
+			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 
@@ -102,6 +106,7 @@ struct CommitProxyInterface {
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
+		streams.push_back(expireIdempotencyId.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -150,6 +155,24 @@ struct ClientDBInfo {
 	}
 };
 
+struct ExpireIdempotencyIdRequest {
+	constexpr static FileIdentifier file_identifier = 1900933;
+	Version commitVersion = invalidVersion;
+	uint8_t batchIndexHighByte = 0;
+	TenantInfo tenant;
+
+	ExpireIdempotencyIdRequest() {}
+	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte, TenantInfo tenant)
+	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte), tenant(tenant) {}
+
+	bool verify() const { return tenant.isAuthorized(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, commitVersion, batchIndexHighByte, tenant);
+	}
+};
+
 struct CommitID {
 	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; // returns invalidVersion if transaction conflicts
@@ -186,6 +209,7 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
+	IdempotencyIdRef idempotencyId;
 
 	TenantInfo tenantInfo;
 
@@ -196,8 +220,17 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
+		serializer(ar,
+		           transaction,
+		           reply,
+		           flags,
+		           debugID,
+		           commitCostEstimation,
+		           tagSet,
+		           spanContext,
+		           tenantInfo,
+		           idempotencyId,
+		           arena);
 	}
 };
 
@@ -224,6 +257,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
+	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
 	UID proxyId; // GRV proxy ID to detect old GRV proxies at client side
@@ -242,7 +276,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           rkDefaultThrottled,
 		           rkBatchThrottled,
 		           ssVersionVectorDelta,
-		           proxyId);
+		           proxyId,
+		           proxyTagThrottledDuration);
 	}
 };
 
@@ -267,6 +302,10 @@ struct GetReadVersionRequest : TimedRequest {
 	TransactionPriority priority;
 
 	TransactionTagMap<uint32_t> tags;
+	// Not serialized, because this field does not need to be sent to master.
+	// It is used for reporting to clients the amount of time spent delayed by
+	// the TagQueue
+	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
@@ -302,6 +341,8 @@ struct GetReadVersionRequest : TimedRequest {
 	bool verify() const { return true; }
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
+
+	bool isTagged() const { return !tags.empty(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

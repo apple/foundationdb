@@ -24,10 +24,11 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct RestoreBackupWorkload final : TestWorkload {
+struct RestoreBackupWorkload : TestWorkload {
 
 	FileBackupAgent backupAgent;
 	Reference<IBackupContainer> backupContainer;
@@ -44,7 +45,7 @@ struct RestoreBackupWorkload final : TestWorkload {
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 	}
 
-	static constexpr const char* DESCRIPTION = "RestoreBackup";
+	static constexpr auto NAME = "RestoreBackup";
 
 	ACTOR static Future<Void> waitOnBackup(RestoreBackupWorkload* self, Database cx) {
 		state Version waitForVersion;
@@ -113,22 +114,50 @@ struct RestoreBackupWorkload final : TestWorkload {
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
-		wait(success(self->backupAgent.restore(cx,
-		                                       cx,
-		                                       self->tag,
-		                                       Key(self->backupContainer->getURL()),
-		                                       self->backupContainer->getProxy(),
-		                                       WaitForComplete::True,
-		                                       ::invalidVersion,
-		                                       Verbose::True)));
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+			// restore system keys
+			VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
+			state std::vector<Future<Version>> restores;
+			for (int i = 0; i < systemBackupRanges.size(); i++) {
+				restores.push_back((self->backupAgent.restore(cx,
+				                                              cx,
+				                                              "system_restore"_sr,
+				                                              Key(self->backupContainer->getURL()),
+				                                              self->backupContainer->getProxy(),
+				                                              WaitForComplete::True,
+				                                              ::invalidVersion,
+				                                              Verbose::True,
+				                                              systemBackupRanges[i])));
+			}
+			waitForAll(restores);
+			// restore non-system keys
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       self->tag,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True,
+			                                       normalKeys)));
+		} else {
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       self->tag,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True)));
+		}
+
 		return Void();
 	}
 
-	std::string description() const override { return DESCRIPTION; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<RestoreBackupWorkload> RestoreBackupWorkloadFactory(RestoreBackupWorkload::DESCRIPTION);
+WorkloadFactory<RestoreBackupWorkload> RestoreBackupWorkloadFactory;

@@ -290,8 +290,8 @@ struct BackupData {
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		specialCounter(cc, "BufferedBytes", [this]() { return this->lock->activePermits(); });
 		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
-		logger = traceCounters(
-		    "BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "BackupWorkerMetrics");
+		logger =
+		    cc.traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "BackupWorkerMetrics");
 	}
 
 	bool pullFinished() const { return endVersion.present() && pulledVersion.get() > endVersion.get(); }

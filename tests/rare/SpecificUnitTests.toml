@@ -6,5 +6,5 @@ startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
-    maxTestCases = 1
+    maxTestCases = 0
     testsMatching = '/'

@@ -59,7 +59,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	bool fastSuccess = false;
 	int rangeEachBadActor = 0;
 	std::set<std::string> throttledTags;
-	static constexpr const char* NAME = "WriteTagThrottling";
+	static constexpr auto NAME = "WriteTagThrottling";
 	static constexpr int MIN_TAGS_PER_TRANSACTION = 1;
 	static constexpr int MIN_TRANSACTION_TAG_LENGTH = 2;
 
@@ -90,8 +90,6 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		badTag = TransactionTag(std::string("bT"));
 		goodTag = TransactionTag(std::string("gT"));
 	}
-
-	std::string description() const override { return WriteTagThrottlingWorkload::NAME; }
 
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
 		ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION &&
@@ -324,4 +322,4 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<WriteTagThrottlingWorkload> WriteTagThrottlingWorkloadFactory(WriteTagThrottlingWorkload::NAME);
+WorkloadFactory<WriteTagThrottlingWorkload> WriteTagThrottlingWorkloadFactory;

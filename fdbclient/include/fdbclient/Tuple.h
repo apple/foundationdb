@@ -48,6 +48,7 @@ struct Tuple {
 	// Note that strings can't be incomplete because they are parsed such that the end of the packed
 	// byte string is considered the end of the string in lieu of a specific end.
 	static Tuple unpack(StringRef const& str, bool exclude_incomplete = false);
+	static std::string tupleToString(Tuple const& tuple);
 	static Tuple unpackUserType(StringRef const& str, bool exclude_incomplete = false);
 
 	Tuple& append(Tuple const& tuple);

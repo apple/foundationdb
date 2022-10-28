@@ -56,7 +56,7 @@ endfunction()
 #   all these tests in serialized order and within the same directory. This is
 #   useful for restart tests
 function(add_fdb_test)
-  set(options UNIT IGNORE)
+  set(options UNIT IGNORE LONG_RUNNING)
   set(oneValueArgs TEST_NAME TIMEOUT)
   set(multiValueArgs TEST_FILES)
   cmake_parse_arguments(ADD_FDB_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -106,6 +106,9 @@ function(add_fdb_test)
   if(ADD_FDB_TEST_UNIT)
     message(STATUS
       "ADDING UNIT TEST ${assigned_id} ${test_name}")
+  elseif(ADD_FDB_TEST_LONG_RUNNING)
+    message(STATUS
+      "ADDING LONG RUNNING TEST ${assigned_id} ${test_name}")
   else()
     message(STATUS
       "ADDING SIMULATOR TEST ${assigned_id} ${test_name}")
@@ -150,9 +153,15 @@ function(add_fdb_test)
     endif()
   endif()
   # set variables used for generating test packages
-  set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
-  set(TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
-  set(TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+  if(ADD_FDB_TEST_LONG_RUNNING)
+    set(LONG_RUNNING_TEST_NAMES ${LONG_RUNNING_TEST_NAMES} ${test_name} PARENT_SCOPE)
+    set(LONG_RUNNING_TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
+    set(LONG_RUNNING_TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+  else()
+    set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
+    set(TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
+    set(TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+  endif()
 endfunction()
 
 if(NOT WIN32)
@@ -167,14 +176,21 @@ endif()
 # - OUT_DIR the directory where files will be staged
 # - CONTEXT the type of correctness package being built (e.g. 'valgrind correctness')
 function(stage_correctness_package)
+  set(options LONG_RUNNING)
   set(oneValueArgs OUT_DIR CONTEXT OUT_FILES)
-  cmake_parse_arguments(STAGE "" "${oneValueArgs}" "" "${ARGN}")
+  set(multiValueArgs TEST_LIST)
+  cmake_parse_arguments(STAGE "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   file(MAKE_DIRECTORY ${STAGE_OUT_DIR}/bin)
-  string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
-  foreach(test IN LISTS TEST_NAMES)
+  foreach(test IN LISTS STAGE_TEST_LIST)
     if((${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
         (NOT ${test} MATCHES ${TEST_PACKAGE_EXCLUDE}))
-      foreach(file IN LISTS TEST_FILES_${test})
+      string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
+      if(STAGE_LONG_RUNNING)
+        set(TEST_FILES_PREFIX "LONG_RUNNING_TEST_FILES")
+      else()
+        set(TEST_FILES_PREFIX "TEST_FILES")
+      endif()
+      foreach(file IN LISTS ${TEST_FILES_PREFIX}_${test})
         string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
         set(out_file ${STAGE_OUT_DIR}/tests/${rel_out_file})
         list(APPEND test_files ${out_file})
@@ -265,7 +281,7 @@ function(create_correctness_package)
     return()
   endif()
   set(out_dir "${CMAKE_BINARY_DIR}/correctness")
-  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files)
+  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files TEST_LIST "${TEST_NAMES}")
   set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
@@ -294,13 +310,47 @@ function(create_correctness_package)
   add_dependencies(package_tests_u package_tests)
 endfunction()
 
+function(create_long_running_correctness_package)
+  if(WIN32)
+    return()
+  endif()
+  set(out_dir "${CMAKE_BINARY_DIR}/long_running_correctness")
+  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "long running correctness" OUT_FILES package_files TEST_LIST "${LONG_RUNNING_TEST_NAMES}" LONG_RUNNING)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/long-running-correctness-${FDB_VERSION}.tar.gz)
+  add_custom_command(
+    OUTPUT ${tar_file}
+    DEPENDS ${package_files}
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTest.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTimeout.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTest.sh
+                                    ${out_dir}/joshua_test
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTimeout.sh
+                                    ${out_dir}/joshua_timeout
+    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
+                                                    ${out_dir}/joshua_test
+                                                    ${out_dir}/joshua_timeout
+    WORKING_DIRECTORY ${out_dir}
+    COMMENT "Package long running correctness archive"
+    )
+  add_custom_target(package_long_running_tests ALL DEPENDS ${tar_file})
+  add_dependencies(package_long_running_tests strip_only_fdbserver TestHarness)
+  set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/long_running_correctness.tar.gz")
+  add_custom_command(
+    OUTPUT "${unversioned_tar_file}"
+    DEPENDS "${tar_file}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${tar_file}" "${unversioned_tar_file}"
+    COMMENT "Copy long running correctness package to ${unversioned_tar_file}")
+  add_custom_target(package_long_running_tests_u DEPENDS "${unversioned_tar_file}")
+  add_dependencies(package_long_running_tests_u package_long_running_tests)
+endfunction()
+
 function(create_valgrind_correctness_package)
   if(WIN32)
     return()
   endif()
   if(USE_VALGRIND)
     set(out_dir "${CMAKE_BINARY_DIR}/valgrind_correctness")
-    stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness" OUT_FILES package_files)
+    stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness" OUT_FILES package_files TEST_LIST "${TEST_NAMES}")
     set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${FDB_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}

@@ -284,11 +284,11 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	  : vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0), receivedBytes(0), appliedBytes(0),
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
 	    totalBytesToWrite(-1), applyingDataBytes(0), counters(this, nodeID, batchIndex) {
-		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
-		                            nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
-		                            &counters.cc,
-		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
+		pollMetrics =
+		    counters.cc.traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
+		                              nodeID,
+		                              SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                              nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
 	~ApplierBatchData() {

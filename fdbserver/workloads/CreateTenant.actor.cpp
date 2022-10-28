@@ -26,13 +26,13 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CreateTenantWorkload : TestWorkload {
+	static constexpr auto NAME = "CreateTenant";
 	TenantName tenant;
 
 	CreateTenantWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		tenant = getOption(options, "name"_sr, "DefaultTenant"_sr);
 	}
 
-	std::string description() const override { return "CreateTenant"; }
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			return _setup(this, cx);
@@ -59,4 +59,4 @@ struct CreateTenantWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<CreateTenantWorkload> CreateTenantWorkload("CreateTenant");
+WorkloadFactory<CreateTenantWorkload> CreateTenantWorkload;

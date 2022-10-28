@@ -279,9 +279,9 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 	return true;
 }
 
-void fdb_check(fdb::Error e) {
-	if (e) {
-		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e.code(), e.what());
+void fdb_check(fdb::Error e, std::string_view msg, fdb::Error::CodeType expectedError = error_code_success) {
+	if (e.code()) {
+		fmt::print(stderr, "{}, Error: {}({})\n", msg, e.code(), e.what());
 		std::abort();
 	}
 }
@@ -429,7 +429,7 @@ bool runWorkloads(TesterOptions& options) {
 		}
 		workloadMgr.run();
 		return !workloadMgr.failed();
-	} catch (const std::runtime_error& err) {
+	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		return false;
 	}
@@ -453,15 +453,15 @@ int main(int argc, char** argv) {
 		applyNetworkOptions(options);
 		fdb::network::setup();
 
-		std::thread network_thread{ &fdb::network::run };
+		std::thread network_thread{ [] { fdb_check(fdb::network::run(), "FDB network thread failed"); } };
 
 		if (!runWorkloads(options)) {
 			retCode = 1;
 		}
 
-		fdb_check(fdb::network::stop());
+		fdb_check(fdb::network::stop(), "Failed to stop FDB thread");
 		network_thread.join();
-	} catch (const std::runtime_error& err) {
+	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		retCode = 1;
 	}

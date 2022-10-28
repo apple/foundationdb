@@ -29,6 +29,7 @@
 #include "flow/actorcompiler.h" // This must be the last include.
 
 struct KillRegionWorkload : TestWorkload {
+	static constexpr auto NAME = "KillRegion";
 	bool enabled;
 	double testDuration;
 
@@ -38,8 +39,6 @@ struct KillRegionWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		g_simulator->usableRegions = 1;
 	}
-
-	std::string description() const override { return "KillRegionWorkload"; }
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
@@ -134,4 +133,4 @@ struct KillRegionWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<KillRegionWorkload> KillRegionWorkloadFactory("KillRegion");
+WorkloadFactory<KillRegionWorkload> KillRegionWorkloadFactory;

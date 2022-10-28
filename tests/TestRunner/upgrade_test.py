@@ -145,8 +145,9 @@ class UpgradeTest:
         self.cluster.fdbmonitor_binary = self.downloader.binary_path(version, "fdbmonitor")
         self.cluster.fdbserver_binary = self.downloader.binary_path(version, "fdbserver")
         self.cluster.fdbcli_binary = self.downloader.binary_path(version, "fdbcli")
-        self.cluster.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (
-            self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
+        self.cluster.set_env_var(
+            "LD_LIBRARY_PATH", "%s:%s" % (self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH"))
+        )
         self.cluster.use_legacy_conf_syntax = version_before(version, "7.1.0")
         self.cluster.use_future_protocol_version = version == FUTURE_VERSION
         self.cluster.save_config()
@@ -325,36 +326,6 @@ class UpgradeTest:
             .splitlines()
         )
 
-    # Check the cluster log for errors
-    def check_cluster_logs(self, error_limit=100):
-        sev40s = (
-            subprocess.getoutput("grep -r 'Severity=\"40\"' {}".format(self.cluster.log.as_posix()))
-            .rstrip()
-            .splitlines()
-        )
-
-        err_cnt = 0
-        for line in sev40s:
-            # When running ASAN we expect to see this message. Boost coroutine should be using the
-            # correct asan annotations so that it shouldn't produce any false positives.
-            if line.endswith(
-                "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false "
-                "positives in some cases!"
-            ):
-                continue
-            if err_cnt < error_limit:
-                print(line)
-            err_cnt += 1
-
-        if err_cnt > 0:
-            print(
-                ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails",
-                err_cnt,
-            )
-        else:
-            print("No errors found in logs")
-        return err_cnt == 0
-
     # Check the server and client logs for warnings and dump them
     def dump_warnings_in_logs(self, limit=100):
         sev30s = (
@@ -454,7 +425,7 @@ if __name__ == "__main__":
         print("data-dir: {}".format(test.data))
         print("cluster-file: {}".format(test.etc.joinpath("fdb.cluster")))
         errcode = test.exec_test(args)
-        if not test.check_cluster_logs():
+        if not test.cluster.check_cluster_logs():
             errcode = 1 if errcode == 0 else errcode
         test.dump_warnings_in_logs()
         if errcode != 0 and not args.disable_log_dump:

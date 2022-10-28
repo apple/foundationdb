@@ -344,7 +344,7 @@ class TransactionEnvironment {
 		state Key configKey = encodeConfigKey(configClass, knobName);
 		state Optional<Value> value = wait(tr->get(configKey));
 		if (expected.present()) {
-			ASSERT_EQ(BinaryReader::fromStringRef<int64_t>(value.get(), Unversioned()), expected.get());
+			ASSERT_EQ(Tuple::unpack(value.get()).getInt(0), expected.get());
 		} else {
 			ASSERT(!value.present());
 		}

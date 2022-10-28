@@ -26,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct AsyncFileWriteWorkload : public AsyncFileWorkload {
+	static constexpr auto NAME = "AsyncFileWrite";
 	// Buffer used to store what is being written
 	Reference<AsyncFileBuffer> writeBuffer;
 
@@ -52,8 +53,6 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		fileSize = getOption(options, "fileSize"_sr, 10002432);
 		sequential = getOption(options, "sequential"_sr, true);
 	}
-
-	std::string description() const override { return "AsyncFileWrite"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
@@ -153,4 +152,4 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 	}
 };
 
-WorkloadFactory<AsyncFileWriteWorkload> AsyncFileWriteWorkloadFactory("AsyncFileWrite");
+WorkloadFactory<AsyncFileWriteWorkload> AsyncFileWriteWorkloadFactory;

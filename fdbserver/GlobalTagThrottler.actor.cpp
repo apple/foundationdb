@@ -120,12 +120,13 @@ class GlobalTagThrottlerImpl {
 		Smoother transactionCounter;
 		Smoother perClientRate;
 		Smoother targetRate;
+		double transactionsLastAdded;
 
 	public:
 		explicit PerTagStatistics()
 		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
+		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()) {}
 
 		Optional<ThrottleApi::TagQuotaValue> getQuota() const { return quota; }
 
@@ -133,7 +134,10 @@ class GlobalTagThrottlerImpl {
 
 		void clearQuota() { quota = {}; }
 
-		void addTransactions(int count) { transactionCounter.addDelta(count); }
+		void addTransactions(int count) {
+			transactionsLastAdded = now();
+			transactionCounter.addDelta(count);
+		}
 
 		double getTransactionRate() const { return transactionCounter.smoothRate(); }
 
@@ -150,6 +154,10 @@ class GlobalTagThrottlerImpl {
 		double updateAndGetTargetLimit(double targetTps) {
 			targetRate.setTotal(targetTps);
 			return targetRate.smoothTotal();
+		}
+
+		bool recentTransactionsAdded() const {
+			return now() - transactionsLastAdded < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
 		}
 	};
 
@@ -194,7 +202,8 @@ class GlobalTagThrottlerImpl {
 		for (const auto& [id, _] : throughput) {
 			result += getCurrentCost(id, tag).orDefault(0);
 		}
-		TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
+		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
+		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
 
 		return result;
 	}
@@ -227,10 +236,13 @@ class GlobalTagThrottlerImpl {
 			return 1.0;
 		}
 		auto const transactionRate = stats.get().getTransactionRate();
+		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
+		/*
 		TraceEvent("GlobalTagThrottler_GetAverageTransactionCost")
 		    .detail("Tag", tag)
 		    .detail("TransactionRate", transactionRate)
 		    .detail("Cost", cost);
+		*/
 		if (transactionRate == 0.0) {
 			return 1.0;
 		} else {
@@ -278,7 +290,7 @@ class GlobalTagThrottlerImpl {
 		for (const auto& t : tagsAffectingStorageServer) {
 			auto const tQuota = getQuota(t, LimitType::TOTAL);
 			sumQuota += tQuota.orDefault(0);
-			if (tag.compare(tag) == 0) {
+			if (t.compare(tag) == 0) {
 				tagQuota = tQuota.orDefault(0);
 			}
 		}
@@ -360,6 +372,7 @@ class GlobalTagThrottlerImpl {
 						tagsWithQuota.insert(tag);
 					}
 					self->removeUnseenQuotas(tagsWithQuota);
+					self->removeExpiredTags();
 					++self->throttledTagChangeId;
 					wait(delay(5.0));
 					break;
@@ -397,11 +410,28 @@ class GlobalTagThrottlerImpl {
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-	void addRequests(TransactionTag tag, int count) { tagStatistics[tag].addTransactions(static_cast<double>(count)); }
+	void addRequests(TransactionTag tag, int count) {
+		auto it = tagStatistics.find(tag);
+		if (it == tagStatistics.end()) {
+			if (tagStatistics.size() == SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {
+				CODE_PROBE(true,
+				           "Global tag throttler ignoring transactions because maximum number of trackable tags has "
+				           "been reached");
+				TraceEvent("GlobalTagThrottler_IgnoringRequests")
+				    .suppressFor(1.0)
+				    .detail("Tag", printable(tag))
+				    .detail("Count", count);
+			} else {
+				tagStatistics[tag].addTransactions(static_cast<double>(count));
+			}
+		} else {
+			it->second.addTransactions(static_cast<double>(count));
+		}
+	}
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 
-	PrioritizedTransactionTagMap<double> getProxyRates(int numProxies) {
-		PrioritizedTransactionTagMap<double> result;
+	TransactionTagMap<double> getProxyRates(int numProxies) {
+		TransactionTagMap<double> result;
 		lastBusyTagCount = 0;
 
 		for (auto& [tag, stats] : tagStatistics) {
@@ -414,8 +444,7 @@ public:
 			}
 			if (targetTps.present()) {
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
-				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
-				    smoothedTargetTps / numProxies;
+				result[tag] = smoothedTargetTps / numProxies;
 			} else {
 				te.disable();
 			}
@@ -466,10 +495,14 @@ public:
 		throttlingRatios[ss.id] = ss.getThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
 		                                                SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
 		for (const auto& busyReadTag : ss.busiestReadTags) {
-			throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
+			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
+				throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
+			}
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
-			throughput[ss.id][busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+			if (tagStatistics.find(busyWriteTag.tag) != tagStatistics.end()) {
+				throughput[ss.id][busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+			}
 		}
 		return Void();
 	}
@@ -479,6 +512,22 @@ public:
 	}
 
 	void removeQuota(TransactionTagRef tag) { tagStatistics[tag].clearQuota(); }
+
+	void removeExpiredTags() {
+		for (auto it = tagStatistics.begin(); it != tagStatistics.end();) {
+			const auto& [tag, stats] = *it;
+			if (!stats.recentTransactionsAdded()) {
+				for (auto& [ss, tagToCounters] : throughput) {
+					tagToCounters.erase(tag);
+				}
+				it = tagStatistics.erase(it);
+			} else {
+				++it;
+			}
+		}
+	}
+
+	uint32_t tagsTracked() const { return tagStatistics.size(); }
 };
 
 GlobalTagThrottler::GlobalTagThrottler(Database db, UID id) : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id)) {}
@@ -497,7 +546,7 @@ uint64_t GlobalTagThrottler::getThrottledTagChangeId() const {
 PrioritizedTransactionTagMap<ClientTagThrottleLimits> GlobalTagThrottler::getClientRates() {
 	return impl->getClientRates();
 }
-PrioritizedTransactionTagMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
+TransactionTagMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
 	return impl->getProxyRates(numProxies);
 }
 int64_t GlobalTagThrottler::autoThrottleCount() const {
@@ -525,6 +574,14 @@ void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaVa
 
 void GlobalTagThrottler::removeQuota(TransactionTagRef tag) {
 	return impl->removeQuota(tag);
+}
+
+uint32_t GlobalTagThrottler::tagsTracked() const {
+	return impl->tagsTracked();
+}
+
+void GlobalTagThrottler::removeExpiredTags() {
+	return impl->removeExpiredTags();
 }
 
 namespace GlobalTagThrottlerTesting {
@@ -679,12 +736,9 @@ bool isNear(Optional<double> a, Optional<double> b) {
 bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag, Optional<double> expected) {
 	Optional<double> rate;
 	auto targetRates = globalTagThrottler.getProxyRates(1);
-	auto it1 = targetRates.find(TransactionPriority::DEFAULT);
-	if (it1 != targetRates.end()) {
-		auto it2 = it1->second.find(tag);
-		if (it2 != it1->second.end()) {
-			rate = it2->second;
-		}
+	auto it = targetRates.find(tag);
+	if (it != targetRates.end()) {
+		rate = it->second;
 	}
 	TraceEvent("GlobalTagThrottling_RateMonitor")
 	    .detail("Tag", tag)
@@ -1027,5 +1081,49 @@ TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
+	return Void();
+}
+
+// Test that tags are expired iff a sufficient amount of time has passed since the
+// last transaction with that tag
+TEST_CASE("/GlobalTagThrottler/ExpireTags") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	TransactionTag testTag = "sampleTag1"_sr;
+
+	state Future<Void> client =
+	    timeout(GlobalTagThrottlerTesting::runClient(
+	                &globalTagThrottler, &storageServers, testTag, 10.0, 6.0, GlobalTagThrottlerTesting::OpType::READ),
+	            60.0,
+	            Void());
+	state Future<Void> updater = timeout(
+	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers), 60.0, Void());
+	wait(client && updater);
+	client.cancel();
+	updater.cancel();
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
+	globalTagThrottler.removeExpiredTags();
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
+	wait(delay(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER + 1.0));
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
+	globalTagThrottler.removeExpiredTags();
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), 0);
+	return Void();
+}
+
+// Test that the number of tags tracked does not grow beyond SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED
+TEST_CASE("/GlobalTagThrottler/TagLimit") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	std::vector<Future<Void>> futures;
+	for (int i = 0; i < 2 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED; ++i) {
+		Arena arena;
+		TransactionTag tag = makeString(8, arena);
+		deterministicRandom()->randomBytes(mutateString(tag), tag.size());
+		futures.push_back(GlobalTagThrottlerTesting::runClient(
+		    &globalTagThrottler, &storageServers, tag, 1.0, 6.0, GlobalTagThrottlerTesting::OpType::READ));
+	}
+	wait(timeout(waitForAll(futures), 60.0, Void()));
+	ASSERT_EQ(globalTagThrottler.tagsTracked(), SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED);
 	return Void();
 }

@@ -31,6 +31,7 @@
 
 // A workload which test the correctness of upgrading DR from 5.1 to 5.2
 struct BackupToDBUpgradeWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupToDBUpgrade";
 	double backupAfter, stopDifferentialAfter;
 	Key backupTag, restoreTag, backupPrefix, extraPrefix;
 	int backupRangesCount, backupRangeLengthMax;
@@ -84,8 +85,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 		TraceEvent("DRU_Start").log();
 	}
-
-	std::string description() const override { return "BackupToDBUpgrade"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
@@ -539,4 +538,4 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BackupToDBUpgradeWorkload> BackupToDBUpgradeWorkloadFactory("BackupToDBUpgrade");
+WorkloadFactory<BackupToDBUpgradeWorkload> BackupToDBUpgradeWorkloadFactory;

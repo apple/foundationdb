@@ -27,6 +27,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchAndWaitWorkload : TestWorkload {
+	static constexpr auto NAME = "WatchAndWait";
+
 	uint64_t nodeCount, watchCount;
 	int64_t nodePrefix;
 	int keyBytes;
@@ -54,8 +56,6 @@ struct WatchAndWaitWorkload : TestWorkload {
 			keyBytes++; // watches are on different keys than the ones being modified by the workload
 		}
 	}
-
-	std::string description() const override { return "WatchAndWait"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -130,4 +130,4 @@ struct WatchAndWaitWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<WatchAndWaitWorkload> WatchAndWaitWorkloadFactory("WatchAndWait");
+WorkloadFactory<WatchAndWaitWorkload> WatchAndWaitWorkloadFactory;

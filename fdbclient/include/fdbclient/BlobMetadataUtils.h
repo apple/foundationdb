@@ -44,18 +44,41 @@ struct BlobMetadataDetailsRef {
 	Optional<StringRef> base;
 	VectorRef<StringRef> partitions;
 
+	// cache options
+	double refreshAt;
+	double expireAt;
+
 	BlobMetadataDetailsRef() {}
 	BlobMetadataDetailsRef(Arena& arena, const BlobMetadataDetailsRef& from)
-	  : domainId(from.domainId), domainName(arena, from.domainName), partitions(arena, from.partitions) {
+	  : domainId(from.domainId), domainName(arena, from.domainName), partitions(arena, from.partitions),
+	    refreshAt(from.refreshAt), expireAt(from.expireAt) {
 		if (from.base.present()) {
 			base = StringRef(arena, from.base.get());
 		}
 	}
+
+	explicit BlobMetadataDetailsRef(Arena& ar,
+	                                BlobMetadataDomainId domainId,
+	                                BlobMetadataDomainNameRef domainName,
+	                                Optional<StringRef> base,
+	                                VectorRef<StringRef> partitions,
+	                                double refreshAt,
+	                                double expireAt)
+	  : domainId(domainId), domainName(ar, domainName), partitions(ar, partitions), refreshAt(refreshAt),
+	    expireAt(expireAt) {
+		if (base.present()) {
+			base = StringRef(ar, base.get());
+		}
+	}
+
 	explicit BlobMetadataDetailsRef(BlobMetadataDomainId domainId,
 	                                BlobMetadataDomainNameRef domainName,
 	                                Optional<StringRef> base,
-	                                VectorRef<StringRef> partitions)
-	  : domainId(domainId), domainName(domainName), base(base), partitions(partitions) {}
+	                                VectorRef<StringRef> partitions,
+	                                double refreshAt,
+	                                double expireAt)
+	  : domainId(domainId), domainName(domainName), base(base), partitions(partitions), refreshAt(refreshAt),
+	    expireAt(expireAt) {}
 
 	int expectedSize() const {
 		return sizeof(BlobMetadataDetailsRef) + domainName.size() + (base.present() ? base.get().size() : 0) +
@@ -64,8 +87,12 @@ struct BlobMetadataDetailsRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, domainId, domainName, base, partitions);
+		serializer(ar, domainId, domainName, base, partitions, refreshAt, expireAt);
 	}
 };
+
+Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::string& baseUrl,
+                                                                BlobMetadataDomainId domainId,
+                                                                BlobMetadataDomainName domainName);
 
 #endif

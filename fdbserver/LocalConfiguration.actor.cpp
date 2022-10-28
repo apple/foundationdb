@@ -347,8 +347,8 @@ public:
 			                            Randomize::False,
 			                            g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		}
-		logger = traceCounters(
-		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
+		logger = cc.traceCounters(
+		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "LocalConfigurationMetrics");
 	}
 
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,

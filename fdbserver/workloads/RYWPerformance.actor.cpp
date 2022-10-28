@@ -26,14 +26,14 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RYWPerformanceWorkload : TestWorkload {
+	static constexpr auto NAME = "RYWPerformance";
+
 	int keyBytes, nodes, ranges;
 	RYWPerformanceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		nodes = getOption(options, "nodes"_sr, 10000);
 		ranges = getOption(options, "ranges"_sr, 10);
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
-
-	std::string description() const override { return "RYWPerformance"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0)
@@ -312,4 +312,4 @@ struct RYWPerformanceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RYWPerformanceWorkload> RYWPerformanceWorkloadFactory("RYWPerformance");
+WorkloadFactory<RYWPerformanceWorkload> RYWPerformanceWorkloadFactory;

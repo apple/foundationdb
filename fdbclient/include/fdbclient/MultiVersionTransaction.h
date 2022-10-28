@@ -221,6 +221,32 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              uint8_t const* purge_key_name,
 	                                              int purge_key_name_length);
 
+	FDBFuture* (*tenantBlobbifyRange)(FDBTenant* tenant,
+	                                  uint8_t const* begin_key_name,
+	                                  int begin_key_name_length,
+	                                  uint8_t const* end_key_name,
+	                                  int end_key_name_length);
+
+	FDBFuture* (*tenantUnblobbifyRange)(FDBTenant* tenant,
+	                                    uint8_t const* begin_key_name,
+	                                    int begin_key_name_length,
+	                                    uint8_t const* end_key_name,
+	                                    int end_key_name_length);
+
+	FDBFuture* (*tenantListBlobbifiedRanges)(FDBTenant* tenant,
+	                                         uint8_t const* begin_key_name,
+	                                         int begin_key_name_length,
+	                                         uint8_t const* end_key_name,
+	                                         int end_key_name_length,
+	                                         int rangeLimit);
+
+	FDBFuture* (*tenantVerifyBlobRange)(FDBTenant* tenant,
+	                                    uint8_t const* begin_key_name,
+	                                    int begin_key_name_length,
+	                                    uint8_t const* end_key_name,
+	                                    int end_key_name_length,
+	                                    int64_t version);
+
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
@@ -513,6 +539,13 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
 
@@ -560,6 +593,7 @@ public:
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
+
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
@@ -809,6 +843,12 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
 
@@ -984,6 +1024,7 @@ public:
 		ThreadFuture<Void> protocolVersionMonitor;
 
 		Future<Void> sharedStateUpdater;
+		bool isConfigDB;
 
 		// Versions older than 6.1 do not benefit from having their database connections closed. Additionally,
 		// there are various issues that result in negative behavior in some cases if the connections are closed.
