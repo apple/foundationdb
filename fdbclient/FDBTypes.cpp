@@ -96,6 +96,31 @@ Key randomKeyBetween(const KeyRangeRef& keys) {
 	return end;
 }
 
+TEST_CASE("/KeyRangeUtil/randomKeyBetween") {
+	Key begin = "qwert"_sr;
+	Key end = "qwertyu"_sr;
+	Key res;
+	for(int i = 0; i < 10; ++ i) {
+		res = randomKeyBetween(KeyRangeRef(begin, end));
+		ASSERT(res > begin);
+		ASSERT(res < end);
+	}
+
+	begin = "q"_sr;
+	end = "q\x00"_sr;
+	res = randomKeyBetween(KeyRangeRef(begin, end));
+	ASSERT(res == end);
+
+	begin = "aaaaaaa"_sr;
+	end = "b"_sr;
+	for(int i = 0; i < 10; ++ i) {
+		res = randomKeyBetween(KeyRangeRef(begin, end));
+		ASSERT(res > begin);
+		ASSERT(res < end);
+	}
+	return Void();
+}
+
 void KeySelectorRef::setKey(KeyRef const& key) {
 	// There are no keys in the database with size greater than the max key size, so if this key selector has a key
 	// which is large, then we can translate it to an equivalent key selector with a smaller key

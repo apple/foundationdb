@@ -77,9 +77,9 @@ private:
 struct StorageServerMetrics {
 	KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>> waitMetricsMap;
 	StorageMetricSample byteSample;
-	TransientStorageMetricSample iopsSample,
-	    bandwidthSample; // FIXME: iops and bandwidth calculations are not effectively tested, since they aren't
-	                     // currently used by data distribution
+
+	// FIXME: iops is not effectively tested, and is not used by data distribution
+	TransientStorageMetricSample iopsSample, bandwidthSample;
 	TransientStorageMetricSample bytesReadSample;
 
 	StorageServerMetrics()
