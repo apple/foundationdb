@@ -1921,7 +1921,13 @@ public:
 				wait(watchFuture);
 				tr.reset();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				state Error err = e;
+				if (e.code() == error_code_broken_promise) {
+					tr.reset();
+					wait(delay(1.0));
+				} else {
+					wait(tr.onError(err));
+				}
 			}
 		}
 	}
