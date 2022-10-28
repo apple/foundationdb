@@ -1009,7 +1009,6 @@ public:
 	// Extra lock that prevents too much post-initial-fetch work from building up, such as mutation applying and change
 	// feed tail fetching
 	FlowLock fetchKeysParallelismFullLock;
-	FlowLock changeFeedDiskReadsLock;
 	int64_t fetchKeysBytesBudget;
 	AsyncVar<bool> fetchKeysBudgetUsed;
 	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
@@ -1242,10 +1241,6 @@ public:
 			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
 				return self->serveAuditStorageParallelismLock.waiters();
 			});
-			specialCounter(
-			    cc, "ChangeFeedDiskReadsActive", [self]() { return self->changeFeedDiskReadsLock.activePermits(); });
-			specialCounter(
-			    cc, "ChangeFeedDiskReadsWaiting", [self]() { return self->changeFeedDiskReadsLock.waiters(); });
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
@@ -1305,7 +1300,6 @@ public:
 	    noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
-	    changeFeedDiskReadsLock(SERVER_KNOBS->CHANGE_FEED_DISK_READS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    ssLock(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY, SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
@@ -2694,8 +2688,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			wait(delay(0));
 		}
 
-		wait(data->changeFeedDiskReadsLock.take(TaskPriority::DefaultYield));
-		state FlowLock::Releaser holdingDiskReadsLock(data->changeFeedDiskReadsLock);
 		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
 		RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
@@ -2704,7 +2696,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		                            remainingDurableBytes,
 		                            req.options));
 		ssReadLock.release();
-		holdingDiskReadsLock.release();
 
 		data->counters.kvScanBytes += res.logicalSize();
 		++data->counters.changeFeedDiskReads;
