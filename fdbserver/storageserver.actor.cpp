@@ -337,6 +337,9 @@ struct UpdateEagerReadInfo {
 	std::vector<Optional<Value>> value;
 
 	Arena arena;
+	bool enableClearRangeEagerReads;
+
+	UpdateEagerReadInfo(bool enableClearRangeEagerReads) : enableClearRangeEagerReads(enableClearRangeEagerReads) {}
 
 	void addMutations(VectorRef<MutationRef> const& mutations) {
 		for (auto& m : mutations)
@@ -345,11 +348,10 @@ struct UpdateEagerReadInfo {
 
 	void addMutation(MutationRef const& m) {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
-		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) &&
-		    SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS)
+		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) && enableClearRangeEagerReads)
 			keyBegin.push_back(m.param2);
 		else if (m.type == MutationRef::CompareAndClear) {
-			if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS)
+			if (enableClearRangeEagerReads)
 				keyBegin.push_back(keyAfter(m.param1, arena));
 			if (keys.size() > 0 && keys.back().first == m.param1) {
 				// Don't issue a second read, if the last read was equal to the current key.
@@ -366,7 +368,7 @@ struct UpdateEagerReadInfo {
 	}
 
 	void finishKeyBegin() {
-		if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
+		if (enableClearRangeEagerReads) {
 			std::sort(keyBegin.begin(), keyBegin.end());
 			keyBegin.resize(std::unique(keyBegin.begin(), keyBegin.end()) - keyBegin.begin());
 		}
@@ -4452,7 +4454,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
 
-	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
+	if (eager->enableClearRangeEagerReads) {
 		std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
 		for (int i = 0; i < keyEnd.size(); i++)
 			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], IKeyValueStore::ReadType::EAGER);
@@ -4646,7 +4648,7 @@ void expandClear(MutationRef& m,
 	i = d.lastLessOrEqual(m.param2);
 	if (i && i->isClearTo() && i->getEndKey() >= m.param2) {
 		m.param2 = i->getEndKey();
-	} else if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
+	} else if (eager->enableClearRangeEagerReads) {
 		// Expand to the next set or clear (from storage or latestVersion), and if it
 		// is a clear, engulf it as well
 		i = d.lower_bound(m.param2);
@@ -6946,6 +6948,10 @@ ACTOR Future<Void> tssDelayForever() {
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double updateStart = g_network->timer();
 	state double start;
+	state bool enableClearRangeEagerReads = data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1
+	                                            ? SERVER_KNOBS->ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS
+	                                            : SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS;
+	state UpdateEagerReadInfo eager(enableClearRangeEagerReads);
 	try {
 
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
@@ -7040,7 +7046,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		data->ssVersionLockLatencyHistogram->sampleSeconds(now() - start);
 
 		start = now();
-		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
 		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 
@@ -7109,7 +7114,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			            // again.
 			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
 			// only selectively
-			eager = UpdateEagerReadInfo();
+			eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
