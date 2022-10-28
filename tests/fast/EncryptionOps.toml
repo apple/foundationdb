@@ -4,9 +4,6 @@ testClass = "Encryption"
 
 [[knobs]]
 enable_encryption = false
-enable_tlog_encryption = false
-enable_storage_server_encryption = false
-enable_blob_granule_encryption = false
 
 [[test]]
 testTitle = 'EncryptDecrypt'
