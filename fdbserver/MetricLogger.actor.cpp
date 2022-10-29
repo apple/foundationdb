@@ -19,8 +19,17 @@
  */
 
 #include <cmath>
+#include <cstddef>
+#include <memory>
+#include "msgpack.hpp"
+#include <msgpack/v3/unpack_decl.hpp>
+#include <string>
+#include "fdbrpc/Stats.h"
+#include "flow/Msgpack.h"
 #include "flow/ApiVersion.h"
+#include "flow/IRandom.h"
 #include "flow/Knobs.h"
+#include "flow/OTELMetrics.h"
 #include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
@@ -30,8 +39,8 @@
 #include "fdbserver/MetricLogger.actor.h"
 #include "fdbserver/MetricClient.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
@@ -369,48 +378,58 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 	}
 }
 
-// ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
-// 	// Never log to an empty prefix, it's pretty much always a bad idea.
-// 	if (prefix.size() == 0) {
-// 		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix").log();
-// 		return Void();
-// 	}
+ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
+	// Never log to an empty prefix, it's pretty much always a bad idea.
+	if (prefix.size() == 0) {
+		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix").log();
+		return Void();
+	}
 
-// 	// Wait until the collection has been created and initialized.
-// 	state TDMetricCollection* metrics = nullptr;
-// 	loop {
-// 		metrics = TDMetricCollection::getTDMetrics();
-// 		if (metrics != nullptr)
-// 			if (metrics->init())
-// 				break;
-// 		wait(delay(1.0));
-// 	}
+	// Wait until the collection has been created and initialized.
+	state TDMetricCollection* metrics = nullptr;
+	loop {
+		metrics = TDMetricCollection::getTDMetrics();
+		if (metrics != nullptr)
+			if (metrics->init())
+				break;
+		wait(delay(1.0));
+	}
 
-// 	state MetricsConfig config(prefix);
+	state MetricsConfig config(prefix);
 
-// 	try {
-// 		Database cx = wait(fcx);
-// 		Future<Void> conf = metricRuleUpdater(cx, &config, metrics);
-// 		Future<Void> dump = dumpMetrics(cx, &config, metrics);
-// 		Future<Void> reg = updateMetricRegistration(cx, &config, metrics);
+	try {
+		Database cx = wait(fcx);
+		Future<Void> conf = metricRuleUpdater(cx, &config, metrics);
+		Future<Void> dump = dumpMetrics(cx, &config, metrics);
+		Future<Void> reg = updateMetricRegistration(cx, &config, metrics);
 
-// 		wait(conf || dump || reg);
-// 	} catch (Error& e) {
-// 		if (e.code() != error_code_actor_cancelled) {
-// 			// Disable all metrics
-// 			for (auto& it : metrics->metricMap)
-// 				it.value->setConfig(false);
-// 		}
+		wait(conf || dump || reg);
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			// Disable all metrics
+			for (auto& it : metrics->metricMap)
+				it.value->setConfig(false);
+		}
 
-// 		TraceEvent(SevWarnAlways, "TDMetricsStopped").error(e);
-// 		throw e;
-// 	}
-// 	return Void();
-// }
+		TraceEvent(SevWarnAlways, "TDMetricsStopped").error(e);
+		throw e;
+	}
+	return Void();
+}
 
-ACTOR Future<Void> startMetricsSimulationServer() {
-	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
-	uint32_t port = (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_PORT : FLOW_KNOBS->METRICS_UDP_EMISSION_PORT;
+ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
+	if (model == MetricsDataModel::NONE) {
+		return Void{};
+	}
+	state uint32_t port = 0;
+	switch (model) {
+	case MetricsDataModel::STATSD:
+		port = FLOW_KNOBS->STATSD_UDP_EMISSION_PORT;
+	case MetricsDataModel::OTLP:
+		port = FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
+	case MetricsDataModel::NONE:
+		port = 0;
+	}
 	TraceEvent(SevInfo, "MetricsUDPServerStarted").detail("Address", "127.0.0.1").detail("Port", port);
 	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(port));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
@@ -430,49 +449,32 @@ ACTOR Future<Void> startMetricsSimulationServer() {
 			for (const auto& metric : metrics) {
 				ASSERT(verifyStatsdMessage(metric));
 			}
+		} else if (model == MetricsDataModel::OTLP) {
+			msgpack::object_handle result;
+			msgpack::unpack(result, reinterpret_cast<const char*>(packet), size);
 		}
 	}
 }
 
 ACTOR Future<Void> runMetrics() {
 	state MetricCollection* metrics = nullptr;
-	state MetricBatch batch;
 	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
-	std::string address =
-	    (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_ADDR : FLOW_KNOBS->METRICS_UDP_EMISSION_ADDR;
-	uint32_t port = (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_PORT : FLOW_KNOBS->METRICS_UDP_EMISSION_PORT;
-	state UDPClient metricClient{ address, port };
-	state Future<Void> metrics_actor;
+	if (model == MetricsDataModel::NONE) {
+		return Void{};
+	}
+	state UDPMetricClient metricClient;
+	state Future<Void> metricsActor;
 	if (g_network->isSimulated()) {
-		metrics_actor = startMetricsSimulationServer();
+		metricsActor = startMetricsSimulationServer(model);
 	}
 	loop {
 		metrics = MetricCollection::getMetricCollection();
 		if (metrics != nullptr) {
-			for (const auto& p : metrics->map) {
-				p.second->flush(batch);
-			}
-			metricClient.send(batch);
+
+			metricClient.send(metrics);
 		}
-		batch.clear();
 		wait(delay(FLOW_KNOBS->METRICS_EMISSION_INTERVAL));
 	}
-}
-
-TEST_CASE("/fdbserver/metrics/statsd/CreateStatsdMessage") {
-	std::string msg1 = "name:120|c";
-	std::string msg2 = "blank";
-	std::string msg3 = "name:781";
-	std::string msg4 = "name_67138:200.13|g";
-	std::string msg5 = "name:34|f";
-	std::string msg6 = "";
-	ASSERT(verifyStatsdMessage(msg1));
-	ASSERT(!verifyStatsdMessage(msg2));
-	ASSERT(!verifyStatsdMessage(msg3));
-	ASSERT(verifyStatsdMessage(msg4));
-	ASSERT(!verifyStatsdMessage(msg5));
-	ASSERT(!verifyStatsdMessage(msg6));
-	return Void{};
 }
 
 TEST_CASE("/fdbserver/metrics/TraceEvents") {
@@ -490,8 +492,7 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 
 	state Database metricsDb = Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION);
 	TDMetricCollection::getTDMetrics()->address = "0.0.0.0:0"_sr;
-	// state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
-	state Future<Void> metrics = runMetrics();
+	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
 	state double w = 0.5;

@@ -257,9 +257,9 @@ std::string createStatsdMessage(const std::string& name,
 	}
 
 	if (!tags.empty()) {
-		msg += "|#";
+		msg += "|";
 		for (size_t i = 0; i < tags.size(); i++) {
-			msg = msg + tags[i].first + ":" + tags[i].second;
+			msg = msg + "#" + tags[i].first + ":" + tags[i].second;
 			// If we know there is another tag coming, we should add a comma in the message
 			if (i != tags.size() - 1) {
 				msg += ",";
@@ -273,8 +273,13 @@ std::string createStatsdMessage(const std::string& name,
 MetricsDataModel knobToMetricModel(const std::string& knob) {
 	if (knob == "statsd") {
 		return MetricsDataModel::STATSD;
+	} else if (knob == "otel") {
+		return MetricsDataModel::OTLP;
+	} else if (knob == "none") {
+		return MetricsDataModel::NONE;
 	}
-	return MetricsDataModel::OTEL;
+	ASSERT(false);
+	return MetricsDataModel::NONE;
 }
 
 std::vector<std::string> splitString(const std::string& str, const std::string& delimit) {

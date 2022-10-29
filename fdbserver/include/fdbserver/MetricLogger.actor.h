@@ -29,7 +29,7 @@
 #define FDBSERVER_METRICLOGGER_ACTOR_H
 #include "flow/actorcompiler.h" // This must be the last #include
 
-// ACTOR Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
+ACTOR Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
 ACTOR Future<Void> runMetrics();
 
 #include "flow/unactorcompiler.h"

@@ -19,15 +19,18 @@
  */
 
 #include "fdbrpc/Stats.h"
+#include "flow/IRandom.h"
 #include "flow/Knobs.h"
+#include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
+#include "flow/Trace.h"
+#include "flow/flow.h"
+#include "flow/network.h"
 #include <string>
+#include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-  : name(name), IMetric(collection.getName() + "_" + name + "_" + collection.getId(),
-                        knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
-    interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
+  : name(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
     interval_start_value(0) {
 	metric.init(collection.getName() + "." + (char)toupper(name.at(0)) + name.substr(1), collection.getId());
 	collection.addCounter(this);
@@ -86,27 +89,36 @@ void Counter::clear() {
 	metric = 0;
 }
 
-void Counter::flush(MetricBatch& batch) {
-	Value val = getValue();
-	switch (model) {
-	case MetricsDataModel::STATSD: {
-		std::string msg = createStatsdMessage(name, StatsDMetric::COUNTER, std::to_string(val));
-		if (!batch.statsd_message.empty()) {
-			batch.statsd_message += "\n";
-		}
-		batch.statsd_message += msg;
-		break;
-	}
-	case MetricsDataModel::OTEL: {
-		break;
-	}
-	default:
-		break;
-	}
-}
-
-void CounterCollection::logToTraceEvent(TraceEvent& te) const {
+void CounterCollection::logToTraceEvent(TraceEvent& te) {
+	NetworkAddress addr = g_network->getLocalAddress();
 	for (ICounter* c : counters) {
+		MetricCollection* metrics = MetricCollection::getMetricCollection();
+		if (metrics != nullptr) {
+			std::string ip_str = addr.ip.toString();
+			std::string port_str = std::to_string(addr.port);
+			uint64_t val = c->getValue();
+			switch (c->model) {
+			case MetricsDataModel::OTLP: {
+				if (metrics->sumMap.find(c->id) != metrics->sumMap.end()) {
+					metrics->sumMap[c->id].points.emplace_back(val);
+				} else {
+					metrics->sumMap[c->id] = OTEL::OTELSum(c->getName(), val);
+				}
+				metrics->sumMap[c->id].points.back().addAttribute("ip", ip_str);
+				metrics->sumMap[c->id].points.back().addAttribute("port", port_str);
+				metrics->sumMap[c->id].points.back().startTime = logTime;
+			}
+			case MetricsDataModel::STATSD: {
+				std::vector<std::pair<std::string, std::string>> statsd_attributes{ { "ip", ip_str },
+					                                                                { "port", port_str } };
+				metrics->statsd_message.push_back(createStatsdMessage(
+				    c->getName(), StatsDMetric::COUNTER, std::to_string(val) /*, statsd_attributes*/));
+			}
+			case MetricsDataModel::NONE:
+			default: {
+			}
+			}
+		}
 		te.detail(c->getName().c_str(), c);
 		c->resetInterval();
 	}
@@ -159,7 +171,7 @@ Future<Void> CounterCollection::traceCounters(std::string const& traceEventName,
 }
 
 void LatencyBands::insertBand(double value) {
-	bands.emplace(std::make_pair(value, std::make_unique<Counter>(name + format("Band%f", value), *cc)));
+	bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
 }
 
 FDB_DEFINE_BOOLEAN_PARAM(Filtered);
@@ -176,7 +188,7 @@ void LatencyBands::addThreshold(double value) {
 			ASSERT(!cc && !filteredCount);
 			cc = std::make_unique<CounterCollection>(name, id.toString());
 			logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name, decorator);
-			filteredCount = std::make_unique<Counter>(name + "Filtered", *cc);
+			filteredCount = std::make_unique<Counter>("Filtered", *cc);
 			insertBand(std::numeric_limits<double>::infinity());
 		}
 
@@ -203,4 +215,69 @@ void LatencyBands::clearBands() {
 
 LatencyBands::~LatencyBands() {
 	clearBands();
+}
+
+LatencySample::LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
+  : name(name), IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id), sampleEmit(now()), sketch(accuracy),
+    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
+	logger = recurring([this]() { logSample(); }, loggingInterval);
+}
+
+void LatencySample::addMeasurement(double measurement) {
+	sketch.addSample(measurement);
+}
+
+void LatencySample::logSample() {
+	TraceEvent(name.c_str(), id)
+	    .detail("Count", sketch.getPopulationSize())
+	    .detail("Elapsed", now() - sampleEmit)
+	    .detail("Min", sketch.min())
+	    .detail("Max", sketch.max())
+	    .detail("Mean", sketch.mean())
+	    .detail("Median", sketch.median())
+	    .detail("P25", sketch.percentile(0.25))
+	    .detail("P90", sketch.percentile(0.9))
+	    .detail("P95", sketch.percentile(0.95))
+	    .detail("P99", sketch.percentile(0.99))
+	    .detail("P99.9", sketch.percentile(0.999))
+	    .trackLatest(latencySampleEventHolder->trackingKey);
+	MetricCollection* metrics = MetricCollection::getMetricCollection();
+	if (metrics != nullptr) {
+		NetworkAddress addr = g_network->getLocalAddress();
+		std::string ip_str = addr.ip.toString();
+		std::string port_str = std::to_string(addr.port);
+		switch (model) {
+		case MetricsDataModel::OTLP: {
+			if (metrics->histMap.find(IMetric::id) != metrics->histMap.end()) {
+				metrics->histMap[IMetric::id].points.emplace_back(
+				    sketch.getErrorGuarantee(), sketch.getSamples(), sketch.min(), sketch.max(), sketch.getSum());
+			} else {
+				metrics->histMap[IMetric::id] = OTEL::OTELHistogram(
+				    name, sketch.getErrorGuarantee(), sketch.getSamples(), sketch.min(), sketch.max(), sketch.getSum());
+			}
+			metrics->histMap[IMetric::id].points.back().addAttribute("ip", ip_str);
+			metrics->histMap[IMetric::id].points.back().addAttribute("port", port_str);
+			metrics->histMap[IMetric::id].points.back().startTime = sampleEmit;
+		}
+		case MetricsDataModel::STATSD: {
+			std::vector<std::pair<std::string, std::string>> statsd_attributes{ { "ip", ip_str },
+				                                                                { "port", port_str } };
+			auto median_gauge = createStatsdMessage(
+			    name + "p50", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.5)) /*, statsd_attributes*/);
+			auto p90_gauge = createStatsdMessage(
+			    name + "p90", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.9)) /*, statsd_attributes*/);
+			auto p95_gauge = createStatsdMessage(
+			    name + "p95", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.95)) /*, statsd_attributes*/);
+			auto p99_gauge = createStatsdMessage(
+			    name + "p99", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.99)) /*, statsd_attributes*/);
+			auto p999_gauge = createStatsdMessage(
+			    name + "p99.9", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.999)) /*, statsd_attributes*/);
+		}
+		case MetricsDataModel::NONE:
+		default: {
+		}
+		}
+	}
+	sketch.clear();
+	sampleEmit = now();
 }
