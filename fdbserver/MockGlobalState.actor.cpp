@@ -251,6 +251,9 @@ void MockStorageServer::twoWayShardSplitting(KeyRangeRef range,
                                              KeyRef splitPoint,
                                              uint64_t rangeSize,
                                              bool restrictSize) {
+	if (splitPoint == range.begin || !range.contains(splitPoint)) {
+		return;
+	}
 	Key left = range.begin;
 	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
 	int leftSize = deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES,
@@ -301,6 +304,8 @@ Future<Void> MockStorageServer::run() {
 	                            Optional<Standalone<StringRef>>());
 	ssi.initEndpoints();
 	ssi.startAcceptingRequests();
+	IFailureMonitor::failureMonitor().setStatus(ssi.address(), FailureStatus(false));
+
 	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
 	addActor(serveStorageMetricsRequests(this, ssi));
 	addActor(MockStorageServerImpl::serveMockStorageServer(this));
@@ -620,9 +625,7 @@ std::vector<Future<Void>> MockGlobalState::runAllMockServers() {
 	return futures;
 }
 Future<Void> MockGlobalState::runMockServer(const UID& id) {
-	auto& server = allServers.at(id);
-	IFailureMonitor::failureMonitor().setStatus(server.ssi.address(), FailureStatus(false));
-	return server.run();
+	return allServers.at(id).run();
 }
 
 int64_t MockGlobalState::get(KeyRef key) {
@@ -934,20 +937,20 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
 	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
 
-	// use data ops
-	state int64_t setBytes = 0;
-	setBytes += mgs->set("a"_sr, 1 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
-	setBytes += mgs->set("b"_sr, 2 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
-	setBytes += mgs->set("c"_sr, 3 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
-	for (auto& server : mgs->allServers) {
-		ASSERT_EQ(server.second.sumRangeSize(KeyRangeRef("a"_sr, "c"_sr)),
-		          2 + 3 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE);
-		ASSERT_EQ(server.second.usedDiskSpace, 3 + 6 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE);
+	// insert
+	{
+		mgs->set("a"_sr, 1 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
+		mgs->set("b"_sr, 2 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
+		mgs->set("c"_sr, 3 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
+		for (auto& server : mgs->allServers) {
+			ASSERT_EQ(server.second.usedDiskSpace, 3 + 6 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE);
+		}
+		ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
+		std::pair<Optional<StorageMetrics>, int> res = wait(
+		    mgs->waitStorageMetrics(KeyRangeRef("a"_sr, "c"_sr), bounds.min, bounds.max, bounds.permittedError, 1, 1));
+
+		int64_t testSize = 2 + 3 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE;
+		ASSERT_EQ(res.first.get().bytes, testSize);
 	}
-	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
-	std::pair<Optional<StorageMetrics>, int> res =
-	    wait(mgs->waitStorageMetrics(allKeys, bounds.min, bounds.max, bounds.permittedError, 1, 1));
-	std::cout << "get result " << res.second << "\n";
-	std::cout << "get byte " << res.first.get().bytes << " " << setBytes << "\n";
 	return Void();
 }

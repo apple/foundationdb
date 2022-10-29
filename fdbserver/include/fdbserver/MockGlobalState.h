@@ -282,7 +282,8 @@ public:
 	                                                               UseProvisionalProxies useProvisionalProxies,
 	                                                               Version version) override;
 
-	// data ops
+	// data ops - the key is not accurate, only the shard the key locate in matters.
+
 	// MGS finds the shard X contains this key, randomly generates a N-bytes read operation on that shard, which may
 	// change the read sampling stats of shard X. return the random size of value
 	int64_t get(KeyRef key);
