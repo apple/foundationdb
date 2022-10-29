@@ -2,7 +2,8 @@
 allowDefaultTenant = false
 tenantModes = ['optional', 'required']
 allowCreatingTenants = false
-extraDatabaseMode = 'Single' 
+extraDatabaseMode = 'Single'
+disableEncryption = true
 
 [[test]]
 testTitle = 'TenantManagementConcurrencyTest'

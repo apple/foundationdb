@@ -140,7 +140,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		int extraDBIndex = std::max<int>(1, g_simulator->extraDatabases.size() - 1);
+		int extraDBIndex = std::min<int>(1, g_simulator->extraDatabases.size() - 1);
 		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[extraDBIndex], wcx.defaultTenant);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);

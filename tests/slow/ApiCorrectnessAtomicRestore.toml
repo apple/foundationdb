@@ -1,3 +1,6 @@
+[configuration]
+disableEncryption = true
+
 [[knobs]]
 rocksdb_read_value_timeout=300.0
 rocksdb_read_value_prefix_timeout=300.0

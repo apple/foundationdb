@@ -3,6 +3,7 @@ allowDefaultTenant = false
 tenantModes = ['optional', 'required']
 allowCreatingTenants = false
 extraDatabaseMode = 'Single'
+disableEncryption = true
 
 [[test]]
 testTitle = 'TenantManagementTest'

@@ -1,5 +1,6 @@
 [configuration]
 StderrSeverity = 30
+disableEncryption = true
 
 [[test]]
 testTitle = 'WriteDuringReadTest'

@@ -1,6 +1,7 @@
 [configuration]
 allowDefaultTenant = false
 tenantModes = ['optional', 'required']
+disableEncryption = true
 
 [[test]]
 testTitle = 'TenantManagementTest'
