@@ -170,6 +170,7 @@ public:
 
 	T min() const { return minValue; }
 	T max() const { return maxValue; }
+	T getSum() const { return sum; }
 
 	void clear() {
 		std::fill(buckets.begin(), buckets.end(), 0);
@@ -184,6 +185,8 @@ public:
 	double getErrorGuarantee() const { return errorGuarantee; }
 
 	size_t getBucketSize() const { return buckets.size(); }
+
+	std::vector<uint64_t> getSamples() const { return buckets; }
 
 	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
 		// Must have the same guarantee

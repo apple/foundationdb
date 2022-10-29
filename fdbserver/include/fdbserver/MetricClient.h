@@ -18,17 +18,30 @@
  * limitations under the License.
  */
 #include "flow/TDMetric.actor.h"
+#include "flow/Msgpack.h"
+#ifndef METRIC_CLIENT_H
+#define METRIC_CLIENT_H
 class IMetricClient {
+protected:
+	MetricsDataModel model;
+
 public:
-	virtual void send(const MetricBatch& batch) = 0;
+	virtual void send(MetricCollection*) = 0;
 	virtual ~IMetricClient() {}
 };
 
-class UDPClient : public IMetricClient {
+class UDPMetricClient : public IMetricClient {
+private:
+	MetricsDataModel model;
 	Future<Reference<IUDPSocket>> socket;
 	int socket_fd;
+	MsgpackBuffer buf;
+	std::string address;
+	int port;
+	void send_packet(int fd, const void* data, size_t len);
 
 public:
-	UDPClient(const std::string& addr, uint32_t port);
-	void send(const MetricBatch& batch) override;
+	UDPMetricClient();
+	void send(MetricCollection*) override;
 };
+#endif

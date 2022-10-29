@@ -22,7 +22,9 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include <cstddef>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_TDMETRIC_ACTOR_G_H)
 #define FLOW_TDMETRIC_ACTOR_G_H
 #include "flow/TDMetric.actor.g.h"
@@ -35,10 +37,14 @@
 #include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
 #include "flow/CompressedInt.h"
+#include "flow/OTELMetrics.h"
 #include <algorithm>
 #include <functional>
 #include <cmath>
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+enum MetricsDataModel { STATSD = 0, OTLP, NONE };
+MetricsDataModel knobToMetricModel(const std::string& knob);
 
 struct MetricNameRef {
 	MetricNameRef() {}
@@ -167,7 +173,6 @@ struct FDBScope {
 
 struct MetricBatch {
 	FDBScope scope;
-	std::string statsd_message;
 
 	MetricBatch() {}
 
@@ -179,10 +184,7 @@ struct MetricBatch {
 		scope.callbacks = std::move(in->callbacks);
 	}
 
-	void clear() {
-		scope.clear();
-		statsd_message.clear();
-	}
+	void clear() { scope.clear(); }
 };
 
 template <typename T>
@@ -249,12 +251,16 @@ public:
 
 class MetricCollection {
 public:
-	std::unordered_map<std::string, IMetric*> map;
+	std::unordered_map<UID, IMetric*> map;
+	std::unordered_map<UID, OTEL::OTELSum> sumMap;
+	std::unordered_map<UID, OTEL::OTELHistogram> histMap;
+	std::unordered_map<UID, OTEL::OTELGauge> gaugeMap;
+	std::vector<std::string> statsd_message;
 
 	MetricCollection() {}
 
 	static MetricCollection* getMetricCollection() {
-		if (g_network == nullptr)
+		if (g_network == nullptr || knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL) == MetricsDataModel::NONE)
 			return nullptr;
 		return static_cast<MetricCollection*>((void*)g_network->global(INetwork::enMetrics));
 	}
@@ -1444,30 +1450,28 @@ typedef MetricHandle<DoubleMetric> DoubleMetricHandle;
 template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
 
-enum MetricsDataModel { STATSD = 0, OTEL };
-
 enum StatsDMetric { GAUGE = 0, COUNTER };
 
 class IMetric {
-protected:
-	std::string metric_name;
-	MetricsDataModel model;
-
 public:
-	IMetric(const std::string& n, MetricsDataModel m) : metric_name{ n }, model{ m } {
+	const UID id;
+	const MetricsDataModel model;
+	IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
-		ASSERT(metrics != nullptr);
-		if (metrics->map.count(metric_name) > 0) {
-			TraceEvent(SevError, "MetricCollection_NameCollision").detail("NameConflict", metric_name.c_str());
-			ASSERT(metrics->map.count(metric_name) > 0);
+		if (metrics != nullptr) {
+			if (metrics->map.count(id) > 0) {
+				TraceEvent(SevError, "MetricCollection_NameCollision").detail("NameConflict", id.toString().c_str());
+				ASSERT(metrics->map.count(id) > 0);
+			}
+			metrics->map[id] = this;
 		}
-		metrics->map[metric_name] = this;
 	}
-	virtual ~IMetric() {
+	~IMetric() {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
-		metrics->map.erase(metric_name);
+		if (metrics != nullptr) {
+			metrics->map.erase(id);
+		}
 	}
-	virtual void flush(MetricBatch&) = 0;
 };
 
 std::string createStatsdMessage(const std::string& name,
@@ -1480,8 +1484,6 @@ std::string createStatsdMessage(const std::string& name, StatsDMetric type, cons
 std::vector<std::string> splitString(const std::string& str, const std::string& delimit);
 
 bool verifyStatsdMessage(const std::string& msg);
-
-MetricsDataModel knobToMetricModel(const std::string& knob);
 
 #include "flow/unactorcompiler.h"
 
