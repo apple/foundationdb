@@ -311,8 +311,8 @@ class GlobalTagThrottlerImpl {
 	// cost and throttling ratio
 	Optional<double> getLimitingCost(UID storageServerId) const {
 		auto const ssInfo = tryGet(ssInfos, storageServerId);
-		auto const throttlingRatio = ssInfo.present() ? ssInfo.get().throttlingRatio : Optional<double>{};
-		auto const currentCost = getCurrentCost(storageServerId);
+		Optional<double> const throttlingRatio = ssInfo.present() ? ssInfo.get().throttlingRatio : Optional<double>{};
+		Optional<double> const currentCost = getCurrentCost(storageServerId);
 		if (!throttlingRatio.present() || !currentCost.present()) {
 			return {};
 		}
@@ -322,8 +322,8 @@ class GlobalTagThrottlerImpl {
 	// For a given storage server and tag combination, return the limiting transaction rate.
 	Optional<double> getLimitingTps(UID storageServerId, TransactionTag tag) const {
 		auto const quotaRatio = getQuotaRatio(tag, storageServerId);
-		auto const limitingCost = getLimitingCost(storageServerId);
-		auto const averageTransactionCost = getAverageTransactionCost(tag, storageServerId);
+		Optional<double> const limitingCost = getLimitingCost(storageServerId);
+		Optional<double> const averageTransactionCost = getAverageTransactionCost(tag, storageServerId);
 		if (!limitingCost.present() || !averageTransactionCost.present()) {
 			return {};
 		}
@@ -334,10 +334,12 @@ class GlobalTagThrottlerImpl {
 
 	// Return the limiting transaction rate, aggregated across all storage servers.
 	// The limits from the worst maxFallingBehind zones are
-	// ignored
+	// ignored, because we do not non-workload related issues (e.g. slow disks)
+	// to affect tag throttling. If more than maxFallingBehind zones are at
+	// or near saturation, this indicates that throttling should take place.
 	Optional<double> getLimitingTps(TransactionTag tag) const {
 		// TODO: The algorithm for ignoring the worst zones can be made more efficient
-		std::map<Optional<Standalone<StringRef>>, double> zoneIdToLimitingTps;
+		std::unordered_map<Optional<Standalone<StringRef>>, double> zoneIdToLimitingTps;
 		for (const auto& [id, ssInfo] : ssInfos) {
 			auto const limitingTpsForSS = getLimitingTps(id, tag);
 			if (limitingTpsForSS.present()) {
@@ -749,6 +751,8 @@ Future<Void> monitorActor(GlobalTagThrottler* globalTagThrottler, Check check) {
 	loop {
 		wait(delay(1.0));
 		if (check(*globalTagThrottler)) {
+			// Wait for 10 consecutive successes so we're certain
+			// than a stable equilibrium has been reached
 			if (++successes == 10) {
 				return Void();
 			}
