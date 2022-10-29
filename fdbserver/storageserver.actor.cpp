@@ -8559,7 +8559,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					MutationRef msg;
 					cloneReader >> msg;
 					if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
-					    !msg.param1.startsWith(backupLogKeys.begin) && !msg.param1.startsWith(applyLogKeys.begin)) {
+					    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+					      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
 						ASSERT(false);
 					}
 					if (msg.isEncrypted()) {
@@ -8716,7 +8717,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				MutationRef msg;
 				rd >> msg;
 				if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
-				    !msg.param1.startsWith(backupLogKeys.begin) && !msg.param1.startsWith(applyLogKeys.begin)) {
+				    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+				      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
 					ASSERT(false);
 				}
 				if (msg.isEncrypted()) {
