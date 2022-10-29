@@ -410,7 +410,7 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 
 ACTOR Future<Void> startMetricsSimulationServer() {
 	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
-	uint32_t port = (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_PORT : FLOW_KNOBS->METRICS_UDP_EMISSION_PORT;
+	uint32_t port = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
 	TraceEvent(SevInfo, "MetricsUDPServerStarted").detail("Address", "127.0.0.1").detail("Port", port);
 	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(port));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
@@ -438,9 +438,8 @@ ACTOR Future<Void> runMetrics() {
 	state MetricCollection* metrics = nullptr;
 	state MetricBatch batch;
 	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
-	std::string address =
-	    (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_ADDR : FLOW_KNOBS->METRICS_UDP_EMISSION_ADDR;
-	uint32_t port = (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_PORT : FLOW_KNOBS->METRICS_UDP_EMISSION_PORT;
+	std::string address = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_ADDR : FLOW_KNOBS->OTEL_UDP_EMISSION_ADDR;
+	uint32_t port = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
 	state UDPClient metricClient{ address, port };
 	state Future<Void> metrics_actor;
 	if (g_network->isSimulated()) {
