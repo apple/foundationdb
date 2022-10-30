@@ -30,7 +30,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
-#include "fdbclient/IdempotencyId.h"
+#include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
@@ -61,6 +61,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
+	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -87,6 +88,8 @@ struct CommitProxyInterface {
 			exclusionSafetyCheckReq =
 			    RequestStream<struct ExclusionSafetyCheckRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
+			expireIdempotencyId =
+			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 
@@ -103,6 +106,7 @@ struct CommitProxyInterface {
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
+		streams.push_back(expireIdempotencyId.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -148,6 +152,24 @@ struct ClientDBInfo {
 		           clusterId,
 		           clusterType,
 		           metaclusterName);
+	}
+};
+
+struct ExpireIdempotencyIdRequest {
+	constexpr static FileIdentifier file_identifier = 1900933;
+	Version commitVersion = invalidVersion;
+	uint8_t batchIndexHighByte = 0;
+	TenantInfo tenant;
+
+	ExpireIdempotencyIdRequest() {}
+	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte, TenantInfo tenant)
+	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte), tenant(tenant) {}
+
+	bool verify() const { return tenant.isAuthorized(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, commitVersion, batchIndexHighByte, tenant);
 	}
 };
 

@@ -468,8 +468,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	                               bool recruitTss,
 	                               Reference<TSSPairState> tssState);
 
-	Future<UID> getClusterId();
-
 	// return the next ServerID in storageWiggler
 	Future<UID> getNextWigglingServerID();
 

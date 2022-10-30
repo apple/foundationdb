@@ -221,21 +221,6 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<UID> getClusterId(Database cx) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-				ASSERT(clusterId.present());
-				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
@@ -319,6 +304,7 @@ class DDTxnProcessorImpl {
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
+					ASSERT(!meta.ranges.empty());
 					for (const UID& id : meta.src) {
 						auto& dc = server_dc[id];
 						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
@@ -340,11 +326,11 @@ class DDTxnProcessorImpl {
 					std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
 					std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
 
-					auto ranges = result->dataMoveMap.intersectingRanges(meta.range);
+					auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
-					result->dataMoveMap.insert(meta.range, std::move(dataMove));
+					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
 					++numDataMoves;
 				}
 
@@ -673,10 +659,6 @@ Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 
 Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const {
 	return DDTxnProcessorImpl::tryUpdateReplicasKeyForDc(cx, dcId, storageTeamSize);
-}
-
-Future<UID> DDTxnProcessor::getClusterId() const {
-	return DDTxnProcessorImpl::getClusterId(cx);
 }
 
 Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
