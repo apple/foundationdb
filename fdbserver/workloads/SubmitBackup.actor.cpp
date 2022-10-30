@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -52,8 +53,9 @@ struct SubmitBackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
 		wait(delay(self->delayFor));
-		Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
+		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
@@ -62,7 +64,8 @@ struct SubmitBackupWorkload : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
-			                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                        configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));

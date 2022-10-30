@@ -202,7 +202,8 @@ class GlobalTagThrottlerImpl {
 		for (const auto& [id, _] : throughput) {
 			result += getCurrentCost(id, tag).orDefault(0);
 		}
-		TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
+		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
+		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
 
 		return result;
 	}
@@ -235,10 +236,13 @@ class GlobalTagThrottlerImpl {
 			return 1.0;
 		}
 		auto const transactionRate = stats.get().getTransactionRate();
+		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
+		/*
 		TraceEvent("GlobalTagThrottler_GetAverageTransactionCost")
 		    .detail("Tag", tag)
 		    .detail("TransactionRate", transactionRate)
 		    .detail("Cost", cost);
+		*/
 		if (transactionRate == 0.0) {
 			return 1.0;
 		} else {

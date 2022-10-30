@@ -159,13 +159,20 @@ class Parser:
         pass
 
 
-class XmlParser(Parser, xml.sax.handler.ContentHandler):
+class XmlParser(Parser, xml.sax.handler.ContentHandler, xml.sax.handler.ErrorHandler):
     def __init__(self):
         super().__init__()
         self.handler: ParseHandler | None = None
 
     def parse(self, file: TextIO, handler: ParseHandler) -> None:
-        xml.sax.parse(file, self)
+        self.handler = handler
+        xml.sax.parse(file, self, errorHandler=self)
+
+    def error(self, exception):
+        pass
+
+    def fatalError(self, exception):
+        pass
 
     def startElement(self, name, attrs) -> None:
         attributes: Dict[str, str] = {}
@@ -276,6 +283,7 @@ class TraceFiles:
                     raise StopIteration
                 self.current += 1
                 return self.trace_files[self.current - 1]
+
         return TraceFilesIterator(self)
 
 
@@ -283,11 +291,12 @@ class Summary:
     def __init__(self, binary: Path, runtime: float = 0, max_rss: int | None = None,
                  was_killed: bool = False, uid: uuid.UUID | None = None, expected_unseed: int | None = None,
                  exit_code: int = 0, valgrind_out_file: Path | None = None, stats: str | None = None,
-                 error_out: str = None, will_restart: bool = False):
+                 error_out: str = None, will_restart: bool = False, long_running: bool = False):
         self.binary = binary
         self.runtime: float = runtime
         self.max_rss: int | None = max_rss
         self.was_killed: bool = was_killed
+        self.long_running = long_running
         self.expected_unseed: int | None = expected_unseed
         self.exit_code: int = exit_code
         self.out: SummaryTree = SummaryTree('Test')
@@ -388,6 +397,10 @@ class Summary:
         if self.was_killed:
             child = SummaryTree('ExternalTimeout')
             child.attributes['Severity'] = '40'
+            if self.long_running:
+                # debugging info for long-running tests
+                child.attributes['LongRunning'] = '1'
+                child.attributes['Runtime'] = str(self.runtime)
             self.out.append(child)
             self.error = True
         if self.max_rss is not None:
@@ -426,7 +439,8 @@ class Summary:
             lines = self.error_out.splitlines()
             stderr_bytes = 0
             for line in lines:
-                if line.endswith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
+                if line.endswith(
+                        "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
                     # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
                     continue
                 if line.endswith("Warning: unimplemented fcntl command: 1036"):
@@ -560,6 +574,9 @@ class Summary:
         self.handler.add_handler(('Severity', '30'), parse_warning)
 
         def parse_error(attrs: Dict[str, str]):
+            if 'ErrorIsInjectedFault' in attrs and attrs['ErrorIsInjectedFault'].lower() in ['1', 'true']:
+                # ignore injected errors. In newer fdb versions these will have a lower severity
+                return
             self.errors += 1
             self.error = True
             if self.errors > config.max_errors:
@@ -606,6 +623,7 @@ class Summary:
                 child.attributes['File'] = attrs['File']
                 child.attributes['Line'] = attrs['Line']
                 self.out.append(child)
+
         self.handler.add_handler(('Type', 'BuggifySection'), buggify_section)
         self.handler.add_handler(('Type', 'FaultInjected'), buggify_section)
 
@@ -614,9 +632,11 @@ class Summary:
             child.attributes['Name'] = attrs['Name']
             child.attributes['File'] = attrs['File']
             child.attributes['Line'] = attrs['Line']
+
         self.handler.add_handler(('Type', 'RunningUnitTest'), running_unit_test)
 
         def stderr_severity(attrs: Dict[str, str]):
             if 'NewSeverity' in attrs:
                 self.stderr_severity = attrs['NewSeverity']
+
         self.handler.add_handler(('Type', 'StderrSeverity'), stderr_severity)

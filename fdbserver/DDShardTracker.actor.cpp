@@ -212,7 +212,7 @@ ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
                                          const Reference<AsyncVar<Optional<ShardMetrics>>>& shardMetrics,
                                          const BandwidthStatus& bandwidthStatus,
                                          PromiseStream<KeyRange> readHotShard) {
-	ShardSizeBounds bounds;
+	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
 	if (shardMetrics->get().present()) {
 		auto bytes = shardMetrics->get().get().metrics.bytes;
 		auto readBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get().metrics);
@@ -259,21 +259,7 @@ ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
 		} else {
 			ASSERT(false);
 		}
-	} else {
-		bounds.max.bytes = -1;
-		bounds.min.bytes = -1;
-		bounds.permittedError.bytes = -1;
-		bounds.max.bytesPerKSecond = bounds.max.infinity;
-		bounds.min.bytesPerKSecond = 0;
-		bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
-		bounds.max.bytesReadPerKSecond = bounds.max.infinity;
-		bounds.min.bytesReadPerKSecond = 0;
-		bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
 	}
-
-	bounds.max.iosPerKSecond = bounds.max.infinity;
-	bounds.min.iosPerKSecond = 0;
-	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 	return bounds;
 }
 

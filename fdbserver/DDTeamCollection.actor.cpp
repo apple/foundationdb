@@ -895,7 +895,7 @@ public:
 							if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
 								std::pair<std::vector<ShardsAffectedByTeamFailure::Team>,
 								          std::vector<ShardsAffectedByTeamFailure::Team>>
-								    teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
+								    teams = self->shardsAffectedByTeamFailure->getTeamsForFirstShard(shards[i]);
 								for (int j = 0; j < teams.first.size() + teams.second.size(); j++) {
 									// t is the team in primary DC or the remote DC
 									auto& t =
@@ -2284,15 +2284,12 @@ public:
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			UID clusterId = wait(self->getClusterId());
-
 			state InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
-			isr.clusterId = clusterId;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -3468,10 +3465,6 @@ Future<Void> DDTeamCollection::serverGetTeamRequests(TeamCollectionInterface tci
 
 Future<Void> DDTeamCollection::monitorHealthyTeams() {
 	return DDTeamCollectionImpl::monitorHealthyTeams(this);
-}
-
-Future<UID> DDTeamCollection::getClusterId() {
-	return db->getClusterId();
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {

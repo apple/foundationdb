@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/Knobs.h"
@@ -95,6 +96,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", self->usePartitionedLogs);
 
 		state std::string backupContainer = "file://simfdb/backups/";
+		state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(backupAgent.submitBackup(cx,
 			                              StringRef(backupContainer),
@@ -103,7 +105,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
-			                              SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                              SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                  conf.tenantMode != TenantMode::OPTIONAL_TENANT,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {

@@ -1027,6 +1027,7 @@ public:
 		ThreadFuture<Void> protocolVersionMonitor;
 
 		Future<Void> sharedStateUpdater;
+		bool isConfigDB;
 
 		// Versions older than 6.1 do not benefit from having their database connections closed. Additionally,
 		// there are various issues that result in negative behavior in some cases if the connections are closed.
