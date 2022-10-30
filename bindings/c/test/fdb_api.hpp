@@ -23,7 +23,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #endif
 
 #include <cassert>

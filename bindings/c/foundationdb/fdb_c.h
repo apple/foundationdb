@@ -27,10 +27,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 720)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 730)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 720
+#elif FDB_API_VERSION > 730
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -520,7 +520,7 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_transaction_get_committed_version(F
  * asynchronously by the main thread. In order to see them, this call has to
  * be serviced by the main thread too.
  */
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_get_total_cost(FDBTransaction* tr);
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr);
 
