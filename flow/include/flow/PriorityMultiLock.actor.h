@@ -96,9 +96,12 @@ public:
 
 	~PriorityMultiLock() { kill(); }
 
-	Future<Lock> lock(int priority = 0) {
+	Future<Lock> lock(int priority = 0,
+	                  TaskPriority flowDelayPriority = TaskPriority::DefaultEndpoint,
+	                  int64_t userTag = 0) {
 		Priority& p = priorities[priority];
 		Queue& q = p.queue;
+		Waiter w({ flowDelayPriority, userTag });
 
 		// If this priority currently has no waiters
 		if (q.empty()) {
@@ -112,14 +115,13 @@ public:
 
 				// Return a Lock to the caller
 				Lock lock;
-				addRunner(lock, &p);
+				addRunner(lock, w.task, &p);
 
 				pml_debug_printf("lock nowait line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
 				return lock;
 			}
 		}
 
-		Waiter w;
 		q.push_back(w);
 		++waiting;
 
@@ -139,7 +141,7 @@ public:
 	std::string toString() const {
 		int runnersDone = 0;
 		for (int i = 0; i < runners.size(); ++i) {
-			if (runners[i].isReady()) {
+			if (runners[i].taskFuture.isReady()) {
 				++runnersDone;
 			}
 		}
@@ -186,9 +188,20 @@ public:
 	}
 
 private:
+	struct Task {
+		TaskPriority flowDelayPriority;
+		int64_t userTag;
+	};
+
 	struct Waiter {
-		Waiter() {}
+		Waiter(Task task) : task(task) {}
 		Promise<Lock> lockPromise;
+		Task task;
+	};
+
+	struct Runner {
+		Task task;
+		Future<Void> taskFuture;
 	};
 
 	// Total execution slots allowed across all priorities
@@ -224,7 +237,7 @@ private:
 	std::vector<Priority> priorities;
 
 	// Current or recent (ended) runners
-	Deque<Future<Void>> runners;
+	Deque<Runner> runners;
 
 	Future<Void> fRunner;
 	AsyncTrigger wakeRunner;
@@ -263,10 +276,10 @@ private:
 		return Void();
 	}
 
-	void addRunner(Lock& lock, Priority* p) {
+	void addRunner(Lock& lock, const Task& task, Priority* p) {
 		p->runners += 1;
 		--available;
-		runners.push_back(handleRelease(this, lock.promise.getFuture(), p));
+		runners.push_back({ task, handleRelease(this, lock.promise.getFuture(), p) });
 	}
 
 	// Current maximum running tasks for the specified priority, which must have waiters
@@ -289,7 +302,7 @@ private:
 			    "runner loop start line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 
 			// Cleanup finished runner futures at the front of the runner queue.
-			while (!self->runners.empty() && self->runners.front().isReady()) {
+			while (!self->runners.empty() && self->runners.front().taskFuture.isReady()) {
 				self->runners.pop_front();
 			}
 
@@ -362,7 +375,7 @@ private:
 
 				// If the lock was not already released, add it to the runners future queue
 				if (lock.promise.canBeSet()) {
-					self->addRunner(lock, pPriority);
+					self->addRunner(lock, w.task, pPriority);
 				}
 
 				pml_debug_printf("    launched line %d alreadyDone=%d priority=%d  %s\n",
