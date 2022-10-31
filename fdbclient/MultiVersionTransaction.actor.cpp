@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/Trace.h"
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -2787,11 +2788,19 @@ void MultiVersionApi::runNetwork() {
 		});
 	}
 
-	localClient->api->runNetwork();
+	try {
+		localClient->api->runNetwork();
+	} catch (const Error& e) {
+		closeTraceFile();
+		throw e;
+	}
 
 	for (auto h : handles) {
 		waitThread(h);
 	}
+
+	TraceEvent("MVCRunNetworkTerminating");
+	closeTraceFile();
 }
 
 void MultiVersionApi::stopNetwork() {
