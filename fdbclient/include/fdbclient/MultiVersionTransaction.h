@@ -1148,6 +1148,7 @@ private:
 	bool disableBypass;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
+	bool retainClientLibCopies;
 	ApiVersion apiVersion;
 
 	int nextThread = 0;

@@ -2623,6 +2623,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::TRACE_SHARE_AMONG_CLIENT_THREADS) {
 		validateOption(value, false, true);
 		traceShareBaseNameAmongThreads = true;
+	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
+		validateOption(value, false, true);
+		retainClientLibCopies = true;
 	} else {
 		forwardOption = true;
 	}
@@ -2668,7 +2671,7 @@ void MultiVersionApi::setupNetwork() {
 				externalClients[filename] = {};
 				auto libCopies = copyExternalLibraryPerThread(path);
 				for (int idx = 0; idx < libCopies.size(); ++idx) {
-					bool unlinkOnLoad = libCopies[idx].second && CLIENT_KNOBS->DELETE_NATIVE_LIB_AFTER_LOADING;
+					bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
 					externalClients[filename].push_back(Reference<ClientInfo>(
 					    new ClientInfo(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
 					                   path,
@@ -3073,8 +3076,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    disableBypass(false), bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0),
-    tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
+    disableBypass(false), bypassMultiClientApi(false), externalClient(false), retainClientLibCopies(false),
+    apiVersion(0), threadCount(0), tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
