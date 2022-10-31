@@ -1623,15 +1623,25 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                            idempotencyIdSet.param2 = kv.value;
 		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
 		                            self->toCommit.addTags(tags);
-		                            Arena arena;
-		                            writeMutation(self, INVALID_ENCRYPT_DOMAIN_ID, &idempotencyIdSet, nullptr, &arena);
+		                            if (self->pProxyCommitData->isEncryptionEnabled) {
+			                            CODE_PROBE(true, "encrypting idempotency mutation");
+			                            std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
+			                            Arena arena;
+			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
+			                                self->cipherKeys, p.second, arena, BlobCipherMetrics::TLOG);
+			                            self->toCommit.writeTypedMessage(encryptedMutation);
+		                            } else {
+			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
+		                            }
 	                            });
-
-	for (const auto& m : pProxyCommitData->idempotencyClears) {
+	state int i = 0;
+	for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
+		MutationRef& m = pProxyCommitData->idempotencyClears[i];
 		auto& tags = pProxyCommitData->tagsForKey(m.param1);
 		self->toCommit.addTags(tags);
 		Arena arena;
-		writeMutation(self, INVALID_ENCRYPT_DOMAIN_ID, &m, nullptr, &arena);
+		wait(success(writeMutation(self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &m, nullptr, &arena)));
 	}
 	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
 
