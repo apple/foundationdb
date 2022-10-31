@@ -54,6 +54,7 @@ public:
 		FailDisk,
 		RebootAndDelete,
 		RebootProcessAndDelete,
+		RebootProcessAndSwitch,
 		Reboot,
 		RebootProcess,
 		None
@@ -104,6 +105,7 @@ public:
 		bool excluded;
 		bool cleared;
 		bool rebooting;
+		bool drProcess;
 		std::vector<flowGlobalType> globals;
 
 		INetworkConnections* network;
@@ -128,8 +130,8 @@ public:
 		            const char* coordinationFolder)
 		  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
 		    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
-		    failed(false), excluded(false), cleared(false), rebooting(false), network(net), fault_injection_r(0),
-		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
+		    failed(false), excluded(false), cleared(false), rebooting(false), drProcess(false), network(net),
+		    fault_injection_r(0), fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
 
@@ -283,7 +285,8 @@ public:
 	                                ProcessClass startingClass,
 	                                const char* dataFolder,
 	                                const char* coordinationFolder,
-	                                ProtocolVersion protocol) = 0;
+	                                ProtocolVersion protocol,
+	                                bool drProcess) = 0;
 	virtual void killProcess(ProcessInfo* machine, KillType) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses) = 0;
 	virtual void rebootProcess(ProcessInfo* process, KillType kt) = 0;
@@ -304,6 +307,7 @@ public:
 	                          KillType kt,
 	                          bool forceKill = false,
 	                          KillType* ktFinal = nullptr) = 0;
+	virtual bool killAll(KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
 	// virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
@@ -389,6 +393,13 @@ public:
 	bool isCleared(NetworkAddress const& address) const {
 		return clearedAddresses.find(address) != clearedAddresses.end();
 	}
+
+	void switchCluster(NetworkAddress const& address) { switchedCluster[address] = !switchedCluster[address]; }
+	bool hasSwitchedCluster(NetworkAddress const& address) const {
+		return switchedCluster.find(address) != switchedCluster.end() ? switchedCluster.at(address) : false;
+	}
+	void toggleGlobalSwitchCluster() { globalSwitchedCluster = !globalSwitchedCluster; }
+	bool globalHasSwitchedCluster() const { return globalSwitchedCluster; }
 
 	void excludeAddress(NetworkAddress const& address) {
 		excludedAddresses[address]++;
@@ -540,6 +551,8 @@ private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
+	std::map<NetworkAddress, bool> switchedCluster;
+	bool globalSwitchedCluster = false;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
 	std::map<std::string, double> disabledMap;
 	bool allSwapsDisabled;

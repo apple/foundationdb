@@ -268,6 +268,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
+	bool automaticIdempotency = false;
+
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionState(TaskPriority taskID, SpanContext spanContext)
 	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
@@ -482,6 +484,7 @@ public:
 	Database getDatabase() const { return trState->cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 
+	Transaction& getTransaction() { return *this; }
 	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 
