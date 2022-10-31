@@ -422,10 +422,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Enable this knob only for experminatal purpose, never enable this in production.
 	// If enabled, all the committed in-memory memtable writes are lost on a crash.
 	init( ROCKSDB_DISABLE_WAL_EXPERIMENTAL,                    false );
-	// If ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled, disable ENABLE_CLEAR_RANGE_EAGER_READS knob.
+	// If ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled, disable ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS knob.
 	// These knobs have contrary functionality.
 	init( ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE,             false ); if( randomize && BUGGIFY ) ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE = deterministicRandom()->coinflip() ? false : true;
 	init( ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT,              200000 ); // 200KB
+	init( ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS,               true ); if( randomize && BUGGIFY ) ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS = deterministicRandom()->coinflip() ? false : true;
 	// Can commit will delay ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD seconds for
 	// ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD times, if rocksdb overloaded.
 	// Set ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD to 0, to disable
@@ -734,6 +735,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO,            5.0 );
 	init( GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED,                 10 );
 	init( GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER,              240.0 );
+	init( GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,         60.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
@@ -762,7 +764,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                      2 );
-	init( CHANGE_FEED_DISK_READS_PARALLELISM,                   1000 ); if( randomize && BUGGIFY ) CHANGE_FEED_DISK_READS_PARALLELISM = 20;
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
@@ -801,6 +802,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 	init( STORAGE_FEED_QUERY_HARD_LIMIT,                      100000 );
+	init( STORAGE_SERVER_READ_CONCURRENCY,                        70 );
+	// Priorities which each ReadType maps to, in enumeration order
+	init( STORAGESERVER_READ_RANKS,                      "0,2,1,1,1" );
+	init( STORAGESERVER_READ_PRIORITIES,                   "48,32,8" );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -912,7 +917,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_DEFAULT_EXTENT_SIZE,              32 * 1024 * 1024 );
 	init( REDWOOD_DEFAULT_EXTENT_READ_SIZE,              1024 * 1024 );
 	init( REDWOOD_EXTENT_CONCURRENT_READS,                         4 );
-	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
 	init( REDWOOD_KVSTORE_RANGE_PREFETCH,                       true );
 	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
@@ -925,6 +929,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && BUGGIFY ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && BUGGIFY ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
+	init( REDWOOD_PRIORITY_LAUNCHS,                    "32,32,32,32" );
 	init( REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT,             false );
 
 	// Server request latency measurement
