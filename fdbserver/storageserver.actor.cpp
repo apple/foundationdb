@@ -2011,7 +2011,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(duration, resultSize > maxReadBytes);
+		data->counters.readLatencyBands.addMeasurement(duration, 1, Filtered(resultSize > maxReadBytes));
 	}
 
 	return Void();
@@ -3935,9 +3935,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(duration,
-		                                               resultSize > maxReadBytes ||
-		                                                   abs(req.begin.offset) > maxSelectorOffset ||
-		                                                   abs(req.end.offset) > maxSelectorOffset);
+		                                               1,
+		                                               Filtered(resultSize > maxReadBytes ||
+		                                                        abs(req.begin.offset) > maxSelectorOffset ||
+		                                                        abs(req.end.offset) > maxSelectorOffset));
 	}
 
 	return Void();
@@ -5017,9 +5018,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(duration,
-		                                               resultSize > maxReadBytes ||
-		                                                   abs(req.begin.offset) > maxSelectorOffset ||
-		                                                   abs(req.end.offset) > maxSelectorOffset);
+		                                               1,
+		                                               Filtered(resultSize > maxReadBytes ||
+		                                                        abs(req.begin.offset) > maxSelectorOffset ||
+		                                                        abs(req.end.offset) > maxSelectorOffset));
 	}
 
 	return Void();
@@ -5337,7 +5339,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(
-		    duration, resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
+		    duration, 1, Filtered(resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset));
 	}
 
 	return Void();
