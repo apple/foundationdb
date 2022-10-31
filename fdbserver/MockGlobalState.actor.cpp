@@ -947,10 +947,16 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 		}
 		ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
 		std::pair<Optional<StorageMetrics>, int> res = wait(
-		    mgs->waitStorageMetrics(KeyRangeRef("a"_sr, "c"_sr), bounds.min, bounds.max, bounds.permittedError, 1, 1));
+		    mgs->waitStorageMetrics(KeyRangeRef("a"_sr, "bc"_sr), bounds.min, bounds.max, bounds.permittedError, 1, 1));
 
 		int64_t testSize = 2 + 3 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE;
-		ASSERT_EQ(res.first.get().bytes, testSize);
+		// SOMEDAY: how to integrate with isKeyValueInSample() better?
+		if (res.first.get().bytes > 0) {
+			// If sampled
+			ASSERT_EQ(res.first.get().bytes, testSize);
+			ASSERT_LT(res.first.get().writeBytesPerKSecond, 0);
+			ASSERT_LT(res.first.get().iosPerKSecond, 0);
+		}
 	}
 	return Void();
 }
