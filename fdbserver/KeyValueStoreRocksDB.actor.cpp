@@ -204,7 +204,9 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 
-	options.info_log = std::shared_ptr<rocksdb::Logger>(new RocksDBLogForwarder(id, options.info_log_level));
+	options.info_log = std::shared_ptr<rocksdb::Logger>(SERVER_KNOBS->ROCKSDB_MUTE_LOGS
+	                                                        ? new NullRocksDBLogForwarder()
+	                                                        : new RocksDBLogForwarder(id, options.info_log_level));
 
 	return options;
 }
