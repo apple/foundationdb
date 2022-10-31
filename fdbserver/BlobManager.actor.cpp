@@ -638,7 +638,8 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
 			splitMetrics.writeBytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 			if (writeHot) {
-				splitMetrics.writeBytesPerKSecond = std::min(splitMetrics.writeBytesPerKSecond, estimated.writeBytesPerKSecond / 2);
+				splitMetrics.writeBytesPerKSecond =
+				    std::min(splitMetrics.writeBytesPerKSecond, estimated.writeBytesPerKSecond / 2);
 				splitMetrics.writeBytesPerKSecond =
 				    std::max(splitMetrics.writeBytesPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
 			}

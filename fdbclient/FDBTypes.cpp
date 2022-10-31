@@ -100,7 +100,7 @@ TEST_CASE("/KeyRangeUtil/randomKeyBetween") {
 	Key begin = "qwert"_sr;
 	Key end = "qwertyu"_sr;
 	Key res;
-	for(int i = 0; i < 10; ++ i) {
+	for (int i = 0; i < 10; ++i) {
 		res = randomKeyBetween(KeyRangeRef(begin, end));
 		ASSERT(res > begin);
 		ASSERT(res < end);
@@ -113,7 +113,7 @@ TEST_CASE("/KeyRangeUtil/randomKeyBetween") {
 
 	begin = "aaaaaaa"_sr;
 	end = "b"_sr;
-	for(int i = 0; i < 10; ++ i) {
+	for (int i = 0; i < 10; ++i) {
 		res = randomKeyBetween(KeyRangeRef(begin, end));
 		ASSERT(res > begin);
 		ASSERT(res < end);
