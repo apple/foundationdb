@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -378,6 +379,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool adjacentReads; // keys are adjacent within a transaction
 	bool adjacentWrites;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
+	int readType;
+	bool cacheResult;
 	Optional<Key> transactionTag;
 
 	int transactionsTagThrottled{ 0 };
@@ -400,6 +403,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		rampUpConcurrency = getOption(options, "rampUpConcurrency"_sr, false);
 		batchPriority = getOption(options, "batchPriority"_sr, false);
 		descriptionString = getOption(options, "description"_sr, "ReadWrite"_sr);
+		readType = getOption(options, "readType"_sr, 3);
+		cacheResult = getOption(options, "cacheResult"_sr, true);
 		if (hasOption(options, "transactionTag"_sr)) {
 			transactionTag = getOption(options, "transactionTag"_sr, ""_sr);
 		}
@@ -429,6 +434,10 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (transactionTag.present() && tr.getTags().size() == 0) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
+		ReadOptions options;
+		options.type = static_cast<ReadType>(readType);
+		options.cacheResult = cacheResult;
+		tr.getTransaction().trState->readOptions = options;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -502,7 +511,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
-
 			try {
 				self->setupTransaction(tr);
 				wait(self->readOp(&tr, keys, self, false));

@@ -7,5 +7,5 @@ runSetup=false
 
     [[test.workload]]
     testName = 'UnitTests'
-    maxTestCases = 0
+    axTestCases = 1
     testsMatching = 'noSim/'

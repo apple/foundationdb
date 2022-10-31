@@ -38,6 +38,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/PriorityMultiLock.actor.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -104,210 +105,6 @@ std::string addPrefix(std::string prefix, std::string lines) {
 	}
 	return s;
 }
-
-#define PRIORITYMULTILOCK_DEBUG 0
-
-// A multi user lock with a concurrent holder limit where waiters are granted the lock according to
-// an integer priority from 0 to maxPriority, inclusive, where higher integers are given priority.
-//
-// The interface is similar to FlowMutex except that lock holders can drop the lock to release it.
-//
-// Usage:
-//   Lock lock = wait(prioritylock.lock(priorityLevel));
-//   lock.release();  // Explicit release, or
-//   // let lock and all copies of lock go out of scope to release
-class PriorityMultiLock {
-
-public:
-	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
-	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
-	// the Lock before it goes out of scope.
-	struct Lock {
-		void release() { promise.send(Void()); }
-
-		// This is exposed in case the caller wants to use/copy it directly
-		Promise<Void> promise;
-	};
-
-private:
-	struct Waiter {
-		Waiter() : queuedTime(now()) {}
-		Promise<Lock> lockPromise;
-		double queuedTime;
-	};
-
-	typedef Deque<Waiter> Queue;
-
-#if PRIORITYMULTILOCK_DEBUG
-#define prioritylock_printf(...) printf(__VA_ARGS__)
-#else
-#define prioritylock_printf(...)
-#endif
-
-public:
-	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
-	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimit(launchLimit) {
-		waiters.resize(maxPriority + 1);
-		fRunner = runner(this);
-	}
-
-	~PriorityMultiLock() { prioritylock_printf("destruct"); }
-
-	void kill() {
-		brokenOnDestruct.sendError(broken_promise());
-		fRunner.cancel();
-		runners.clear();
-		for (auto& w : waiters) {
-			w.clear();
-		}
-	}
-
-	Future<Lock> lock(int priority = 0) {
-		prioritylock_printf("lock begin %s\n", toString().c_str());
-
-		// This shortcut may enable a waiter to jump the line when the releaser loop yields
-		if (available > 0) {
-			--available;
-			Lock p;
-			addRunner(p);
-			prioritylock_printf("lock exit immediate %s\n", toString().c_str());
-			return p;
-		}
-
-		Waiter w;
-		waiters[priority].push_back(w);
-		++waiting;
-		prioritylock_printf("lock exit queued %s\n", toString().c_str());
-		return w.lockPromise.getFuture();
-	}
-
-	std::string toString() const {
-		int runnersDone = 0;
-		for (int i = 0; i < runners.size(); ++i) {
-			if (runners[i].isReady()) {
-				++runnersDone;
-			}
-		}
-
-		std::string s =
-		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
-		           this,
-		           concurrency,
-		           available,
-		           concurrency - available,
-		           waiting,
-		           runners.size(),
-		           runnersDone);
-
-		for (int i = 0; i < waiters.size(); ++i) {
-			s += format("p%d_waiters=%u ", i, waiters[i].size());
-		}
-
-		s += "}";
-		return s;
-	}
-
-private:
-	void addRunner(Lock& lock) {
-		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
-			prioritylock_printf("Lock released\n");
-			++available;
-			if (waiting > 0 || runners.size() > 100) {
-				release.trigger();
-			}
-			return Void();
-		}));
-	}
-
-	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
-		state int sinceYield = 0;
-		state Future<Void> error = self->brokenOnDestruct.getFuture();
-		state int maxPriority = self->waiters.size() - 1;
-
-		// Priority to try to run tasks from next
-		state int priority = maxPriority;
-		state Queue* pQueue = &self->waiters[maxPriority];
-
-		// Track the number of waiters unlocked at the same priority in a row
-		state int lastPriorityCount = 0;
-
-		loop {
-			// Cleanup finished runner futures at the front of the runner queue.
-			while (!self->runners.empty() && self->runners.front().isReady()) {
-				self->runners.pop_front();
-			}
-
-			// Wait for a runner to release its lock
-			wait(self->release.onTrigger());
-			prioritylock_printf("runner wakeup %s\n", self->toString().c_str());
-
-			if (++sinceYield == 1000) {
-				sinceYield = 0;
-				wait(delay(0));
-			}
-
-			// While there are available slots and there are waiters, launch tasks
-			while (self->available > 0 && self->waiting > 0) {
-				prioritylock_printf("Checking priority=%d lastPriorityCount=%d %s\n",
-				                    priority,
-				                    lastPriorityCount,
-				                    self->toString().c_str());
-
-				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
-					Waiter w = pQueue->front();
-					pQueue->pop_front();
-					--self->waiting;
-					Lock lock;
-					prioritylock_printf("  Running waiter priority=%d wait=%f %s\n",
-					                    priority,
-					                    now() - w.queuedTime,
-					                    self->toString().c_str());
-					w.lockPromise.send(lock);
-
-					// Self may have been destructed during the lock callback
-					if (error.isReady()) {
-						throw error.getError();
-					}
-
-					// If the lock was not already released, add it to the runners future queue
-					if (lock.promise.canBeSet()) {
-						self->addRunner(lock);
-
-						// A slot has been consumed, so stop reading from this queue if there aren't any more
-						if (--self->available == 0) {
-							break;
-						}
-					}
-				}
-
-				// If there are no more slots available, then don't move to the next priority
-				if (self->available == 0) {
-					break;
-				}
-
-				// Decrease priority, wrapping around to max from 0
-				if (priority == 0) {
-					priority = maxPriority;
-				} else {
-					--priority;
-				}
-
-				pQueue = &self->waiters[priority];
-				lastPriorityCount = 0;
-			}
-		}
-	}
-
-	int concurrency;
-	int available;
-	int waiting;
-	int launchLimit;
-	std::vector<Queue> waiters;
-	Deque<Future<Void>> runners;
-	Future<Void> fRunner;
-	AsyncTrigger release;
-	Promise<Void> brokenOnDestruct;
-};
 
 // Some convenience functions for debugging to stringify various structures
 // Classes can add compatibility by either specializing toString<T> or implementing
@@ -1677,6 +1474,8 @@ struct RedwoodMetrics {
 		kvSizeReadByGetRange = Reference<Histogram>(
 		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGetRange", Histogram::Unit::bytes));
 
+		ioLock = nullptr;
+
 		// These histograms are used for Btree events, hence level > 0
 		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
@@ -1719,6 +1518,8 @@ struct RedwoodMetrics {
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;
+	// pointer to the priority multi lock used in pager
+	PriorityMultiLock* ioLock;
 
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
@@ -1773,9 +1574,12 @@ struct RedwoodMetrics {
 	// The string is a reasonably well formatted page of information
 	void getFields(TraceEvent* e, std::string* s = nullptr, bool skipZeroes = false);
 
+	void getIOLockFields(TraceEvent* e, std::string* s = nullptr);
+
 	std::string toString(bool clearAfter) {
 		std::string s;
 		getFields(nullptr, &s);
+		getIOLockFields(nullptr, &s);
 
 		if (clearAfter) {
 			clear();
@@ -1810,6 +1614,7 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 		double elapsed = now() - g_redwoodMetrics.startTime;
 		e.detail("Elapsed", elapsed);
 		g_redwoodMetrics.getFields(&e);
+		g_redwoodMetrics.getIOLockFields(&e);
 		g_redwoodMetrics.clear();
 	}
 }
@@ -2220,7 +2025,7 @@ public:
 	          bool memoryOnly,
 	          Reference<IPageEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCHS),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
@@ -2232,6 +2037,7 @@ public:
 		// This sets the page cache size for all PageCacheT instances using the same evictor
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
+		g_redwoodMetrics.ioLock = &ioLock;
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
@@ -8121,8 +7927,7 @@ RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
 	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
-	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
@@ -8186,6 +7991,8 @@ public:
 
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
+
+		g_redwoodMetrics.ioLock = nullptr;
 
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
 		if (g_network->isSimulated() && dispose && BUGGIFY) {
@@ -8289,7 +8096,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached forward range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -8345,7 +8151,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached reverse range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -8412,9 +8217,6 @@ public:
 		wait(self->m_tree->initBTreeCursor(
 		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options));
 
-		// Not locking for point reads, instead relying on IO priority lock
-		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
-
 		++g_redwoodMetrics.metric.opGet;
 		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
@@ -8450,7 +8252,6 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
-	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
@@ -9082,6 +8883,43 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 				}
 			}
 			*s += metric.events.toString(i, elapsed);
+		}
+	}
+}
+
+void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
+	if (ioLock == nullptr)
+		return;
+
+	int maxPriority = ioLock->maxPriority();
+
+	if (e != nullptr) {
+		e->detail("ActiveReads", ioLock->totalRunners());
+		e->detail("AwaitReads", ioLock->totalWaiters());
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			e->detail(format("ActiveP%d", priority), ioLock->numRunners(priority));
+			e->detail(format("AwaitP%d", priority), ioLock->numWaiters(priority));
+		}
+	}
+
+	if (s != nullptr) {
+		std::string active = "Active";
+		std::string await = "Await";
+
+		*s += "\n";
+		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalRunners());
+		*s += format("%-15s %-8u  ", "AwaitReads", ioLock->totalWaiters());
+		*s += "\n";
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numRunners(priority));
+		}
+		*s += "\n";
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (await + 'P' + std::to_string(priority)).c_str(), ioLock->numWaiters(priority));
 		}
 	}
 }
@@ -11567,5 +11405,59 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	return Void();
+}
+
+ACTOR Future<Void> waitLockIncrement(PriorityMultiLock* pml, int priority, int* pout) {
+	state PriorityMultiLock::Lock lock = wait(pml->lock(priority));
+	wait(delay(deterministicRandom()->random01() * .1));
+	++*pout;
+	return Void();
+}
+
+TEST_CASE("/redwood/PriorityMultiLock") {
+	state std::vector<int> priorities = { 10, 20, 40 };
+	state int concurrency = 25;
+	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
+	state std::vector<int> counts;
+	counts.resize(priorities.size(), 0);
+
+	// Clog the lock buy taking concurrency locks at each level
+	state std::vector<Future<PriorityMultiLock::Lock>> lockFutures;
+	for (int i = 0; i < priorities.size(); ++i) {
+		for (int j = 0; j < concurrency; ++j) {
+			lockFutures.push_back(pml->lock(i));
+		}
+	}
+
+	// Wait for n = concurrency locks to be acquired
+	wait(quorum(lockFutures, concurrency));
+
+	state std::vector<Future<Void>> futures;
+	for (int i = 0; i < 10e3; ++i) {
+		int p = i % priorities.size();
+		futures.push_back(waitLockIncrement(pml, p, &counts[p]));
+	}
+
+	state Future<Void> f = waitForAll(futures);
+
+	// Release the locks
+	lockFutures.clear();
+
+	// Print stats and wait for all futures to be ready
+	loop {
+		choose {
+			when(wait(delay(1))) {
+				printf("counts: ");
+				for (auto c : counts) {
+					printf("%d ", c);
+				}
+				printf("   pml: %s\n", pml->toString().c_str());
+			}
+			when(wait(f)) { break; }
+		}
+	}
+
+	delete pml;
 	return Void();
 }
