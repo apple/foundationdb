@@ -20,6 +20,7 @@
 
 #include "benchmark/benchmark.h"
 
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
@@ -61,3 +62,31 @@ static void bench_net2(benchmark::State& benchState) {
 }
 
 BENCHMARK(bench_net2)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
+
+ACTOR static Future<Void> benchDelayActor(benchmark::State* benchState, bool useYield) {
+	// Number of random delays to start to just to populate the run loop
+	// priority queue
+	state int64_t timerCount = benchState->range(0);
+	state std::vector<Future<Void>> futures;
+	state DeterministicRandom rand(platform::getRandomSeed());
+	while (--timerCount > 0) {
+		futures.push_back(delay(1.0 + rand.random01(), getRandomTaskPriority(rand)));
+	}
+
+	while (benchState->KeepRunning()) {
+		wait(useYield ? yield() : delay(0));
+	}
+	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations() + timerCount));
+	return Void();
+}
+
+static void bench_delay(benchmark::State& benchState) {
+	onMainThread([&benchState] { return benchDelayActor(&benchState, false); }).blockUntilReady();
+}
+
+static void bench_yield(benchmark::State& benchState) {
+	onMainThread([&benchState] { return benchDelayActor(&benchState, true); }).blockUntilReady();
+}
+
+BENCHMARK(bench_delay)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
+BENCHMARK(bench_yield)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
