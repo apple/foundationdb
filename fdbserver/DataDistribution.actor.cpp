@@ -786,9 +786,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				}
 				shards.clear();
 				throw e;
-			} else {
-				wait(shards.clearAsync());
 			}
+
+			wait(shards.clearAsync());
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);

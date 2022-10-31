@@ -1834,6 +1834,7 @@ public:
 	ACTOR static Future<Void> trackExcludedServers(DDTeamCollection* self) {
 		// Fetch the list of excluded servers
 		state ReadYourWritesTransaction tr(self->dbContext());
+		state Reference<IDDTxnProcessor> txnProcessor = self->db;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1842,7 +1843,7 @@ public:
 				state Future<RangeResult> flocalitiesExclude =
 				    tr.getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> flocalitiesFailed = tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<std::vector<ProcessData>> fworkers = self->db->getWorkers();
+				state Future<std::vector<ProcessData>> fworkers = txnProcessor->getWorkers();
 				wait(success(fresultsExclude) && success(fresultsFailed) && success(flocalitiesExclude) &&
 				     success(flocalitiesFailed));
 
@@ -1921,6 +1922,7 @@ public:
 				wait(watchFuture);
 				tr.reset();
 			} catch (Error& e) {
+				// TraceEvent("TrackExcludeServersError").error(e).backtrace();
 				wait(tr.onError(e));
 			}
 		}
