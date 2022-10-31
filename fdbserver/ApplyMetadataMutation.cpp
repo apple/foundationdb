@@ -747,7 +747,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
+					logSystem->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -759,7 +759,7 @@ private:
 
 					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
-					toCommit->addTag(decodeServerTagValue(kv.value));
+					toCommit->addTag(tag);
 					toCommit->writeTypedMessage(privatized);
 				}
 			}
