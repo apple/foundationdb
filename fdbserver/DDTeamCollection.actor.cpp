@@ -516,7 +516,6 @@ public:
 	ACTOR static Future<Void> buildTeams(DDTeamCollection* self) {
 		state int desiredTeams;
 		state int serverCount = 0;
-		state int uniqueMachines = 0;
 		state std::set<Optional<Standalone<StringRef>>> machines;
 
 		// wait to see whether restartTeamBuilder is triggered
@@ -538,15 +537,15 @@ public:
 			}
 		}
 
-		uniqueMachines = machines.size();
+		int uniqueMachines = machines.size();
 		TraceEvent("BuildTeams", self->distributorId)
 		    .detail("ServerCount", self->server_info.size())
 		    .detail("UniqueMachines", uniqueMachines)
 		    .detail("Primary", self->primary)
 		    .detail("StorageTeamSize", self->configuration.storageTeamSize);
 
-		// If there are too few machines to even build teams or there are too few represented datacenters, build no new
-		// teams
+		// If there are too few machines to even build teams or there are too few represented datacenters, can't build
+		// any team.
 		if (uniqueMachines >= self->configuration.storageTeamSize) {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * serverCount;
 			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * serverCount;
@@ -1014,7 +1013,7 @@ public:
 	    const DDEnabledState* ddEnabledState,
 	    bool isTss) {
 		state Future<Void> failureTracker;
-		state ServerStatus status(false, false, false, server->getLastKnownInterface().locality);
+		state ServerStatus status(server->getLastKnownInterface().locality);
 		state bool lastIsUnhealthy = false;
 		state Future<Void> metricsTracker = server->serverMetricsPolling();
 
@@ -2478,6 +2477,7 @@ public:
 				hasHealthyTeam = (self->healthyTeamCount != 0);
 				RecruitStorageRequest rsr;
 				std::set<AddressExclusion> exclusions;
+				// Exclude existing servers running SS from being recruited again.
 				for (auto s = self->server_and_tss_info.begin(); s != self->server_and_tss_info.end(); ++s) {
 					auto serverStatus = self->server_status.get(s->second->getLastKnownInterface().id());
 					if (serverStatus.excludeOnRecruit()) {
@@ -2538,6 +2538,8 @@ public:
 
 				choose {
 					when(RecruitStorageReply candidateWorker = wait(fCandidateWorker)) {
+						// Note that this call may be blocked in CC when there are no more storage process matching
+						// the criteria in RecruitStorageRequest.
 						AddressExclusion candidateSSAddr(candidateWorker.worker.stableAddress().ip,
 						                                 candidateWorker.worker.stableAddress().port);
 						int numExistingSS = numSSPerAddr[candidateSSAddr];
