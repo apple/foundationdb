@@ -603,61 +603,67 @@ int runWorkload(Database db,
 	/* main transaction loop */
 	while (1) {
 		Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
-		while ((thread_tps > 0) && (xacts >= current_tps)) {
+		if ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
-			const auto time_now = steady_clock::now();
-			if (toDoubleSeconds(time_now - time_prev) >= 1.0) {
-				/* more than 1 second passed, no need to throttle */
-				xacts = 0;
-				time_prev = time_now;
-
-				/* update throttle rate */
-				current_tps = static_cast<int>(thread_tps * throttle_factor.load());
-			} else {
+			auto time_now = steady_clock::now();
+			while (toDoubleSeconds(time_now - time_prev) < 1.0) {
 				usleep(1000);
+				time_now = steady_clock::now();
 			}
+
+			/* more than 1 second passed*/
+			xacts = 0;
+			time_prev = time_now;
+
+			/* update throttle rate */
+			current_tps = static_cast<int>(thread_tps * throttle_factor.load());
 		}
-		/* enable transaction trace */
-		if (dotrace) {
-			const auto time_now = steady_clock::now();
-			if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
-				time_last_trace = time_now;
-				traceid.clear();
-				fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
-				logr.debug("txn tracing {}", traceid);
-				auto err = Error{};
-				err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
+
+		if (current_tps > 0) {
+
+			/* enable transaction trace */
+			if (dotrace) {
+				const auto time_now = steady_clock::now();
+				if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
+					time_last_trace = time_now;
+					traceid.clear();
+					fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
+					logr.debug("txn tracing {}", traceid);
+					auto err = Error{};
+					err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
+					if (err) {
+						logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
+					}
+					err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
+					if (err) {
+						logr.error("TR_OPTION_LOG_TRANSACTION: {}", err.what());
+					}
+				}
+			}
+
+			/* enable transaction tagging */
+			if (dotagging > 0) {
+				tagstr.clear();
+				fmt::format_to(std::back_inserter(tagstr),
+				               "{}{}{:0>3d}",
+				               KEY_PREFIX,
+				               args.txntagging_prefix,
+				               urand(0, args.txntagging - 1));
+				auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
 				if (err) {
 					logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
 				}
-				err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
-				if (err) {
-					logr.error("TR_OPTION_LOG_TRANSACTION: {}", err.what());
-				}
 			}
-		}
 
-		/* enable transaction tagging */
-		if (dotagging > 0) {
-			tagstr.clear();
-			fmt::format_to(std::back_inserter(tagstr),
-			               "{}{}{:0>3d}",
-			               KEY_PREFIX,
-			               args.txntagging_prefix,
-			               urand(0, args.txntagging - 1));
-			auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
-			if (err) {
-				logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
+			rc = runOneTransaction(tx, args, stats, key1, key2, val);
+			if (rc) {
+				logr.warn("runOneTransaction failed ({})", rc);
 			}
+
+			xacts++;
+			total_xacts++;
 		}
 
-		rc = runOneTransaction(tx, args, stats, key1, key2, val);
-		if (rc) {
-			logr.warn("runOneTransaction failed ({})", rc);
-		}
-
-		xacts++;
-		total_xacts++;
 		if (thread_iters != -1) {
 			if (total_xacts >= thread_iters) {
 				/* xact limit reached */
@@ -749,6 +755,9 @@ void runAsyncWorkload(Arguments const& args,
 			    args.iteration == 0
 			        ? -1
 			        : computeThreadIters(args.iteration, worker_id, i, args.num_processes, args.async_xacts);
+			// argument validation should ensure max_iters > 0
+			assert(args.iteration == 0 || max_iters > 0);
+
 			auto state =
 			    std::make_shared<ResumableStateForRunWorkload>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
 			                                                   db,
@@ -796,11 +805,15 @@ void workerThread(ThreadArgs& thread_args) {
 	const auto thread_tps =
 	    args.tpsmax == 0 ? 0
 	                     : computeThreadTps(args.tpsmax, worker_id, thread_id, args.num_processes, args.num_threads);
+	// argument validation should ensure thread_tps > 0
+	assert(args.tpsmax == 0 || thread_tps > 0);
 
 	const auto thread_iters =
 	    args.iteration == 0
 	        ? -1
 	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
+	// argument validation should ensure thread_iters > 0
+	assert(args.iteration == 0 || thread_iters > 0);
 
 	/* i'm ready */
 	readycount.fetch_add(1);
@@ -1685,6 +1698,27 @@ int Arguments::validate() {
 			logr.error("--txntagging must be a non-negative integer");
 			return -1;
 		}
+		if (iteration > 0) {
+			if (async_xacts > 0 && async_xacts * num_processes > iteration) {
+				logr.error("--async_xacts * --num_processes must be <= --iteration");
+				return -1;
+			} else if (async_xacts == 0 && num_threads * num_processes > iteration) {
+				logr.error("--num_threads * --num_processes must be <= --iteration");
+				return -1;
+			}
+		}
+	}
+
+	if (mode == MODE_RUN || mode == MODE_BUILD) {
+		if (tpsmax > 0) {
+			if (async_xacts > 0 && async_xacts * num_processes > iteration) {
+				logr.error("--async_xacts * --num_processes must be <= --tpsmax|--tps");
+				return -1;
+			} else if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
+				logr.error("--num_threads * --num_processes must be <= --tpsmax|--tps");
+				return -1;
+			}
+		}
 	}
 
 	// ensure that all of the files provided to mako are valid and exist
@@ -2373,7 +2407,7 @@ int main(int argc, char* argv[]) {
 		args.total_tenants = args.active_tenants;
 	}
 
-	// set --seconds in case not ending condition has been set
+	// set --seconds in case no ending condition has been set
 	if (args.seconds == 0 && args.iteration == 0) {
 		args.seconds = 30; // default value accodring to documentation
 	}
