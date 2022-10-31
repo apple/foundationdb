@@ -63,7 +63,11 @@ static void bench_net2(benchmark::State& benchState) {
 
 BENCHMARK(bench_net2)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
 
-ACTOR static Future<Void> benchDelayActor(benchmark::State* benchState, bool useYield) {
+static constexpr bool DELAY = false;
+static constexpr bool YIELD = true;
+
+ACTOR template <bool useYield>
+static Future<Void> benchDelay(benchmark::State* benchState) {
 	// Number of random delays to start to just to populate the run loop
 	// priority queue
 	state int64_t timerCount = benchState->range(0);
@@ -76,17 +80,14 @@ ACTOR static Future<Void> benchDelayActor(benchmark::State* benchState, bool use
 	while (benchState->KeepRunning()) {
 		wait(useYield ? yield() : delay(0));
 	}
-	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations() + timerCount));
+	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()));
 	return Void();
 }
 
+template <bool useYield>
 static void bench_delay(benchmark::State& benchState) {
-	onMainThread([&benchState] { return benchDelayActor(&benchState, false); }).blockUntilReady();
+	onMainThread([&benchState] { return benchDelay<useYield>(&benchState); }).blockUntilReady();
 }
 
-static void bench_yield(benchmark::State& benchState) {
-	onMainThread([&benchState] { return benchDelayActor(&benchState, true); }).blockUntilReady();
-}
-
-BENCHMARK(bench_delay)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
-BENCHMARK(bench_yield)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_delay, DELAY)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_delay, YIELD)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
