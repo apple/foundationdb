@@ -132,7 +132,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::unordered_map<int64_t, TenantName>* tenantIdIndex = nullptr;
+	std::unordered_map<int64_t, TenantNameUniqueSet>* tenantIdIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -669,7 +669,7 @@ private:
 
 				(*tenantMap)[tenantName] = tenantEntry;
 				if (tenantIdIndex) {
-					(*tenantIdIndex)[tenantEntry.id] = tenantName;
+					(*tenantIdIndex)[tenantEntry.id].insert(tenantName);
 				}
 			}
 
@@ -1096,7 +1096,11 @@ private:
 					// TODO: O(n) operation, optimize cpu
 					auto itr = startItr;
 					while (itr != endItr) {
-						tenantIdIndex->erase(itr->second.id);
+						auto indexItr = tenantIdIndex->find(itr->second.id);
+						ASSERT(indexItr != tenantIdIndex->end());
+						if (indexItr->second.remove(itr->first)) {
+							tenantIdIndex->erase(indexItr);
+						}
 						itr++;
 					}
 				}
