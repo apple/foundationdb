@@ -60,7 +60,7 @@ class DDTeamCollectionImpl {
 				// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 				// processId; This actor is inactive most time, so iterating all workers incurs little performance
 				// overhead.
-				state std::vector<ProcessData> workers = wait(getWorkers(self->cx));
+				state std::vector<ProcessData> workers = wait(self->db->getWorkers());
 				state std::set<AddressExclusion> existingAddrs;
 				for (int i = 0; i < workers.size(); i++) {
 					const ProcessData& workerData = workers[i];
@@ -895,7 +895,7 @@ public:
 							if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
 								std::pair<std::vector<ShardsAffectedByTeamFailure::Team>,
 								          std::vector<ShardsAffectedByTeamFailure::Team>>
-								    teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
+								    teams = self->shardsAffectedByTeamFailure->getTeamsForFirstShard(shards[i]);
 								for (int j = 0; j < teams.first.size() + teams.second.size(); j++) {
 									// t is the team in primary DC or the remote DC
 									auto& t =
@@ -1008,7 +1008,6 @@ public:
 
 	ACTOR static Future<Void> storageServerTracker(
 	    DDTeamCollection* self,
-	    Database cx,
 	    TCServerInfo* server, // This actor is owned by this TCServerInfo, point to server_info[id]
 	    Promise<Void> errorOut,
 	    Version addedVersion,
@@ -1191,7 +1190,7 @@ public:
 					}
 				}
 
-				failureTracker = storageServerFailureTracker(self, server, cx, &status, addedVersion);
+				failureTracker = storageServerFailureTracker(self, server, &status, addedVersion);
 				// We need to recruit new storage servers if the key value store type has changed
 				if (hasWrongDC || hasInvalidLocality || server->wrongStoreTypeToRemove.get()) {
 					self->restartRecruiting.trigger();
@@ -1219,11 +1218,8 @@ public:
 
 						// Remove server from FF/serverList
 						storageMetadataTracker.cancel();
-						wait(removeStorageServer(cx,
-						                         server->getId(),
-						                         server->getLastKnownInterface().tssPairID,
-						                         self->lock,
-						                         ddEnabledState));
+						wait(self->db->removeStorageServer(
+						    server->getId(), server->getLastKnownInterface().tssPairID, self->lock, ddEnabledState));
 
 						TraceEvent("StatusMapChange", self->distributorId)
 						    .detail("ServerID", server->getId())
@@ -1519,7 +1515,6 @@ public:
 
 	ACTOR static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 	                                                      TCServerInfo* server,
-	                                                      Database cx,
 	                                                      ServerStatus* status,
 	                                                      Version addedVersion) {
 		state StorageServerInterface interf = server->getLastKnownInterface();
@@ -1584,7 +1579,7 @@ public:
 							    .detail("Status", status->toString());
 							status->isFailed = false;
 						} else if (self->clearHealthyZoneFuture.isReady()) {
-							self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
+							self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
 							TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 							self->healthyZone.set(Optional<Key>());
 						}
@@ -1603,8 +1598,7 @@ public:
 					        "Available",
 					        IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 				}
-				when(wait(status->isUnhealthy() ? self->waitForAllDataRemoved(cx, interf.id(), addedVersion)
-				                                : Never())) {
+				when(wait(status->isUnhealthy() ? self->waitForAllDataRemoved(interf.id(), addedVersion) : Never())) {
 					break;
 				}
 				when(wait(self->healthyZone.onChange())) {}
@@ -1614,11 +1608,8 @@ public:
 		return Void(); // Don't ignore failures
 	}
 
-	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* teams,
-	                                                Database cx,
-	                                                UID serverID,
-	                                                Version addedVersion) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* self, UID serverID, Version addedVersion) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1632,9 +1623,9 @@ public:
 					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
 					    .detail("Server", serverID)
 					    .detail("CanRemove", canRemove)
-					    .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
-					ASSERT_GE(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
-					if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
+					    .detail("Shards", self->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+					ASSERT_GE(self->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
+					if (canRemove && self->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 						return Void();
 					}
 				}
@@ -1842,7 +1833,7 @@ public:
 
 	ACTOR static Future<Void> trackExcludedServers(DDTeamCollection* self) {
 		// Fetch the list of excluded servers
-		state ReadYourWritesTransaction tr(self->cx);
+		state ReadYourWritesTransaction tr(self->dbContext());
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1851,7 +1842,7 @@ public:
 				state Future<RangeResult> flocalitiesExclude =
 				    tr.getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> flocalitiesFailed = tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<std::vector<ProcessData>> fworkers = getWorkers(self->cx);
+				state Future<std::vector<ProcessData>> fworkers = self->db->getWorkers();
 				wait(success(fresultsExclude) && success(fresultsFailed) && success(flocalitiesExclude) &&
 				     success(flocalitiesFailed));
 
@@ -1935,14 +1926,13 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* teamCollection) {
-		state Key writeKey =
-		    perpetualStorageWiggleIDPrefix.withSuffix(teamCollection->primary ? "primary/"_sr : "remote/"_sr);
+	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
+		state Key writeKey = perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
 		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(writeKey,
 		                                                                                          IncludeVersion());
-		state UID nextId = wait(teamCollection->getNextWigglingServerID());
+		state UID nextId = wait(self->getNextWigglingServerID());
 		state StorageWiggleValue value(nextId);
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(teamCollection->cx));
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
 		loop {
 			// write the next server id
 			try {
@@ -1955,9 +1945,9 @@ public:
 			}
 		}
 
-		teamCollection->nextWiggleInfo.send(value);
-		TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", teamCollection->distributorId)
-		    .detail("Primary", teamCollection->primary)
+		self->nextWiggleInfo.send(value);
+		TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", self->distributorId)
+		    .detail("Primary", self->primary)
 		    .detail("WriteID", nextId);
 
 		return Void();
@@ -2133,15 +2123,15 @@ public:
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection) {
+	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
 		state int speed = 0;
 		state AsyncVar<bool> stopWiggleSignal(true);
 		state PromiseStream<Void> finishStorageWiggleSignal;
 		state SignalableActorCollection collection;
-		teamCollection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
+		self->pauseWiggle = makeReference<AsyncVar<bool>>(true);
 
 		loop {
-			state ReadYourWritesTransaction tr(teamCollection->cx);
+			state ReadYourWritesTransaction tr(self->dbContext());
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2156,20 +2146,17 @@ public:
 					ASSERT(speed == 1 || speed == 0);
 					if (speed == 1 && stopWiggleSignal.get()) { // avoid duplicated start
 						stopWiggleSignal.set(false);
-						collection.add(teamCollection->perpetualStorageWiggleIterator(
-						    stopWiggleSignal, finishStorageWiggleSignal.getFuture()));
-						collection.add(
-						    teamCollection->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
-						TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId)
-						    .detail("Primary", teamCollection->primary);
+						collection.add(self->perpetualStorageWiggleIterator(stopWiggleSignal,
+						                                                    finishStorageWiggleSignal.getFuture()));
+						collection.add(self->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
+						TraceEvent("PerpetualStorageWiggleOpen", self->distributorId).detail("Primary", self->primary);
 					} else if (speed == 0) {
 						if (!stopWiggleSignal.get()) {
 							stopWiggleSignal.set(true);
 							wait(collection.signalAndReset());
-							teamCollection->pauseWiggle->set(true);
+							self->pauseWiggle->set(true);
 						}
-						TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
-						    .detail("Primary", teamCollection->primary);
+						TraceEvent("PerpetualStorageWiggleClose", self->distributorId).detail("Primary", self->primary);
 					}
 					wait(watchFuture);
 					break;
@@ -2181,7 +2168,7 @@ public:
 	}
 
 	ACTOR static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
-		state ReadYourWritesTransaction tr(self->cx);
+		state ReadYourWritesTransaction tr(self->dbContext());
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -2297,15 +2284,12 @@ public:
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			UID clusterId = wait(self->getClusterId());
-
 			state InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
-			isr.clusterId = clusterId;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -2823,7 +2807,7 @@ public:
 	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
 	ACTOR static Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
 		state std::vector<std::pair<UID, StorageWiggleValue>> res =
-		    wait(readStorageWiggleValues(self->cx, self->primary, false));
+		    wait(readStorageWiggleValues(self->dbContext(), self->primary, false));
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
@@ -2835,7 +2819,7 @@ public:
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
 		// Update server's storeType, especially when it was created
 		wait(server->updateStoreType());
@@ -3372,14 +3356,12 @@ Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team,
 	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam);
 }
 
-Future<Void> DDTeamCollection::storageServerTracker(
-    Database cx,
-    TCServerInfo* server, // This actor is owned by this TCServerInfo, point to server_info[id]
-    Promise<Void> errorOut,
-    Version addedVersion,
-    DDEnabledState const& ddEnabledState,
-    bool isTss) {
-	return DDTeamCollectionImpl::storageServerTracker(this, cx, server, errorOut, addedVersion, &ddEnabledState, isTss);
+Future<Void> DDTeamCollection::storageServerTracker(TCServerInfo* server,
+                                                    Promise<Void> errorOut,
+                                                    Version addedVersion,
+                                                    DDEnabledState const& ddEnabledState,
+                                                    bool isTss) {
+	return DDTeamCollectionImpl::storageServerTracker(this, server, errorOut, addedVersion, &ddEnabledState, isTss);
 }
 
 Future<Void> DDTeamCollection::removeWrongStoreType() {
@@ -3401,14 +3383,13 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 }
 
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
-                                                           Database cx,
                                                            ServerStatus* status,
                                                            Version addedVersion) {
-	return DDTeamCollectionImpl::storageServerFailureTracker(this, server, cx, status, addedVersion);
+	return DDTeamCollectionImpl::storageServerFailureTracker(this, server, status, addedVersion);
 }
 
-Future<Void> DDTeamCollection::waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const {
-	return DDTeamCollectionImpl::waitForAllDataRemoved(this, cx, serverID, addedVersion);
+Future<Void> DDTeamCollection::waitForAllDataRemoved(UID serverID, Version addedVersion) const {
+	return DDTeamCollectionImpl::waitForAllDataRemoved(this, serverID, addedVersion);
 }
 
 Future<Void> DDTeamCollection::machineTeamRemover() {
@@ -3484,10 +3465,6 @@ Future<Void> DDTeamCollection::serverGetTeamRequests(TeamCollectionInterface tci
 
 Future<Void> DDTeamCollection::monitorHealthyTeams() {
 	return DDTeamCollectionImpl::monitorHealthyTeams(this);
-}
-
-Future<UID> DDTeamCollection::getClusterId() {
-	return db->getClusterId();
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {
@@ -3579,10 +3556,6 @@ DDTeamCollection::DDTeamCollection(Reference<IDDTxnProcessor>& db,
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
     primary(primary), distributorId(distributorId), configuration(configuration),
     storageServerSet(new LocalityMap<UID>()) {
-
-	if (!db->isMocked()) {
-		cx = this->db->context();
-	}
 
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
@@ -4730,7 +4703,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 		checkAndCreateMachine(r);
 	}
 
-	r->setTracker(storageServerTracker(cx, r.getPtr(), errorOut, addedVersion, ddEnabledState, newServer.isTss()));
+	r->setTracker(storageServerTracker(r.getPtr(), errorOut, addedVersion, ddEnabledState, newServer.isTss()));
 
 	if (!newServer.isTss()) {
 		// link and wake up tss' tracker so it knows when this server gets removed

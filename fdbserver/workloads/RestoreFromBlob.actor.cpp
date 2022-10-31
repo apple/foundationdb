@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/BlobStoreWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -32,7 +34,7 @@ struct RestoreFromBlobWorkload : TestWorkload {
 	Standalone<StringRef> backupURL;
 	WaitForComplete waitForComplete{ false };
 
-	static constexpr const char* DESCRIPTION = "RestoreFromBlob";
+	static constexpr auto NAME = "RestoreFromBlob";
 
 	RestoreFromBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		restoreAfter = getOption(options, "restoreAfter"_sr, 10.0);
@@ -48,19 +50,26 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		backupURL = backupURLString;
 	}
 
-	std::string description() const override { return DESCRIPTION; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	ACTOR static Future<Void> _start(Database cx, RestoreFromBlobWorkload* self) {
 		state FileBackupAgent backupAgent;
-		state Standalone<VectorRef<KeyRangeRef>> restoreRanges;
-
-		addDefaultBackupRanges(restoreRanges);
 
 		wait(delay(self->restoreAfter));
-		Version v = wait(
-		    backupAgent.restore(cx, {}, self->backupTag, self->backupURL, {}, restoreRanges, self->waitForComplete));
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+			// restore system keys followed by user keys
+			wait(success(backupAgent.restore(
+			    cx, {}, self->backupTag, self->backupURL, {}, getSystemBackupRanges(), self->waitForComplete)));
+			Standalone<VectorRef<KeyRangeRef>> restoreRanges;
+			restoreRanges.push_back_deep(restoreRanges.arena(), normalKeys);
+			wait(success(backupAgent.restore(
+			    cx, {}, self->backupTag, self->backupURL, {}, restoreRanges, self->waitForComplete)));
+		} else {
+			Standalone<VectorRef<KeyRangeRef>> restoreRanges;
+			addDefaultBackupRanges(restoreRanges);
+			wait(success(backupAgent.restore(
+			    cx, {}, self->backupTag, self->backupURL, {}, restoreRanges, self->waitForComplete)));
+		}
 		return Void();
 	}
 
@@ -71,4 +80,4 @@ struct RestoreFromBlobWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<RestoreFromBlobWorkload> RestoreFromBlobWorkloadFactory(RestoreFromBlobWorkload::DESCRIPTION);
+WorkloadFactory<RestoreFromBlobWorkload> RestoreFromBlobWorkloadFactory;

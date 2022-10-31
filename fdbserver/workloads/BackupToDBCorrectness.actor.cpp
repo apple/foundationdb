@@ -22,6 +22,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/ApiVersion.h"
@@ -31,6 +32,7 @@
 // database must be idle after the restore completes, and this workload checks
 // that the restore range does not change post restore.
 struct BackupToDBCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupToDBCorrectness";
 	double backupAfter, abortAndRestartAfter, restoreAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag, restoreTag;
@@ -143,8 +145,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}
-
-	std::string description() const override { return "BackupToDBCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0) {
@@ -668,10 +668,47 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				// wait(diffRanges(self->backupRanges, self->backupPrefix, cx, self->extraDB));
 
 				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
+				state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 				for (auto r : self->backupRanges) {
-					restoreRange.push_back_deep(
-					    restoreRange.arena(),
-					    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
+					if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
+						restoreRange.push_back_deep(
+						    restoreRange.arena(),
+						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
+					} else {
+						KeyRangeRef normalKeyRange = r & normalKeys;
+						KeyRangeRef systemKeyRange = r & systemKeys;
+						if (!normalKeyRange.empty()) {
+							restoreRange.push_back_deep(restoreRange.arena(),
+							                            KeyRangeRef(normalKeyRange.begin.withPrefix(self->backupPrefix),
+							                                        normalKeyRange.end.withPrefix(self->backupPrefix)));
+						}
+						if (!systemKeyRange.empty()) {
+							systemRestoreRange.push_back_deep(systemRestoreRange.arena(), systemKeyRange);
+						}
+					}
+				}
+
+				// restore system keys first before restoring user data
+				if (!systemRestoreRange.empty()) {
+					state Key systemRestoreTag = "restore_system"_sr;
+					try {
+						wait(restoreTool.submitBackup(cx,
+						                              systemRestoreTag,
+						                              systemRestoreRange,
+						                              StopWhenDone::True,
+						                              StringRef(),
+						                              self->backupPrefix,
+						                              self->locked,
+						                              DatabaseBackupAgent::PreBackupAction::CLEAR));
+					} catch (Error& e) {
+						TraceEvent("BARW_DoBackupSubmitBackupException", randomID)
+						    .error(e)
+						    .detail("Tag", printable(systemRestoreTag));
+						if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+							throw;
+					}
+					wait(success(restoreTool.waitBackup(cx, systemRestoreTag)));
+					wait(restoreTool.unlockBackup(cx, systemRestoreTag));
 				}
 
 				try {
@@ -773,4 +810,4 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 int BackupToDBCorrectnessWorkload::drAgentRequests = 0;
 
-WorkloadFactory<BackupToDBCorrectnessWorkload> BackupToDBCorrectnessWorkloadFactory("BackupToDBCorrectness");
+WorkloadFactory<BackupToDBCorrectnessWorkload> BackupToDBCorrectnessWorkloadFactory;

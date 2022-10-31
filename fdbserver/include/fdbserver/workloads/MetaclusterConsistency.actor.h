@@ -360,4 +360,6 @@ public:
 	Future<Void> run() { return run(this); }
 };
 
+#include "flow/unactorcompiler.h"
+
 #endif

@@ -1,24 +1,11 @@
 [configuration]
-allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = ['required']
 
 [[knobs]]
 enable_encryption = true
-
-[[test]]
-testTitle = 'TenantCreation'
-
-    [[test.workload]]
-    testName = 'CreateTenant'
-    name = 'First'
-
-    [[test.workload]]
-    testName = 'CreateTenant'
-    name = 'Second'
-
-    [[test.workload]]
-    testName = 'CreateTenant'
-    name = 'Third'
+enable_tlog_encryption = true
+enable_storage_server_encryption = false
+enable_blob_granule_encryption = true
 
 [[test]]
 testTitle = 'EncryptedBackupAndRestore'
@@ -26,13 +13,13 @@ clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
-    testName = 'BulkSetup'
-    tenants = 'First,Second,Third'
+    testName = 'BulkLoadWithTenants'
+    maxNumTenantsPerClient = 100
+    minNumTenantsPerClient = 0
     transactionsPerSecond = 2500.0
 
     [[test.workload]]
     testName = 'BackupAndRestoreCorrectness'
-    enableBackupEncryption = true
     defaultBackup = true
     backupAfter = 10.0
     restoreAfter = 60.0

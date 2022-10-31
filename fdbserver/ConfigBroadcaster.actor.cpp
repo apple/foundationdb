@@ -183,8 +183,8 @@ class ConfigBroadcasterImpl {
 	    id(deterministicRandom()->randomUniqueID()), cc("ConfigBroadcaster"), compactRequest("CompactRequest", cc),
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
 	    snapshotRequest("SnapshotRequest", cc) {
-		logger = traceCounters(
-		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigBroadcasterMetrics");
+		logger = cc.traceCounters(
+		    "ConfigBroadcasterMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ConfigBroadcasterMetrics");
 	}
 
 	void addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,

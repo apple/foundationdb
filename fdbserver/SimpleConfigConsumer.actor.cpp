@@ -166,8 +166,8 @@ public:
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
 	    snapshotRequest("SnapshotRequest", cc) {
 		cfi = getConfigFollowerInterface(configSource);
-		logger = traceCounters(
-		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
+		logger = cc.traceCounters(
+		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ConfigConsumerMetrics");
 	}
 
 	Future<Void> consume(ConfigBroadcaster& broadcaster) {

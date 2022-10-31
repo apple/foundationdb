@@ -4,6 +4,7 @@ disableTss = true # There's no TSS in MGS this prevent the DD operate TSS mappin
 
 [[test]]
 testTitle = 'IDDTxnProcessorApiCorrectness'
+
     [[test.workload]]
     testName = 'IDDTxnProcessorApiCorrectness'
-    testDuration = 10.0
+    testDuration = 50.0

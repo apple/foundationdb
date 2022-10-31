@@ -296,6 +296,15 @@ struct CommitTransactionRef {
 			}
 			if (ar.protocolVersion().hasResolverPrivateMutations()) {
 				serializer(ar, lock_aware);
+				if (!ar.protocolVersion().hasOTELSpanContext()) {
+					Optional<UID> context;
+					serializer(ar, context);
+					if (context.present()) {
+						SpanContext res;
+						res.traceID = context.get();
+						spanContext = res;
+					}
+				}
 			}
 			if (ar.protocolVersion().hasOTELSpanContext()) {
 				serializer(ar, spanContext);

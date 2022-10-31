@@ -45,7 +45,7 @@ double DeterministicRandom::random01() {
 }
 
 int DeterministicRandom::randomInt(int min, int maxPlusOne) {
-	ASSERT(min < maxPlusOne);
+	ASSERT_LT(min, maxPlusOne);
 	unsigned int range;
 	if (maxPlusOne < 0)
 		range = std::abs(maxPlusOne - min);
@@ -65,7 +65,7 @@ int DeterministicRandom::randomInt(int min, int maxPlusOne) {
 }
 
 int64_t DeterministicRandom::randomInt64(int64_t min, int64_t maxPlusOne) {
-	ASSERT(min < maxPlusOne);
+	ASSERT_LT(min, maxPlusOne);
 	uint64_t range;
 	if (maxPlusOne < 0)
 		range = std::abs(maxPlusOne - min);
@@ -93,7 +93,7 @@ uint64_t DeterministicRandom::randomUInt64() {
 }
 
 uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
-	ASSERT(min < maxPlusOne);
+	ASSERT_LT(min, maxPlusOne);
 	std::uniform_real_distribution<double> distribution(std::log(std::max<double>(min, 1.0 / M_E)),
 	                                                    std::log(maxPlusOne));
 	double exponent = distribution(random);

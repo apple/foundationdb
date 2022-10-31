@@ -582,7 +582,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
-                  "fetch_storage_wiggler_stats_timeout"
+                  "fetch_storage_wiggler_stats_timeout",
+                  "fetch_consistency_scan_info_timeout"
                ]
             },
             "issues":[

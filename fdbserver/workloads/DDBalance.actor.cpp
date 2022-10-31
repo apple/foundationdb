@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDBalanceWorkload : TestWorkload {
+	static constexpr auto NAME = "DDBalance";
 	int actorsPerClient, nodesPerActor, moversPerClient, currentbin, binCount, writesPerTransaction,
 	    keySpaceDriftFactor;
 	double testDuration, warmingDelay, transactionsPerSecond;
@@ -52,8 +53,6 @@ struct DDBalanceWorkload : TestWorkload {
 
 		currentbin = deterministicRandom()->randomInt(0, binCount);
 	}
-
-	std::string description() const override { return "DDBalance"; }
 
 	Future<Void> setup(Database const& cx) override { return ddbalanceSetup(cx, this); }
 
@@ -259,4 +258,4 @@ struct DDBalanceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<DDBalanceWorkload> DDBalanceWorkloadFactory("DDBalance");
+WorkloadFactory<DDBalanceWorkload> DDBalanceWorkloadFactory;

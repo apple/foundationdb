@@ -106,6 +106,8 @@ public:
 	std::array<CounterSet, int(UsageType::MAX)> counterSets;
 };
 
+std::string toString(BlobCipherMetrics::UsageType type);
+
 // Encryption operations buffer management
 // Approach limits number of copies needed during encryption or decryption operations.
 // For encryption EncryptBuf is allocated using client supplied Arena and provided to AES library to capture
@@ -185,7 +187,7 @@ struct hash<BlobCipherDetails> {
 
 #pragma pack(push, 1) // exact fit - no padding
 typedef struct BlobCipherEncryptHeader {
-	static constexpr int headerSize = 136;
+	static constexpr int headerSize = 104;
 	union {
 		struct {
 			uint8_t size; // reading first byte is sufficient to determine header
@@ -210,29 +212,22 @@ typedef struct BlobCipherEncryptHeader {
 	// reads. FIPS compliance recommendation is to leverage cryptographic digest mechanism to generate 'authentication
 	// token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
 
-	union {
-		// Encryption header support two modes of generation 'authentication tokens':
-		// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
-		// header} payload. Scheme is geared towards optimizing cost due to crypto-secure auth-token generation,
-		// however, on decryption client needs to be read 'header' + 'encrypted-buffer' to validate the 'auth-token'.
-		// The scheme is ideal for usecases where payload represented by the encryptionHeader is not large and it is
-		// desirable to minimize CPU/latency penalty due to crypto-secure ops, such as: CommitProxies encrypted inline
-		// transactions, StorageServer encrypting pages etc. 2) MultiAuthTokenMode: Scheme generates separate authTokens
-		// for 'encrypted buffer' & 'encryption-header'. The scheme is ideal where payload represented by
-		// encryptionHeader is large enough such that it is desirable to optimize cost of upfront reading full
-		// 'encrypted buffer', compared to reading only encryptionHeader and ensuring its sanity; for instance:
-		// backup-files.
+	// Encryption header support two modes of generation 'authentication tokens':
+	// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
+	// header} payload. Scheme is geared towards optimizing cost due to crypto-secure auth-token generation,
+	// however, on decryption client needs to be read 'header' + 'encrypted-buffer' to validate the 'auth-token'.
+	// The scheme is ideal for usecases where payload represented by the encryptionHeader is not large and it is
+	// desirable to minimize CPU/latency penalty due to crypto-secure ops, such as: CommitProxies encrypted inline
+	// transactions, StorageServer encrypting pages etc.
+	// SOMEDAY: Another potential scheme could be 'MultiAuthTokenMode': Scheme generates separate authTokens
+	// for 'encrypted buffer' & 'encryption-header'. The scheme is ideal where payload represented by
+	// encryptionHeader is large enough such that it is desirable to optimize cost of upfront reading full
+	// 'encrypted buffer', compared to reading only encryptionHeader and ensuring its sanity; for instance:
+	// backup-files.
 
-		struct {
-			// Cipher text authentication token
-			uint8_t cipherTextAuthToken[AUTH_TOKEN_MAX_SIZE]{};
-			uint8_t headerAuthToken[AUTH_TOKEN_MAX_SIZE]{};
-		} multiAuthTokens;
-		struct {
-			uint8_t authToken[AUTH_TOKEN_MAX_SIZE]{};
-			uint8_t _reserved[AUTH_TOKEN_MAX_SIZE]{};
-		} singleAuthToken;
-	};
+	struct {
+		uint8_t authToken[AUTH_TOKEN_MAX_SIZE]{};
+	} singleAuthToken;
 
 	BlobCipherEncryptHeader() {}
 
@@ -311,14 +306,14 @@ public:
 		if (refreshAtTS == std::numeric_limits<int64_t>::max()) {
 			return false;
 		}
-		return now() >= refreshAtTS ? true : false;
+		return now() + INetwork::TIME_EPS >= refreshAtTS ? true : false;
 	}
 
 	inline bool isExpired() {
 		if (expireAtTS == std::numeric_limits<int64_t>::max()) {
 			return false;
 		}
-		return now() >= expireAtTS ? true : false;
+		return now() + INetwork::TIME_EPS >= expireAtTS ? true : false;
 	}
 
 	void reset();
@@ -628,10 +623,6 @@ private:
 	                                 const int ciphertextLen,
 	                                 const BlobCipherEncryptHeader& header,
 	                                 Arena& arena);
-	void verifyHeaderMultiAuthToken(const uint8_t* ciphertext,
-	                                const int ciphertextLen,
-	                                const BlobCipherEncryptHeader& header,
-	                                Arena& arena);
 };
 
 class HmacSha256DigestGen final : NonCopyable {
