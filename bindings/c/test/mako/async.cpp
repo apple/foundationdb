@@ -123,33 +123,34 @@ repeat_immediate_steps:
 		f.then([this, state = shared_from_this()](Future f) {
 			if (auto postStepFn = opTable[iter.op].postStepFunction(iter.step))
 				postStepFn(f, tx, args, key1, key2, val);
-			if (auto err = f.error()) {
-				logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
-				                       "ERROR",
-				                       "{}:{} returned '{}'",
-				                       iter.opName(),
-				                       iter.step,
-				                       err.what());
-				updateErrorStats(err, iter.op);
-				if (iter.stepKind() != StepKind::ON_ERROR) {
+			if (iter.stepKind() != StepKind::ON_ERROR) {
+				if (auto err = f.error()) {
+					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+					                       "ERROR",
+					                       "{}:{} returned '{}'",
+					                       iter.opName(),
+					                       iter.step,
+					                       err.what());
+					updateErrorStats(err, iter.op);
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						FutureRC rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
+						const FutureRC rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
 						restartIteration(rc);
 					});
 				} else {
-					// blob granules op error
-					FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR");
-					restartIteration(rc);
+					// async step succeeded
+					updateStepStats();
+					iter = getOpNext(args, iter);
+					if (iter == OpEnd) {
+						onTransactionSuccess();
+					} else {
+						postNextTick();
+					}
 				}
 			} else {
-				// async step succeeded
-				updateStepStats();
-				iter = getOpNext(args, iter);
-				if (iter == OpEnd) {
-					onTransactionSuccess();
-				} else {
-					postNextTick();
-				}
+				// blob granules op error
+				updateErrorStats(f.error(), iter.op);
+				FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR");
+				restartIteration(rc);
 			}
 		});
 	}
@@ -183,7 +184,7 @@ void ResumableStateForRunWorkload::updateStepStats() {
 	}
 }
 
-force_inline void ResumableStateForRunWorkload::updateErrorStats(fdb::Error& err, int op) {
+force_inline void ResumableStateForRunWorkload::updateErrorStats(const fdb::Error& err, int op) {
 	if (err) {
 		if (err.is(1020 /*not_commited*/)) {
 			stats.incrConflictCount();

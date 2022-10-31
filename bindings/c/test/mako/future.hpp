@@ -84,7 +84,10 @@ force_inline bool waitFuture(FutureType& f, std::string_view step) {
 	auto err = fdb::Error{};
 	if ((err = f.blockUntilReady())) {
 		const auto retry = err.retryable();
-		logr.error("{} error '{}' found during step: {}", (retry ? "Retryable" : "Unretryable"), err.what(), step);
+		logr.error("{} error '{}' found while waiting for future during step: {}",
+		           (retry ? "Retryable" : "Unretryable"),
+		           err.what(),
+		           step);
 		return false;
 	}
 	err = f.error();
