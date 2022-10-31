@@ -3652,7 +3652,14 @@ void registerCrashHandler() {
 	sigaction(SIGSEGV, &action, nullptr);
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
+#ifdef USE_GCOV
+	// SIGTERM is the "graceful" way to end an fdbserver process, so we actually
+	// don't want to invoke crashHandler. crashHandler is not actually
+	// async-signal-safe, so we can only justify calling it if we were going to
+	// crash anyway. For USE_GCOV though we need to flush coverage info, which
+	// we do through crashHandler.
 	sigaction(SIGTERM, &action, nullptr);
+#endif
 #else
 	// No crash handler for other platforms!
 #endif
