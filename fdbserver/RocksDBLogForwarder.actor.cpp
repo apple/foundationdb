@@ -61,8 +61,7 @@ void logTraceEvent(const RocksDBLogRecord& record) {
 	{
 		std::stringstream ss;
 		ss << record.threadID;
-		std::string threadID;
-		event.detail("RocksDBThreadID", threadID);
+		event.detail("RocksDBThreadID", ss.str());
 	}
 
 	for (const auto& [k, v] : record.kvPairs) {
@@ -89,8 +88,8 @@ void RocksDBLogger::inject(RocksDBLogRecord&& record) {
 	} else {
 		const std::lock_guard<std::mutex> lockGuard(recordsMutex);
 
-		records.emplace_back();
-		records.back() = std::move(record);
+		logRecords.emplace_back();
+		logRecords.back() = std::move(record);
 	}
 }
 
@@ -98,7 +97,7 @@ void RocksDBLogger::consume() {
 	std::vector<RocksDBLogRecord> currentRecords;
 	{
 		const std::lock_guard<std::mutex> lockGuard(recordsMutex);
-		currentRecords.swap(records);
+		currentRecords.swap(logRecords);
 	}
 
 	for (const auto& record : currentRecords) {
@@ -109,7 +108,7 @@ void RocksDBLogger::consume() {
 } // namespace details
 
 RocksDBLogForwarder::RocksDBLogForwarder(const UID& id_, const InfoLogLevel log_level)
-  : rocksdb::Logger(log_level), id(id_), records() {
+  : rocksdb::Logger(log_level), id(id_), logger() {
 	TraceEvent(SevInfo, "RocksDBLoggerStart", id);
 }
 
@@ -133,9 +132,9 @@ void RocksDBLogForwarder::Logv(const InfoLogLevel log_level, const char* format,
 	char buf[1024];
 	vsnprintf(buf, 1024, format, ap);
 	if (severity < SevError) {
-		records.inject(details::RocksDBLogRecord{ now(), severity, id, threadID, { { "Text", std::string(buf) } } });
+		logger.inject(details::RocksDBLogRecord{ now(), severity, id, threadID, { { "Text", std::string(buf) } } });
 	} else {
-		records.inject(details::RocksDBLogRecord{
+		logger.inject(details::RocksDBLogRecord{
 		    now(),
 		    severity,
 		    id,
