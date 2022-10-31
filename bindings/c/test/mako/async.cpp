@@ -133,7 +133,7 @@ repeat_immediate_steps:
 					                       err.what());
 					updateErrorStats(err, iter.op);
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						const FutureRC rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
+						const auto rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
 						restartIteration(rc);
 					});
 				} else {
@@ -207,7 +207,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				                       err.what());
 				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
-					FutureRC rc = handleForOnError(tx, f, "ON_ERROR");
+					const auto rc = handleForOnError(tx, f, "ON_ERROR");
 					restartIteration(rc);
 				});
 			} else {
@@ -240,7 +240,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		restartIteration(FutureRC::OK);
 	}
 }
-void ResumableStateForRunWorkload::restartIteration(FutureRC rc) {
+force_inline void ResumableStateForRunWorkload::restartIteration(FutureRC rc) {
 	// restart current iteration from beginning unless ended
 	if (rc == FutureRC::OK || rc == FutureRC::ABORT) {
 		total_xacts++;
