@@ -603,7 +603,7 @@ int runWorkload(Database db,
 	/* main transaction loop */
 	while (1) {
 		Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
-		if ((thread_tps > 0) && (xacts >= current_tps)) {
+		if ((thread_tps > 0 /* iff throttling on */) && (xacts >= current_tps)) {
 			/* throttle on */
 			auto time_now = steady_clock::now();
 			while (toDoubleSeconds(time_now - time_prev) < 1.0) {
@@ -619,7 +619,7 @@ int runWorkload(Database db,
 			current_tps = static_cast<int>(thread_tps * throttle_factor.load());
 		}
 
-		if (current_tps > 0) {
+		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
 
 			/* enable transaction trace */
 			if (dotrace) {
@@ -1711,8 +1711,8 @@ int Arguments::validate() {
 
 	if (mode == MODE_RUN || mode == MODE_BUILD) {
 		if (tpsmax > 0) {
-			if (async_xacts > 0 && async_xacts * num_processes > iteration) {
-				logr.error("--async_xacts * --num_processes must be <= --tpsmax|--tps");
+			if (async_xacts > 0) {
+				logr.error("--tpsmax|--tps must be 0 or unspecified because throttling is not supported in async mode");
 				return -1;
 			} else if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
 				logr.error("--num_threads * --num_processes must be <= --tpsmax|--tps");
