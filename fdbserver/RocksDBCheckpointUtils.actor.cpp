@@ -529,6 +529,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	state int64_t offset = 0;
 	state Reference<IAsyncFile> asyncFile;
 	loop {
+		offset = 0;
 		try {
 			asyncFile = Reference<IAsyncFile>();
 			++attempt;
@@ -559,7 +560,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 				offset += rep.data.size();
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
+			if (e.code() != error_code_end_of_stream ||
+			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
 				TraceEvent("FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
@@ -751,6 +753,8 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 	    .detail("InitialState", initialState.toString())
 	    .detail("CheckpointDir", dir);
 
+	ASSERT(!initialState.ranges.empty());
+
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
 
 	if (metaData->format == RocksDBColumnFamily) {
@@ -769,7 +773,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 	} else if (metaData->format == RocksDB) {
 		std::shared_ptr<rocksdb::SstFileWriter> writer =
 		    std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options());
-		wait(fetchCheckpointRange(cx, metaData, metaData->range, dir, writer, cFun));
+		wait(fetchCheckpointRange(cx, metaData, metaData->ranges.front(), dir, writer, cFun));
 	}
 
 	return *metaData;

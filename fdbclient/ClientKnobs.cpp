@@ -273,6 +273,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 	init( WRITE_COST_BYTE_FACTOR,                 16384 ); if( randomize && BUGGIFY ) WRITE_COST_BYTE_FACTOR = 4096;
 	init( READ_COST_BYTE_FACTOR,                  16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
+	init( PROXY_MAX_TAG_THROTTLE_DURATION,          5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE_DURATION = 0.5;
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
@@ -281,6 +282,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 	init( BG_TOO_MANY_GRANULES,                   10000 );
+	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );

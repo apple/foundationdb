@@ -828,6 +828,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
+	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobMigrator.present()) {
+		roles.addRole("blob_migrator", db->get().blobMigrator.get());
+	}
+
 	if (db->get().consistencyScan.present()) {
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
@@ -2919,7 +2923,7 @@ ACTOR Future<Optional<Value>> consistencyScanInfoFetcher(Database cx) {
 	}
 
 	TraceEvent("ConsistencyScanInfoFetcher").log();
-	return val.get();
+	return val;
 }
 
 // constructs the cluster section of the json status output
@@ -3438,23 +3442,19 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// Fetch Consistency Scan Information
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		state Optional<Value> val;
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				wait(store(val, ConsistencyScanInfo::getInfo(tr)));
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
+		try {
+			Optional<Value> val = wait(timeoutError(consistencyScanInfoFetcher(cx), 2.0));
+			if (val.present()) {
+				ConsistencyScanInfo consistencyScanInfo =
+				    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
+				TraceEvent("StatusConsistencyScanGotVal").log();
+				statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
 			}
-		}
-		if (val.present()) {
-			ConsistencyScanInfo consistencyScanInfo =
-			    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
-			TraceEvent("StatusConsistencyScanGotVal").log();
-			statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			messages.push_back(JsonString::makeMessage("fetch_consistency_scan_info_timeout",
+			                                           "Fetching consistency scan information timed out."));
 		}
 
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.

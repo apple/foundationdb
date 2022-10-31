@@ -23,6 +23,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/GrvTransactionRateInfo.h"
+#include "fdbserver/LatencyBandsMap.h"
 
 // GrvProxyTransactionTagThrottler is used to throttle GetReadVersionRequests based on tag quotas
 // before they're pushed into priority-partitioned queues.
@@ -45,22 +46,31 @@ class GrvProxyTransactionTagThrottler {
 		explicit DelayedRequest(GetReadVersionRequest const& req)
 		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
 
-		void updateProxyTagThrottledDuration();
+		void updateProxyTagThrottledDuration(LatencyBandsMap&);
+		bool isMaxThrottled() const;
 	};
 
 	struct TagQueue {
 		Optional<GrvTransactionRateInfo> rateInfo;
 		Deque<DelayedRequest> requests;
 
-		explicit TagQueue(double rate = 0.0) : rateInfo(rate) {}
+		TagQueue() = default;
+		explicit TagQueue(double rate) : rateInfo(rate) {}
 
 		void setRate(double rate);
+		bool isMaxThrottled() const;
+		void rejectRequests(LatencyBandsMap&);
 	};
 
 	// Track the budgets for each tag
 	TransactionTagMap<TagQueue> queues;
 
+	// Track latency bands for each tag
+	LatencyBandsMap latencyBandsMap;
+
 public:
+	GrvProxyTransactionTagThrottler();
+
 	// Called with rates received from ratekeeper
 	void updateRates(TransactionTagMap<double> const& newRates);
 
@@ -68,12 +78,14 @@ public:
 	// If a request is ready to be executed, it is sent to the deque
 	// corresponding to its priority. If not, the request remains queued.
 	void releaseTransactions(double elapsed,
-	                         SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-	                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
+	                         Deque<GetReadVersionRequest>& outBatchPriority,
+	                         Deque<GetReadVersionRequest>& outDefaultPriority);
 
 	void addRequest(GetReadVersionRequest const&);
 
+	void addLatencyBandThreshold(double value);
+
 public: // testing
 	// Returns number of tags tracked
-	uint32_t size();
+	uint32_t size() const;
 };

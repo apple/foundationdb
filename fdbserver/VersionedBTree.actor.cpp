@@ -38,6 +38,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/PriorityMultiLock.actor.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -104,201 +105,6 @@ std::string addPrefix(std::string prefix, std::string lines) {
 	}
 	return s;
 }
-
-#define PRIORITYMULTILOCK_DEBUG 0
-
-// A multi user lock with a concurrent holder limit where waiters are granted the lock according to
-// an integer priority from 0 to maxPriority, inclusive, where higher integers are given priority.
-//
-// The interface is similar to FlowMutex except that lock holders can drop the lock to release it.
-//
-// Usage:
-//   Lock lock = wait(prioritylock.lock(priorityLevel));
-//   lock.release();  // Explicit release, or
-//   // let lock and all copies of lock go out of scope to release
-class PriorityMultiLock {
-
-public:
-	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
-	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
-	// the Lock before it goes out of scope.
-	struct Lock {
-		void release() { promise.send(Void()); }
-
-		// This is exposed in case the caller wants to use/copy it directly
-		Promise<Void> promise;
-	};
-
-private:
-	struct Waiter {
-		Waiter() : queuedTime(now()) {}
-		Promise<Lock> lockPromise;
-		double queuedTime;
-	};
-
-	typedef Deque<Waiter> Queue;
-
-#if PRIORITYMULTILOCK_DEBUG
-#define prioritylock_printf(...) printf(__VA_ARGS__)
-#else
-#define prioritylock_printf(...)
-#endif
-
-public:
-	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
-	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimit(launchLimit) {
-		waiters.resize(maxPriority + 1);
-		fRunner = runner(this);
-	}
-
-	~PriorityMultiLock() { prioritylock_printf("destruct"); }
-
-	Future<Lock> lock(int priority = 0) {
-		prioritylock_printf("lock begin %s\n", toString().c_str());
-
-		// This shortcut may enable a waiter to jump the line when the releaser loop yields
-		if (available > 0) {
-			--available;
-			Lock p;
-			addRunner(p);
-			prioritylock_printf("lock exit immediate %s\n", toString().c_str());
-			return p;
-		}
-
-		Waiter w;
-		waiters[priority].push_back(w);
-		++waiting;
-		prioritylock_printf("lock exit queued %s\n", toString().c_str());
-		return w.lockPromise.getFuture();
-	}
-
-	std::string toString() const {
-		int runnersDone = 0;
-		for (int i = 0; i < runners.size(); ++i) {
-			if (runners[i].isReady()) {
-				++runnersDone;
-			}
-		}
-
-		std::string s =
-		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
-		           this,
-		           concurrency,
-		           available,
-		           concurrency - available,
-		           waiting,
-		           runners.size(),
-		           runnersDone);
-
-		for (int i = 0; i < waiters.size(); ++i) {
-			s += format("p%d_waiters=%u ", i, waiters[i].size());
-		}
-
-		s += "}";
-		return s;
-	}
-
-private:
-	void addRunner(Lock& lock) {
-		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
-			prioritylock_printf("Lock released\n");
-			++available;
-			if (waiting > 0 || runners.size() > 100) {
-				release.trigger();
-			}
-			return Void();
-		}));
-	}
-
-	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
-		state int sinceYield = 0;
-		state Future<Void> error = self->brokenOnDestruct.getFuture();
-		state int maxPriority = self->waiters.size() - 1;
-
-		// Priority to try to run tasks from next
-		state int priority = maxPriority;
-		state Queue* pQueue = &self->waiters[maxPriority];
-
-		// Track the number of waiters unlocked at the same priority in a row
-		state int lastPriorityCount = 0;
-
-		loop {
-			// Cleanup finished runner futures at the front of the runner queue.
-			while (!self->runners.empty() && self->runners.front().isReady()) {
-				self->runners.pop_front();
-			}
-
-			// Wait for a runner to release its lock
-			wait(self->release.onTrigger());
-			prioritylock_printf("runner wakeup %s\n", self->toString().c_str());
-
-			if (++sinceYield == 1000) {
-				sinceYield = 0;
-				wait(delay(0));
-			}
-
-			// While there are available slots and there are waiters, launch tasks
-			while (self->available > 0 && self->waiting > 0) {
-				prioritylock_printf("Checking priority=%d lastPriorityCount=%d %s\n",
-				                    priority,
-				                    lastPriorityCount,
-				                    self->toString().c_str());
-
-				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
-					Waiter w = pQueue->front();
-					pQueue->pop_front();
-					--self->waiting;
-					Lock lock;
-					prioritylock_printf("  Running waiter priority=%d wait=%f %s\n",
-					                    priority,
-					                    now() - w.queuedTime,
-					                    self->toString().c_str());
-					w.lockPromise.send(lock);
-
-					// Self may have been destructed during the lock callback
-					if (error.isReady()) {
-						throw error.getError();
-					}
-
-					// If the lock was not already released, add it to the runners future queue
-					if (lock.promise.canBeSet()) {
-						self->addRunner(lock);
-
-						// A slot has been consumed, so stop reading from this queue if there aren't any more
-						if (--self->available == 0) {
-							break;
-						}
-					}
-				}
-
-				// If there are no more slots available, then don't move to the next priority
-				if (self->available == 0) {
-					break;
-				}
-
-				// Decrease priority, wrapping around to max from 0
-				if (priority == 0) {
-					priority = maxPriority;
-				} else {
-					--priority;
-				}
-
-				pQueue = &self->waiters[priority];
-				lastPriorityCount = 0;
-			}
-		}
-	}
-
-	int concurrency;
-	int available;
-	int waiting;
-	int launchLimit;
-	std::vector<Queue> waiters;
-	Deque<Future<Void>> runners;
-	Future<Void> fRunner;
-	AsyncTrigger release;
-	Promise<Void> brokenOnDestruct;
-};
 
 // Some convenience functions for debugging to stringify various structures
 // Classes can add compatibility by either specializing toString<T> or implementing
@@ -1668,6 +1474,8 @@ struct RedwoodMetrics {
 		kvSizeReadByGetRange = Reference<Histogram>(
 		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGetRange", Histogram::Unit::bytes));
 
+		ioLock = nullptr;
+
 		// These histograms are used for Btree events, hence level > 0
 		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
@@ -1710,6 +1518,8 @@ struct RedwoodMetrics {
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;
+	// pointer to the priority multi lock used in pager
+	PriorityMultiLock* ioLock;
 
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
@@ -1764,9 +1574,12 @@ struct RedwoodMetrics {
 	// The string is a reasonably well formatted page of information
 	void getFields(TraceEvent* e, std::string* s = nullptr, bool skipZeroes = false);
 
+	void getIOLockFields(TraceEvent* e, std::string* s = nullptr);
+
 	std::string toString(bool clearAfter) {
 		std::string s;
 		getFields(nullptr, &s);
+		getIOLockFields(nullptr, &s);
 
 		if (clearAfter) {
 			clear();
@@ -1801,14 +1614,23 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 		double elapsed = now() - g_redwoodMetrics.startTime;
 		e.detail("Elapsed", elapsed);
 		g_redwoodMetrics.getFields(&e);
+		g_redwoodMetrics.getIOLockFields(&e);
 		g_redwoodMetrics.clear();
 	}
 }
 
 // Holds an index of recently used objects.
-// ObjectType must have the methods
-//   bool evictable() const;            // return true if the entry can be evicted
-//   Future<Void> onEvictable() const;  // ready when entry can be evicted
+// ObjectType must have these methods
+//
+//   // Returns true iff the entry can be evicted
+//   bool evictable() const;
+//
+//	 // Ready when object is safe to evict from cache
+//   Future<Void> onEvictable() const;
+//
+//   // Ready when object destruction is safe
+//   // Should cancel pending async operations that are safe to cancel when cache is being destroyed
+//   Future<Void> cancel() const;
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 	struct Entry;
@@ -2031,7 +1853,7 @@ public:
 	}
 
 	// Clears the cache, saving the entries to second cache, then waits for each item to be evictable and evicts it.
-	ACTOR static Future<Void> clear_impl(ObjectCache* self) {
+	ACTOR static Future<Void> clear_impl(ObjectCache* self, bool waitForSafeEviction) {
 		// Claim ownership of all of our cached items, removing them from the evictor's control and quota.
 		for (auto& ie : self->cache) {
 			self->pEvictor->reclaim(ie.second);
@@ -2043,16 +1865,15 @@ public:
 
 		state typename CacheT::iterator i = self->cache.begin();
 		while (i != self->cache.end()) {
-			if (!i->second.item.evictable()) {
-				wait(i->second.item.onEvictable());
-			}
+			wait(waitForSafeEviction ? i->second.item.onEvictable() : i->second.item.cancel());
 			++i;
 		}
+		self->cache.clear();
 
 		return Void();
 	}
 
-	Future<Void> clear() { return clear_impl(this); }
+	Future<Void> clear(bool waitForSafeEviction = false) { return clear_impl(this, waitForSafeEviction); }
 
 	// Move the prioritized evictions queued to the front of the eviction order
 	void flushPrioritizedEvictions() { pEvictor->moveIn(prioritizedEvictions); }
@@ -2113,6 +1934,13 @@ public:
 		// Entry is evictable when its write and read futures are ready, even if they are
 		// errors, so any buffers they hold are no longer needed by the underlying file actors
 		Future<Void> onEvictable() const { return ready(readFuture) && ready(writeFuture); }
+
+		// Read and write futures are safe to cancel so just cancel them and return
+		Future<Void> cancel() {
+			writeFuture.cancel();
+			readFuture.cancel();
+			return Void();
+		}
 	};
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 
@@ -2197,7 +2025,7 @@ public:
 	          bool memoryOnly,
 	          Reference<IPageEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCHS),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
@@ -2209,6 +2037,7 @@ public:
 		// This sets the page cache size for all PageCacheT instances using the same evictor
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
+		g_redwoodMetrics.ioLock = &ioLock;
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
@@ -2660,14 +2489,15 @@ public:
 
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
-	ACTOR static Future<Void> writePhysicalBlock(DWALPager* self,
-	                                             Reference<ArenaPage> page,
-	                                             int blockNum,
-	                                             int blockSize,
-	                                             PhysicalPageID pageID,
-	                                             PagerEventReasons reason,
-	                                             unsigned int level,
-	                                             bool header) {
+	// Write one block of a page of a physical page in the page file.  Futures returned must be allowed to complete.
+	ACTOR static UNCANCELLABLE Future<Void> writePhysicalBlock(DWALPager* self,
+	                                                           Reference<ArenaPage> page,
+	                                                           int blockNum,
+	                                                           int blockSize,
+	                                                           PhysicalPageID pageID,
+	                                                           PagerEventReasons reason,
+	                                                           unsigned int level,
+	                                                           bool header) {
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
@@ -2691,7 +2521,11 @@ public:
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		debug_printf("DWALPager(%s) op=writeBlock %s\n", self->filename.c_str(), toString(pageID).c_str());
 		wait(self->pageFile->write(page->rawData() + (blockNum * blockSize), blockSize, (int64_t)pageID * blockSize));
-		debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
+
+		// This next line could crash on shutdown because this actor can't be cancelled so self could be destroyed after
+		// write, so enable this line with caution when debugging.
+		// debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
+
 		return Void();
 	}
 
@@ -2715,6 +2549,7 @@ public:
 		return Void();
 	}
 
+	// All returned futures are added to the operations vector
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
 	                               unsigned int level,
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
@@ -2938,18 +2773,19 @@ public:
 	}
 	void freeExtent(LogicalPageID pageID) override { freeExtent_impl(this, pageID); }
 
-	ACTOR static Future<int> readPhysicalBlock(DWALPager* self,
-	                                           uint8_t* data,
-	                                           int blockSize,
-	                                           int64_t offset,
-	                                           int priority) {
+	ACTOR static UNCANCELLABLE Future<int> readPhysicalBlock(DWALPager* self,
+	                                                         Reference<ArenaPage> pageBuffer,
+	                                                         int pageOffset,
+	                                                         int blockSize,
+	                                                         int64_t offset,
+	                                                         int priority) {
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
 		++g_redwoodMetrics.metric.pagerDiskRead;
-		int bytes = wait(self->pageFile->read(data, blockSize, offset));
+		int bytes = wait(self->pageFile->read(pageBuffer->rawData() + pageOffset, blockSize, offset));
 		return bytes;
 	}
 
-	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
+	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock.
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<ArenaPage>> readPhysicalPage(DWALPager* self,
@@ -2966,8 +2802,8 @@ public:
 		             page->rawData(),
 		             header);
 
-		int readBytes = wait(
-		    readPhysicalBlock(self, page->rawData(), page->rawSize(), (int64_t)pageID * page->rawSize(), priority));
+		int readBytes =
+		    wait(readPhysicalBlock(self, page, 0, page->rawSize(), (int64_t)pageID * page->rawSize(), priority));
 		debug_printf("DWALPager(%s) op=readPhysicalDiskReadComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
@@ -3030,8 +2866,8 @@ public:
 		state int blockSize = self->physicalPageSize;
 		std::vector<Future<int>> reads;
 		for (int i = 0; i < pageIDs.size(); ++i) {
-			reads.push_back(readPhysicalBlock(
-			    self, page->rawData() + (i * blockSize), blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
+			reads.push_back(
+			    readPhysicalBlock(self, page, i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
 		}
 		// wait for all the parallel read futures
 		wait(waitForAll(reads));
@@ -3268,8 +3104,8 @@ public:
 			currentOffset = i * physicalReadSize;
 			debug_printf("DWALPager(%s) current offset %" PRId64 "\n", self->filename.c_str(), currentOffset);
 			++g_redwoodMetrics.metric.pagerDiskRead;
-			reads.push_back(
-			    self->pageFile->read(extent->rawData() + currentOffset, physicalReadSize, startOffset + currentOffset));
+			reads.push_back(self->readPhysicalBlock(
+			    self, extent, currentOffset, physicalReadSize, startOffset + currentOffset, ioMaxPriority));
 		}
 
 		// Handle the last read separately as it may be smaller than physicalReadSize
@@ -3281,8 +3117,8 @@ public:
 			             currentOffset,
 			             lastReadSize);
 			++g_redwoodMetrics.metric.pagerDiskRead;
-			reads.push_back(
-			    self->pageFile->read(extent->rawData() + currentOffset, lastReadSize, startOffset + currentOffset));
+			reads.push_back(self->readPhysicalBlock(
+			    self, extent, currentOffset, lastReadSize, startOffset + currentOffset, ioMaxPriority));
 		}
 
 		// wait for all the parallel read futures for the given extent
@@ -3747,30 +3583,36 @@ public:
 	Value getCommitRecord() const override { return lastCommittedHeader.userCommitRecord; }
 
 	ACTOR void shutdown(DWALPager* self, bool dispose) {
+		// Send to the error promise first and then delay(0) to give users a chance to cancel
+		// any outstanding operations
+		if (self->errorPromise.canBeSet()) {
+			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
+			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
+		}
+		wait(delay(0));
+
+		// The next section explicitly cancels all pending operations held in the pager
+		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
+		self->ioLock.kill();
+
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
 		self->commitFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
+		debug_printf("DWALPager(%s) shutdown kill file extension\n", self->filename.c_str());
+		self->fileExtension.cancel();
 
-		if (self->errorPromise.canBeSet()) {
-			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
-			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
+		debug_printf("DWALPager(%s) shutdown cancel operations\n", self->filename.c_str());
+		for (auto& f : self->operations) {
+			f.cancel();
 		}
-
-		// Must wait for pending operations to complete, canceling them can cause a crash because the underlying
-		// operations may be uncancellable and depend on memory from calling scope's page reference
-		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
-
-		// Pending ops must be all ready, errors are okay
-		wait(waitForAllReady(self->operations));
 		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->extentCache.clear());
 		wait(self->pageCache.clear());
-		wait(delay(0));
 
 		debug_printf("DWALPager(%s) shutdown remappedPagesMap: %s\n",
 		             self->filename.c_str(),
@@ -3995,7 +3837,11 @@ private:
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise;
 	Future<Void> commitFuture;
+
+	// The operations vector is used to hold all disk writes made by the Pager, but could also hold
+	// other operations that need to be waited on before a commit can finish.
 	std::vector<Future<Void>> operations;
+
 	Future<Void> recoverFuture;
 	Future<Void> remapCleanupFuture;
 	bool remapCleanupStop;
@@ -4767,7 +4613,7 @@ struct BoundaryRefAndPage {
 // DecodeBoundaryVerifier provides simulation-only verification of DeltaTree boundaries between
 // reads and writes by using a static structure to track boundaries used during DeltaTree generation
 // for all writes and updates across cold starts and virtual process restarts.
-struct DecodeBoundaryVerifier {
+class DecodeBoundaryVerifier {
 	struct DecodeBoundaries {
 		Key lower;
 		Key upper;
@@ -4778,10 +4624,12 @@ struct DecodeBoundaryVerifier {
 
 	typedef std::map<Version, DecodeBoundaries> BoundariesByVersion;
 	std::unordered_map<LogicalPageID, BoundariesByVersion> boundariesByPageID;
-	std::vector<Key> boundarySamples;
 	int boundarySampleSize = 1000;
 	int boundaryPopulation = 0;
 	Reference<IPageEncryptionKeyProvider> keyProvider;
+
+public:
+	std::vector<Key> boundarySamples;
 
 	// Sample rate of pages to be scanned to verify if all entries in the page meet domain prefix requirement.
 	double domainPrefixScanProbability = 0.01;
@@ -4811,7 +4659,7 @@ struct DecodeBoundaryVerifier {
 		if (boundarySamples.empty()) {
 			return Key();
 		}
-		return boundarySamples[deterministicRandom()->randomInt(0, boundarySamples.size())];
+		return deterministicRandom()->randomChoice(boundarySamples);
 	}
 
 	bool update(BTreeNodeLinkRef id,
@@ -5377,6 +5225,15 @@ public:
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
+		// DecodeBoundaryVerifier objects outlive simulated processes.
+		// Thus, if we did not clear the key providers here, each DecodeBoundaryVerifier object might
+		// maintain references to untracked peers through its key provider. This would result in
+		// errors when FlowTransport::removePeerReference is called to remove a peer that is no
+		// longer tracked by FlowTransport::transport().
+		if (m_pBoundaryVerifier != nullptr) {
+			m_pBoundaryVerifier->setKeyProvider(Reference<IPageEncryptionKeyProvider>());
+		}
+
 		// This probably shouldn't be called directly (meaning deleting an instance directly) but it should be safe,
 		// it will cancel init and commit and leave the pager alive but with potentially an incomplete set of
 		// uncommitted writes so it should not be committed.
@@ -8070,8 +7927,7 @@ RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
 	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
-	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
@@ -8136,6 +7992,8 @@ public:
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
 
+		g_redwoodMetrics.ioLock = nullptr;
+
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
 		if (g_network->isSimulated() && dispose && BUGGIFY) {
 			// Only proceed if the last commit is a success, but don't throw if it's not because shutdown
@@ -8187,7 +8045,9 @@ public:
 
 	Future<Void> getError() const override { return delayed(m_error.getFuture()); };
 
-	void clear(KeyRangeRef range, const Arena* arena = 0) override {
+	void clear(KeyRangeRef range,
+	           const StorageServerMetrics* storageMetrics = nullptr,
+	           const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
@@ -8236,7 +8096,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached forward range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -8292,7 +8151,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached reverse range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -8359,9 +8217,6 @@ public:
 		wait(self->m_tree->initBTreeCursor(
 		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options));
 
-		// Not locking for point reads, instead relying on IO priority lock
-		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
-
 		++g_redwoodMetrics.metric.opGet;
 		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
@@ -8397,7 +8252,6 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
-	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
@@ -9029,6 +8883,43 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 				}
 			}
 			*s += metric.events.toString(i, elapsed);
+		}
+	}
+}
+
+void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
+	if (ioLock == nullptr)
+		return;
+
+	int maxPriority = ioLock->maxPriority();
+
+	if (e != nullptr) {
+		e->detail("ActiveReads", ioLock->totalRunners());
+		e->detail("AwaitReads", ioLock->totalWaiters());
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			e->detail(format("ActiveP%d", priority), ioLock->numRunners(priority));
+			e->detail(format("AwaitP%d", priority), ioLock->numWaiters(priority));
+		}
+	}
+
+	if (s != nullptr) {
+		std::string active = "Active";
+		std::string await = "Await";
+
+		*s += "\n";
+		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalRunners());
+		*s += format("%-15s %-8u  ", "AwaitReads", ioLock->totalWaiters());
+		*s += "\n";
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numRunners(priority));
+		}
+		*s += "\n";
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (await + 'P' + std::to_string(priority)).c_str(), ioLock->numWaiters(priority));
 		}
 	}
 }
@@ -11514,5 +11405,59 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	return Void();
+}
+
+ACTOR Future<Void> waitLockIncrement(PriorityMultiLock* pml, int priority, int* pout) {
+	state PriorityMultiLock::Lock lock = wait(pml->lock(priority));
+	wait(delay(deterministicRandom()->random01() * .1));
+	++*pout;
+	return Void();
+}
+
+TEST_CASE("/redwood/PriorityMultiLock") {
+	state std::vector<int> priorities = { 10, 20, 40 };
+	state int concurrency = 25;
+	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
+	state std::vector<int> counts;
+	counts.resize(priorities.size(), 0);
+
+	// Clog the lock buy taking concurrency locks at each level
+	state std::vector<Future<PriorityMultiLock::Lock>> lockFutures;
+	for (int i = 0; i < priorities.size(); ++i) {
+		for (int j = 0; j < concurrency; ++j) {
+			lockFutures.push_back(pml->lock(i));
+		}
+	}
+
+	// Wait for n = concurrency locks to be acquired
+	wait(quorum(lockFutures, concurrency));
+
+	state std::vector<Future<Void>> futures;
+	for (int i = 0; i < 10e3; ++i) {
+		int p = i % priorities.size();
+		futures.push_back(waitLockIncrement(pml, p, &counts[p]));
+	}
+
+	state Future<Void> f = waitForAll(futures);
+
+	// Release the locks
+	lockFutures.clear();
+
+	// Print stats and wait for all futures to be ready
+	loop {
+		choose {
+			when(wait(delay(1))) {
+				printf("counts: ");
+				for (auto c : counts) {
+					printf("%d ", c);
+				}
+				printf("   pml: %s\n", pml->toString().c_str());
+			}
+			when(wait(f)) { break; }
+		}
+	}
+
+	delete pml;
 	return Void();
 }

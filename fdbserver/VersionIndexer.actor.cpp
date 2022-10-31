@@ -82,7 +82,7 @@ struct VersionIndexerState {
 
 VersionIndexerStats::VersionIndexerStats(UID id)
   : cc("VersionIndexerStats", id.toString()), commits("Commits", cc), peeks("PeekRequests", cc) {
-	logger = traceCounters("VersionIndexerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc);
+	logger = cc.traceCounters("VersionIndexerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL);
 }
 
 ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequest req) {

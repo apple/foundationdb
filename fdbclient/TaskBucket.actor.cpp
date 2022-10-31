@@ -579,8 +579,8 @@ public:
 	                              int maxConcurrentTasks) {
 		state Reference<AsyncVar<bool>> paused = makeReference<AsyncVar<bool>>(true);
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
-		taskBucket->metricLogger = traceCounters(
-		    "TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY, &taskBucket->cc);
+		taskBucket->metricLogger = taskBucket->cc.traceCounters(
+		    "TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY);
 		loop {
 			while (paused->get()) {
 				wait(paused->onChange() || watchPausedFuture);

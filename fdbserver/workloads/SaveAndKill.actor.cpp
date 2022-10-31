@@ -33,6 +33,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SaveAndKillWorkload : TestWorkload {
+	static constexpr auto NAME = "SaveAndKill";
 
 	std::string restartInfo;
 	double testDuration;
@@ -44,15 +45,14 @@ struct SaveAndKillWorkload : TestWorkload {
 		isRestoring = getOption(options, "isRestoring"_sr, 0);
 	}
 
-	std::string description() const override { return "SaveAndKillWorkload"; }
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 	Future<Void> setup(Database const& cx) override {
 		g_simulator->disableSwapsToAll();
 		return Void();
 	}
-	Future<Void> start(Database const& cx) override { return _start(this); }
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
-	ACTOR Future<Void> _start(SaveAndKillWorkload* self) {
+	ACTOR Future<Void> _start(SaveAndKillWorkload* self, Database cx) {
 		state int i;
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
@@ -68,6 +68,10 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
+		ini.SetValue("META", "tenantMode", cx->clientInfo->get().tenantMode.toString().c_str());
+		if (cx->defaultTenant.present()) {
+			ini.SetValue("META", "defaultTenant", cx->defaultTenant.get().toString().c_str());
+		}
 
 		ini.SetBoolValue("META", "enableEncryption", SERVER_KNOBS->ENABLE_ENCRYPTION);
 		ini.SetBoolValue("META", "enableTLogEncryption", SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
@@ -157,4 +161,4 @@ struct SaveAndKillWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>&) override {}
 };
 
-WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory("SaveAndKill");
+WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory;

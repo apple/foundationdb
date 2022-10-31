@@ -284,8 +284,6 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transaction/write_conflict_range/"_sr,
                                                             "\xff\xff/transaction/write_conflict_range/\xff\xff"_sr);
 
-const KeyRef clusterIdKey = "\xff/clusterId"_sr;
-
 const KeyRangeRef auditRange = KeyRangeRef("\xff/audit/"_sr, "\xff/audit0"_sr);
 const KeyRef auditPrefix = auditRange.begin;
 
@@ -1074,6 +1072,11 @@ const KeyRangeRef timeKeeperPrefixRange("\xff\x02/timeKeeper/map/"_sr, "\xff\x02
 const KeyRef timeKeeperVersionKey = "\xff\x02/timeKeeper/version"_sr;
 const KeyRef timeKeeperDisableKey = "\xff\x02/timeKeeper/disable"_sr;
 
+// Durable cluster ID key. Added "Key" to the end to differentiate from the key
+// "\xff/clusterId" which was stored in the txnStateStore in FDB 7.1, whereas
+// this key is stored in the database in 7.2+.
+const KeyRef clusterIdKey = "\xff/clusterIdKey"_sr;
+
 // Backup Log Mutation constant variables
 const KeyRef backupEnabledKey = "\xff/backupEnabled"_sr;
 const KeyRangeRef backupLogKeys("\xff\x02/blog/"_sr, "\xff\x02/blog0"_sr);
@@ -1663,6 +1666,9 @@ const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 Key storageQuotaKey(StringRef tenantName) {
 	return tenantName.withPrefix(storageQuotaPrefix);
 }
+
+const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
+const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

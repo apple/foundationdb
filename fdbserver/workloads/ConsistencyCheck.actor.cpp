@@ -30,7 +30,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
@@ -41,10 +41,11 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//#define SevCCheckInfo SevVerbose
+// #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
 
 struct ConsistencyCheckWorkload : TestWorkload {
+	static constexpr auto NAME = "ConsistencyCheck";
 	// Whether or not we should perform checks that will only pass if the database is in a quiescent state
 	bool performQuiescentChecks;
 
@@ -119,8 +120,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		repetitions = 0;
 		bytesReadInPreviousRound = 0;
 	}
-
-	std::string description() const override { return "ConsistencyCheck"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -406,6 +405,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyValueRef>>
 		    serverList; // "\xff/serverList/[[serverID]]" := "[[StorageServerInterface]]"
 		state Standalone<VectorRef<KeyValueRef>> serverTag; // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
+		state bool testResult = true;
 
 		std::vector<Future<bool>> cacheResultsPromise;
 		cacheResultsPromise.push_back(self->fetchKeyValuesFromSS(cx, self, storageCacheKeys, cacheKeyPromise, true));
@@ -593,7 +593,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					for (j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 						// if (rangeResult.isError()) {
-						// 	throw rangeResult.getError();
+						//	throw rangeResult.getError();
 						// }
 
 						// Compare the results with other storage servers
@@ -721,7 +721,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									    .detail("MatchingKVPairs", matchingKVPairs);
 
 									self->testFailure("Data inconsistent", true);
-									return false;
+									testResult = false;
 								}
 							}
 						}
@@ -767,7 +767,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
-		return true;
+		return testResult;
 	}
 
 	// Directly fetch key/values from storage servers through GetKeyValuesRequest
@@ -1568,6 +1568,22 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		// Check BlobMigrator
+		if (config.blobGranulesEnabled && db.blobMigrator.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
+		         ProcessClass::BlobMigrator) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_BlobMigratorNotBest")
+			    .detail("BestBlobMigratorFitness", fitnessLowerBound)
+			    .detail(
+			        "ExistingBlobMigratorFitness",
+			        nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address())
+			            ? nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
+			                  ProcessClass::BlobMigrator)
+			            : -1);
+			return false;
+		}
+
 		// Check EncryptKeyProxy
 		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
@@ -1589,4 +1605,4 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ConsistencyCheckWorkload> ConsistencyCheckWorkloadFactory("ConsistencyCheck");
+WorkloadFactory<ConsistencyCheckWorkload> ConsistencyCheckWorkloadFactory;

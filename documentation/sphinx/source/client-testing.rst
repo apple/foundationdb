@@ -648,6 +648,16 @@ The subclasses of the ``ApiWorkload`` inherit the following configuration option
    initiated by a test script to check if the client workload is successfully progressing after a
    cluster change.
 
+The FDB server configuration can be specialized in the section ``[[server]]``:
+
+- ``tenants_enabled``: enable multitenancy (default: true)
+- ``blob_granules_enabled``:  enable support for blob granules (default: false)
+- ``tls_enabled``: enable TLS (default: false)
+- ``tls_client_chain_len``: the length of the client-side TLS chain (default: 2)
+- ``tls_server_chain_len``: the length of the server-side TLS chain (default: 3)
+- ``min_num_processes`` and ``max_num_processes``: the number of FDB server processes to be
+  randomly selected from the given range (default 1-3)
+
 Executing the Tests
 ===================
 
@@ -656,19 +666,35 @@ according to its specification. Before that we must create a FDB cluster and pas
 a parameter to ``fdb_c_api_tester``. Note that multithreaded tests also need to be provided with an
 external client library. 
 
-For example, we can create a temporary cluster and use it for execution of one of the existing API tests:
+The ``run_c_api_tests.py`` script automates execution of the API tests on a local cluster. The cluster
+is created according to the options specified in the ``[[server]]`` section of the given test file.
 
 .. code-block:: bash
 
-   ${srcDir}/tests/TestRunner/tmp_cluster.py --build-dir ${buildDir} -- \
-      ${buildDir}/bin/fdb_c_api_tester \
-      --cluster-file @CLUSTER_FILE@ \
-      --external-client-library=${buildDir}/bindings/c/libfdb_c_external.so \
+   ${srcDir}/bindings/c/test/apitester/run_c_api_tests.py
+      --build-dir ${buildDir}
+      --api-tester-bin ${buildDir}/bin/fdb_c_api_tester
+      --external-client-library ${buildDir}/bindings/c/libfdb_c_external.so
       --test-file ${srcDir}/bindings/c/test/apitester/tests/CApiCorrectnessMultiThr.toml
 
 The test specifications added to the ``bindings/c/test/apitester/tests/`` directory are executed as a part
-of the regression test suite. They can be executed using the ``ctest`` target ``fdb_c_api_tests``:
+of the regression test suite as ``ctest`` targets with names ``fdb_c_api_test_{file_name}``.
+
+The ``ctest`` targets provide a more convenient way for executing the API tests. We can execute 
+a single test:
 
 .. code-block:: bash
    
-   ctest -R fdb_c_api_tests -VV
+   ctest -R fdb_c_api_test_CApiCorrectnessMultiThr -VV
+
+or execute all of them in parallel (here ``-j20`` specifies the parallelization level):
+
+.. code-block:: bash
+   
+   ctest -R fdb_c_api_test_ -j20 --output-on-failure
+
+More sophisticated filters can be applied to execute a selected set of tests, e.g. the tests using TLS:
+
+.. code-block:: bash
+
+   ctest -R 'fdb_c_api_test_.*TLS' -j20 --output_on_failure

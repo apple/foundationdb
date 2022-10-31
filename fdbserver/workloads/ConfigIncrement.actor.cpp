@@ -128,6 +128,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 	}
 
 public:
+	static constexpr auto NAME = "ConfigIncrement";
 	ConfigIncrementWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"),
 	    commitUnknownResult("CommitUnknownResult") {
@@ -136,8 +137,6 @@ public:
 		meanSleepWithinTransactions = getOption(options, "meanSleepWithinTransactions"_sr, 0.01);
 		meanSleepBetweenTransactions = getOption(options, "meanSleepBetweenTransactions"_sr, 0.1);
 	}
-
-	std::string description() const override { return "ConfigIncrementWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -161,6 +160,6 @@ public:
 	}
 };
 
-WorkloadFactory<ConfigIncrementWorkload> ConfigIncrementWorkloadFactory("ConfigIncrement");
+WorkloadFactory<ConfigIncrementWorkload> ConfigIncrementWorkloadFactory;
 
 KeyRef const ConfigIncrementWorkload::testKnobName = "test_int"_sr;

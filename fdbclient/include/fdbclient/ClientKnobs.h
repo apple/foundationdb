@@ -263,6 +263,8 @@ public:
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 	int64_t WRITE_COST_BYTE_FACTOR; // Used to round up the cost of write operations
 	int64_t READ_COST_BYTE_FACTOR; // Used to round up the cost of read operations
+	double PROXY_MAX_TAG_THROTTLE_DURATION; // Maximum duration that a transaction can be tag throttled by proxy before
+	                                        // being rejected
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -271,6 +273,7 @@ public:
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
 	int BG_TOO_MANY_GRANULES;
+	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.

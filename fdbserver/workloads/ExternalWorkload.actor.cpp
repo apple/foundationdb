@@ -107,7 +107,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	FDBWorkloadFactory* (*workloadFactory)(FDBLogger*);
 	std::shared_ptr<FDBWorkload> workloadImpl;
 
-	constexpr static const char* NAME = "External";
+	constexpr static auto NAME = "External";
 
 	static std::string getDefaultLibraryPath() {
 		auto self = exePath();
@@ -162,8 +162,6 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 			closeLibrary(library);
 		}
 	}
-
-	std::string description() const override { return NAME; }
 
 	ACTOR Future<Void> assertTrue(StringRef stage, Future<bool> f) {
 		bool res = wait(f);
@@ -278,4 +276,4 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 };
 } // namespace
 
-WorkloadFactory<ExternalWorkload> CycleWorkloadFactory(ExternalWorkload::NAME);
+WorkloadFactory<ExternalWorkload> CycleWorkloadFactory;

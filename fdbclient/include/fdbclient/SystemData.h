@@ -92,8 +92,6 @@ void decodeKeyServersValue(RangeResult result,
                            UID& destID,
                            bool missingIsError = true);
 
-extern const KeyRef clusterIdKey;
-
 extern const KeyRangeRef auditRange;
 extern const KeyRef auditPrefix;
 const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
@@ -505,6 +503,9 @@ extern const KeyRangeRef timeKeeperPrefixRange;
 extern const KeyRef timeKeeperVersionKey;
 extern const KeyRef timeKeeperDisableKey;
 
+// Durable cluster ID key
+extern const KeyRef clusterIdKey;
+
 // Layer status metadata prefix
 extern const KeyRangeRef layerStatusMetaPrefixRange;
 
@@ -714,6 +715,9 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 extern const KeyRangeRef storageQuotaKeys;
 extern const KeyRef storageQuotaPrefix;
 Key storageQuotaKey(StringRef tenantName);
+
+extern const KeyRangeRef idempotencyIdKeys;
+extern const KeyRef idempotencyIdsExpiredVersion;
 
 #pragma clang diagnostic pop
 

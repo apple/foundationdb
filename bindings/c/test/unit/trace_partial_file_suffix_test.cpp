@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_PARTIAL_FILE_SUFFIX, trace_partial_file_suffix);
 
 	fdb_check(fdb_setup_network());
-	std::thread network_thread{ &fdb_run_network };
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	// Apparently you need to open a database to initialize logging
 	FDBDatabase* out;

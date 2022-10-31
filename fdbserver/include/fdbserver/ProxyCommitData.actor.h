@@ -157,8 +157,18 @@ struct ProxyStats {
 		specialCounter(cc, "NumTenants", [pTenantMap]() { return pTenantMap ? pTenantMap->size() : 0; });
 		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
-		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		logger = cc.traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ProxyMetrics");
 	}
+};
+
+struct ExpectedIdempotencyIdCountForKey {
+	Version commitVersion = invalidVersion;
+	int16_t idempotencyIdCount = 0;
+	uint8_t batchIndexHighByte = 0;
+
+	ExpectedIdempotencyIdCountForKey() {}
+	ExpectedIdempotencyIdCountForKey(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
+	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
 
 struct ProxyCommitData {
@@ -226,6 +236,9 @@ struct ProxyCommitData {
 	int localTLogCount = -1;
 
 	bool isEncryptionEnabled = false;
+
+	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey;
+	Standalone<VectorRef<MutationRef>> idempotencyClears;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to

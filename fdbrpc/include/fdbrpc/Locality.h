@@ -50,6 +50,7 @@ struct ProcessClass {
 		BlobWorkerClass,
 		EncryptKeyProxyClass,
 		ConsistencyScanClass,
+		BlobMigratorClass,
 		VersionIndexerClass,
 		InvalidClass = -1
 	};
@@ -78,7 +79,8 @@ struct ProcessClass {
 	static_assert(ProcessClass::BlobWorkerClass == 19);
 	static_assert(ProcessClass::EncryptKeyProxyClass == 20);
 	static_assert(ProcessClass::ConsistencyScanClass == 21);
-	static_assert(ProcessClass::VersionIndexerClass == 22);
+	static_assert(ProcessClass::BlobMigratorClass == 22);
+	static_assert(ProcessClass::VersionIndexerClass == 23);
 	static_assert(ProcessClass::InvalidClass == -1);
 
 	enum Fitness {
@@ -104,6 +106,7 @@ struct ProcessClass {
 		ConsistencyScan,
 		BlobManager,
 		BlobWorker,
+		BlobMigrator,
 		StorageCache,
 		Backup,
 		EncryptKeyProxy,

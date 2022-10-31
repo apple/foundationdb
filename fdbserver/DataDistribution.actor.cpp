@@ -53,6 +53,20 @@
 #include "fdbserver/DDSharedContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
+	return ShardSizeBounds{
+		.max = StorageMetrics{ .bytes = -1,
+		                       .bytesPerKSecond = StorageMetrics::infinity,
+		                       .iosPerKSecond = StorageMetrics::infinity,
+		                       .bytesReadPerKSecond = StorageMetrics::infinity },
+		.min = StorageMetrics{ .bytes = -1, .bytesPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
+		.permittedError = StorageMetrics{ .bytes = -1,
+		                                  .bytesPerKSecond = StorageMetrics::infinity,
+		                                  .iosPerKSecond = StorageMetrics::infinity,
+		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
+	};
+}
+
 struct DDAudit {
 	DDAudit(UID id, KeyRange range, AuditType type)
 	  : id(id), range(range), type(type), auditMap(AuditPhase::Invalid, allKeys.end), actors(true) {}
@@ -76,7 +90,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 		return;
 	}
 
-	ASSERT(this->meta.range.contains(range));
+	ASSERT(!this->meta.ranges.empty() && this->meta.ranges.front().contains(range));
 
 	if (!shard.hasDest) {
 		TraceEvent(SevError, "DataMoveValidationError")
@@ -286,8 +300,6 @@ public:
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 
-	StorageQuotaInfo storageQuotaInfo;
-
 	Promise<Void> initialized;
 
 	std::unordered_map<AuditType, std::vector<std::shared_ptr<DDAudit>>> audits;
@@ -316,7 +328,8 @@ public:
 		                 ddId,
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
-		                 context->ddEnabledState.get()));
+		                 context->ddEnabledState.get(),
+		                 SkipDDModeCheck::False));
 	}
 
 	void initDcInfo() {
@@ -481,17 +494,21 @@ public:
 
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
+			if (meta.ranges.empty()) {
+				TraceEvent(SevWarnAlways, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				continue;
+			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
-				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
-				ASSERT(meta.range == it.range());
+				ASSERT(meta.ranges.front() == it.range());
 				// TODO: Persist priority in DataMoveMetaData.
-				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.dataMove = it.value();
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
@@ -540,27 +557,6 @@ public:
 		return txnProcessor->removeStorageServer(serverID, tssPairID, lock, context->ddEnabledState.get());
 	}
 };
-
-ACTOR Future<Void> storageQuotaTracker(Database cx, StorageQuotaInfo* storageQuotaInfo) {
-	loop {
-		state Transaction tr(cx);
-		loop {
-			try {
-				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-				TraceEvent("StorageQuota_ReadCurrentQuotas").detail("Size", currentQuotas.size());
-				for (auto const kv : currentQuotas) {
-					Key const key = kv.key.removePrefix(storageQuotaPrefix);
-					uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
-					storageQuotaInfo->quotaMap[key] = quota;
-				}
-				wait(delay(5.0));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-}
 
 // Periodically check and log the physicalShard status; clean up empty physicalShard;
 ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection> self) {
@@ -682,14 +678,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			actors.push_back(reportErrorsExcept(storageQuotaTracker(cx, &self->storageQuotaInfo),
-			                                    "StorageQuotaTracker",
-			                                    self->ddId,
-			                                    &normalDDQueueErrors()));
-
 			if (ddIsTenantAware) {
 				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
 				                                    "DDTenantCacheMonitor",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageQuota(),
+				                                    "StorageQuotaTracker",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageUsage(),
+				                                    "StorageUsageTracker",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
 			}
