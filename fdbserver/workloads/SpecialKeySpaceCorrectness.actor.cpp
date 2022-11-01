@@ -83,7 +83,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Key startKey(baseKey + "/");
 			Key endKey(baseKey + "/\xff");
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			if (deterministicRandom()->random01() < 0.2) {
+			if (deterministicRandom()->random01() < 0.2 && !self->rwImpls.empty()) {
 				self->asyncReadImpls.push_back(std::make_shared<SKSCTestAsyncReadImpl>(KeyRangeRef(startKey, endKey)));
 				cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
 				                                      SpecialKeySpace::IMPLTYPE::READONLY,
@@ -105,6 +105,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
+		ASSERT(rwImpls.size() > 0);
+
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
@@ -249,6 +251,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	KeyRange randomRWKeyRange() {
+		ASSERT(rwImpls.size() > 0);
 		Key prefix = rwImpls[deterministicRandom()->randomInt(0, rwImpls.size())]->getKeyRange().begin;
 		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
 		                .withPrefix(prefix);
