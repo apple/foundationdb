@@ -2799,7 +2799,7 @@ void MultiVersionApi::runNetwork() {
 		waitThread(h);
 	}
 
-	TraceEvent("MVCRunNetworkTerminating");
+	TraceEvent("MultiVersionRunNetworkTerminating");
 	closeTraceFile();
 }
 
