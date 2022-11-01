@@ -132,6 +132,7 @@ enum {
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
 	OPT_USE_PARTITIONED_LOG,
+	OPT_ENCRYPT_FILES,
 
 	// Backup and Restore constants
 	OPT_PROXY,
@@ -275,6 +276,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1112,6 +1114,9 @@ static void printBackupUsage(bool devhelp) {
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
+	printf("  --encrypt-files 0/1"
+	       "                 If passed, this argument will allow the user to override the database encryption state to "
+	       "either enable (1) or disable (0) encryption at rest with snapshot backups.\n");
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -3385,7 +3390,6 @@ int main(int argc, char* argv[]) {
 		bool dryRun = false;
 		bool restoreSystemKeys = false;
 		bool restoreUserKeys = false;
-		// TODO (Nim): Set this value when we add optional encrypt_files CLI argument to backup agent start
 		bool encryptionEnabled = true;
 		std::string traceDir = "";
 		std::string traceFormat = "";
@@ -3560,6 +3564,24 @@ int main(int argc, char* argv[]) {
 			case OPT_BASEURL:
 				baseUrl = args->OptionArg();
 				break;
+			case OPT_ENCRYPT_FILES: {
+				const char* a = args->OptionArg();
+				int encryptFiles;
+				if (!sscanf(a, "%d", &encryptFiles)) {
+					fprintf(stderr, "ERROR: Could not parse encrypt-files `%s'\n", a);
+					return FDB_EXIT_ERROR;
+				}
+				if (encryptFiles != 0 && encryptFiles != 1) {
+					fprintf(stderr, "ERROR: encrypt-files must be either 0 or 1\n");
+					return FDB_EXIT_ERROR;
+				}
+				if (encryptFiles == 0) {
+					encryptionEnabled = false;
+				} else {
+					encryptionEnabled = true;
+				}
+				break;
+			}
 			case OPT_RESTORE_CLUSTERFILE_DEST:
 				restoreClusterFileDest = args->OptionArg();
 				break;
