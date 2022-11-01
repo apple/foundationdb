@@ -302,7 +302,7 @@ private:
 
 		execOperation(
 		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->db().listBlobbifiedRanges(begin, end, 1000).eraseType();
+			    fdb::Future f = ctx->dbOps()->listBlobbifiedRanges(begin, end, 1000).eraseType();
 			    ctx->continueAfter(f, [ctx, f, results]() {
 				    *results = copyKeyRangeArray(f.get<fdb::future_var::KeyRangeRefArray>());
 				    ctx->done();
@@ -331,7 +331,7 @@ private:
 		auto verifyVersion = std::make_shared<int64_t>(-1);
 		execOperation(
 		    [begin, end, verifyVersion](auto ctx) {
-			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
+			    fdb::Future f = ctx->dbOps()->verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
 			    ctx->continueAfter(f, [ctx, verifyVersion, f]() {
 				    *verifyVersion = f.get<fdb::future_var::Int64>();
 				    ctx->done();

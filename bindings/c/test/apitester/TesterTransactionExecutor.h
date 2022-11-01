@@ -44,6 +44,9 @@ public:
 	// Current FDB tenant
 	virtual fdb::Tenant tenant() = 0;
 
+	// Current FDB IDatabaseOps
+	virtual std::shared_ptr<fdb::IDatabaseOps> dbOps() = 0;
+
 	// Current FDB transaction
 	virtual fdb::Transaction tx() = 0;
 
