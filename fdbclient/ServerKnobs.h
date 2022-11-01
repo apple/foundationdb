@@ -115,6 +115,7 @@ public:
 	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
+	double POP_FROM_LOG_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;

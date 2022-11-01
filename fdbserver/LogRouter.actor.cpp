@@ -519,35 +519,38 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	}
 
 	state double startTime = now();
-
-	Version poppedVer = poppedVersion(self, reqTag);
-
-	if (poppedVer > reqBegin || reqBegin < self->startVersion) {
-		// This should only happen if a packet is sent multiple times and the reply is not needed.
-		// Since we are using popped differently, do not send a reply.
-		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid)
-		    .detail("Begin", reqBegin)
-		    .detail("Popped", poppedVer)
-		    .detail("Start", self->startVersion);
-		if (std::is_same<PromiseType, Promise<TLogPeekReply>>::value) {
-			// kills logRouterPeekStream actor, otherwise that actor becomes stuck
-			throw operation_obsolete();
-		}
-		replyPromise.send(Never());
-		if (reqSequence.present()) {
-			auto& trackerData = self->peekTracker[peekId];
-			auto& sequenceData = trackerData.sequence_version[sequence + 1];
-			if (!sequenceData.isSet()) {
-				sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
-			}
-		}
-		return Void();
-	}
-
+	state Version poppedVer;
 	state Version endVersion;
 	// Run the peek logic in a loop to account for the case where there is no data to return to the caller, and we may
 	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
 	loop {
+
+		poppedVer = poppedVersion(self, reqTag);
+
+		if (poppedVer > reqBegin || reqBegin < self->startVersion) {
+			// This should only happen if a packet is sent multiple times and the reply is not needed.
+			// Since we are using popped differently, do not send a reply.
+			TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid)
+			    .detail("Begin", reqBegin)
+			    .detail("Popped", poppedVer)
+			    .detail("Start", self->startVersion);
+			if (std::is_same<PromiseType, Promise<TLogPeekReply>>::value) {
+				// kills logRouterPeekStream actor, otherwise that actor becomes stuck
+				throw operation_obsolete();
+			}
+			replyPromise.send(Never());
+			if (reqSequence.present()) {
+				auto& trackerData = self->peekTracker[peekId];
+				auto& sequenceData = trackerData.sequence_version[sequence + 1];
+				if (!sequenceData.isSet()) {
+					sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
+				}
+			}
+			return Void();
+		}
+		
+		ASSERT_WE_THINK(reqBegin >= poppedVersion(self, reqTag) && reqBegin >= self->startVersion);
+
 		endVersion = self->version.get() + 1;
 		peekMessagesFromMemory(self, reqTag, reqBegin, messages, endVersion);
 
