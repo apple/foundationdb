@@ -2401,7 +2401,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevWarnAlways, "ShardedRocksDB", this->id)
+			TraceEvent(SevWarn, "ShardedRocksDB", this->id)
 			    .detail("Detail", "Read non-exist key range")
 			    .detail("ReadKey", key);
 			return Optional<Value>();
@@ -2434,7 +2434,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevWarnAlways, "ShardedRocksDB", this->id)
+			TraceEvent(SevWarn, "ShardedRocksDB", this->id)
 			    .detail("Detail", "Read non-exist key range")
 			    .detail("ReadKey", key);
 			return Optional<Value>();
