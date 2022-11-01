@@ -25,6 +25,8 @@
 
 namespace FdbApiTester {
 
+#define BG_API_DEBUG_VERBOSE true
+
 class ApiBlobGranuleCorrectnessWorkload : public ApiWorkload {
 public:
 	ApiBlobGranuleCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
@@ -35,7 +37,7 @@ public:
 	}
 
 private:
-	// FIXME: use other new blob granule apis!
+	// FIXME: add tenant support for DB operations
 	enum OpType {
 		OP_INSERT,
 		OP_CLEAR,
@@ -51,7 +53,23 @@ private:
 
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	// FIXME: should still guarantee a read succeeds eventually somehow
+	// FIXME: this needs to be per tenant if tenant ids are set
 	bool seenReadSuccess = false;
+
+	std::string tenantDebugString(std::optional<int> tenantId) {
+		return tenantId.has_value() ? fmt::format(" (tenant {0})", tenantId.value()) : "";
+	}
+
+	void debugOp(std::string opName, fdb::Key begin, fdb::Key end, std::optional<int> tenantId, std::string message) {
+		if (BG_API_DEBUG_VERBOSE) {
+			info(fmt::format("{0}: [{1} - {2}){3}: {4}",
+			                 opName,
+			                 fdb::toCharsRef(begin),
+			                 fdb::toCharsRef(end),
+			                 tenantDebugString(tenantId),
+			                 message));
+		}
+	}
 
 	void randomReadOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
@@ -63,8 +81,10 @@ private:
 		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
 		auto tooOld = std::make_shared<bool>(false);
 
+		debugOp("Read", begin, end, tenantId, "starting");
+
 		execTransaction(
-		    [this, begin, end, results, tooOld](auto ctx) {
+		    [this, begin, end, tenantId, results, tooOld](auto ctx) {
 			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 			    TesterGranuleContext testerContext(ctx->getBGBasePath());
 			    fdb::native::FDBReadBlobGranuleContext granuleContext = createGranuleContext(&testerContext);
@@ -74,7 +94,11 @@ private:
 			    auto out = fdb::Result::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 			    if (err.code() == error_code_blob_granule_transaction_too_old) {
-				    info("BlobGranuleCorrectness::randomReadOp bg too old\n");
+				    if (seenReadSuccess) {
+					    error("Read bg too old after read success!\n");
+				    } else {
+					    info("Read bg too old\n");
+				    }
 				    ASSERT(!seenReadSuccess);
 				    *tooOld = true;
 				    ctx->done();
@@ -86,9 +110,11 @@ private:
 				    ASSERT(!out_more);
 				    results.get()->assign(resVector.begin(), resVector.end());
 				    if (!seenReadSuccess) {
-					    info("BlobGranuleCorrectness::randomReadOp first success\n");
+					    info(fmt::format("Read{0}: first success\n", tenantDebugString(tenantId)));
+					    seenReadSuccess = true;
+				    } else {
+					    debugOp("Read", begin, end, tenantId, "complete");
 				    }
-				    seenReadSuccess = true;
 				    ctx->done();
 			    }
 		    },
@@ -97,7 +123,7 @@ private:
 				    std::vector<fdb::KeyValue> expected =
 				        stores[tenantId].getRange(begin, end, stores[tenantId].size(), false);
 				    if (results->size() != expected.size()) {
-					    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
+					    error(fmt::format("randomReadOp result size mismatch. expected: {0} actual: {1}",
 					                      expected.size(),
 					                      results->size()));
 				    }
@@ -105,7 +131,7 @@ private:
 
 				    for (int i = 0; i < results->size(); i++) {
 					    if ((*results)[i].key != expected[i].key) {
-						    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
+						    error(fmt::format("randomReadOp key mismatch at {0}/{1}. expected: {2} actual: {3}",
 						                      i,
 						                      results->size(),
 						                      fdb::toCharsRef(expected[i].key),
@@ -138,6 +164,8 @@ private:
 		}
 		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
 
+		debugOp("GetGranules", begin, end, tenantId, "starting");
+
 		execTransaction(
 		    [begin, end, results](auto ctx) {
 			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end, 1000).eraseType();
@@ -149,7 +177,9 @@ private:
 			        },
 			        true);
 		    },
-		    [this, begin, end, results, cont]() {
+		    [this, begin, end, tenantId, results, cont]() {
+			    debugOp(
+			        "GetGranules", begin, end, tenantId, fmt::format("complete with {0} granules", results->size()));
 			    this->validateRanges(results, begin, end, seenReadSuccess);
 			    schedule(cont);
 		    },
@@ -169,6 +199,9 @@ private:
 			std::swap(begin, end);
 		}
 		auto results = std::make_shared<std::vector<fdb::GranuleSummary>>();
+
+		debugOp("Summarize", begin, end, tenantId, "starting");
+
 		execTransaction(
 		    [begin, end, results](auto ctx) {
 			    fdb::Future f = ctx->tx().summarizeBlobGranules(begin, end, -2 /*latest version*/, 1000).eraseType();
@@ -180,7 +213,9 @@ private:
 			        },
 			        true);
 		    },
-		    [this, begin, end, results, cont]() {
+		    [this, begin, end, tenantId, results, cont]() {
+			    debugOp("Summarize", begin, end, tenantId, fmt::format("complete with {0} granules", results->size()));
+			    // FIXME: make this use validateRanges to share validation
 			    ASSERT(results->size() > 0);
 			    ASSERT(results->front().keyRange.beginKey <= begin);
 			    ASSERT(results->back().keyRange.endKey >= end);
@@ -208,18 +243,29 @@ private:
 	                    fdb::Key end,
 	                    bool shouldBeRanges) {
 		if (shouldBeRanges) {
+			if (results->size() == 0) {
+				error(fmt::format(
+				    "ValidateRanges: [{0} - {1}): No ranges returned!", fdb::toCharsRef(begin), fdb::toCharsRef(end)));
+			}
 			ASSERT(results->size() > 0);
+			if (results->front().beginKey > begin || results->back().endKey < end) {
+				error(fmt::format("ValidateRanges: [{0} - {1}): Incomplete range(s) returned [{2} - {3})!",
+				                  fdb::toCharsRef(begin),
+				                  fdb::toCharsRef(end),
+				                  fdb::toCharsRef(results->front().beginKey),
+				                  fdb::toCharsRef(results->back().endKey)));
+			}
 			ASSERT(results->front().beginKey <= begin);
 			ASSERT(results->back().endKey >= end);
 		}
 		for (int i = 0; i < results->size(); i++) {
 			// no empty or inverted ranges
 			if ((*results)[i].beginKey >= (*results)[i].endKey) {
-				error(fmt::format("Empty/inverted range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
-				                  fdb::toCharsRef((*results)[i].beginKey),
-				                  fdb::toCharsRef((*results)[i].endKey),
+				error(fmt::format("ValidateRanges: [{0} - {1}): Empty/inverted range [{2} - {3})",
 				                  fdb::toCharsRef(begin),
-				                  fdb::toCharsRef(end)));
+				                  fdb::toCharsRef(end),
+				                  fdb::toCharsRef((*results)[i].beginKey),
+				                  fdb::toCharsRef((*results)[i].endKey)));
 			}
 			ASSERT((*results)[i].beginKey < (*results)[i].endKey);
 		}
@@ -227,16 +273,17 @@ private:
 		for (int i = 1; i < results->size(); i++) {
 			// ranges contain entire requested key range
 			if ((*results)[i].beginKey != (*results)[i].endKey) {
-				error(fmt::format("Non-contiguous range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
-				                  fdb::toCharsRef((*results)[i].beginKey),
-				                  fdb::toCharsRef((*results)[i].endKey),
+				error(fmt::format("ValidateRanges: [{0} - {1}): Non-covereed range [{2} - {3})",
 				                  fdb::toCharsRef(begin),
-				                  fdb::toCharsRef(end)));
+				                  fdb::toCharsRef(end),
+				                  fdb::toCharsRef((*results)[i - 1].endKey),
+				                  fdb::toCharsRef((*results)[i].endKey)));
 			}
 			ASSERT((*results)[i].beginKey == (*results)[i - 1].endKey);
 		}
 	}
 
+	// TODO: tenant support
 	void randomGetBlobRangesOp(TTaskFct cont) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
@@ -244,6 +291,9 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
+
+		debugOp("GetBlobRanges", begin, end, {}, "starting");
+
 		execOperation(
 		    [begin, end, results](auto ctx) {
 			    fdb::Future f = ctx->db().listBlobbifiedRanges(begin, end, 1000).eraseType();
@@ -253,12 +303,14 @@ private:
 			    });
 		    },
 		    [this, begin, end, results, cont]() {
+			    debugOp("GetBlobRanges", begin, end, {}, fmt::format("complete with {0} ranges", results->size()));
 			    this->validateRanges(results, begin, end, seenReadSuccess);
 			    schedule(cont);
 		    },
 		    /* failOnError = */ false);
 	}
 
+	// TODO: tenant support
 	void randomVerifyOp(TTaskFct cont) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
@@ -267,7 +319,8 @@ private:
 		}
 
 		auto verifyVersion = std::make_shared<int64_t>(false);
-		// info("Verify op starting");
+
+		debugOp("Verify", begin, end, {}, "starting");
 
 		execOperation(
 		    [begin, end, verifyVersion](auto ctx) {
@@ -278,15 +331,15 @@ private:
 			    });
 		    },
 		    [this, begin, end, verifyVersion, cont]() {
+			    debugOp("Verify", begin, end, {}, fmt::format("Complete @ {0}", *verifyVersion));
 			    if (*verifyVersion == -1) {
 				    ASSERT(!seenReadSuccess);
 			    } else {
 				    if (!seenReadSuccess) {
-					    info("BlobGranuleCorrectness::randomVerifyOp first success");
+					    info(fmt::format("Verify{0}: first success\n", tenantDebugString({})));
+					    seenReadSuccess = true;
 				    }
-				    seenReadSuccess = true;
 			    }
-			    // info(fmt::format("verify op done @ {}", *verifyVersion));
 			    schedule(cont);
 		    },
 		    /* failOnError = */ false);
