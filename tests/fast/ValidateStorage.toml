@@ -1,6 +1,5 @@
 [configuration]
 config = 'triple'
-storageEngineType = 5
 generateFearless = true
 allowDefaultTenant = false
 machineCount = 45

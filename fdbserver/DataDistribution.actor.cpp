@@ -1412,14 +1412,16 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		try {
 			auto it = self->audits.find(req.getType());
 			if (it != self->audits.end() && !it->second.empty()) {
-				ASSERT_EQ(it->second.size(), 1);
-				auto& currentAudit = it->second.front();
-				if (currentAudit->range.contains(req.range)) {
-					auditState.id = currentAudit->id;
-					auditState.range = currentAudit->range;
-					auditState.setPhase(AuditPhase::Running);
-					audit = it->second.front();
-				} else {
+				for (auto& currentAudit : it->second) {
+					if (currentAudit->range.contains(req.range)) {
+						auditState.id = currentAudit->id;
+						auditState.range = currentAudit->range;
+						auditState.setPhase(AuditPhase::Running);
+						audit = it->second.front();
+						break;
+					}
+				}
+				if (audit == nullptr) {
 					req.reply.sendError(audit_storage_exceeded_request_limit());
 					return Void();
 				}
