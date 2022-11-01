@@ -1274,7 +1274,8 @@ public:
 	                        ProcessClass startingClass,
 	                        const char* dataFolder,
 	                        const char* coordinationFolder,
-	                        ProtocolVersion protocol) override {
+	                        ProtocolVersion protocol,
+	                        bool drProcess) override {
 		ASSERT(locality.machineId().present());
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
@@ -1324,6 +1325,7 @@ public:
 		m->excluded = g_simulator->isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator->isCleared(addresses.address);
 		m->protocolVersion = protocol;
+		m->drProcess = drProcess;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType)&m->tdmetrics);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
@@ -1337,7 +1339,8 @@ public:
 		    .detail("Address", m->address)
 		    .detail("MachineId", m->locality.machineId())
 		    .detail("Excluded", m->excluded)
-		    .detail("Cleared", m->cleared);
+		    .detail("Cleared", m->cleared)
+		    .detail("DrProcess", m->drProcess);
 
 		if (std::string(name) == "remote flow process") {
 			protectedAddresses.insert(m->address);
@@ -1807,6 +1810,15 @@ public:
 		}
 		return result;
 	}
+	bool killAll(KillType kt, bool forceKill, KillType* ktFinal) override {
+		bool result = false;
+		for (auto& machine : machines) {
+			if (killMachine(machine.second.machineId, kt, forceKill, ktFinal)) {
+				result = true;
+			}
+		}
+		return result;
+	}
 	bool killMachine(Optional<Standalone<StringRef>> machineId,
 	                 KillType kt,
 	                 bool forceKill,
@@ -1829,6 +1841,7 @@ public:
 		}
 
 		int processesOnMachine = 0;
+		bool isMainCluster = true; // false for machines running DR processes
 
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
@@ -1837,6 +1850,9 @@ public:
 				kt = Reboot;
 			if (!process->rebooting)
 				processesOnMachine++;
+			if (process->drProcess) {
+				isMainCluster = false;
+			}
 		}
 
 		// Do nothing, if no processes to kill
@@ -1963,28 +1979,15 @@ public:
 		           probe::context::sim2,
 		           probe::assert::simOnly);
 
-		// Check if any processes on machine are rebooting
-		if (processesOnMachine != processesPerMachine && kt >= RebootAndDelete) {
+		if (isMainCluster && originalKt == RebootProcessAndSwitch) {
+			// When killing processes with the RebootProcessAndSwitch kill
+			// type, processes in the original cluster should be rebooted in
+			// order to kill any zombie processes.
+			kt = KillType::Reboot;
+		} else if (processesOnMachine != processesPerMachine && kt != RebootProcessAndSwitch) {
+			// Check if any processes on machine are rebooting
 			CODE_PROBE(true,
 			           "Attempted reboot, but the target did not have all of its processes running",
-			           probe::context::sim2,
-			           probe::assert::simOnly);
-			TraceEvent(SevWarn, "AbortedKill")
-			    .detail("KillType", kt)
-			    .detail("MachineId", machineId)
-			    .detail("Reason", "Machine processes does not match number of processes per machine")
-			    .detail("Processes", processesOnMachine)
-			    .detail("ProcessesPerMachine", processesPerMachine)
-			    .backtrace();
-			if (ktFinal)
-				*ktFinal = None;
-			return false;
-		}
-
-		// Check if any processes on machine are rebooting
-		if (processesOnMachine != processesPerMachine) {
-			CODE_PROBE(true,
-			           "Attempted reboot and kill, but the target did not have all of its processes running",
 			           probe::context::sim2,
 			           probe::assert::simOnly);
 			TraceEvent(SevWarn, "AbortedKill")
@@ -2021,7 +2024,7 @@ public:
 				if (process->startingClass != ProcessClass::TesterClass)
 					killProcess_internal(process, kt);
 			}
-		} else if (kt == Reboot || kt == RebootAndDelete) {
+		} else if (kt == Reboot || kt == RebootAndDelete || kt == RebootProcessAndSwitch) {
 			for (auto& process : machines[machineId].processes) {
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
@@ -2577,7 +2580,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 
 	try {
 		ASSERT(kt == ISimulator::RebootProcess || kt == ISimulator::Reboot || kt == ISimulator::RebootAndDelete ||
-		       kt == ISimulator::RebootProcessAndDelete);
+		       kt == ISimulator::RebootProcessAndDelete || kt == ISimulator::RebootProcessAndSwitch);
 
 		CODE_PROBE(kt == ISimulator::RebootProcess,
 		           "Simulated process rebooted",
@@ -2591,6 +2594,10 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		           probe::context::sim2);
 		CODE_PROBE(kt == ISimulator::RebootProcessAndDelete,
 		           "Simulated process rebooted with data and coordination state deletion",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
+		CODE_PROBE(kt == ISimulator::RebootProcessAndSwitch,
+		           "Simulated process rebooted with different cluster file",
 		           probe::assert::simOnly,
 		           probe::context::sim2);
 
@@ -2621,6 +2628,8 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		if ((kt == ISimulator::RebootAndDelete) || (kt == ISimulator::RebootProcessAndDelete)) {
 			p->cleared = true;
 			g_simulator->clearAddress(p->address);
+		} else if (kt == ISimulator::RebootProcessAndSwitch) {
+			g_simulator->switchCluster(p->address);
 		}
 		p->shutdownSignal.send(kt);
 	} catch (Error& e) {

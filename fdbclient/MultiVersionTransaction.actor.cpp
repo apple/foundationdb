@@ -414,6 +414,20 @@ Version DLTransaction::getCommittedVersion() {
 	return version;
 }
 
+ThreadFuture<int64_t> DLTransaction::getTotalCost() {
+	if (!api->transactionGetTotalCost) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->transactionGetTotalCost(tr);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		int64_t size = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
+		ASSERT(!error);
+		return size;
+	});
+}
+
 ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 	if (!api->transactionGetApproximateSize) {
 		return unsupported_operation();
@@ -950,6 +964,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_committed_version",
 	                   headerVersion >= 0);
+	loadClientFunction(&api->transactionGetTotalCost,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_total_cost",
+	                   headerVersion >= ApiVersion::withGetTotalCost().version());
 	loadClientFunction(&api->transactionGetApproximateSize,
 	                   lib,
 	                   fdbCPath,
@@ -1486,6 +1505,12 @@ ThreadFuture<SpanContext> MultiVersionTransaction::getSpanContext() {
 	return SpanContext();
 }
 
+ThreadFuture<int64_t> MultiVersionTransaction::getTotalCost() {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getTotalCost() : makeTimeout<int64_t>();
+	return abortableFuture(f, tr.onChange);
+}
+
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getApproximateSize() : makeTimeout<int64_t>();
@@ -1863,6 +1888,9 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
 	}
+	if (itr->first == FDBDatabaseOptions::USE_CONFIG_DATABASE) {
+		dbState->isConfigDB = true;
+	}
 
 	int defaultFor = itr->second.defaultFor;
 	if (defaultFor >= 0) {
@@ -1969,7 +1997,7 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord const& connectionRecord,
                                                    Reference<IDatabase> versionMonitorDb)
   : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))),
-    connectionRecord(connectionRecord), versionMonitorDb(versionMonitorDb), closed(false) {}
+    connectionRecord(connectionRecord), versionMonitorDb(versionMonitorDb), closed(false), isConfigDB(false) {}
 
 // Adds a client (local or externally loaded) that can be used to connect to the cluster
 void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client) {
@@ -2167,8 +2195,12 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			    .detail("ConnectionRecord", connectionRecord);
 		}
 	}
+	// Verify the database has the necessary functionality to update the shared
+	// state. Avoid updating the shared state if the database is a
+	// configuration database, because a configuration database does not have
+	// access to typical system keys and does not need to be updated.
 	if (db.isValid() && dbProtocolVersion.present() &&
-	    MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap()) {
+	    MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap() && !isConfigDB) {
 		Future<std::string> updateResult =
 		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), db);
 		sharedStateUpdater = map(errorOr(updateResult), [this](ErrorOr<std::string> result) {

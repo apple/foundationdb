@@ -1635,13 +1635,7 @@ struct StorageWiggleValue {
 	}
 };
 
-enum class ReadType {
-	EAGER,
-	FETCH,
-	LOW,
-	NORMAL,
-	HIGH,
-};
+enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
 
 FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
 
@@ -1657,13 +1651,13 @@ struct ReadOptions {
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
-
-	ReadOptions(Optional<UID> debugID,
+	ReadOptions(Optional<UID> debugID = Optional<UID>(),
 	            ReadType type = ReadType::NORMAL,
-	            CacheResult cache = CacheResult::False,
+	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
 	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

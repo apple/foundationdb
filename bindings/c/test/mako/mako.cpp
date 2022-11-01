@@ -283,24 +283,60 @@ int populate(Database db,
 			int batch_size = args.tenant_batch_size;
 			int batches = (args.total_tenants + batch_size - 1) / batch_size;
 			for (int batch = 0; batch < batches; ++batch) {
+				while (1) {
+					for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
+						std::string tenant_str = "tenant" + std::to_string(i);
+						Tenant::createTenant(systemTx, toBytesRef(tenant_str));
+					}
+					auto future_commit = systemTx.commit();
+					const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
+					if (rc == FutureRC::OK) {
+						// Keep going with reset transaction if commit was successful
+						systemTx.reset();
+						break;
+					} else if (rc == FutureRC::RETRY) {
+						// We want to retry this batch. Transaction is already reset
+					} else {
+						// Abort
+						return -1;
+					}
+				}
+
+				Tenant tenants[batch_size];
+				fdb::TypedFuture<fdb::future_var::Bool> blobbifyResults[batch_size];
+
+				// blobbify tenant ranges explicitly
+				// FIXME: skip if database not configured for blob granules?
 				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-					std::string tenant_name = "tenant" + std::to_string(i);
-					Tenant::createTenant(systemTx, toBytesRef(tenant_name));
+					std::string tenant_str = "tenant" + std::to_string(i);
+					BytesRef tenant_name = toBytesRef(tenant_str);
+					tenants[i] = db.openTenant(tenant_name);
+					std::string rangeEnd = "\xff";
+					blobbifyResults[i - (batch * batch_size)] =
+					    tenants[i].blobbifyRange(BytesRef(), toBytesRef(rangeEnd));
 				}
-				auto future_commit = systemTx.commit();
-				const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
-				if (rc == FutureRC::OK) {
-					// Keep going with reset transaction if commit was successful
-					systemTx.reset();
-				} else if (rc == FutureRC::RETRY) {
-					// We want to retry this batch, so decrement the number
-					// and go back through the loop to get the same value
-					// Transaction is already reset
-					--batch;
-				} else {
-					// Abort
-					return -1;
+
+				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
+					while (true) {
+						// not technically an operation that's part of systemTx, but it works
+						const auto rc =
+						    waitAndHandleError(systemTx, blobbifyResults[i - (batch * batch_size)], "BLOBBIFY_TENANT");
+						if (rc == FutureRC::OK) {
+							if (!blobbifyResults[i - (batch * batch_size)].get()) {
+								fmt::print("Blobbifying tenant {0} failed!\n", i);
+								return -1;
+							}
+							break;
+						} else if (rc == FutureRC::RETRY) {
+							continue;
+						} else {
+							// Abort
+							return -1;
+						}
+					}
 				}
+
+				systemTx.reset();
 			}
 		} else {
 			std::string last_tenant_name = "tenant" + std::to_string(args.total_tenants - 1);
