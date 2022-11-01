@@ -20,6 +20,7 @@
 #include "TesterApiWorkload.h"
 #include "TesterBlobGranuleUtil.h"
 #include "TesterUtil.h"
+#include <unordered_set>
 #include <memory>
 #include <fmt/format.h>
 
@@ -54,7 +55,11 @@ private:
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	// FIXME: should still guarantee a read succeeds eventually somehow
 	// FIXME: this needs to be per tenant if tenant ids are set
-	bool seenReadSuccess = false;
+	std::unordered_set<std::optional<int>> tenantsWithReadSuccess;
+
+	inline void setReadSuccess(std::optional<int> tenantId) { tenantsWithReadSuccess.insert(tenantId); }
+
+	inline bool seenReadSuccess(std::optional<int> tenantId) { return tenantsWithReadSuccess.count(tenantId); }
 
 	std::string tenantDebugString(std::optional<int> tenantId) {
 		return tenantId.has_value() ? fmt::format(" (tenant {0})", tenantId.value()) : "";
@@ -94,12 +99,13 @@ private:
 			    auto out = fdb::Result::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 			    if (err.code() == error_code_blob_granule_transaction_too_old) {
-				    if (seenReadSuccess) {
+				    bool previousSuccess = seenReadSuccess(tenantId);
+				    if (previousSuccess) {
 					    error("Read bg too old after read success!\n");
 				    } else {
 					    info("Read bg too old\n");
 				    }
-				    ASSERT(!seenReadSuccess);
+				    ASSERT(!previousSuccess);
 				    *tooOld = true;
 				    ctx->done();
 			    } else if (err.code() != error_code_success) {
@@ -109,9 +115,10 @@ private:
 				    auto& [resVector, out_more] = resCopy;
 				    ASSERT(!out_more);
 				    results.get()->assign(resVector.begin(), resVector.end());
-				    if (!seenReadSuccess) {
+				    bool previousSuccess = seenReadSuccess(tenantId);
+				    if (!previousSuccess) {
 					    info(fmt::format("Read{0}: first success\n", tenantDebugString(tenantId)));
-					    seenReadSuccess = true;
+					    setReadSuccess(tenantId);
 				    } else {
 					    debugOp("Read", begin, end, tenantId, "complete");
 				    }
@@ -180,14 +187,14 @@ private:
 		    [this, begin, end, tenantId, results, cont]() {
 			    debugOp(
 			        "GetGranules", begin, end, tenantId, fmt::format("complete with {0} granules", results->size()));
-			    this->validateRanges(results, begin, end, seenReadSuccess);
+			    this->validateRanges(results, begin, end, seenReadSuccess(tenantId));
 			    schedule(cont);
 		    },
 		    getTenant(tenantId));
 	}
 
 	void randomSummarizeOp(TTaskFct cont, std::optional<int> tenantId) {
-		if (!seenReadSuccess) {
+		if (!seenReadSuccess(tenantId)) {
 			// tester can't handle this throwing bg_txn_too_old, so just don't call it unless we have already seen a
 			// read success
 			schedule(cont);
@@ -291,8 +298,9 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
+		std::optional<int> tenantId = {};
 
-		debugOp("GetBlobRanges", begin, end, {}, "starting");
+		debugOp("GetBlobRanges", begin, end, tenantId, "starting");
 
 		execOperation(
 		    [begin, end, results](auto ctx) {
@@ -302,9 +310,10 @@ private:
 				    ctx->done();
 			    });
 		    },
-		    [this, begin, end, results, cont]() {
-			    debugOp("GetBlobRanges", begin, end, {}, fmt::format("complete with {0} ranges", results->size()));
-			    this->validateRanges(results, begin, end, seenReadSuccess);
+		    [this, begin, end, tenantId, results, cont]() {
+			    debugOp(
+			        "GetBlobRanges", begin, end, tenantId, fmt::format("complete with {0} ranges", results->size()));
+			    this->validateRanges(results, begin, end, seenReadSuccess(tenantId));
 			    schedule(cont);
 		    },
 		    /* failOnError = */ false);
@@ -314,13 +323,14 @@ private:
 	void randomVerifyOp(TTaskFct cont) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
+		std::optional<int> tenantId;
 		if (begin > end) {
 			std::swap(begin, end);
 		}
 
 		auto verifyVersion = std::make_shared<int64_t>(false);
 
-		debugOp("Verify", begin, end, {}, "starting");
+		debugOp("Verify", begin, end, tenantId, "starting");
 
 		execOperation(
 		    [begin, end, verifyVersion](auto ctx) {
@@ -330,15 +340,14 @@ private:
 				    ctx->done();
 			    });
 		    },
-		    [this, begin, end, verifyVersion, cont]() {
-			    debugOp("Verify", begin, end, {}, fmt::format("Complete @ {0}", *verifyVersion));
+		    [this, begin, end, tenantId, verifyVersion, cont]() {
+			    debugOp("Verify", begin, end, tenantId, fmt::format("Complete @ {0}", *verifyVersion));
+			    bool previousSuccess = seenReadSuccess(tenantId);
 			    if (*verifyVersion == -1) {
-				    ASSERT(!seenReadSuccess);
-			    } else {
-				    if (!seenReadSuccess) {
-					    info(fmt::format("Verify{0}: first success\n", tenantDebugString({})));
-					    seenReadSuccess = true;
-				    }
+				    ASSERT(!previousSuccess);
+			    } else if (!previousSuccess) {
+				    info(fmt::format("Verify{0}: first success\n", tenantDebugString(tenantId)));
+				    setReadSuccess(tenantId);
 			    }
 			    schedule(cont);
 		    },
