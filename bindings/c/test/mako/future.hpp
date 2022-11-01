@@ -59,8 +59,8 @@ force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& 
 template <class FutureType>
 force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	assert(f);
-	auto err = fdb::Error{};
-	if ((err = f.blockUntilReady())) {
+	auto err = f.blockUntilReady();
+	if (err) {
 		const auto retry = err.retryable();
 		logr.error("{} error '{}' found during step: {}", (retry ? "Retryable" : "Unretryable"), err.what(), step);
 		return retry ? FutureRC::RETRY : FutureRC::ABORT;
@@ -81,8 +81,8 @@ force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, st
 template <class FutureType>
 force_inline bool waitFuture(FutureType& f, std::string_view step) {
 	assert(f);
-	auto err = fdb::Error{};
-	if ((err = f.blockUntilReady())) {
+	auto err = f.blockUntilReady();
+	if (err) {
 		const auto retry = err.retryable();
 		logr.error("{} error '{}' found while waiting for future during step: {}",
 		           (retry ? "Retryable" : "Unretryable"),
