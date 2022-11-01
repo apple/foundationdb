@@ -26,7 +26,7 @@
 
 namespace FdbApiTester {
 
-#define BG_API_DEBUG_VERBOSE true
+#define BG_API_DEBUG_VERBOSE false
 
 class ApiBlobGranuleCorrectnessWorkload : public ApiWorkload {
 public:
@@ -222,10 +222,9 @@ private:
 		    },
 		    [this, begin, end, tenantId, results, cont]() {
 			    debugOp("Summarize", begin, end, tenantId, fmt::format("complete with {0} granules", results->size()));
-			    // FIXME: make this use validateRanges to share validation
-			    ASSERT(results->size() > 0);
-			    ASSERT(results->front().keyRange.beginKey <= begin);
-			    ASSERT(results->back().keyRange.endKey >= end);
+
+			    // use validateRanges to share validation
+			    auto ranges = std::make_shared<std::vector<fdb::KeyRange>>();
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // TODO: could do validation of subsequent calls and ensure snapshot version never decreases
@@ -233,12 +232,11 @@ private:
 				    ASSERT((*results)[i].snapshotVersion <= (*results)[i].deltaVersion);
 				    ASSERT((*results)[i].snapshotSize > 0);
 				    ASSERT((*results)[i].deltaSize >= 0);
+
+				    ranges->push_back((*results)[i].keyRange);
 			    }
 
-			    for (int i = 1; i < results->size(); i++) {
-				    // ranges contain entire requested key range
-				    ASSERT((*results)[i].keyRange.beginKey == (*results)[i - 1].keyRange.endKey);
-			    }
+			    this->validateRanges(ranges, begin, end, true);
 
 			    schedule(cont);
 		    },
