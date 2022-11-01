@@ -96,6 +96,7 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> clearDatabase(Database cx) {
 		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		loop {
 			try {
 				tr.clear(normalKeys);
