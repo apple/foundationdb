@@ -31,21 +31,25 @@
 
 struct MockGlobalStateTester;
 
+// the status is roughly order by transition order, except for UNSET and EMPTY
 enum class MockShardStatus {
 	EMPTY = 0, // data loss
-	COMPLETED,
+	UNSET,
 	INFLIGHT,
 	FETCHED, // finish fetch but not change the serverKey mapping. Only can be set by MSS itself.
-	UNSET
+	COMPLETED
 };
 
 inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
+	if (from == to)
+		return true;
+
 	switch (from) {
 	case MockShardStatus::UNSET:
 	case MockShardStatus::EMPTY:
-		return to == MockShardStatus::COMPLETED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
+		return to >= MockShardStatus::INFLIGHT;
 	case MockShardStatus::INFLIGHT:
-		return to == MockShardStatus::FETCHED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
+		return to == MockShardStatus::FETCHED || to == MockShardStatus::EMPTY;
 	case MockShardStatus::FETCHED:
 		return to == MockShardStatus::COMPLETED;
 	case MockShardStatus::COMPLETED:

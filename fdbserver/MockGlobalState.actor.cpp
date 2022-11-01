@@ -178,22 +178,25 @@ bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::se
 void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus status, bool restrictSize) {
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty());
-	if (ranges.begin().range().contains(range)) {
+	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
 		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
-	}
-	if (ranges.begin().begin() < range.begin) {
-		CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
-		twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
-	}
-	if (ranges.end().end() > range.end) {
-		CODE_PROBE(true, "Implicitly split end range to 2 pieces");
-		twoWayShardSplitting(ranges.end().range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
+	} else {
+		if (ranges.begin().begin() < range.begin) {
+			CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
+			twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
+		}
+		if (ranges.end().begin() > range.end) {
+			CODE_PROBE(true, "Implicitly split end range to 2 pieces");
+			auto lastRange = ranges.end();
+			--lastRange;
+			twoWayShardSplitting(lastRange.range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
+		}
 	}
 	ranges = serverKeys.containedRanges(range);
 	// now the boundary must be aligned
 	ASSERT(ranges.begin().begin() == range.begin);
-	ASSERT(ranges.end().end() == range.end);
+	ASSERT(ranges.end().begin() == range.end);
 	uint64_t newSize = 0;
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		newSize += it->cvalue().shardSize;
@@ -402,9 +405,7 @@ void MockStorageServer::notifyWriteMetrics(KeyRef const& key, int64_t size) {
 }
 
 void MockStorageServer::signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes) {
-	std::cout << "----- signalFetchKeys ---- \n";
 	fetchKeysRequests.send({ range, rangeTotalBytes });
-	std::cout << "----- signalFetchKeys end ---- \n";
 }
 
 Future<Void> MockStorageServer::fetchKeys(const MockStorageServer::FetchKeysParams& param) {
@@ -754,11 +755,13 @@ struct MockGlobalStateTester {
 		mss.threeWayShardSplitting(outerRange, KeyRangeRef(x1, x2), oldSize, false);
 		auto ranges = mss.serverKeys.containedRanges(outerRange);
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x1, x2));
 		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x2, outerRange.end));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.empty());
 	}
@@ -777,6 +780,7 @@ struct MockGlobalStateTester {
 		mss.twoWayShardSplitting(it->range(), x1, oldSize, false);
 		auto ranges = mss.serverKeys.containedRanges(outerRange);
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x1, outerRange.end));
 		ASSERT(ranges.begin().cvalue().status == oldStatus);
@@ -841,9 +845,27 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
 
 	auto& mss = mgs->allServers.at(MockGlobalState::indexToUID(1));
+	mss.serverKeys.insert(allKeys, { MockShardStatus::UNSET, 0 }); // manually reset status
+
+	// split to 3 shards [allKeys.begin, a, b, allKeys.end]
 	KeyRange testRange(KeyRangeRef("a"_sr, "b"_sr));
 	mss.setShardStatus(testRange, MockShardStatus::INFLIGHT, false);
 	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::INFLIGHT));
+
+	// [allKeys.begin, a, ac, b, bc, allKeys.end]
+	testRange = KeyRangeRef("ac"_sr, "bc"_sr);
+	mss.setShardStatus(testRange, MockShardStatus::INFLIGHT, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::INFLIGHT));
+
+	testRange = KeyRangeRef("b"_sr, "bc"_sr);
+	mss.setShardStatus(testRange, MockShardStatus::FETCHED, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::FETCHED));
+	mss.setShardStatus(testRange, MockShardStatus::COMPLETED, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::COMPLETED));
+	mss.setShardStatus(testRange, MockShardStatus::FETCHED, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::COMPLETED));
+
+	ASSERT(mss.serverKeys.size() == 5);
 
 	return Void();
 }
