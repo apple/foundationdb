@@ -82,7 +82,9 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant);
 		}
 
-		wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+		if (self->clientId == 0) {
+			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+		}
 		return Void();
 	}
 
@@ -107,7 +109,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_cluster_already_exists) {
+			if (e.code() != error_code_cluster_already_exists && e.code() != error_code_cluster_not_empty &&
+			    e.code() != error_code_cluster_already_registered && e.code() != error_code_cluster_removed) {
 				TraceEvent(SevError, "RegisterClusterFailure").error(e).detail("ClusterName", clusterName);
 			}
 			return Void();
@@ -144,16 +147,23 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> listClusters(MetaclusterManagementConcurrencyWorkload* self) {
+		state UID debugId = nondeterministicRandom()->randomUniqueID();
 		state ClusterName clusterName1 = self->chooseClusterName();
 		state ClusterName clusterName2 = self->chooseClusterName();
 		state int limit = deterministicRandom()->randomInt(1, self->dataDbs.size() + 1);
 		try {
+			TraceEvent("BreakpointOpListBegin", debugId)
+			    .detail("ClusterName1", clusterName1)
+			    .detail("ClusterName2", clusterName2);
 			std::map<ClusterName, DataClusterMetadata> clusterList =
 			    wait(MetaclusterAPI::listClusters(self->managementDb, clusterName1, clusterName2, limit));
 			ASSERT(clusterName1 <= clusterName2);
+			TraceEvent("BreakpointOpListEnd", debugId)
+			    .detail("ClusterName1", clusterName1)
+			    .detail("ClusterName2", clusterName2);
 		} catch (Error& e) {
 			if (e.code() != error_code_inverted_range) {
-				TraceEvent(SevError, "RemoveClusterFailure")
+				TraceEvent(SevError, "ListClusterFailure", debugId)
 				    .error(e)
 				    .detail("ClusterName1", clusterName1)
 				    .detail("ClusterName2", clusterName2);
@@ -168,6 +178,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		state Database* dataDb = &self->dataDbs[clusterName];
 
 		try {
+			TraceEvent("BreakpointGet").detail("ClusterName", clusterName);
 			DataClusterMetadata clusterMetadata = wait(MetaclusterAPI::getCluster(self->managementDb, clusterName));
 			ASSERT(dataDb->getReference()->getConnectionRecord()->getConnectionString() ==
 			       clusterMetadata.connectionString);
@@ -186,6 +197,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	                                                              Optional<int64_t> numTenantGroups,
 	                                                              Optional<ClusterConnectionString> connectionString) {
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+		state UID debugId = nondeterministicRandom()->randomUniqueID();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -198,10 +210,12 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 						entry = clusterMetadata.get().entry;
 						entry.get().capacity.numTenantGroups = numTenantGroups.get();
 					}
+					TraceEvent("BreakpointOpConfigureBefore", debugId).detail("ClusterName", clusterName);
 					MetaclusterAPI::updateClusterMetadata(
 					    tr, clusterName, clusterMetadata.get(), connectionString, entry);
 
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+					TraceEvent("BreakpointOpConfigureEnd", debugId).detail("ClusterName", clusterName);
 				}
 
 				return entry;
@@ -267,41 +281,41 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> decommissionMetacluster(MetaclusterManagementConcurrencyWorkload* self) {
-		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+	// ACTOR static Future<Void> decommissionMetacluster(MetaclusterManagementConcurrencyWorkload* self) {
+	// 	state Reference<ITransaction> tr = self->managementDb->createTransaction();
 
-		state bool deleteTenants = deterministicRandom()->coinflip();
+	// 	state bool deleteTenants = deterministicRandom()->coinflip();
 
-		if (deleteTenants) {
-			state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-			    wait(MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
+	// 	if (deleteTenants) {
+	// 		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+	// 		    wait(MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
 
-			state std::vector<Future<Void>> deleteTenantFutures;
-			for (auto [tenantName, tenantMapEntry] : tenants) {
-				deleteTenantFutures.push_back(MetaclusterAPI::deleteTenant(self->managementDb, tenantName));
-			}
+	// 		state std::vector<Future<Void>> deleteTenantFutures;
+	// 		for (auto [tenantName, tenantMapEntry] : tenants) {
+	// 			deleteTenantFutures.push_back(MetaclusterAPI::deleteTenant(self->managementDb, tenantName));
+	// 		}
 
-			wait(waitForAll(deleteTenantFutures));
-		}
+	// 		wait(waitForAll(deleteTenantFutures));
+	// 	}
 
-		state std::map<ClusterName, DataClusterMetadata> dataClusters = wait(
-		    MetaclusterAPI::listClusters(self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+	// 	state std::map<ClusterName, DataClusterMetadata> dataClusters = wait(
+	// 	    MetaclusterAPI::listClusters(self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
 
-		std::vector<Future<Void>> removeClusterFutures;
-		for (auto [clusterName, clusterMetadata] : dataClusters) {
-			removeClusterFutures.push_back(
-			    MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants));
-		}
+	// 	std::vector<Future<Void>> removeClusterFutures;
+	// 	for (auto [clusterName, clusterMetadata] : dataClusters) {
+	// 		removeClusterFutures.push_back(
+	// 		    MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants));
+	// 	}
 
-		wait(waitForAll(removeClusterFutures));
-		wait(MetaclusterAPI::decommissionMetacluster(self->managementDb));
+	// 	wait(waitForAll(removeClusterFutures));
+	// 	wait(MetaclusterAPI::decommissionMetacluster(self->managementDb));
 
-		Optional<MetaclusterRegistrationEntry> entry =
-		    wait(MetaclusterMetadata::metaclusterRegistration().get(self->managementDb));
-		ASSERT(!entry.present());
+	// 	Optional<MetaclusterRegistrationEntry> entry =
+	// 	    wait(MetaclusterMetadata::metaclusterRegistration().get(self->managementDb));
+	// 	ASSERT(!entry.present());
 
-		return Void();
-	}
+	// 	return Void();
+	// }
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 	ACTOR static Future<bool> _check(Database cx, MetaclusterManagementConcurrencyWorkload* self) {
@@ -310,7 +324,9 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		    self->managementDb, AllowPartialMetaclusterOperations::True);
 		wait(metaclusterConsistencyCheck.run());
 
-		wait(decommissionMetacluster(self));
+		// if (self->clientId == 0) {
+		// 	wait(decommissionMetacluster(self));
+		// }
 
 		return true;
 	}

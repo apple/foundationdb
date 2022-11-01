@@ -25,6 +25,7 @@
 // version.
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/BooleanParam.h"
+#include "flow/IRandom.h"
 #if defined(NO_INTELLISENSE) && !defined(WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H)
 #define WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H
 #include "fdbserver/workloads/MetaclusterConsistency.actor.g.h"
@@ -41,6 +42,7 @@ FDB_DECLARE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
 template <class DB>
 class MetaclusterConsistencyCheck {
 private:
+	UID debugId = nondeterministicRandom()->randomUniqueID();
 	Reference<DB> managementDb;
 	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 
@@ -107,6 +109,7 @@ private:
 				     store(self->managementMetadata.systemTenantSubspaceKeys,
 				           safeThreadFutureToFuture(systemTenantSubspaceKeysFuture)));
 
+				TraceEvent("BreakpointLoadMetadata", self->debugId);
 				break;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(managementTr->onError(e)));
@@ -277,6 +280,11 @@ private:
 		state std::map<TenantName, TenantMapEntry> dataClusterTenantMap(dataClusterTenantList.begin(),
 		                                                                dataClusterTenantList.end());
 
+		TraceEvent("BreakpointConsistency", self->debugId)
+		    .detail("Name", clusterName)
+		    .detail("EntryId", clusterMetadata.entry.id)
+		    .detail("OtherEntryId", dataClusterRegistration.get().id)
+		    .detail("TenantState", DataClusterEntry::clusterStateToString(clusterMetadata.entry.clusterState));
 		ASSERT(dataClusterRegistration.present());
 		ASSERT(dataClusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA);
 		ASSERT(dataClusterRegistration.get().matches(self->managementMetadata.metaclusterRegistration.get()));
@@ -342,7 +350,6 @@ private:
 		self->validateManagementCluster();
 
 		state std::vector<Future<Void>> dataClusterChecks;
-		state std::map<ClusterName, DataClusterMetadata>::iterator dataClusterItr;
 		for (auto [clusterName, clusterMetadata] : self->managementMetadata.dataClusters) {
 			dataClusterChecks.push_back(validateDataCluster(self, clusterName, clusterMetadata));
 		}
