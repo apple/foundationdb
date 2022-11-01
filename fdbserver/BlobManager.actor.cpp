@@ -4238,7 +4238,13 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       Version purgeVersion,
                                       KeyRange granuleRange,
                                       Optional<UID> mergeChildID,
-                                      bool force) {
+                                      bool force,
+                                      Future<Void> parentFuture) {
+	// wait for parent to finish first to avoid ordering/orphaning issues
+	wait(parentFuture);
+	// yield to avoid a long callstack and to allow this to get cancelled
+	wait(delay(0));
+
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0} Fully deleting granule [{1} - {2}): {3} @ {4}{5}\n",
 		           self->epoch,
@@ -4296,6 +4302,11 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	// deleting files before corresponding metadata reduces the # of orphaned files.
 	wait(waitForAll(deletions));
 
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
+
 	// delete metadata in FDB (history entry and file keys)
 	if (BM_PURGE_DEBUG) {
 		fmt::print(
@@ -4329,6 +4340,11 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
 	}
 
 	if (BM_PURGE_DEBUG) {
@@ -4810,15 +4826,15 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("DeletingFullyCount", toFullyDelete.size())
 	    .detail("DeletingPartiallyCount", toPartiallyDelete.size());
 
-	state std::vector<Future<Void>> partialDeletions;
+	state std::vector<Future<Void>> fullDeletions;
 	state int i;
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to fully delete\n", self->epoch, toFullyDelete.size());
 	}
 	// Go backwards through set of granules to guarantee deleting oldest first. This avoids orphaning granules in the
 	// deletion process
-	// FIXME: could track explicit parent dependencies and parallelize so long as a parent and child aren't running in
-	// parallel, but that's non-trivial
+	KeyRangeMap<Future<Void>> parentDelete;
+	parentDelete.insert(normalKeys, Future<Void>(Void()));
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		state UID granuleId;
 		Key historyKey;
@@ -4829,17 +4845,24 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_PURGE_DEBUG) {
 			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
 		}
-		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force));
-		if (BUGGIFY && self->maybeInjectTargetedRestart()) {
-			wait(delay(0)); // should be cancelled
-			ASSERT(false);
+		std::vector<Future<Void>> parents;
+		auto parentRanges = parentDelete.intersectingRanges(keyRange);
+		for (auto& it : parentRanges) {
+			parents.push_back(it.cvalue());
 		}
+		Future<Void> deleteFuture = fullyDeleteGranule(
+		    self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force, waitForAll(parents));
+		fullDeletions.push_back(deleteFuture);
+		parentDelete.insert(keyRange, deleteFuture);
 	}
+
+	wait(waitForAll(fullDeletions));
 
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to partially delete\n", self->epoch, toPartiallyDelete.size());
 	}
 
+	state std::vector<Future<Void>> partialDeletions;
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
 		KeyRange keyRange;
@@ -4851,6 +4874,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 
 	wait(waitForAll(partialDeletions));
+
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
 
 	if (force) {
 		tr.reset();
@@ -4875,6 +4903,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				wait(tr.onError(e));
 			}
 		}
+	}
+
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
 	}
 
 	// Now that all the necessary granules and their files have been deleted, we can
