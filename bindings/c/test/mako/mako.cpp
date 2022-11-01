@@ -1555,7 +1555,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				char default_file[] = "mako.json";
 				strncpy(args.json_output_path, default_file, sizeof(default_file));
 			} else {
-				strncpy(args.json_output_path, optarg, std::min(sizeof(args.json_output_path), strlen(optarg) + 1));
+				strncpy(args.json_output_path,
+				        argv[optind],
+				        std::min(sizeof(args.json_output_path), strlen(argv[optind]) + 1));
 			}
 			break;
 		case ARG_BG_FILE_PATH:
