@@ -43,9 +43,9 @@ Optional<LimitType> parseLimitType(StringRef token) {
 	}
 }
 
-Optional<double> parseLimitValue(StringRef token) {
+Optional<int64_t> parseLimitValue(StringRef token) {
 	try {
-		return std::stod(token.toString());
+		return std::stol(token.toString());
 	} catch (...) {
 		return {};
 	}
@@ -75,7 +75,7 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 	}
 }
 
-ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitType limitType, double value) {
+ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitType limitType, int64_t value) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
