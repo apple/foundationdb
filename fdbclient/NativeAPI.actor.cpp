@@ -3456,6 +3456,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
+			trState->totalCost +=
+			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0));
 
 			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
@@ -4285,6 +4287,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       RangeResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
+	trState->totalCost += getReadOperationCost(bytes);
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
 
@@ -5767,6 +5770,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange
 	auto r = singleKeyRange(key, req.arena);
 	auto v = ValueRef(req.arena, value);
 	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
+	trState->totalCost += getWriteOperationCost(key.expectedSize() + value.expectedSize());
 
 	if (addConflictRange) {
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5796,6 +5800,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	auto v = ValueRef(req.arena, operand);
 
 	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
+	trState->totalCost += getWriteOperationCost(key.expectedSize());
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5827,7 +5832,10 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 		return;
 
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
-
+	// NOTE: The throttling cost of each clear is assumed to be one page.
+	// This makes compuation fast, but can be inaccurate and may
+	// underestimate the cost of large clears.
+	trState->totalCost += CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6240,14 +6248,14 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 	state int i = 0;
 
 	for (; i < transaction->mutations.size(); ++i) {
-		auto* it = &transaction->mutations[i];
+		auto const& mutation = transaction->mutations[i];
 
-		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
+		if (mutation.type == MutationRef::Type::SetValue || mutation.isAtomicOp()) {
 			trCommitCosts.opsCount++;
-			trCommitCosts.writeCosts += getWriteOperationCost(it->expectedSize());
-		} else if (it->type == MutationRef::Type::ClearRange) {
+			trCommitCosts.writeCosts += getWriteOperationCost(mutation.expectedSize());
+		} else if (mutation.type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
-			keyRange = KeyRangeRef(it->param1, it->param2);
+			keyRange = KeyRangeRef(mutation.param1, mutation.param2);
 			if (trState->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(trState->cx->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY, trState));
 				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));

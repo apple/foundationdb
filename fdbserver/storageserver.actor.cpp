@@ -2001,7 +2001,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	// Key size is not included in "BytesQueried", but still contributes to cost,
+	// so it must be accounted for here.
+	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
