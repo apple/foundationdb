@@ -41,6 +41,9 @@ public:
 	// Current FDB database
 	virtual fdb::Database db() = 0;
 
+	// Current FDB tenant
+	virtual fdb::Tenant tenant() = 0;
+
 	// Current FDB transaction
 	virtual fdb::Transaction tx() = 0;
 

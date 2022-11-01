@@ -91,10 +91,13 @@ public:
 			fdbDb = executor->selectDatabase();
 		}
 
+		if (tenantName) {
+			fdbTenant = fdbDb.openTenant(*tenantName);
+		}
+
 		if (transactional) {
 			if (tenantName) {
-				fdb::Tenant tenant = fdbDb.openTenant(*tenantName);
-				fdbTx = tenant.createTransaction();
+				fdbTx = fdbTenant.createTransaction();
 			} else {
 				fdbTx = fdbDb.createTransaction();
 			}
@@ -108,6 +111,8 @@ public:
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
 	fdb::Database db() override { return fdbDb.atomic_load(); }
+
+	fdb::Tenant tenant() override { return fdbTenant.atomic_load(); }
 
 	fdb::Transaction tx() override { return fdbTx.atomic_load(); }
 
@@ -275,6 +280,7 @@ protected:
 			if (thisRef->transactional) {
 				if (thisRef->tenantName) {
 					fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
+					thisRef->fdbTenant.atomic_store(tenant);
 					thisRef->fdbTx.atomic_store(tenant.createTransaction());
 				} else {
 					thisRef->fdbTx.atomic_store(db.createTransaction());
@@ -316,6 +322,10 @@ protected:
 	// FDB database
 	// Provides a thread safe interface by itself (no need for mutex)
 	fdb::Database fdbDb;
+
+	// FDB tenant
+	// Provides a thread safe interface by itself (no need for mutex)
+	fdb::Tenant fdbTenant;
 
 	// FDB transaction
 	// Provides a thread safe interface by itself (no need for mutex)

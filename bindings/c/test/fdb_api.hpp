@@ -694,6 +694,14 @@ public:
 	Tenant& operator=(const Tenant&) noexcept = default;
 	Tenant() noexcept : tenant(nullptr) {}
 
+	void atomic_store(Tenant other) { std::atomic_store(&tenant, other.tenant); }
+
+	Tenant atomic_load() {
+		Tenant retVal;
+		retVal.tenant = std::atomic_load(&tenant);
+		return retVal;
+	}
+
 	static void createTenant(Transaction tr, BytesRef name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
