@@ -184,7 +184,7 @@ void ResumableStateForRunWorkload::updateStepStats() {
 	}
 }
 
-force_inline void ResumableStateForRunWorkload::updateErrorStats(const fdb::Error& err, int op) {
+void ResumableStateForRunWorkload::updateErrorStats(const fdb::Error& err, int op) {
 	if (err) {
 		if (err.is(1020 /*not_commited*/)) {
 			stats.incrConflictCount();
@@ -240,7 +240,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		restartIteration(FutureRC::OK);
 	}
 }
-force_inline void ResumableStateForRunWorkload::restartIteration(FutureRC rc) {
+void ResumableStateForRunWorkload::restartIteration(FutureRC rc) {
 	// restart current iteration from beginning unless ended
 	if (rc == FutureRC::OK || rc == FutureRC::ABORT) {
 		total_xacts++;

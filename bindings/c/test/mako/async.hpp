@@ -26,7 +26,7 @@
 #include <boost/asio.hpp>
 #include "logger.hpp"
 #include "mako.hpp"
-#include "mako/future.hpp"
+#include "future.hpp"
 #include "shm.hpp"
 #include "stats.hpp"
 #include "time.hpp"
@@ -115,9 +115,9 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	void postNextTick();
 	void runOneTick();
 	void updateStepStats();
-	force_inline void updateErrorStats(const fdb::Error& err, int op);
+	void updateErrorStats(const fdb::Error& err, int op);
 	void onTransactionSuccess();
-	force_inline void restartIteration(FutureRC rc);
+	void restartIteration(FutureRC rc);
 };
 
 using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;
