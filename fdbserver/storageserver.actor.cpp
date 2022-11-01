@@ -8567,6 +8567,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
+					if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+					    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+					      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
+						ASSERT(false);
+					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
 							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
@@ -8720,6 +8725,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else {
 				MutationRef msg;
 				rd >> msg;
+				if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+				    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+				      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
+					ASSERT(false);
+				}
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
 					msg = msg.decrypt(cipherKeys.get(), rd.arena(), BlobCipherMetrics::TLOG);
