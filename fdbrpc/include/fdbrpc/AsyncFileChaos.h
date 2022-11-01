@@ -123,16 +123,7 @@ public:
 				});
 			}
 
-			return map(file->write(data, length, offset), [this, pdata, offset, length](auto res) {
-				if (pdata != nullptr || !g_network->isSimulated()) {
-					return res;
-				}
-				g_simulator->corruptedBlocks.erase(
-				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(file->getFilename(), offset / 4096)),
-				    g_simulator->corruptedBlocks.upper_bound(
-				        std::make_pair(file->getFilename(), (offset + length) / 4096)));
-				return res;
-			});
+			return file->write(data, length, offset);
 		});
 	}
 
