@@ -82,7 +82,7 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
 
     NotifiedVersion prevTLogVersion; // Order of transactions to tlogs
 
-    NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
+    NotifiedVersionValue liveCommittedVersion; // The largest live committed version reported by commit proxies.
     bool databaseLocked;
     Optional<Value> proxyMetadataVersion;
     Version minKnownCommittedVersion;
@@ -112,7 +112,7 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
     // This counter gives an estimate of the number of non-empty peeks that storage servers
     // should do from tlogs (in the worst case, ignoring blocking peek timeouts).
     LatencySample versionVectorTagUpdates;
-    Counter waitForPrevCommitRequests;
+    CounterValue waitForPrevCommitRequests;
     Counter nonWaitForPrevCommitRequests;
     LatencySample versionVectorSizeOnCVReply;
     LatencySample waitForPrevLatencies;
@@ -138,6 +138,8 @@ struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterD
         return resolutionBalancer;
     }
 };
+
+void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequest req);
 
 // FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
 inline void addrefMasterData(MasterData* ptr) {
