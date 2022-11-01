@@ -46,6 +46,10 @@ bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
 
 void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<InitialDataDistribution> mock) {
 	// Mock DD just care about the team list and server<->key mapping are consistent with the real cluster
+	if(real->shards.size() != mock->shards.size()) {
+		std::cout << "real.size: " << real->shards.size() << " mock.size: " << mock->shards.size() << "\n";
+		ASSERT(false);
+	}
 	ASSERT(std::equal(
 	    real->shards.begin(), real->shards.end(), mock->shards.begin(), mock->shards.end(), compareShardInfo));
 	std::cout << describe(real->primaryTeams) << " | " << describe(mock->primaryTeams) << "\n";
@@ -189,18 +193,17 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 
-		// wait(timeout(reportErrors(self->worker(cx, self), "IDDTxnProcessorApiWorkload"), self->testDuration,
-		// Void()));
+		wait(timeout(reportErrors(self->worker(cx, self), "IDDTxnProcessorApiWorkload"), self->testDuration, Void()));
 
 		// Always set the DD mode back, even if we die with an error
 		TraceEvent("IDDTxnApiTestDoneMoving").log();
-		wait(success(setDDMode(cx, 1)));
-		TraceEvent("IDDTxnApiTestDoneModeSetting").log();
+		int oldValue = wait(setDDMode(cx, 1));
+		TraceEvent("IDDTxnApiTestDoneModeSetting").detail("OldValue", oldValue);
 		return Void();
 	}
 
 	ACTOR static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {
-		state TraceInterval relocateShardInterval("RelocateShard");
+		state TraceInterval relocateShardInterval("RelocateShard_TestRawMovementApi");
 		state FlowLock fl1(1);
 		state FlowLock fl2(1);
 		state std::map<UID, StorageServerInterface> emptyTssMapping;
@@ -209,32 +212,33 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		params.startMoveKeysParallelismLock = &fl1;
 		params.finishMoveKeysParallelismLock = &fl2;
 		params.relocationIntervalId = relocateShardInterval.pairID;
+		TraceEvent(SevDebug, relocateShardInterval.begin(), relocateShardInterval.pairID);
 
-		// test start
-		self->mock->testRawStartMovement(params, emptyTssMapping);
-		wait(self->real->testRawStartMovement(params, emptyTssMapping));
+		loop {
+			params.dataMovementComplete.reset();
+			wait(store(params.lock, self->real->takeMoveKeysLock(UID())));
+			try {
+				// test start
+				self->mock->testRawStartMovement(params, emptyTssMapping);
+				wait(self->real->testRawStartMovement(params, emptyTssMapping));
 
-		// read initial data again
-		wait(readRealInitialDataDistribution(self));
-		mockInitData = self->mock
-		                   ->getInitialDataDistribution(self->ddContext.id(),
-		                                                self->ddContext.lock,
-		                                                {},
-		                                                self->ddContext.ddEnabledState.get(),
-		                                                SkipDDModeCheck::True)
-		                   .get();
+				// test finish or started but cancelled movement
+				if (deterministicRandom()->coinflip()) {
+					CODE_PROBE(true, "RawMovementApi partial started");
+					break;
+				}
 
-		verifyInitDataEqual(self->realInitDD, mockInitData);
-
-		// test finish or started but cancelled movement
-		if (deterministicRandom()->coinflip()) {
-			CODE_PROBE(true, "RawMovementApi partial started");
-			return Void();
+				self->mock->testRawFinishMovement(params, emptyTssMapping);
+				wait(self->real->testRawFinishMovement(params, emptyTssMapping));
+				break;
+			} catch (Error& e) {
+				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed)
+					throw;
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				// Keep trying to get the moveKeysLock
+			}
 		}
 
-		self->mock->testRawFinishMovement(params, emptyTssMapping);
-		wait(self->real->testRawFinishMovement(params, emptyTssMapping));
-
 		// read initial data again
 		wait(readRealInitialDataDistribution(self));
 		mockInitData = self->mock
@@ -246,6 +250,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		                   .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
+		TraceEvent(SevDebug, relocateShardInterval.end(), relocateShardInterval.pairID);
 		return Void();
 	}
 
@@ -269,7 +274,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> testMoveKeys(IDDTxnProcessorApiWorkload* self) {
-		state TraceInterval relocateShardInterval("RelocateShard");
+		state TraceInterval relocateShardInterval("RelocateShard_TestMoveKeys");
 		state FlowLock fl1(1);
 		state FlowLock fl2(1);
 		state std::map<UID, StorageServerInterface> emptyTssMapping;
@@ -278,9 +283,22 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		params.startMoveKeysParallelismLock = &fl1;
 		params.finishMoveKeysParallelismLock = &fl2;
 		params.relocationIntervalId = relocateShardInterval.pairID;
+		TraceEvent(SevDebug, relocateShardInterval.begin(), relocateShardInterval.pairID);
 
-		self->mock->moveKeys(params);
-		wait(self->real->moveKeys(params));
+		loop {
+			params.dataMovementComplete.reset();
+			wait(store(params.lock, self->real->takeMoveKeysLock(UID())));
+			try {
+				self->mock->moveKeys(params);
+				wait(self->real->moveKeys(params));
+				break;
+			} catch (Error& e) {
+				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed)
+					throw;
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				// Keep trying to get the moveKeysLock
+			}
+		}
 
 		// read initial data again
 		wait(readRealInitialDataDistribution(self));
@@ -293,7 +311,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		                   .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
-
+		TraceEvent(SevDebug, relocateShardInterval.end(), relocateShardInterval.pairID);
 		return Void();
 	}
 	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {

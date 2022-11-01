@@ -28,13 +28,39 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct MockDDTestWorkload {
+struct MockDDTestWorkload : public TestWorkload {
 	bool enabled;
+	bool simpleConfig;
 	double testDuration;
 	double meanDelay = 0.05;
 	double maxKeyspace = 0.1;
-	DDSharedContext ddContext;
 
 	std::shared_ptr<MockGlobalState> mgs;
 	std::shared_ptr<DDMockTxnProcessor> mock;
+
+	MockDDTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
+		simpleConfig = getOption(options, "simpleConfig"_sr, true);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		meanDelay = getOption(options, "meanDelay"_sr, meanDelay);
+		maxKeyspace = getOption(options, "maxKeyspace"_sr, maxKeyspace);
+	}
+
+	Future<Void> setup(Database const& cx) override {
+		if (!enabled)
+			return Void();
+		// initialize configuration
+		BasicTestConfig testConfig;
+		testConfig.simpleConfig = simpleConfig;
+		testConfig.minimumReplication = 1;
+		testConfig.logAntiQuorum = 0;
+		DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
+
+		// initialize mgs
+		mgs = std::make_shared<MockGlobalState>();
+		mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+		mock = std::make_shared<DDMockTxnProcessor>(mgs);
+
+		return Void();
+	}
 };

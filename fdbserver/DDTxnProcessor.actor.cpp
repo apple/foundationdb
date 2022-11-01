@@ -701,6 +701,10 @@ struct DDMockTxnProcessorImpl {
 
 	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
 		state std::map<UID, StorageServerInterface> tssMapping;
+		// Because SFBTF::Team requires the ID is ordered
+		std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
+		std::sort(params.healthyDestinations.begin(), params.healthyDestinations.end());
+
 		self->rawStartMovement(params, tssMapping);
 		ASSERT(tssMapping.empty());
 
@@ -892,6 +896,7 @@ void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, 
 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
+	mgs->shardMapping->defineShard(params.keys);
 	mgs->shardMapping->moveShard(params.keys, destTeams);
 
 	auto randomRangeSize =
@@ -926,9 +931,12 @@ void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED, mgs->restrictSize);
 	}
 
+	// remove destination servers from source servers
 	ASSERT_EQ(srcTeams.size(), 0);
 	for (auto& id : srcTeams.front().servers) {
-		mgs->allServers.at(id).removeShard(params.keys);
+		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
+			mgs->allServers.at(id).removeShard(params.keys);
+		}
 	}
 	mgs->shardMapping->finishMove(params.keys);
 }

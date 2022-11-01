@@ -36,7 +36,9 @@ public:
 		bool primary;
 
 		Team() : primary(true) {}
-		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
+		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {
+			ASSERT(std::is_sorted(servers.begin(), servers.end()));
+		}
 
 		bool operator<(const Team& r) const {
 			if (servers == r.servers)
