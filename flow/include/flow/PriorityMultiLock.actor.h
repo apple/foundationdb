@@ -291,7 +291,6 @@ private:
 	}
 
 	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
-		state int sinceYield = 0;
 		state Future<Void> error = self->brokenOnDestruct.getFuture();
 
 		// Priority to try to run tasks from next
@@ -312,15 +311,6 @@ private:
 			wait(self->wakeRunner.onTrigger());
 			pml_debug_printf(
 			    "%f runner loop wake line %d  priority=%d  %s\n", now(), __LINE__, priority, self->toString().c_str());
-
-			if (++sinceYield == 100) {
-				sinceYield = 0;
-				pml_debug_printf(
-				    "  runner waitDelay line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
-				wait(delay(0));
-				pml_debug_printf(
-				    "  runner afterDelay line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
-			}
 
 			// While there are available slots and there are waiters, launch tasks
 			while (self->available > 0 && self->waiting > 0) {
@@ -383,6 +373,12 @@ private:
 				                 !lock.promise.canBeSet(),
 				                 priority,
 				                 self->toString().c_str());
+
+				// If the task returned the lock immediately and did not wait, then delay to let the Flow run loop
+				// schedule other tasks if needed
+				if (!lock.promise.canBeSet()) {
+					wait(delay(0, w.task.flowDelayPriority));
+				}
 			}
 		}
 	}
