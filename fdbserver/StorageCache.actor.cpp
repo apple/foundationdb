@@ -1188,7 +1188,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
-	state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
+	state ReadOptions options = ReadOptions(ReadType::FETCH, CacheResult::False);
 
 	if (*isTooOld)
 		throw transaction_too_old();
