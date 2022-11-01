@@ -60,7 +60,8 @@ void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& 
 }
 
 GrvProxyTransactionTagThrottler::GrvProxyTransactionTagThrottler(double maxThrottleDuration)
-  : maxThrottleDuration(maxThrottleDuration), latencyBandsMap("GrvProxyTagThrottler",
+  : maxThrottleDuration(maxThrottleDuration),
+    latencyBandsMap("GrvProxyTagThrottler",
                     deterministicRandom()->randomUniqueID(),
                     SERVER_KNOBS->GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,
                     SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {}
