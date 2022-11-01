@@ -20,13 +20,17 @@
 
 #include "fdbclient/Knobs.h"
 #include "fdbserver/GrvProxyTransactionTagThrottler.h"
+#include "fdbserver/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
 uint64_t GrvProxyTransactionTagThrottler::DelayedRequest::lastSequenceNumber = 0;
 
-void GrvProxyTransactionTagThrottler::DelayedRequest::updateProxyTagThrottledDuration() {
+void GrvProxyTransactionTagThrottler::DelayedRequest::updateProxyTagThrottledDuration(
+    LatencyBandsMap& latencyBandsMap) {
 	req.proxyTagThrottledDuration = now() - startTime;
+	auto const& [tag, count] = *req.tags.begin();
+	latencyBandsMap.addMeasurement(tag, req.proxyTagThrottledDuration, count);
 }
 
 bool GrvProxyTransactionTagThrottler::DelayedRequest::isMaxThrottled(double maxThrottleDuration) const {
@@ -45,18 +49,21 @@ bool GrvProxyTransactionTagThrottler::TagQueue::isMaxThrottled(double maxThrottl
 	return !requests.empty() && requests.front().isMaxThrottled(maxThrottleDuration);
 }
 
-void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests() {
+void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& latencyBandsMap) {
 	CODE_PROBE(true, "GrvProxyTransactionTagThrottler rejecting requests");
 	while (!requests.empty()) {
 		auto& delayedReq = requests.front();
-		delayedReq.updateProxyTagThrottledDuration();
+		delayedReq.updateProxyTagThrottledDuration(latencyBandsMap);
 		delayedReq.req.reply.sendError(proxy_tag_throttled());
 		requests.pop_front();
 	}
 }
 
 GrvProxyTransactionTagThrottler::GrvProxyTransactionTagThrottler(double maxThrottleDuration)
-  : maxThrottleDuration(maxThrottleDuration) {}
+  : maxThrottleDuration(maxThrottleDuration), latencyBandsMap("GrvProxyTagThrottler",
+                    deterministicRandom()->randomUniqueID(),
+                    SERVER_KNOBS->GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,
+                    SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {}
 
 void GrvProxyTransactionTagThrottler::updateRates(TransactionTagMap<double> const& newRates) {
 	for (const auto& [tag, rate] : newRates) {
@@ -166,14 +173,14 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 				if (tagQueueHandle.queue->isMaxThrottled(maxThrottleDuration)) {
 					// Requests in this queue have been throttled too long and errors
 					// should be sent to clients.
-					tagQueueHandle.queue->rejectRequests();
+					tagQueueHandle.queue->rejectRequests(latencyBandsMap);
 				}
 				break;
 			} else {
 				if (tagQueueHandle.nextSeqNo < nextQueueSeqNo) {
 					// Releasing transaction
 					*(tagQueueHandle.numReleased) += count;
-					delayedReq.updateProxyTagThrottledDuration();
+					delayedReq.updateProxyTagThrottledDuration(latencyBandsMap);
 					if (delayedReq.req.priority == TransactionPriority::BATCH) {
 						outBatchPriority.push_back(delayedReq.req);
 					} else if (delayedReq.req.priority == TransactionPriority::DEFAULT) {
@@ -212,7 +219,12 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 	ASSERT_EQ(transactionsReleased.capacity(), transactionsReleasedInitialCapacity);
 }
 
-uint32_t GrvProxyTransactionTagThrottler::size() {
+void GrvProxyTransactionTagThrottler::addLatencyBandThreshold(double value) {
+	CODE_PROBE(size() > 0, "GrvProxyTransactionTagThrottler adding latency bands while actively throttling");
+	latencyBandsMap.addThreshold(value);
+}
+
+uint32_t GrvProxyTransactionTagThrottler::size() const {
 	return queues.size();
 }
 

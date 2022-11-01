@@ -716,6 +716,12 @@ public:
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
 	}
+
+	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) {
+		if (!tenant)
+			throw std::runtime_error("blobbifyRange from null tenant");
+		return native::fdb_tenant_blobbify_range(tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
 };
 
 class Database {
