@@ -644,6 +644,56 @@ struct BusiestWriteTagContext {
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
 
+class SSPhysicalShard {
+public:
+	SSPhysicalShard() : id(0LL) {}
+	SSPhysicalShard(const int64_t id) : id(id) {}
+
+	void addRange(Reference<ShardInfo> shard);
+	void removeRange(Reference<ShardInfo> shard);
+
+	bool supportCheckpoint() const;
+
+	bool hasRange() const;
+
+private:
+	const int64_t id;
+	std::vector<Reference<ShardInfo>> ranges;
+};
+
+void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
+	for (const auto& r : this->ranges) {
+		ASSERT(!r->keys.intersects(shard->keys));
+	}
+	ranges.push_back(shard);
+}
+
+void SSPhysicalShard::removeRange(Reference<ShardInfo> shard) {
+	for (int i = 0; i < this->ranges.size(); ++i) {
+		const auto& r = this->ranges[i];
+		if (r->keys.intersects(shard->keys)) {
+			ASSERT(r->keys == shard->keys);
+			this->ranges[i] = this->ranges.back();
+			this->ranges.pop_back();
+			return;
+		}
+	}
+	ASSERT(false);
+}
+
+void SSPhysicalShard::removeRange(Reference<ShardInfo> shard) {
+	for (int i = 0; i < this->ranges.size(); ++i) {
+		const auto& r = this->ranges[i];
+		if (r->keys.intersects(shard->keys)) {
+			ASSERT(r->keys == shard->keys);
+			this->ranges[i] = this->ranges.back();
+			this->ranges.pop_back();
+			return;
+		}
+	}
+	ASSERT(false);
+}
+
 struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -925,6 +975,7 @@ public:
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
+	std::unordered_map<int64_t, SSPhysicalShard> physicalShards;
 	uint64_t shardChangeCounter; // max( shards->changecounter )
 
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
@@ -7655,7 +7706,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 
 	validate(data);
 
-	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID);
+	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID)
+	    .detail("DataMoveID", dataMoveId);
 
 	const uint64_t desiredId = dataMoveId.first();
 	const Version cVer = version + 1;
@@ -7667,6 +7719,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	auto os = data->shards.intersectingRanges(keys);
 	for (auto r = os.begin(); r != os.end(); ++r) {
 		oldShards.push_back(r->value());
+		data->physicalShards[r->value()->shardId].removeRange(r->value());
 	}
 
 	auto ranges = data->shards.getAffectedRangesAfterInsertion(
@@ -7695,6 +7748,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
+			const auto& newShardInfo = data->shards[currentRange.begin];
+			data->physicalShards[newShardInfo->shardId].addRange(newShardInfo);
 			TraceEvent(SevVerbose, "SSSplitShardReadable", data->thisServerID)
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
@@ -7706,6 +7761,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			newShard.range = currentRange;
 			// TODO(psm): Cancel or update the moving-in shard when physical shard move is enabled.
 			data->addShard(ShardInfo::newShard(data, newShard));
+			const auto& newShardInfo = data->shards[currentRange.begin];
+			data->physicalShards[newShardInfo->shardId].addRange(newShardInfo);
 			TraceEvent(SevVerbose, "SSSplitShardAdding", data->thisServerID)
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
@@ -7824,6 +7881,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (const auto& shard : updatedShards) {
 		data->addShard(ShardInfo::newShard(data, shard));
 		updateStorageShard(data, shard);
+		const auto& newShardInfo = data->shards[shard.range.begin];
+		data->physicalShards[newShardInfo->shardId].addRange(newShardInfo);
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
