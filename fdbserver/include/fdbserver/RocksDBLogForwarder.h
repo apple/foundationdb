@@ -72,8 +72,10 @@ public:
 
 class NullRocksDBLogForwarder : public rocksdb::Logger {
 public:
-	virtual void Logv(const char*, va_list) { /* intended to be blank */ }
-	virtual void Logv(const rocksdb::InfoLogLevel, const char*, va_list) { /* intended to be blank */ }
+	virtual void Logv(const char*, va_list) { /* intended to be blank */
+	}
+	virtual void Logv(const rocksdb::InfoLogLevel, const char*, va_list) { /* intended to be blank */
+	}
 };
 
 class RocksDBLogForwarder : public rocksdb::Logger {
