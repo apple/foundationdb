@@ -2001,7 +2001,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	// Key size is not included in "BytesQueried", but still contributes to cost,
+	// so it must be accounted for here.
+	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -3014,7 +3016,11 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			req.reply.setByteLimit(std::min((int64_t)req.replyBufferSize, SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES));
 		}
 
-		wait(delay(0, TaskPriority::DefaultEndpoint));
+		// Change feeds that are not atLatest must have a lower priority than UpdateStorage to not starve it out, and
+		// change feed disk reads generally only happen on blob worker recovery or data movement, so they should be
+		// lower priority. AtLatest change feeds are triggered directly from the SS update loop with no waits, so they
+		// will still be low latency
+		wait(delay(0, TaskPriority::SSSpilledChangeFeedReply));
 
 		if (DEBUG_CF_TRACE) {
 			TraceEvent(SevDebug, "TraceChangeFeedStreamStart", data->thisServerID)
@@ -8567,6 +8573,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
+					if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+					    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+					      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
+						ASSERT(false);
+					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
 							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
@@ -8720,6 +8731,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else {
 				MutationRef msg;
 				rd >> msg;
+				if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+				    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+				      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
+					ASSERT(false);
+				}
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
 					msg = msg.decrypt(cipherKeys.get(), rd.arena(), BlobCipherMetrics::TLOG);
