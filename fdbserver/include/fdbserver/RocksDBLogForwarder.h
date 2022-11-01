@@ -24,7 +24,9 @@
 #include <cstdarg>
 #include <thread>
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 #include <rocksdb/env.h>
+#endif
 
 #include "flow/genericactors.actor.h"
 #include "flow/IRandom.h"
