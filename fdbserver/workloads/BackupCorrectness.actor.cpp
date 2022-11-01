@@ -528,7 +528,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	                                            FileBackupAgent* backupAgent,
 	                                            Version targetVersion,
 	                                            Reference<IBackupContainer> lastBackupContainer,
-												Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges) {
+	                                            Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges) {
 		// restore system keys before restoring any other ranges
 		state Standalone<StringRef> restoreTag(self->backupTag.toString() + "_system");
 		printf("BackupCorrectness, backupAgent.restore is called for tag:%s\n", restoreTag.toString().c_str());
