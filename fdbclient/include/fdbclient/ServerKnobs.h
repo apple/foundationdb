@@ -637,6 +637,8 @@ public:
 	// Global tag throttler forgets about throughput from a tag once no new transactions from that
 	// tag have been received for this duration (in seconds):
 	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
+	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
+	double PROXY_MAX_TAG_THROTTLE_DURATION;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

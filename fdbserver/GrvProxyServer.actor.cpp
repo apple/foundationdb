@@ -824,7 +824,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state int64_t batchTransactionCount = 0;
 	state GrvTransactionRateInfo normalRateInfo(10);
 	state GrvTransactionRateInfo batchRateInfo(0);
-	state GrvProxyTransactionTagThrottler tagThrottler(CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION);
+	state GrvProxyTransactionTagThrottler tagThrottler(SERVER_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION);
 
 	state Deque<GetReadVersionRequest> systemQueue;
 	state Deque<GetReadVersionRequest> defaultQueue;
