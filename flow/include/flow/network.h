@@ -101,6 +101,7 @@ enum class TaskPriority {
 	UpdateStorage = 3000,
 	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
+	SSSpilledChangeFeedReply = 2730,
 	BlobWorkerReadChangeFeed = 2720,
 	BlobWorkerUpdateFDB = 2710,
 	BlobWorkerUpdateStorage = 2700,
