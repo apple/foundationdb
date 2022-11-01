@@ -46,7 +46,7 @@ class GrvProxyTransactionTagThrottler {
 		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
 
 		void updateProxyTagThrottledDuration();
-		bool isMaxThrottled() const;
+		bool isMaxThrottled(double maxThrottleDuration) const;
 	};
 
 	struct TagQueue {
@@ -57,14 +57,17 @@ class GrvProxyTransactionTagThrottler {
 		explicit TagQueue(double rate) : rateInfo(rate) {}
 
 		void setRate(double rate);
-		bool isMaxThrottled() const;
+		bool isMaxThrottled(double maxThrottledDuration) const;
 		void rejectRequests();
 	};
 
 	// Track the budgets for each tag
 	TransactionTagMap<TagQueue> queues;
+	double maxThrottleDuration;
 
 public:
+	explicit GrvProxyTransactionTagThrottler(double maxThrottleDuration);
+
 	// Called with rates received from ratekeeper
 	void updateRates(TransactionTagMap<double> const& newRates);
 
