@@ -850,7 +850,7 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::WRITE);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
-		return targetRateIsNear(gtt, testTag, 100.0 / (6.0 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO));
+		return targetRateIsNear(gtt, testTag, 100.0 / (6.0 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO));
 	});
 
 	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
