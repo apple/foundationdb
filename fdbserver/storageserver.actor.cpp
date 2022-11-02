@@ -10177,8 +10177,14 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 
 ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
-		wait(success(waitForVersionNoTooOld(self, latestVersion)));
-		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
+		state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
+		state Optional<TenantMapEntry> entry;
+		try {
+			entry = self->getTenantEntry(version, req.tenantInfo.get());
+		} catch (Error& e) {
+			self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
+			return Void();
+		}
 		Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
