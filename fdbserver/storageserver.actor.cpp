@@ -595,8 +595,11 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 		auto toRemove = moveTriggers.modify(range);
 		for (auto triggerRange = toRemove.begin(); triggerRange != toRemove.end(); ++triggerRange) {
 			auto streamToRemove = triggerRange->value().find(streamUID);
-			ASSERT(streamToRemove != triggerRange->cvalue().end());
-			triggerRange->value().erase(streamToRemove);
+			if (streamToRemove == triggerRange->cvalue().end()) {
+				ASSERT(destroyed);
+			} else {
+				triggerRange->value().erase(streamToRemove);
+			}
 		}
 		// TODO: may be more cleanup possible here
 	}
