@@ -1874,7 +1874,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			return Void();
 		}
 
-		ASSERT_WE_THINK(reqBegin >= poppedVersion(logData, reqTag));
+		ASSERT(reqBegin >= poppedVersion(logData, reqTag));
 
 		endVersion = logData->version.get() + 1;
 		onlySpilled = false;
