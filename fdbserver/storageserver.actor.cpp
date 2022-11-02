@@ -651,10 +651,11 @@ public:
 
 	void addRange(Reference<ShardInfo> shard);
 	void removeRange(Reference<ShardInfo> shard);
+	void removeRange(KeyRangeRef range);
 
 	bool supportCheckpoint() const;
 
-	bool hasRange() const;
+	bool hasRange(Reference<ShardInfo> shard) const;
 
 private:
 	const int64_t id;
@@ -662,9 +663,12 @@ private:
 };
 
 void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
-	for (const auto& r : this->ranges) {
-		ASSERT(!r->keys.intersects(shard->keys));
+	removeRange(shard->keys);
+
+	if (shard->notAssigned()) {
+		return;
 	}
+
 	ranges.push_back(shard);
 }
 
@@ -681,17 +685,36 @@ void SSPhysicalShard::removeRange(Reference<ShardInfo> shard) {
 	ASSERT(false);
 }
 
-void SSPhysicalShard::removeRange(Reference<ShardInfo> shard) {
-	for (int i = 0; i < this->ranges.size(); ++i) {
+void SSPhysicalShard::removeRange(KeyRangeRef range) {
+	for (int i = 0; i < this->ranges.size();) {
 		const auto& r = this->ranges[i];
-		if (r->keys.intersects(shard->keys)) {
-			ASSERT(r->keys == shard->keys);
+		if (r->keys.intersects(range)) {
 			this->ranges[i] = this->ranges.back();
 			this->ranges.pop_back();
-			return;
+		} else {
+			++i;
 		}
 	}
-	ASSERT(false);
+}
+
+bool SSPhysicalShard::supportCheckpoint() const {
+	for (const auto& r : this->ranges) {
+		ASSERT(r->shardId == this->id);
+		if (r->desiredShardId != this->id) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool SSPhysicalShard::hasRange(Reference<ShardInfo> shard) const {
+	for (int i = 0; i < this->ranges.size(); ++i) {
+		if (this->ranges[i].getPtr() == shard.getPtr()) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 struct StorageServer : public IStorageMetricsService {
@@ -1396,6 +1419,21 @@ public:
 	}
 
 	//~StorageServer() { fclose(log); }
+	void addRangeToPhysicalShard(Reference<ShardInfo> newRange) {
+		if (!shardAware || newRange->notAssigned()) {
+			return;
+		}
+
+		auto [it, ignored] =
+		    physicalShards.insert(std::make_pair(newRange->shardId, SSPhysicalShard(newRange->shardId)));
+		it->second.addRange(newRange);
+	}
+
+	void removeRangeFromPhysicalShard(Reference<ShardInfo> range) {
+		auto it = physicalShards.find(range->shardId);
+		ASSERT(it != physicalShards.end());
+		it->second.removeRange(range);
+	}
 
 	// Puts the given shard into shards.  The caller is responsible for adding shards
 	//   for all ranges in shards.getAffectedRangesAfterInsertion(newShard->keys)), because these
@@ -1407,7 +1445,9 @@ public:
 		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
-		shards.insert(newShard->keys, Reference<ShardInfo>(newShard));
+		Reference<ShardInfo> rShard(newShard);
+		shards.insert(newShard->keys, rShard);
+		addRangeToPhysicalShard(rShard);
 	}
 	void addMutation(Version version,
 	                 bool fromFetch,
@@ -1701,6 +1741,11 @@ void validate(StorageServer* data, bool force = false) {
 				ASSERT(!s->value()->keys.empty());
 				if (data->shardAware) {
 					s->value()->validate();
+					if (!s->value()->notAssigned()) {
+						auto it = data->physicalShards.find(s->value()->shardId);
+						ASSERT(it != data->physicalShards.end());
+						ASSERT(it->second.hasRange(s->value()));
+					}
 				}
 			}
 
@@ -7719,7 +7764,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	auto os = data->shards.intersectingRanges(keys);
 	for (auto r = os.begin(); r != os.end(); ++r) {
 		oldShards.push_back(r->value());
-		data->physicalShards[r->value()->shardId].removeRange(r->value());
 	}
 
 	auto ranges = data->shards.getAffectedRangesAfterInsertion(
@@ -7748,8 +7792,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
-			const auto& newShardInfo = data->shards[currentRange.begin];
-			data->physicalShards[newShardInfo->shardId].addRange(newShardInfo);
 			TraceEvent(SevVerbose, "SSSplitShardReadable", data->thisServerID)
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
@@ -7761,8 +7803,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			newShard.range = currentRange;
 			// TODO(psm): Cancel or update the moving-in shard when physical shard move is enabled.
 			data->addShard(ShardInfo::newShard(data, newShard));
-			const auto& newShardInfo = data->shards[currentRange.begin];
-			data->physicalShards[newShardInfo->shardId].addRange(newShardInfo);
 			TraceEvent(SevVerbose, "SSSplitShardAdding", data->thisServerID)
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
@@ -7856,7 +7896,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						// TODO(psm): Replace this with moveInShard->cancel().
 						ASSERT(false);
 					} else {
-						TraceEvent(SevVerbose, "CSKMoveInToSameShard", data->thisServerID)
+						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
 						    .detailf("TargetShard", "%016llx", desiredId)
 						    .detail("MoveRange", keys)
@@ -7881,8 +7921,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (const auto& shard : updatedShards) {
 		data->addShard(ShardInfo::newShard(data, shard));
 		updateStorageShard(data, shard);
-		const auto& newShardInfo = data->shards[shard.range.begin];
-		data->physicalShards[newShardInfo->shardId].addRange(newShardInfo);
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
