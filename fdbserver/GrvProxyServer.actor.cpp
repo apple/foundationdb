@@ -27,7 +27,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbserver/GrvProxyTransactionTagThrottler.h"
+#include "fdbserver/GrvProxyTagThrottler.h"
 #include "fdbserver/GrvTransactionRateInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -62,7 +62,7 @@ struct GrvProxyStats {
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
 
-	// These latency bands and samples ignore latency injected by the GrvProxyTransactionTagThrottler
+	// These latency bands and samples ignore latency injected by the GrvProxyTagThrottler
 	LatencyBands grvLatencyBands;
 	LatencySample grvLatencySample; // GRV latency metric sample of default priority
 	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
@@ -183,7 +183,7 @@ struct GrvProxyData {
 	Version version;
 	Version minKnownCommittedVersion; // we should ask master for this version.
 
-	GrvProxyTransactionTagThrottler tagThrottler;
+	GrvProxyTagThrottler tagThrottler;
 
 	// Cache of the latest commit versions of storage servers.
 	VersionVector ssVersionVectorCache;
@@ -473,7 +473,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
                                                GrvProxyStats* stats,
                                                GrvTransactionRateInfo* batchRateInfo,
                                                TransactionTagMap<uint64_t>* transactionTagCounter,
-                                               GrvProxyTransactionTagThrottler* tagThrottler) {
+                                               GrvProxyTagThrottler* tagThrottler) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
