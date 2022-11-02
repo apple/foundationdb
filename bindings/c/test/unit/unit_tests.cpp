@@ -21,7 +21,7 @@
 // Unit tests for the FoundationDB C API.
 
 #include "fdb_c_options.g.h"
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -1941,6 +1941,30 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 		int64_t out_version;
 		fdb_check(tr.get_committed_version(&out_version));
 		CHECK(out_version >= 0);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_total_cost") {
+	fdb::Transaction tr(db);
+	while (1) {
+		fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
+		fdb_error_t err = wait_future(f1);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		fdb::Int64Future f2 = tr.get_total_cost();
+		err = wait_future(f2);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		int64_t cost;
+		fdb_check(f2.get(&cost));
+		CHECK(cost > 0);
 		break;
 	}
 }

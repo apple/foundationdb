@@ -1,5 +1,5 @@
 /*
- * GrvProxyTransactionTagThrottler.actor.cpp
+ * GrvProxyTagThrottler.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,25 +19,24 @@
  */
 
 #include "fdbclient/Knobs.h"
-#include "fdbserver/GrvProxyTransactionTagThrottler.h"
+#include "fdbserver/GrvProxyTagThrottler.h"
 #include "fdbserver/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
-uint64_t GrvProxyTransactionTagThrottler::DelayedRequest::lastSequenceNumber = 0;
+uint64_t GrvProxyTagThrottler::DelayedRequest::lastSequenceNumber = 0;
 
-void GrvProxyTransactionTagThrottler::DelayedRequest::updateProxyTagThrottledDuration(
-    LatencyBandsMap& latencyBandsMap) {
+void GrvProxyTagThrottler::DelayedRequest::updateProxyTagThrottledDuration(LatencyBandsMap& latencyBandsMap) {
 	req.proxyTagThrottledDuration = now() - startTime;
 	auto const& [tag, count] = *req.tags.begin();
 	latencyBandsMap.addMeasurement(tag, req.proxyTagThrottledDuration, count);
 }
 
-bool GrvProxyTransactionTagThrottler::DelayedRequest::isMaxThrottled() const {
-	return now() - startTime > CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION;
+bool GrvProxyTagThrottler::DelayedRequest::isMaxThrottled(double maxThrottleDuration) const {
+	return now() - startTime > maxThrottleDuration;
 }
 
-void GrvProxyTransactionTagThrottler::TagQueue::setRate(double rate) {
+void GrvProxyTagThrottler::TagQueue::setRate(double rate) {
 	if (rateInfo.present()) {
 		rateInfo.get().setRate(rate);
 	} else {
@@ -45,12 +44,12 @@ void GrvProxyTransactionTagThrottler::TagQueue::setRate(double rate) {
 	}
 }
 
-bool GrvProxyTransactionTagThrottler::TagQueue::isMaxThrottled() const {
-	return !requests.empty() && requests.front().isMaxThrottled();
+bool GrvProxyTagThrottler::TagQueue::isMaxThrottled(double maxThrottleDuration) const {
+	return !requests.empty() && requests.front().isMaxThrottled(maxThrottleDuration);
 }
 
-void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& latencyBandsMap) {
-	CODE_PROBE(true, "GrvProxyTransactionTagThrottler rejecting requests");
+void GrvProxyTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& latencyBandsMap) {
+	CODE_PROBE(true, "GrvProxyTagThrottler rejecting requests");
 	while (!requests.empty()) {
 		auto& delayedReq = requests.front();
 		delayedReq.updateProxyTagThrottledDuration(latencyBandsMap);
@@ -59,13 +58,14 @@ void GrvProxyTransactionTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& 
 	}
 }
 
-GrvProxyTransactionTagThrottler::GrvProxyTransactionTagThrottler()
-  : latencyBandsMap("GrvProxyTagThrottler",
+GrvProxyTagThrottler::GrvProxyTagThrottler(double maxThrottleDuration)
+  : maxThrottleDuration(maxThrottleDuration),
+    latencyBandsMap("GrvProxyTagThrottler",
                     deterministicRandom()->randomUniqueID(),
                     SERVER_KNOBS->GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,
                     SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {}
 
-void GrvProxyTransactionTagThrottler::updateRates(TransactionTagMap<double> const& newRates) {
+void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates) {
 	for (const auto& [tag, rate] : newRates) {
 		auto it = queues.find(tag);
 		if (it == queues.end()) {
@@ -93,15 +93,15 @@ void GrvProxyTransactionTagThrottler::updateRates(TransactionTagMap<double> cons
 	}
 }
 
-void GrvProxyTransactionTagThrottler::addRequest(GetReadVersionRequest const& req) {
+void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
 	ASSERT(req.isTagged());
 	auto const& tag = req.tags.begin()->first;
 	if (req.tags.size() > 1) {
-		// The GrvProxyTransactionTagThrottler assumes that each GetReadVersionRequest
+		// The GrvProxyTagThrottler assumes that each GetReadVersionRequest
 		// has at most one tag. If a transaction uses multiple tags and
 		// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
 		// unexpected behaviour, because only one tag is used for throttling.
-		TraceEvent(SevWarnAlways, "GrvProxyTransactionTagThrottler_MultipleTags")
+		TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
 		    .suppressFor(1.0)
 		    .detail("NumTags", req.tags.size())
 		    .detail("UsingTag", printable(tag));
@@ -109,9 +109,9 @@ void GrvProxyTransactionTagThrottler::addRequest(GetReadVersionRequest const& re
 	queues[tag].requests.emplace_back(req);
 }
 
-void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
-                                                          Deque<GetReadVersionRequest>& outBatchPriority,
-                                                          Deque<GetReadVersionRequest>& outDefaultPriority) {
+void GrvProxyTagThrottler::releaseTransactions(double elapsed,
+                                               Deque<GetReadVersionRequest>& outBatchPriority,
+                                               Deque<GetReadVersionRequest>& outDefaultPriority) {
 	// Pointer to a TagQueue with some extra metadata stored alongside
 	struct TagQueueHandle {
 		// Store pointers here to avoid frequent std::unordered_map lookups
@@ -169,8 +169,8 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 			    !tagQueueHandle.queue->rateInfo.get().canStart(*(tagQueueHandle.numReleased), count)) {
 				// Cannot release any more transaction from this tag (don't push the tag queue handle back into
 				// pqOfQueues)
-				CODE_PROBE(true, "GrvProxyTransactionTagThrottler throttling transaction");
-				if (tagQueueHandle.queue->isMaxThrottled()) {
+				CODE_PROBE(true, "GrvProxyTagThrottler throttling transaction");
+				if (tagQueueHandle.queue->isMaxThrottled(maxThrottleDuration)) {
 					// Requests in this queue have been throttled too long and errors
 					// should be sent to clients.
 					tagQueueHandle.queue->rejectRequests(latencyBandsMap);
@@ -186,7 +186,7 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 					} else if (delayedReq.req.priority == TransactionPriority::DEFAULT) {
 						outDefaultPriority.push_back(delayedReq.req);
 					} else {
-						// Immediate priority transactions should bypass the GrvProxyTransactionTagThrottler
+						// Immediate priority transactions should bypass the GrvProxyTagThrottler
 						ASSERT(false);
 					}
 					tagQueueHandle.queue->requests.pop_front();
@@ -194,7 +194,7 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 						tagQueueHandle.nextSeqNo = tagQueueHandle.queue->requests.front().sequenceNumber;
 					}
 				} else {
-					CODE_PROBE(true, "GrvProxyTransactionTagThrottler switching tags to preserve FIFO");
+					CODE_PROBE(true, "GrvProxyTagThrottler switching tags to preserve FIFO");
 					pqOfQueues.push(tagQueueHandle);
 					break;
 				}
@@ -219,16 +219,16 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 	ASSERT_EQ(transactionsReleased.capacity(), transactionsReleasedInitialCapacity);
 }
 
-void GrvProxyTransactionTagThrottler::addLatencyBandThreshold(double value) {
-	CODE_PROBE(size() > 0, "GrvProxyTransactionTagThrottler adding latency bands while actively throttling");
+void GrvProxyTagThrottler::addLatencyBandThreshold(double value) {
+	CODE_PROBE(size() > 0, "GrvProxyTagThrottler adding latency bands while actively throttling");
 	latencyBandsMap.addThreshold(value);
 }
 
-uint32_t GrvProxyTransactionTagThrottler::size() const {
+uint32_t GrvProxyTagThrottler::size() const {
 	return queues.size();
 }
 
-ACTOR static Future<Void> mockClient(GrvProxyTransactionTagThrottler* throttler,
+ACTOR static Future<Void> mockClient(GrvProxyTagThrottler* throttler,
                                      TransactionPriority priority,
                                      TagSet tagSet,
                                      int batchSize,
@@ -252,7 +252,7 @@ ACTOR static Future<Void> mockClient(GrvProxyTransactionTagThrottler* throttler,
 	}
 }
 
-ACTOR static Future<Void> mockFifoClient(GrvProxyTransactionTagThrottler* throttler) {
+ACTOR static Future<Void> mockFifoClient(GrvProxyTagThrottler* throttler) {
 	state TransactionTagMap<uint32_t> tagSet1;
 	state TransactionTagMap<uint32_t> tagSet2;
 	state std::vector<GetReadVersionRequest> reqs;
@@ -294,7 +294,7 @@ ACTOR static Future<Void> mockFifoClient(GrvProxyTransactionTagThrottler* thrott
 	return Void();
 }
 
-ACTOR static Future<Void> mockServer(GrvProxyTransactionTagThrottler* throttler) {
+ACTOR static Future<Void> mockServer(GrvProxyTagThrottler* throttler) {
 	state Deque<GetReadVersionRequest> outBatchPriority;
 	state Deque<GetReadVersionRequest> outDefaultPriority;
 	loop {
@@ -305,6 +305,7 @@ ACTOR static Future<Void> mockServer(GrvProxyTransactionTagThrottler* throttler)
 			outBatchPriority.front().reply.send(GetReadVersionReply{});
 			outBatchPriority.pop_front();
 		}
+		TraceEvent("HERE_ServerProcessing").detail("Size", outDefaultPriority.size());
 		while (!outDefaultPriority.empty()) {
 			outDefaultPriority.front().reply.send(GetReadVersionReply{});
 			outDefaultPriority.pop_front();
@@ -328,8 +329,8 @@ static bool isNear(double desired, int64_t actual) {
 
 // Rate limit set at 10, but client attempts 20 transactions per second.
 // Client should be throttled to only 10 transactions per second.
-TEST_CASE("/GrvProxyTransactionTagThrottler/Simple") {
-	state GrvProxyTransactionTagThrottler throttler;
+TEST_CASE("/GrvProxyTagThrottler/Simple") {
+	state GrvProxyTagThrottler throttler(5.0);
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
@@ -348,8 +349,8 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/Simple") {
 }
 
 // Clients share the available 30 transaction/second budget
-TEST_CASE("/GrvProxyTransactionTagThrottler/MultiClient") {
-	state GrvProxyTransactionTagThrottler throttler;
+TEST_CASE("/GrvProxyTagThrottler/MultiClient") {
+	state GrvProxyTagThrottler throttler(5.0);
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
@@ -373,8 +374,8 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/MultiClient") {
 }
 
 // Test processing GetReadVersionRequests that batch several transactions
-TEST_CASE("/GrvProxyTransactionTagThrottler/Batch") {
-	state GrvProxyTransactionTagThrottler throttler;
+TEST_CASE("/GrvProxyTagThrottler/Batch") {
+	state GrvProxyTagThrottler throttler(5.0);
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
@@ -394,8 +395,8 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/Batch") {
 }
 
 // Tests cleanup of tags that are no longer throttled.
-TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup1") {
-	GrvProxyTransactionTagThrottler throttler;
+TEST_CASE("/GrvProxyTagThrottler/Cleanup1") {
+	GrvProxyTagThrottler throttler(5.0);
 	for (int i = 0; i < 1000; ++i) {
 		auto const tag = getRandomTag();
 		TransactionTagMap<double> rates;
@@ -407,8 +408,8 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup1") {
 }
 
 // Tests cleanup of tags once queues have been emptied
-TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup2") {
-	GrvProxyTransactionTagThrottler throttler;
+TEST_CASE("/GrvProxyTagThrottler/Cleanup2") {
+	GrvProxyTagThrottler throttler(5.0);
 	{
 		GetReadVersionRequest req;
 		req.tags["sampleTag"_sr] = 1;
@@ -431,8 +432,8 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup2") {
 
 // Tests that unthrottled transactions are released in FIFO order, even when they
 // have different tags
-TEST_CASE("/GrvProxyTransactionTagThrottler/Fifo") {
-	state GrvProxyTransactionTagThrottler throttler;
+TEST_CASE("/GrvProxyTagThrottler/Fifo") {
+	state GrvProxyTagThrottler throttler(5.0);
 	state Future<Void> server = mockServer(&throttler);
 	wait(mockFifoClient(&throttler));
 	return Void();

@@ -133,7 +133,8 @@ ERROR( incompatible_software_version, 1220, "Current software does not support d
 ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
 ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
 ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
-ERROR( audit_storage_error, 1224, "Found data corruption" )
+ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
+ERROR( audit_storage_error, 1225, "Found data corruption" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

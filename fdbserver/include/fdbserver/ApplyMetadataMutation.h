@@ -144,6 +144,7 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 // Resolver's version
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations);
+                            const VectorRef<MutationRef>& mutations,
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys);
 
 #endif
