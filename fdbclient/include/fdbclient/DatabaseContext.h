@@ -149,13 +149,11 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
 public:
 	Promise<Version> watchPromise;
-	Future<Version> watchFuture;
 	Future<Void> watchFutureSS;
 
 	Reference<const WatchParameters> parameters;
 
-	WatchMetadata(Reference<const WatchParameters> parameters)
-	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
+	WatchMetadata(Reference<const WatchParameters> parameters) : parameters(parameters) {}
 };
 
 struct MutationAndVersionStream {
