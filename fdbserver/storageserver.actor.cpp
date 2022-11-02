@@ -663,29 +663,38 @@ private:
 };
 
 void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
-	// removeRange(shard->keys);
-
+	TraceEvent(SevDebug, "SSPhysicalShardAddShard")
+	    .detail("ShardID", format("%016llx", this->id))
+	    .detail("Assigned", !shard->notAssigned())
+	    .detail("Range", shard->keys);
 	if (shard->notAssigned()) {
 		return;
 	}
+
+	removeRange(shard->keys);
 
 	ranges.push_back(shard);
 }
 
 void SSPhysicalShard::removeRange(Reference<ShardInfo> shard) {
+	TraceEvent(SevDebug, "SSPhysicalShardRemoveShard")
+	    .detail("ShardID", format("%016llx", this->id))
+	    .detail("Assigned", !shard->notAssigned())
+	    .detail("Range", shard->keys);
 	for (int i = 0; i < this->ranges.size(); ++i) {
 		const auto& r = this->ranges[i];
-		if (r->keys.intersects(shard->keys)) {
-			ASSERT(r->keys == shard->keys);
+		if (r.getPtr() == shard.getPtr()) {
 			this->ranges[i] = this->ranges.back();
 			this->ranges.pop_back();
 			return;
 		}
 	}
-	ASSERT(false);
 }
 
 void SSPhysicalShard::removeRange(KeyRangeRef range) {
+	TraceEvent(SevDebug, "SSPhysicalShardRemoveRange")
+	    .detail("ShardID", format("%016llx", this->id))
+	    .detail("Range", range);
 	for (int i = 0; i < this->ranges.size();) {
 		const auto& r = this->ranges[i];
 		if (r->keys.intersects(range)) {
@@ -699,8 +708,8 @@ void SSPhysicalShard::removeRange(KeyRangeRef range) {
 
 bool SSPhysicalShard::supportCheckpoint() const {
 	for (const auto& r : this->ranges) {
-		ASSERT(r->shardId == this->id);
-		if (r->desiredShardId != this->id) {
+		ASSERT(r->desiredShardId == this->id);
+		if (r->shardId != this->id) {
 			return false;
 		}
 	}
@@ -1425,7 +1434,7 @@ public:
 		}
 
 		auto [it, ignored] =
-		    physicalShards.insert(std::make_pair(newRange->shardId, SSPhysicalShard(newRange->shardId)));
+		    physicalShards.insert(std::make_pair(newRange->desiredShardId, SSPhysicalShard(newRange->desiredShardId)));
 		it->second.addRange(newRange);
 	}
 
@@ -1433,7 +1442,7 @@ public:
 		if (!range.isValid() || !shardAware || range->notAssigned()) {
 			return;
 		}
-		auto it = physicalShards.find(range->shardId);
+		auto it = physicalShards.find(range->desiredShardId);
 		ASSERT(it != physicalShards.end());
 		it->second.removeRange(range);
 	}
@@ -1452,7 +1461,11 @@ public:
 		{
 			auto sh = shards.intersectingRanges(newShard->keys);
 			for (auto it = sh.begin(); it != sh.end(); ++it) {
-				if (!it->value()->notAssigned()) {
+				if (it->value().isValid() && !it->value()->notAssigned()) {
+					TraceEvent("StorageServerAddShardClear")
+					    .detail("NewShardRange", newShard->keys)
+					    .detail("Range", it->value()->keys)
+					    .detail("ShardID", format("%016llx", it->value()->desiredShardId));
 					removeRangeFromPhysicalShard(it->value());
 				}
 			}
@@ -1755,7 +1768,7 @@ void validate(StorageServer* data, bool force = false) {
 				if (data->shardAware) {
 					s->value()->validate();
 					if (!s->value()->notAssigned()) {
-						auto it = data->physicalShards.find(s->value()->shardId);
+						auto it = data->physicalShards.find(s->value()->desiredShardId);
 						ASSERT(it != data->physicalShards.end());
 						ASSERT(it->second.hasRange(s->value()));
 					}
@@ -10775,7 +10788,9 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 
 	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with
 	// self still valid
-	self.shards.insert(allKeys, Reference<ShardInfo>());
+	// self.shards.insert(allKeys, Reference<ShardInfo>());
+	// self.physicalShards.clear();
+	self.addShard(ShardInfo::newNotAssigned(allKeys));
 
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise
 	// just close it.
