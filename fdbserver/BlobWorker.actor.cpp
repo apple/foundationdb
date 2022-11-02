@@ -4470,9 +4470,10 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		return Void();
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
-			if (!bwData->shuttingDown) {
+			if (!bwData->shuttingDown && !isSelfReassign) {
 				// the cancelled was because the granule open was cancelled, not because the whole blob
 				// worker was.
+				ASSERT(!req.reply.isSet());
 				req.reply.sendError(granule_assignment_conflict());
 			}
 			throw e;
