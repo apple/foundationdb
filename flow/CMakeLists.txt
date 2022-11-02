@@ -132,9 +132,14 @@ include(FindSwiftLibs)
 swift_get_linker_search_paths(SWIFT_LINK_PATHS)
 target_link_directories(flow PUBLIC "${SWIFT_LINK_PATHS}")
 
-# TODO: make public in other module
-target_link_options(flow PUBLIC "-lswiftCore")
-target_link_options(flow PUBLIC "-lswift_Concurrency")
+# We need to make sure that Swift, and the concurrency library is linked
+# in every module that uses flow, because we implement the Swift hooks in flow.
+# TODO(swift): With upcoming CMake 3.26 we can get rid of this as it should realize
+#              that modules need Swift and use Swift for the linking which 
+#              will do the right thing.
+target_link_options(flow PUBLIC 
+    "-lswiftCore"
+    "-lswift_Concurrency")
 # Link with runtime initialization stub (not needed on Darwin).
 if (NOT APPLE)
   string(REPLACE " " ";" SWIFT_LINK_PATHS_LIST "${SWIFT_LINK_PATHS}")
