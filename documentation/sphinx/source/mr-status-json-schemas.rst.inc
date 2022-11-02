@@ -887,7 +887,8 @@
             },
             "cpu":{
                "logical_core_utilization":0.4 // computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading
-            }
+            },
+            "uptime_seconds":1234.2345
          }
       },
       "tenants":{

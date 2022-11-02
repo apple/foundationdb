@@ -960,7 +960,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
             },
             "cpu":{
                "logical_core_utilization":0.4
-            }
+            },
+            "uptime_seconds":1234.2345
          }
       },
       "tenants":{

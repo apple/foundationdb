@@ -328,6 +328,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
+			    .detail("UptimeSeconds", now() - machineState.monitorStartTime)
 			    .trackLatest("MachineMetrics");
 #ifdef __linux__
 			for (const auto& [k, v] : linux_os::reportCGroupCpuStat()) {
