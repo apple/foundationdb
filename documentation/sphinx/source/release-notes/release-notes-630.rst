@@ -4,6 +4,12 @@
 Release Notes
 #############
 
+6.3.25
+======
+* Fixed a transaction log data corruption bug. `(PR #8558) <https://github.com/apple/foundationdb/pull/8558>`_
+* Fixed a special keyspace ``SpecialKeyRangeAsyncImpl::getRange`` bug. `(PR #6453) <https://github.com/apple/foundationdb/pull/6453>`_
+* Fixed a special keyspace ``ConflictingKeysImpl::getRange`` bug. `(PR #7724) <https://github.com/apple/foundationdb/pull/7724>`_
+
 6.3.24
 ======
 * Fixed a bug where get key location can overload proxies. `(PR #6453) <https://github.com/apple/foundationdb/pull/6453>`_ 
