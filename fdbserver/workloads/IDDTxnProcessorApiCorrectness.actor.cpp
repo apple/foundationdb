@@ -46,7 +46,7 @@ bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
 
 void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<InitialDataDistribution> mock) {
 	// Mock DD just care about the team list and server<->key mapping are consistent with the real cluster
-	if(real->shards.size() != mock->shards.size()) {
+	if (real->shards.size() != mock->shards.size()) {
 		std::cout << "real.size: " << real->shards.size() << " mock.size: " << mock->shards.size() << "\n";
 		ASSERT(false);
 	}
@@ -223,7 +223,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				wait(self->real->testRawStartMovement(params, emptyTssMapping));
 
 				// test finish or started but cancelled movement
-				if (deterministicRandom()->coinflip()) {
+				if (true || deterministicRandom()->coinflip()) {
 					CODE_PROBE(true, "RawMovementApi partial started");
 					break;
 				}
@@ -318,7 +318,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		state double lastTime = now();
 		state int choice = 0;
 		loop {
-			choice = deterministicRandom()->randomInt(0, 2);
+			choice = deterministicRandom()->randomInt(0, 1);
 			if (choice == 0) { // test rawStartMovement and rawFinishMovement separately
 				wait(testRawMovementApi(self));
 			} else if (choice == 1) { // test moveKeys

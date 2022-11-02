@@ -358,7 +358,9 @@ int64_t MockStorageServer::getRange(KeyRangeRef const& range, int64_t beginShard
 	return totalByteSize;
 }
 
-int64_t MockStorageServer::estimateRangeTotalBytes(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes) {
+int64_t MockStorageServer::estimateRangeTotalBytes(KeyRangeRef const& range,
+                                                   int64_t beginShardBytes,
+                                                   int64_t endShardBytes) {
 	int64_t totalByteSize = 0;
 	auto ranges = serverKeys.intersectingRanges(range);
 
@@ -635,7 +637,7 @@ int64_t MockGlobalState::get(KeyRef const& key) {
 	auto ids = shardMapping->getSourceServerIdsFor(key);
 	int64_t randomBytes = 0;
 	if (deterministicRandom()->random01() > emptyProb) {
-		randomBytes = deterministicRandom()->randomInt64(minByteSize, maxByteSize);
+		randomBytes = deterministicRandom()->randomInt64(minByteSize, maxByteSize + 1);
 	}
 	// randomly choose 1 server
 	auto id = deterministicRandom()->randomChoice(ids);
@@ -671,7 +673,7 @@ int64_t MockGlobalState::set(KeyRef const& key, int valueSize, bool insert) {
 	insert |= (deterministicRandom()->random01() < emptyProb);
 
 	if (!insert) {
-		oldKvBytes = key.size() + deterministicRandom()->randomInt64(minByteSize, maxByteSize);
+		oldKvBytes = key.size() + deterministicRandom()->randomInt64(minByteSize, maxByteSize + 1);
 	}
 
 	for (auto& id : ids) {
@@ -684,7 +686,7 @@ int64_t MockGlobalState::clear(KeyRef const& key) {
 	auto ids = shardMapping->getSourceServerIdsFor(key);
 	int64_t randomBytes = 0;
 	if (deterministicRandom()->random01() > emptyProb) {
-		randomBytes = deterministicRandom()->randomInt64(minByteSize, maxByteSize) + key.size();
+		randomBytes = deterministicRandom()->randomInt64(minByteSize, maxByteSize + 1) + key.size();
 	}
 
 	for (auto& id : ids) {

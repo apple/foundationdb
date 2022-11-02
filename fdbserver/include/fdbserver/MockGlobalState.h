@@ -179,7 +179,9 @@ protected:
 	                            bool restrictSize);
 
 	void twoWayShardSplitting(const KeyRangeRef& range,
-	                          const KeyRef& splitPoint, uint64_t rangeSize, bool restrictSize);
+	                          const KeyRef& splitPoint,
+	                          uint64_t rangeSize,
+	                          bool restrictSize);
 
 	// Assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
 	int64_t estimateRangeTotalBytes(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes);
@@ -218,7 +220,7 @@ public:
 
 	// user defined parameters for mock workload purpose
 	double emptyProb; // probability of doing an empty read
-	uint32_t minByteSize, maxByteSize; // the size band of a point data operation
+	int minByteSize, maxByteSize; // the size band of a point data operation
 	bool restrictSize = true;
 
 	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
