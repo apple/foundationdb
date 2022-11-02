@@ -571,7 +571,6 @@ int runWorkload(Database db,
 
 	/* main transaction loop */
 	while (1) {
-		Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
 		if ((thread_tps > 0 /* iff throttling on */) && (xacts >= current_tps)) {
 			/* throttle on */
 			auto time_now = steady_clock::now();
@@ -589,6 +588,7 @@ int runWorkload(Database db,
 		}
 
 		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
+			Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
 
 			/* enable transaction trace */
 			if (dotrace) {
