@@ -2607,7 +2607,6 @@ TEST_CASE("noSim/ShardedRocksDB/Initialization") {
 
 	state IKeyValueStore* kvStore =
 	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	state ShardedRocksDBKeyValueStore* rocksDB = dynamic_cast<ShardedRocksDBKeyValueStore*>(kvStore);
 	wait(kvStore->init());
 
 	Future<Void> closed = kvStore->onClosed();
@@ -2622,7 +2621,6 @@ TEST_CASE("noSim/ShardedRocksDB/SingleShardRead") {
 
 	state IKeyValueStore* kvStore =
 	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	state ShardedRocksDBKeyValueStore* rocksDB = dynamic_cast<ShardedRocksDBKeyValueStore*>(kvStore);
 	wait(kvStore->init());
 
 	KeyRangeRef range("a"_sr, "b"_sr);
