@@ -549,7 +549,7 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 			return Void();
 		}
 
-		ASSERT_WE_THINK(reqBegin >= poppedVersion(self, reqTag) && reqBegin >= self->startVersion);
+		ASSERT(reqBegin >= poppedVersion(self, reqTag) && reqBegin >= self->startVersion);
 
 		endVersion = self->version.get() + 1;
 		peekMessagesFromMemory(self, reqTag, reqBegin, messages, endVersion);
