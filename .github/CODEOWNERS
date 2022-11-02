@@ -4,7 +4,7 @@
 # Section 1
 # This section should only contain the catchall rule
 ##################################################
-*     @snowflakedb/fdb
+#*     @snowflakedb/fdb
 
 ##################################################
 # Section 2
