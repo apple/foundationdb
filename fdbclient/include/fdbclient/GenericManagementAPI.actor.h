@@ -284,7 +284,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 	state bool oldReplicationUsesDcId = false;
 	state bool warnPPWGradual = false;
-	state bool warnChangeStorageNoMigrate = false;
 	state bool warnRocksDBIsExperimental = false;
 	state bool warnShardedRocksDBIsExperimental = false;
 	loop {
