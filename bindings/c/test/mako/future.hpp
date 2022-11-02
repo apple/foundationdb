@@ -26,6 +26,7 @@
 #include <string_view>
 #include "logger.hpp"
 #include "macro.hpp"
+#include "stats.hpp"
 
 extern thread_local mako::Logger logr;
 
@@ -33,12 +34,29 @@ namespace mako {
 
 enum class FutureRC { OK, RETRY, ABORT };
 
+force_inline void updateErrorStats(ThreadStatistics& stats, const fdb::Error& err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else {
+			stats.incrErrorCount(op);
+		}
+	}
+}
+
 template <class FutureType>
-force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+force_inline FutureRC handleForOnError(fdb::Transaction& tx,
+                                       FutureType& f,
+                                       std::string_view step,
+                                       ThreadStatistics* stats = nullptr,
+                                       int op = 0) {
 	if (auto err = f.error()) {
 		assert(!(err.retryable()));
 		logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
 		tx.reset();
+		if (stats) {
+			updateErrorStats(*stats, err, op);
+		}
 		return FutureRC::ABORT;
 	} else {
 		return FutureRC::RETRY;
@@ -46,28 +64,38 @@ force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std:
 }
 
 template <class FutureType>
-force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx,
+                                              FutureType& f,
+                                              std::string_view step,
+                                              ThreadStatistics* stats = nullptr,
+                                              int op = 0,
+                                              bool on_error_future_updates = false) {
 	assert(f);
-	if (auto err = f.blockUntilReady()) {
-		logr.error("'{}' found while waiting for on_error() future, step: {}", err.what(), step);
+	if (!waitFuture(f, step, stats, op)) {
 		return FutureRC::ABORT;
 	}
-	return handleForOnError(tx, f, step);
+
+	return handleForOnError(tx, f, step, on_error_future_updates ? stats : nullptr, op);
 }
 
 // wait on any non-immediate tx-related step to complete. Follow up with on_error().
 template <class FutureType>
-force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+force_inline FutureRC waitAndHandleError(fdb::Transaction& tx,
+                                         FutureType& f,
+                                         std::string_view step,
+                                         ThreadStatistics* stats = nullptr,
+                                         int op = 0) {
 	assert(f);
-	auto err = f.blockUntilReady();
-	if (err) {
-		const auto retry = err.retryable();
-		logr.error("{} error '{}' found during step: {}", (retry ? "Retryable" : "Unretryable"), err.what(), step);
-		return retry ? FutureRC::RETRY : FutureRC::ABORT;
+	if (!waitFuture(f, step, stats, op)) {
+		return FutureRC::ABORT;
 	}
-	err = f.error();
+	auto err = f.error();
 	if (!err)
 		return FutureRC::OK;
+
+	if (stats) {
+		updateErrorStats(*stats, err, op);
+	}
 	if (err.retryable()) {
 		logr.warn("step {} returned '{}'", step, err.what());
 	} else {
@@ -75,11 +103,11 @@ force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, st
 	}
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	return waitAndHandleForOnError(tx, follow_up, step);
+	return waitAndHandleForOnError(tx, follow_up, step, stats, op, false);
 }
 
 template <class FutureType>
-force_inline bool waitFuture(FutureType& f, std::string_view step) {
+force_inline bool waitFuture(FutureType& f, std::string_view step, ThreadStatistics* stats = nullptr, int op = 0) {
 	assert(f);
 	auto err = f.blockUntilReady();
 	if (err) {
@@ -88,17 +116,13 @@ force_inline bool waitFuture(FutureType& f, std::string_view step) {
 		           (retry ? "Retryable" : "Unretryable"),
 		           err.what(),
 		           step);
-		return false;
-	}
-	err = f.error();
-	if (err) {
-		if (err.retryable()) {
-			logr.warn("step {} returned '{}'", step, err.what());
-		} else {
-			logr.error("step {} returned '{}'", step, err.what());
+		if (stats) {
+			updateErrorStats(*stats, err, op);
 		}
+		return false;
+	} else {
+		return true;
 	}
-	return true;
 }
 
 } // namespace mako

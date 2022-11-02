@@ -115,7 +115,6 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	void postNextTick();
 	void runOneTick();
 	void updateStepStats();
-	void updateErrorStats(const fdb::Error& err, int op);
 	void onTransactionSuccess();
 	void restartIteration(FutureRC rc);
 };

@@ -422,16 +422,6 @@ int populate(Database db,
 	return 0;
 }
 
-force_inline void updateErrorStatsRunMode(ThreadStatistics& stats, const fdb::Error& err, int op) {
-	if (err) {
-		if (err.is(1020 /*not_commited*/)) {
-			stats.incrConflictCount();
-		} else {
-			stats.incrErrorCount(op);
-		}
-	}
-}
-
 /* run one iteration of configured transaction */
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
@@ -457,19 +447,10 @@ transaction_begin:
 		auto f = opTable[op].stepFunction(step)(tx, args, key1, key2, val);
 		auto future_rc = FutureRC::OK;
 		if (f) {
-			if (!waitFuture(f, opTable[op].name())) {
-				// exceptional error while waiting on future
-				stats.incrErrorCount(op);
-				return -1;
-			}
-			if (auto err = f.error()) {
-				updateErrorStatsRunMode(stats, err, op);
-				if (step_kind != StepKind::ON_ERROR) {
-					auto follow_up = tx.onError(err);
-					future_rc = waitAndHandleForOnError(tx, follow_up, opTable[op].name());
-				} else {
-					future_rc = handleForOnError(tx, f, opTable[op].name());
-				}
+			if (step_kind != StepKind::ON_ERROR) {
+				future_rc = waitAndHandleError(tx, f, opTable[op].name(), &stats, op);
+			} else {
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), &stats, op, true);
 			}
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
@@ -514,19 +495,7 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		auto rc = FutureRC::OK;
-
-		if (!waitFuture(f, "COMMIT_AT_TX_END")) {
-			// exceptional error while waiting on future
-			stats.incrErrorCount(OP_COMMIT);
-			return -1;
-		}
-		if (auto err = f.error()) {
-			updateErrorStatsRunMode(stats, err, OP_COMMIT);
-			auto follow_up = tx.onError(err);
-			rc = waitAndHandleForOnError(tx, follow_up, "COMMIT_AT_TX_END");
-		}
-
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", &stats, OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
 		if (rc == FutureRC::OK) {
