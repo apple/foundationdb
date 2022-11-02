@@ -116,7 +116,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	void runOneTick();
 	void updateStepStats();
 	void onTransactionSuccess();
-	void restartIteration(FutureRC rc);
+	void onIterationEnd(FutureRC rc);
 };
 
 using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;
