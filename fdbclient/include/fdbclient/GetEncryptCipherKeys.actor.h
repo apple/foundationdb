@@ -313,15 +313,21 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                      BlobCipherEncryptHeader header,
                                                      BlobCipherMetrics::UsageType usageType) {
-	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
+	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
+	if (header.hasHeaderCipher()) {
+		cipherDetails.emplace(header.cipherHeaderDetails);
+	}
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
+	TextAndHeaderCipherKeys result;
 	ASSERT(cipherKeys.count(header.cipherTextDetails) > 0);
-	ASSERT(cipherKeys.count(header.cipherHeaderDetails) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(header.cipherTextDetails),
-		                            cipherKeys.at(header.cipherHeaderDetails) };
+	result.cipherTextKey = cipherKeys.at(header.cipherTextDetails);
 	ASSERT(result.cipherTextKey.isValid());
-	ASSERT(result.cipherHeaderKey.isValid());
+	if (header.hasHeaderCipher()) {
+		ASSERT(cipherKeys.count(header.cipherHeaderDetails) > 0);
+		result.cipherHeaderKey = cipherKeys.at(header.cipherHeaderDetails);
+		ASSERT(result.cipherHeaderKey.isValid());
+	}
 	return result;
 }
 

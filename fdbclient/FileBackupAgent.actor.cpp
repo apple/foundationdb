@@ -563,7 +563,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                     Reference<BlobCipherKey> textCipherKey,
 	                                     BlobCipherEncryptHeader& header) {
 		// Validate encryption header 'cipherHeader' details
-		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
+		if (header.hasHeaderCipher() &&
+		    !(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
 		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
 		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
@@ -598,10 +599,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::BACKUP));
-		ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
+		ASSERT(cipherKeys.cipherTextKey.isValid() &&
+		       (!header.hasHeaderCipher() || cipherKeys.cipherHeaderKey.isValid()));
 		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
-		DecryptBlobCipherAes256Ctr decryptor(
-		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::BACKUP);
+		DecryptBlobCipherAes256 decryptor((EncryptCipherMode)header.flags.encryptMode,
+		                                  cipherKeys.cipherTextKey,
+		                                  cipherKeys.cipherHeaderKey,
+		                                  header.iv,
+		                                  BlobCipherMetrics::BACKUP);
 		return decryptor.decrypt(dataP, dataLen, header, *arena)->toStringRef();
 	}
 
@@ -635,12 +640,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			    wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId(), self->cipherKeys.textDomain));
 			self->cipherKeys.textCipherKey = cipherKey;
 		}
-		EncryptBlobCipherAes265Ctr encryptor(self->cipherKeys.textCipherKey,
-		                                     self->cipherKeys.headerCipherKey,
-		                                     self->cipherKeys.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BACKUP);
+		EncryptBlobCipherAes265 encryptor(self->cipherKeys.textCipherKey,
+		                                  self->cipherKeys.headerCipherKey,
+		                                  self->cipherKeys.ivRef.begin(),
+		                                  AES_256_IV_LENGTH,
+		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                  BlobCipherMetrics::BACKUP);
 		Arena arena;
 		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
 		auto encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, self->encryptHeader, arena);

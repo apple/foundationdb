@@ -373,10 +373,10 @@ public:
 
 		static void encode(void* header, const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
 			Header* h = reinterpret_cast<Header*>(header);
-			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
-			                                  cipherKeys.cipherHeaderKey,
-			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
-			                                  BlobCipherMetrics::KV_REDWOOD);
+			EncryptBlobCipherAes265 cipher(cipherKeys.cipherTextKey,
+			                               cipherKeys.cipherHeaderKey,
+			                               getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+			                               BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef ciphertext = cipher.encrypt(payload, len, h, arena)->toStringRef();
 			ASSERT_EQ(len, ciphertext.size());
@@ -385,8 +385,11 @@ public:
 
 		static void decode(void* header, const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
 			Header* h = reinterpret_cast<Header*>(header);
-			DecryptBlobCipherAes256Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, h->iv, BlobCipherMetrics::KV_REDWOOD);
+			DecryptBlobCipherAes256 cipher((EncryptCipherMode)h->flags.encryptMode,
+			                               cipherKeys.cipherTextKey,
+			                               cipherKeys.cipherHeaderKey,
+			                               h->iv,
+			                               BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef plaintext = cipher.decrypt(payload, len, *h, arena)->toStringRef();
 			ASSERT_EQ(len, plaintext.size());

@@ -373,8 +373,10 @@ ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database
 	Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 	state const BlobCipherEncryptHeader* header = mutation.encryptionHeader();
 	std::unordered_set<BlobCipherDetails> cipherDetails;
-	cipherDetails.insert(header->cipherHeaderDetails);
 	cipherDetails.insert(header->cipherTextDetails);
+	if (header->hasHeaderCipher()) {
+		cipherDetails.insert(header->cipherHeaderDetails);
+	}
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
 	    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
 	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);

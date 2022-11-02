@@ -155,7 +155,7 @@ struct MutationRef {
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		bw << *this;
-		EncryptBlobCipherAes265Ctr cipher(
+		EncryptBlobCipherAes265 cipher(
 		    textCipherItr->second,
 		    headerCipherItr->second,
 		    iv,
@@ -180,7 +180,11 @@ struct MutationRef {
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
-		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header->iv, usageType);
+		DecryptBlobCipherAes256 cipher((EncryptCipherMode)header->flags.encryptMode,
+		                               cipherKeys.cipherTextKey,
+		                               cipherKeys.cipherHeaderKey,
+		                               header->iv,
+		                               usageType);
 		StringRef plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
 		if (buf != nullptr) {
 			*buf = plaintext;
@@ -196,13 +200,15 @@ struct MutationRef {
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
-		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
-		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
-		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
-		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
 		TextAndHeaderCipherKeys textAndHeaderKeys;
-		textAndHeaderKeys.cipherHeaderKey = headerCipherItr->second;
+		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
+		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
 		textAndHeaderKeys.cipherTextKey = textCipherItr->second;
+		if (header->hasHeaderCipher()) {
+			auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
+			ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
+			textAndHeaderKeys.cipherHeaderKey = headerCipherItr->second;
+		}
 		return decrypt(textAndHeaderKeys, arena, usageType, buf);
 	}
 

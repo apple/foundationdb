@@ -73,6 +73,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
@@ -2270,6 +2271,16 @@ int main(int argc, char* argv[]) {
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("enable_blob_granule_compression",
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
+				g_knobs.setKnob(
+				    "encryption_mode",
+				    KnobValue::create((int)ini.GetLongValue("META", "encryptionMode", FLOW_KNOBS->ENCRYPTION_MODE)));
+				g_knobs.setKnob("encrypt_header_auth_token_enabled",
+				                KnobValue::create(ini.GetBoolValue("META",
+				                                                   "encryptHeaderAuthTokenEnabled",
+				                                                   FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED)));
+				g_knobs.setKnob("encrypt_header_auth_token_algo",
+				                KnobValue::create((int)ini.GetLongValue(
+				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();

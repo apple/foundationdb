@@ -279,7 +279,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                                   BlobCipherEncryptHeader* header) {
 		uint8_t iv[AES_256_IV_LENGTH];
 		deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
-		EncryptBlobCipherAes265Ctr encryptor(
+		EncryptBlobCipherAes265 encryptor(
 		    textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode, authAlgo, BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
@@ -289,7 +289,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		// validate encrypted buffer size and contents (not matching with plaintext)
 		ASSERT_EQ(encrypted->getLogicalSize(), len);
 		ASSERT_NE(memcmp(encrypted->begin(), payload, len), 0);
-		ASSERT_EQ(header->flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
+		ASSERT_EQ(header->flags.headerVersion, EncryptBlobCipherAes265::ENCRYPT_HEADER_VERSION);
 
 		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 		return encrypted;
@@ -300,21 +300,28 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                  const BlobCipherEncryptHeader& header,
 	                  uint8_t* originalPayload,
 	                  Reference<BlobCipherKey> orgCipherKey) {
-		ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
-		ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
+		ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265::ENCRYPT_HEADER_VERSION);
 
 		Reference<BlobCipherKey> cipherKey = getEncryptionKey(header.cipherTextDetails.encryptDomainId,
 		                                                      header.cipherTextDetails.baseCipherId,
 		                                                      header.cipherTextDetails.salt);
-		Reference<BlobCipherKey> headerCipherKey = getEncryptionKey(header.cipherHeaderDetails.encryptDomainId,
-		                                                            header.cipherHeaderDetails.baseCipherId,
-		                                                            header.cipherHeaderDetails.salt);
+		Reference<BlobCipherKey> headerCipherKey;
+		if (header.hasHeaderCipher()) {
+			headerCipherKey = getEncryptionKey(header.cipherHeaderDetails.encryptDomainId,
+			                                   header.cipherHeaderDetails.baseCipherId,
+			                                   header.cipherHeaderDetails.salt);
+		}
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 		ASSERT(headerCipherKey.isValid() ||
+		       header.flags.encryptMode == EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_GCM ||
 		       header.flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv, BlobCipherMetrics::TEST);
+		DecryptBlobCipherAes256 decryptor((EncryptCipherMode)header.flags.encryptMode,
+		                                  cipherKey,
+		                                  headerCipherKey,
+		                                  header.iv,
+		                                  BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), len, header, arena);

@@ -220,7 +220,8 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
                                      const BlobCipherEncryptHeader& header,
                                      const StringRef& ivRef) {
 	// Validate encryption header 'cipherHeader' details sanity
-	if (!(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
+	if (header.hasHeaderCipher() &&
+	    !(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
 	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
 	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
 		TraceEvent(SevError, "EncryptionHeader_CipherHeaderMismatch")
@@ -287,7 +288,7 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(
+		EncryptBlobCipherAes265 encryptor(
 		    eKeys.textCipherKey,
 		    eKeys.headerCipherKey,
 		    cipherKeysCtx.ivRef.begin(),
@@ -321,8 +322,11 @@ struct IndexBlockRef {
 
 		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
 
-		DecryptBlobCipherAes256Ctr decryptor(
-		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
+		DecryptBlobCipherAes256 decryptor((EncryptCipherMode)header.flags.encryptMode,
+		                                  eKeys.textCipherKey,
+		                                  eKeys.headerCipherKey,
+		                                  cipherKeysCtx.ivRef.begin(),
+		                                  BlobCipherMetrics::BLOB_GRANULE);
 		StringRef decrypted =
 		    decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), header, arena)->toStringRef();
 
@@ -411,7 +415,7 @@ struct IndexBlobGranuleFileChunkRef {
 			TraceEvent(SevDebug, "BlobChunkEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(
+		EncryptBlobCipherAes265 encryptor(
 		    eKeys.textCipherKey,
 		    eKeys.headerCipherKey,
 		    cipherKeysCtx.ivRef.begin(),
@@ -446,8 +450,11 @@ struct IndexBlobGranuleFileChunkRef {
 
 		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
 
-		DecryptBlobCipherAes256Ctr decryptor(
-		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
+		DecryptBlobCipherAes256 decryptor((EncryptCipherMode)header.flags.encryptMode,
+		                                  eKeys.textCipherKey,
+		                                  eKeys.headerCipherKey,
+		                                  cipherKeysCtx.ivRef.begin(),
+		                                  BlobCipherMetrics::BLOB_GRANULE);
 		StringRef decrypted =
 		    decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), header, arena)->toStringRef();
 

@@ -35,6 +35,8 @@ EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
 		return ENCRYPT_CIPHER_MODE_NONE;
 	} else if (modeStr == "AES-256-CTR") {
 		return ENCRYPT_CIPHER_MODE_AES_256_CTR;
+	} else if (modeStr == "AES-256-GCM") {
+		return ENCRYPT_CIPHER_MODE_AES_256_GCM;
 	} else {
 		TraceEvent("EncryptModeFromString").log();
 		throw not_implemented();
@@ -95,36 +97,41 @@ bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode) {
 	       mode < EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST;
 }
 
-bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
-	if (!isEncryptHeaderAuthTokenModeValid(mode) || !isEncryptHeaderAuthTokenAlgoValid(algo) ||
-	    (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
-	     algo != EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE) ||
-	    (mode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
-	     algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE)) {
-		return false;
+bool isEncryptHeaderAuthTokenDetailsValid(const EncryptCipherMode encryptMode,
+                                          const EncryptAuthTokenMode authMode,
+                                          const EncryptAuthTokenAlgo algo) {
+	if (encryptMode == ENCRYPT_CIPHER_MODE_AES_256_GCM) {
+		return authMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE && algo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE;
+	} else {
+		return isEncryptHeaderAuthTokenModeValid(authMode) && isEncryptHeaderAuthTokenAlgoValid(algo) &&
+		       ((authMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) ==
+		        (algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE));
 	}
-	return true;
 }
 
-// Routine enables mapping EncryptHeader authTokenAlgo for a given authTokenMode; rules followed are:
-// 1. AUTH_TOKEN_NONE overrides authTokenAlgo configuration (as expected)
-// 2. AuthToken mode governed by the FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO
-EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode) {
-	EncryptAuthTokenAlgo algo;
-
-	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+// Sanitize and output proper header authentication mode and algorithm for authentication. Rules are:
+// 1. with aes-gcm, use single auth token mode, but no additional authentication other than GCM itself;
+// 2. otherwise, AUTH_TOKEN_NONE overrides authTokenAlgo configuration;
+// 3. otherwise, authentication algo governed by the FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO.
+void sanitizeAuthTokenMode(const EncryptCipherMode encryptMode,
+                           EncryptAuthTokenMode* authMode,
+                           EncryptAuthTokenAlgo* algo) {
+	ASSERT(authMode != nullptr);
+	ASSERT(algo != nullptr);
+	if (encryptMode == ENCRYPT_CIPHER_MODE_AES_256_GCM) {
+		*authMode = ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE;
+		*algo = ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE;
+	} else if (*authMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		// TOKEN_MODE_NONE overrides authTokenAlgo
-		algo = EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE;
+		*algo = EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE;
 	} else {
-		algo = (EncryptAuthTokenAlgo)FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO;
+		*algo = (EncryptAuthTokenAlgo)FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO;
 		// Ensure cluster authTokenAlgo sanity
-		if (algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE) {
-			TraceEvent(SevWarn, "AuthTokenAlgoMisconfiguration").detail("Algo", algo).detail("Mode", mode);
+		if (*algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE) {
+			TraceEvent(SevWarn, "AuthTokenAlgoMisconfiguration").detail("Algo", *algo).detail("Mode", *authMode);
 			throw not_implemented();
 		}
 	}
-	ASSERT(isEncryptHeaderAuthTokenDetailsValid(mode, algo));
-	return algo;
 }
 
 EncryptAuthTokenMode getRandomAuthTokenMode() {

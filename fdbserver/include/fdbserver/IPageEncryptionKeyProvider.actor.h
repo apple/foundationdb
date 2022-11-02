@@ -185,7 +185,7 @@ public:
 		for (unsigned i = 0; i < NUM_CIPHER; i++) {
 			BlobCipherDetails cipherDetails;
 			cipherDetails.encryptDomainId = 0;
-			cipherDetails.baseCipherId = i;
+			cipherDetails.baseCipherId = i + 1;
 			cipherDetails.salt = deterministicRandom()->randomUInt64();
 			cipherKeys[i] = generateCipherKey(cipherDetails);
 		}
@@ -203,17 +203,19 @@ public:
 		const Header* h = reinterpret_cast<const Header*>(encodingHeader);
 		EncryptionKey s;
 		s.aesKey.cipherTextKey = getCipherKey(h->cipherTextDetails.encryptDomainId, h->cipherTextDetails.baseCipherId);
-		s.aesKey.cipherHeaderKey =
-		    getCipherKey(h->cipherHeaderDetails.encryptDomainId, h->cipherHeaderDetails.baseCipherId);
+		if (h->hasHeaderCipher()) {
+			s.aesKey.cipherHeaderKey =
+			    getCipherKey(h->cipherHeaderDetails.encryptDomainId, h->cipherHeaderDetails.baseCipherId);
+		}
 		return s;
 	}
 
 	Future<EncryptionKey> getLatestEncryptionKey(int64_t domainId) override {
 		domainId = checkDomainId(domainId);
 		EncryptionKey s;
-		s.aesKey.cipherTextKey = getCipherKey(domainId, deterministicRandom()->randomInt(0, NUM_CIPHER));
+		s.aesKey.cipherTextKey = getCipherKey(domainId, deterministicRandom()->randomInt(0, NUM_CIPHER) + 1);
 		s.aesKey.cipherHeaderKey =
-		    getCipherKey(ENCRYPT_HEADER_DOMAIN_ID, deterministicRandom()->randomInt(0, NUM_CIPHER));
+		    getCipherKey(ENCRYPT_HEADER_DOMAIN_ID, deterministicRandom()->randomInt(0, NUM_CIPHER) + 1);
 		return s;
 	}
 
@@ -268,12 +270,13 @@ private:
 	}
 
 	Reference<BlobCipherKey> getCipherKey(EncryptCipherDomainId domainId, EncryptCipherBaseKeyId cipherId) {
+		ASSERT(cipherId > 0 && cipherId <= NUM_CIPHER);
 		// Create a new cipher key by replacing the domain id.
 		return makeReference<BlobCipherKey>(domainId,
 		                                    cipherId,
-		                                    cipherKeys[cipherId]->rawBaseCipher(),
+		                                    cipherKeys[cipherId - 1]->rawBaseCipher(),
 		                                    AES_256_KEY_LENGTH,
-		                                    cipherKeys[cipherId]->getSalt(),
+		                                    cipherKeys[cipherId - 1]->getSalt(),
 		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,
 		                                    std::numeric_limits<int64_t>::max() /* expireAt */);
 	}

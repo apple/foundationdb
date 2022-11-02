@@ -51,6 +51,9 @@
 #endif
 
 #define AES_256_KEY_LENGTH 32
+
+// The aes-ctr mode require 16 bytes IV, while aes-gcm only need 12 bytes.
+// We pass 16 bytes IV to openssl nevertheless.
 #define AES_256_IV_LENGTH 16
 
 class BlobCipherMetrics : public NonCopyable {
@@ -231,6 +234,11 @@ typedef struct BlobCipherEncryptHeader {
 	} singleAuthToken;
 
 	BlobCipherEncryptHeader() {}
+
+	bool hasHeaderCipher() const {
+		return cipherHeaderDetails.encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID &&
+		       cipherHeaderDetails.baseCipherId != INVALID_ENCRYPT_CIPHER_KEY_ID;
+	}
 
 	static BlobCipherEncryptHeader fromStringRef(StringRef headerRef) {
 		BlobCipherEncryptHeader header;
@@ -541,33 +549,33 @@ private:
 // 1) generate encrypted ciphertext for given plaintext input.
 // 2) generate BlobCipherEncryptHeader (including the 'header authTokens') and persit for decryption on reads.
 
-class EncryptBlobCipherAes265Ctr final : NonCopyable, public ReferenceCounted<EncryptBlobCipherAes265Ctr> {
+class EncryptBlobCipherAes265 final : NonCopyable, public ReferenceCounted<EncryptBlobCipherAes265> {
 public:
 	static constexpr uint8_t ENCRYPT_HEADER_VERSION = 1;
 
-	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
-	                           const uint8_t* iv,
-	                           const int ivLen,
-	                           const EncryptAuthTokenMode mode,
-	                           BlobCipherMetrics::UsageType usageType);
-	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
-	                           const uint8_t* iv,
-	                           const int ivLen,
-	                           const EncryptAuthTokenMode mode,
-	                           const EncryptAuthTokenAlgo algo,
-	                           BlobCipherMetrics::UsageType usageType);
-	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
-	                           const EncryptAuthTokenMode mode,
-	                           BlobCipherMetrics::UsageType usageType);
-	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
-	                           const EncryptAuthTokenMode mode,
-	                           const EncryptAuthTokenAlgo algo,
-	                           BlobCipherMetrics::UsageType usageType);
-	~EncryptBlobCipherAes265Ctr();
+	EncryptBlobCipherAes265(Reference<BlobCipherKey> tCipherKey,
+	                        Reference<BlobCipherKey> hCipherKey,
+	                        const uint8_t* iv,
+	                        const int ivLen,
+	                        const EncryptAuthTokenMode mode,
+	                        BlobCipherMetrics::UsageType usageType);
+	EncryptBlobCipherAes265(Reference<BlobCipherKey> tCipherKey,
+	                        Reference<BlobCipherKey> hCipherKey,
+	                        const uint8_t* iv,
+	                        const int ivLen,
+	                        const EncryptAuthTokenMode mode,
+	                        const EncryptAuthTokenAlgo algo,
+	                        BlobCipherMetrics::UsageType usageType);
+	EncryptBlobCipherAes265(Reference<BlobCipherKey> tCipherKey,
+	                        Reference<BlobCipherKey> hCipherKey,
+	                        const EncryptAuthTokenMode mode,
+	                        BlobCipherMetrics::UsageType usageType);
+	EncryptBlobCipherAes265(Reference<BlobCipherKey> tCipherKey,
+	                        Reference<BlobCipherKey> hCipherKey,
+	                        const EncryptAuthTokenMode mode,
+	                        const EncryptAuthTokenAlgo algo,
+	                        BlobCipherMetrics::UsageType usageType);
+	~EncryptBlobCipherAes265();
 
 	Reference<EncryptBuf> encrypt(const uint8_t* plaintext,
 	                              const int plaintextLen,
@@ -578,6 +586,7 @@ private:
 	EVP_CIPHER_CTX* ctx;
 	Reference<BlobCipherKey> textCipherKey;
 	Reference<BlobCipherKey> headerCipherKey;
+	EncryptCipherMode encryptMode;
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
 	BlobCipherMetrics::UsageType usageType;
@@ -589,13 +598,14 @@ private:
 // This interface enable data block decryption. An invocation to decrypt() would generate
 // 'plaintext' for a given 'ciphertext' input, the caller needs to supply BlobCipherEncryptHeader.
 
-class DecryptBlobCipherAes256Ctr final : NonCopyable, public ReferenceCounted<DecryptBlobCipherAes256Ctr> {
+class DecryptBlobCipherAes256 final : NonCopyable, public ReferenceCounted<DecryptBlobCipherAes256> {
 public:
-	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
-	                           const uint8_t* iv,
-	                           BlobCipherMetrics::UsageType usageType);
-	~DecryptBlobCipherAes256Ctr();
+	DecryptBlobCipherAes256(EncryptCipherMode encryptMode,
+	                        Reference<BlobCipherKey> tCipherKey,
+	                        Reference<BlobCipherKey> hCipherKey,
+	                        const uint8_t* iv,
+	                        BlobCipherMetrics::UsageType usageType);
+	~DecryptBlobCipherAes256();
 
 	Reference<EncryptBuf> decrypt(const uint8_t* ciphertext,
 	                              const int ciphertextLen,
@@ -608,6 +618,7 @@ public:
 	void verifyHeaderAuthToken(const BlobCipherEncryptHeader& header, Arena& arena);
 
 private:
+	EncryptCipherMode encryptMode;
 	EVP_CIPHER_CTX* ctx;
 	Reference<BlobCipherKey> textCipherKey;
 	Reference<BlobCipherKey> headerCipherKey;

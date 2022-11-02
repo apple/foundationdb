@@ -31,6 +31,7 @@
 
 constexpr const int AUTH_TOKEN_HMAC_SHA_SIZE = 32;
 constexpr const int AUTH_TOKEN_AES_CMAC_SIZE = 16;
+constexpr const int AUTH_TOKEN_GCM_SIZE = 16;
 constexpr const int AUTH_TOKEN_MAX_SIZE = AUTH_TOKEN_HMAC_SHA_SIZE;
 
 using EncryptCipherDomainId = int64_t;
@@ -55,6 +56,7 @@ extern const EncryptCipherDomainName FDB_ENCRYPT_HEADER_DOMAIN_NAME;
 typedef enum {
 	ENCRYPT_CIPHER_MODE_NONE = 0,
 	ENCRYPT_CIPHER_MODE_AES_256_CTR = 1,
+	ENCRYPT_CIPHER_MODE_AES_256_GCM = 2,
 	ENCRYPT_CIPHER_MODE_LAST = 2
 } EncryptCipherMode;
 
@@ -80,6 +82,8 @@ static_assert(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST <= std::numer
               "EncryptHeaderAuthToken value overflow");
 
 typedef enum {
+	// No additional authentication will be used with ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE,
+	// but AEAD cipher mdoes (e.g. aes-gcm) would still come with their own authentication.
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA = 1,
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC = 2,
@@ -91,8 +95,12 @@ static_assert(EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST <= std::
 
 bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode);
 bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo);
-bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo);
-EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode);
+bool isEncryptHeaderAuthTokenDetailsValid(const EncryptCipherMode encryptMode,
+                                          const EncryptAuthTokenMode authMode,
+                                          const EncryptAuthTokenAlgo algo);
+void sanitizeAuthTokenMode(const EncryptCipherMode encryptMode,
+                           EncryptAuthTokenMode* authMode,
+                           EncryptAuthTokenAlgo* algo);
 EncryptAuthTokenMode getRandomAuthTokenMode();
 EncryptAuthTokenAlgo getRandomAuthTokenAlgo();
 
