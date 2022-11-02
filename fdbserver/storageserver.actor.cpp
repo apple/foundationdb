@@ -663,7 +663,7 @@ private:
 };
 
 void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
-	removeRange(shard->keys);
+	// removeRange(shard->keys);
 
 	if (shard->notAssigned()) {
 		return;
@@ -1430,6 +1430,9 @@ public:
 	}
 
 	void removeRangeFromPhysicalShard(Reference<ShardInfo> range) {
+		if (!range.isValid() || !shardAware || range->notAssigned()) {
+			return;
+		}
 		auto it = physicalShards.find(range->shardId);
 		ASSERT(it != physicalShards.end());
 		it->second.removeRange(range);
@@ -1445,6 +1448,16 @@ public:
 		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
+
+		{
+			auto sh = shards.intersectingRanges(newShard->keys);
+			for (auto it = sh.begin(); it != sh.end(); ++it) {
+				if (!it->value()->notAssigned()) {
+					removeRangeFromPhysicalShard(it->value());
+				}
+			}
+		}
+
 		Reference<ShardInfo> rShard(newShard);
 		shards.insert(newShard->keys, rShard);
 		addRangeToPhysicalShard(rShard);
