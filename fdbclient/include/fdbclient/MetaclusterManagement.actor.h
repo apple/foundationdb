@@ -1555,27 +1555,16 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(
-    Transaction tr,
-    TenantNameRef begin,
-    TenantNameRef end,
-    int limit,
-    std::vector<TenantState> filters = std::vector<TenantState>()) {
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
+                                                                                  TenantNameRef begin,
+                                                                                  TenantNameRef end,
+                                                                                  int limit) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
+	state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
 	    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit));
 
-	if (filters.empty()) {
-		return results.results;
-	}
-	std::vector<std::pair<TenantName, TenantMapEntry>> filterResults;
-	for (auto pair : results.results) {
-		if (std::count(filters.begin(), filters.end(), pair.second.tenantState)) {
-			filterResults.push_back(pair);
-		}
-	}
-	return filterResults;
+	return results.results;
 }
 
 ACTOR template <class DB>
@@ -1584,6 +1573,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
     TenantName begin,
     TenantName end,
     int limit,
+    int offset = 0,
     std::vector<TenantState> filters = std::vector<TenantState>()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
@@ -1591,9 +1581,41 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-			    wait(listTenantsTransaction(tr, begin, end, limit, filters));
-			return tenants;
+			if (offset == 0 && filters.empty()) {
+				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+				    wait(listTenantsTransaction(tr, begin, end, limit));
+				return tenants;
+			}
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+
+			state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
+			    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit));
+			state std::vector<std::pair<TenantName, TenantMapEntry>> filterResults;
+			state int count = 0;
+			loop {
+				for (auto pair : results.results) {
+					if (filters.empty() || std::count(filters.begin(), filters.end(), pair.second.tenantState)) {
+						++count;
+						if (count > offset) {
+							filterResults.push_back(pair);
+							if (count - offset == limit) {
+								ASSERT(count - offset == filterResults.size());
+								return filterResults;
+							}
+						}
+					}
+				}
+				if (!results.more) {
+					return filterResults;
+				}
+				if (results.readThrough.present()) {
+					begin = results.readThrough.get();
+				} else {
+					begin = keyAfter(results.results.back().first);
+				}
+				wait(store(results,
+				           ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit)));
+			}
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
