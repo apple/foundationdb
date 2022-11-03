@@ -10847,8 +10847,6 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 
 	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with
 	// self still valid
-	// self.shards.insert(allKeys, Reference<ShardInfo>());
-	// self.physicalShards.clear();
 	self.addShard(ShardInfo::newNotAssigned(allKeys));
 
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise
