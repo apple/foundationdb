@@ -304,6 +304,8 @@ public:
 
 	std::unordered_map<AuditType, std::vector<std::shared_ptr<DDAudit>>> audits;
 
+	Optional<Reference<TenantCache>> ddTenantCache;
+
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr),
 	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
@@ -565,21 +567,6 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 	}
 }
 
-// Periodically send the list of tenants that are currently over storage quota to the commit proxies
-ACTOR Future<Void> sendTenantsOverStorageQuota(Database cx, Reference<TenantCache> ddTenantCache) {
-	loop {
-		try {
-			wait(sendStorageQuotaEnforcementRequest(cx, ddTenantCache->getTenantsOverQuota()));
-			// TODO(kejriwal): Maybe have a dedicated knob?
-			wait(delay(std::min(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL,
-			                    SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL)));
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "SendTenantsOverStorageQuotaError").error(e);
-			// TODO(kejriwal)
-		}
-	}
-}
-
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList) {
@@ -619,10 +606,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
-			state Optional<Reference<TenantCache>> ddTenantCache;
 			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(ddTenantCache.get()->build());
+				self->ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
+				wait(self->ddTenantCache.get()->build());
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
@@ -664,7 +650,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            self->ddId,
 			                                                            &shards,
 			                                                            &trackerCancelled,
-			                                                            ddTenantCache),
+			                                                            self->ddTenantCache),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -689,21 +675,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			if (ddIsTenantAware) {
-				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
+			if (self->ddTenantCache.present()) {
+				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorTenantMap(),
 				                                    "DDTenantCacheMonitor",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
-				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageQuota(),
+				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorStorageQuota(),
 				                                    "StorageQuotaTracker",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
-				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageUsage(),
+				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorStorageUsage(),
 				                                    "StorageUsageTracker",
-				                                    self->ddId,
-				                                    &normalDDQueueErrors()));
-				actors.push_back(reportErrorsExcept(sendTenantsOverStorageQuota(cx, ddTenantCache.get()),
-				                                    "SendTenantsOverStorageQuota",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
 			}
@@ -1332,6 +1314,14 @@ GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributor> s
 	return reply;
 }
 
+TenantsOverStorageQuotaReply getTenantsOverStorageQuota(Reference<DataDistributor> self) {
+	TenantsOverStorageQuotaReply reply;
+	if (self->ddTenantCache.present()) {
+		reply.tenants = self->ddTenantCache.get()->getTenantsOverQuota();
+	}
+	return reply;
+}
+
 ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
                                 PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
@@ -1576,6 +1566,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			}
 			when(TriggerAuditRequest req = waitNext(di.triggerAudit.getFuture())) {
 				actors.add(auditStorage(self, req));
+			}
+			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
+				req.reply.send(getTenantsOverStorageQuota(self));
 			}
 		}
 	} catch (Error& err) {

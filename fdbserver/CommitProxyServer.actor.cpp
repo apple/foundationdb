@@ -2469,11 +2469,42 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 	}
 }
 
-ACTOR Future<Void> storageQuotaEnforcementUpdate(StorageQuotaEnforcementRequest req, ProxyCommitData* commitData) {
-	TraceEvent("StorageQuotaEnforcementUpdateBegin").log();
-	commitData->tenantsOverStorageQuota = req.tenants;
-	TraceEvent("StorageQuotaEnforcementUpdateFinish").log();
-	return Void();
+// Get the list of tenants that are over the storage quota from the data distributor for quota enforcement.
+ACTOR Future<Void> monitorTenantsOverStorageQuota(UID myID,
+                                                  Reference<AsyncVar<ServerDBInfo> const> db,
+                                                  ProxyCommitData* commitData) {
+	state Future<Void> nextRequestTimer = Never();
+	state Future<TenantsOverStorageQuotaReply> nextReply = Never();
+	if (db->get().distributor.present())
+		nextRequestTimer = Void();
+	loop choose {
+		when(wait(db->onChange())) {
+			if (db->get().distributor.present()) {
+				CODE_PROBE(true, "DataDistributor changed during monitorTenantsOverStorageQuota");
+				TraceEvent("DataDistributorChanged", myID).detail("DDID", db->get().distributor.get().id());
+				nextRequestTimer = Void();
+			} else {
+				TraceEvent("DataDistributorDied", myID).log();
+				nextRequestTimer = Never();
+			}
+		}
+		when(wait(nextRequestTimer)) {
+			nextRequestTimer = Never();
+			if (db->get().distributor.present()) {
+				nextReply = brokenPromiseToNever(
+				    db->get().distributor.get().tenantsOverStorageQuota.getReply(TenantsOverStorageQuotaRequest()));
+			} else {
+				nextReply = Never();
+			}
+		}
+		when(TenantsOverStorageQuotaReply reply = wait(nextReply)) {
+			nextReply = Never();
+			commitData->tenantsOverStorageQuota = reply.tenants;
+			TraceEvent(SevDebug, "MonitorTenantsOverStorageQuota")
+			    .detail("NumTenants", commitData->tenantsOverStorageQuota.size());
+			nextRequestTimer = delay(SERVER_KNOBS->CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL);
+		}
+	}
 }
 
 namespace {
@@ -2740,6 +2771,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
@@ -2804,10 +2836,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		}
 		when(TxnStateRequest request = waitNext(proxy.txnState.getFuture())) {
 			addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
-		}
-		when(StorageQuotaEnforcementRequest storageQuotaEnforcementReq =
-		         waitNext(proxy.storageQuotaEnforcementReq.getFuture())) {
-			addActor.send(storageQuotaEnforcementUpdate(storageQuotaEnforcementReq, &commitData));
 		}
 	}
 }

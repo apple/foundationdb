@@ -537,9 +537,6 @@ int64_t extractIntOption(Optional<StringRef> value,
                          int64_t minValue = std::numeric_limits<int64_t>::min(),
                          int64_t maxValue = std::numeric_limits<int64_t>::max());
 
-// Send the list of tenants that are over the storage quota to commit proxies for quota enforcement.
-ACTOR Future<Void> sendStorageQuotaEnforcementRequest(Database cx, std::vector<TenantName> tenants);
-
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);

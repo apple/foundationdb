@@ -241,6 +241,8 @@ public:
 	                                                 // in the TenantCache
 	int TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL; // How often the storage quota allocated to each tenant is
 	                                                 // refreshed in the TenantCache
+	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
+	                                                  // distributor to fetch the list of tenants over storage quota
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor

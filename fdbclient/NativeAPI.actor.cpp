@@ -8787,28 +8787,6 @@ void enableClientInfoLogging() {
 	TraceEvent(SevInfo, "ClientInfoLoggingEnabled").log();
 }
 
-ACTOR Future<Void> sendStorageQuotaEnforcementRequest(Database cx, std::vector<TenantName> tenants) {
-	TraceEvent("SendStorageQuotaEnforcementRequestBegin").detail("NumTenants", tenants.size());
-	try {
-		loop {
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-				                           &CommitProxyInterface::storageQuotaEnforcementReq,
-				                           StorageQuotaEnforcementRequest(tenants)))) {
-					TraceEvent("SendStorageQuotaEnforcementRequestEnd").detail("NumTenants", tenants.size());
-					return Void();
-				}
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
-			TraceEvent("SendStorageQuotaEnforcementRequestError").error(e).detail("NumTenants", tenants.size());
-		}
-		throw;
-	}
-}
-
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	TraceEvent("SnapCreateEnter").detail("SnapCmd", snapCmd).detail("UID", snapUID);
 	try {

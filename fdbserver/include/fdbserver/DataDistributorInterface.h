@@ -38,6 +38,7 @@ struct DataDistributorInterface {
 	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 	RequestStream<struct GetStorageWigglerStateRequest> storageWigglerState;
 	RequestStream<struct TriggerAuditRequest> triggerAudit;
+	RequestStream<struct TenantsOverStorageQuotaRequest> tenantsOverStorageQuota;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -60,7 +61,8 @@ struct DataDistributorInterface {
 		           dataDistributorMetrics,
 		           distributorSplitRange,
 		           storageWigglerState,
-		           triggerAudit);
+		           triggerAudit,
+		           tenantsOverStorageQuota);
 	}
 };
 
@@ -186,6 +188,31 @@ struct GetStorageWigglerStateRequest {
 	ReplyPromise<GetStorageWigglerStateReply> reply;
 
 	GetStorageWigglerStateRequest() {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct TenantsOverStorageQuotaReply {
+	constexpr static FileIdentifier file_identifier = 5952266;
+	std::vector<TenantName> tenants;
+
+	TenantsOverStorageQuotaReply() {}
+	explicit TenantsOverStorageQuotaReply(std::vector<TenantName> tenants) : tenants(tenants) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tenants);
+	}
+};
+
+struct TenantsOverStorageQuotaRequest {
+	constexpr static FileIdentifier file_identifier = 84290;
+	ReplyPromise<TenantsOverStorageQuotaReply> reply;
+
+	TenantsOverStorageQuotaRequest() {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
