@@ -361,6 +361,7 @@ public:
 
 	// Called on every read operation.
 	ReadIterator getIterator(const KeyRange& range) {
+		// Shared iterators are not bounded.
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
