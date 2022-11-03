@@ -37,8 +37,9 @@ class DDTxnProcessorImpl {
 			servers.clear();
 			completeSources.clear();
 
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
 				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -100,6 +101,7 @@ class DDTxnProcessorImpl {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 				RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
@@ -158,6 +160,7 @@ class DDTxnProcessorImpl {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> val = wait(tr.get(healthyZoneKey));
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
@@ -171,7 +174,6 @@ class DDTxnProcessorImpl {
 				}
 
 				result->mode = 1;
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
@@ -254,6 +256,8 @@ class DDTxnProcessorImpl {
 			loop {
 				succeeded = false;
 				try {
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -369,6 +373,10 @@ class DDTxnProcessorImpl {
 		state Transaction tr(cx);
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
+
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
