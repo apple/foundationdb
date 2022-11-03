@@ -6384,8 +6384,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
-			wait(store(req.transaction.read_snapshot, readVersion) &&
-			     store(req.commitCostEstimation, estimateCommitCosts(trState, &req.transaction)));
+			state Future<Optional<ClientTrCommitCostEstimation>> commitCostFuture =
+			    estimateCommitCosts(trState, &req.transaction);
+			// We need to wait for the read version first so that we can be notified if the database is locked
+			wait(store(req.transaction.read_snapshot, readVersion));
+			wait(store(req.commitCostEstimation, commitCostFuture));
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
