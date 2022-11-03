@@ -644,6 +644,7 @@ struct BusiestWriteTagContext {
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
 
+// A SSPhysicalShard represents a physical shard, it contains a list of keyranges.
 class SSPhysicalShard {
 public:
 	SSPhysicalShard() : id(0LL) {}
@@ -663,10 +664,11 @@ private:
 };
 
 void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
-	TraceEvent(SevDebug, "SSPhysicalShardAddShard")
+	TraceEvent(SevVerbose, "SSPhysicalShardAddShard")
 	    .detail("ShardID", format("%016llx", this->id))
 	    .detail("Assigned", !shard->notAssigned())
 	    .detail("Range", shard->keys);
+
 	if (shard->notAssigned()) {
 		return;
 	}
@@ -677,10 +679,11 @@ void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
 }
 
 void SSPhysicalShard::removeRange(Reference<ShardInfo> shard) {
-	TraceEvent(SevDebug, "SSPhysicalShardRemoveShard")
+	TraceEvent(SevVerbose, "SSPhysicalShardRemoveShard")
 	    .detail("ShardID", format("%016llx", this->id))
 	    .detail("Assigned", !shard->notAssigned())
 	    .detail("Range", shard->keys);
+
 	for (int i = 0; i < this->ranges.size(); ++i) {
 		const auto& r = this->ranges[i];
 		if (r.getPtr() == shard.getPtr()) {
@@ -1442,6 +1445,7 @@ public:
 		if (!range.isValid() || !shardAware || range->notAssigned()) {
 			return;
 		}
+
 		auto it = physicalShards.find(range->desiredShardId);
 		ASSERT(it != physicalShards.end());
 		it->second.removeRange(range);
@@ -1458,11 +1462,11 @@ public:
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
 
-		if (shardAware) {
+		if (shardAware && newShard->notAssigned()) {
 			auto sh = shards.intersectingRanges(newShard->keys);
 			for (auto it = sh.begin(); it != sh.end(); ++it) {
 				if (it->value().isValid() && !it->value()->notAssigned()) {
-					TraceEvent("StorageServerAddShardClear")
+					TraceEvent(SevVerbose, "StorageServerAddShardClear")
 					    .detail("NewShardRange", newShard->keys)
 					    .detail("Range", it->value()->keys)
 					    .detail("ShardID", format("%016llx", it->value()->desiredShardId))
@@ -5903,8 +5907,6 @@ void coalescePhysicalShards(StorageServer* data, KeyRangeRef keys) {
 		if (ShardInfo::canMerge(lastShard.value().getPtr(), iter->value().getPtr())) {
 			ShardInfo* newShard = lastShard.value().extractPtr();
 			ASSERT(newShard->mergeWith(iter->value().getPtr()));
-			TraceEvent("AddShardCaller1", data->thisServerID)
-			    .detail("Shard", newShard->toStorageServerShard().toString());
 			data->addShard(newShard);
 			iter = data->shards.rangeContaining(newShard->keys.begin);
 		}
@@ -5930,14 +5932,10 @@ void coalesceShards(StorageServer* data, KeyRangeRef keys) {
 	for (; iter != iterEnd; ++iter) {
 		if (lastReadable && iter->value()->isReadable()) {
 			KeyRange range = KeyRangeRef(lastRange->begin(), iter->end());
-			TraceEvent("AddShardCaller2", data->thisServerID)
-			    .detail("Shard", iter->value()->toStorageServerShard().toString());
 			data->addShard(ShardInfo::newReadWrite(range, data));
 			iter = data->shards.rangeContaining(range.begin);
 		} else if (lastNotAssigned && iter->value()->notAssigned()) {
 			KeyRange range = KeyRangeRef(lastRange->begin(), iter->end());
-			TraceEvent("AddShardCaller3", data->thisServerID)
-			    .detail("Shard", iter->value()->toStorageServerShard().toString());
 			data->addShard(ShardInfo::newNotAssigned(range));
 			iter = data->shards.rangeContaining(range.begin);
 		}
@@ -7134,9 +7132,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						rightShard.range = KeyRangeRef(nfk, keys.end);
 						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard);
 						leftShard->populateShard(rightShard);
-						TraceEvent("AddShardCaller4", data->thisServerID).detail("Shard",leftShard->toStorageServerShard().toString());
 						shard->server->addShard(leftShard);
-						TraceEvent("AddShardCaller5", data->thisServerID).detail("Shard", rightShard.toString());
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
@@ -7348,7 +7344,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		shard->readWrite.send(Void());
 		if (data->shardAware) {
 			newShard.setShardState(StorageServerShard::ReadWrite);
-			TraceEvent("AddShardCaller6", data->thisServerID).detail("Shard", newShard.toString());
 			data->addShard(ShardInfo::newShard(data, newShard)); // invalidates shard!
 			coalescePhysicalShards(data, keys);
 		} else {
@@ -7495,12 +7490,10 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 			    .detail("Shard", shard.toString())
 			    .detail("Range", range);
 			if (range == shard.range) {
-				TraceEvent("AddShardCaller7", data->thisServerID).detail("Shard", shard.toString());
 				data->addShard(ShardInfo::newShard(data, shard));
 			} else {
 				StorageServerShard rightShard = ranges[i].value->toStorageServerShard();
 				rightShard.range = range;
-				TraceEvent("AddShardCaller8", data->thisServerID).detail("Shard", rightShard.toString());
 				data->addShard(ShardInfo::newShard(data, rightShard));
 			}
 		}
@@ -7969,7 +7962,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	}
 
 	for (const auto& shard : updatedShards) {
-		TraceEvent("AddShardCaller9", data->thisServerID).detail("Shard", shard.toString());
 		data->addShard(ShardInfo::newShard(data, shard));
 		updateStorageShard(data, shard);
 	}

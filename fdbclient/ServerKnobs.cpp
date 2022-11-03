@@ -396,9 +396,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	int64_t blockCacheSize = isSimulated ? 0 : 1024 * 1024 * 1024 /* 1GB */;
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                   blockCacheSize );
 	init( ROCKSDB_METRICS_DELAY,                                60.0 );
-	init( ROCKSDB_READ_VALUE_TIMEOUT,      isSimulated ? 5.0 : 200.0 );
-	init( ROCKSDB_READ_VALUE_PREFIX_TIMEOUT, isSimulated ? 5.0 : 200.0 );
-	init( ROCKSDB_READ_RANGE_TIMEOUT,       isSimulated ? 5.0 : 200.0 );
+	init( ROCKSDB_READ_VALUE_TIMEOUT,      isSimulated ? 5.0 : 500.0 );
+	init( ROCKSDB_READ_VALUE_PREFIX_TIMEOUT, isSimulated ? 5.0 : 500.0 );
+	init( ROCKSDB_READ_RANGE_TIMEOUT,       isSimulated ? 5.0 : 500.0 );
 	init( ROCKSDB_READ_QUEUE_WAIT,                               1.0 );
 	init( ROCKSDB_READ_QUEUE_HARD_MAX,                          1000 );
 	init( ROCKSDB_READ_QUEUE_SOFT_MAX,                           500 );
