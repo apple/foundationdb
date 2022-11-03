@@ -34,6 +34,9 @@ class DDTxnProcessorImpl {
 		state Transaction tr(cx);
 		state ServerWorkerInfos res;
 		loop {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
 				wait(store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr)));
 				res.readVersion = tr.getReadVersion().get();
@@ -54,8 +57,9 @@ class DDTxnProcessorImpl {
 			servers.clear();
 			completeSources.clear();
 
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
 				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -113,8 +117,9 @@ class DDTxnProcessorImpl {
 	    KeyRangeRef range) {
 		state std::vector<IDDTxnProcessor::DDRangeLocations> res;
 		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
 			res.clear();
@@ -173,6 +178,7 @@ class DDTxnProcessorImpl {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 				RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
@@ -202,6 +208,10 @@ class DDTxnProcessorImpl {
 	ACTOR static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
 		state Transaction tr(cx);
 		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 			try {
 				Optional<Value> val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
 				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
@@ -255,6 +265,7 @@ class DDTxnProcessorImpl {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> val = wait(tr.get(healthyZoneKey));
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
@@ -268,7 +279,6 @@ class DDTxnProcessorImpl {
 				}
 
 				result->mode = 1;
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
@@ -352,6 +362,8 @@ class DDTxnProcessorImpl {
 			loop {
 				succeeded = false;
 				try {
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -468,6 +480,10 @@ class DDTxnProcessorImpl {
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
 
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isDDEnabled()) {
@@ -497,6 +513,10 @@ class DDTxnProcessorImpl {
 	ACTOR static Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
 		state Transaction tr(cx);
 		loop {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isDDEnabled())
@@ -539,6 +559,9 @@ class DDTxnProcessorImpl {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
 			state Transaction tr(cx);
 			loop {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				try {
 					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
 					break;
@@ -553,8 +576,10 @@ class DDTxnProcessorImpl {
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 				Optional<Value> res = wait(tr.get(rebalanceDDIgnoreKey));
 				return res;
 			} catch (Error& e) {
