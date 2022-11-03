@@ -1518,8 +1518,6 @@ public:
 	                                                      ServerStatus* status,
 	                                                      Version addedVersion) {
 		state StorageServerInterface interf = server->getLastKnownInterface();
-		state int targetTeamNumPerServer =
-		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 		loop {
 			state bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
 			if (self->healthyZone.get().present()) {
@@ -2284,15 +2282,12 @@ public:
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			UID clusterId = wait(self->getClusterId());
-
 			state InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
-			isr.clusterId = clusterId;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -3468,10 +3463,6 @@ Future<Void> DDTeamCollection::serverGetTeamRequests(TeamCollectionInterface tci
 
 Future<Void> DDTeamCollection::monitorHealthyTeams() {
 	return DDTeamCollectionImpl::monitorHealthyTeams(this);
-}
-
-Future<UID> DDTeamCollection::getClusterId() {
-	return db->getClusterId();
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {

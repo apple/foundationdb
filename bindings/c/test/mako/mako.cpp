@@ -283,24 +283,60 @@ int populate(Database db,
 			int batch_size = args.tenant_batch_size;
 			int batches = (args.total_tenants + batch_size - 1) / batch_size;
 			for (int batch = 0; batch < batches; ++batch) {
+				while (1) {
+					for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
+						std::string tenant_str = "tenant" + std::to_string(i);
+						Tenant::createTenant(systemTx, toBytesRef(tenant_str));
+					}
+					auto future_commit = systemTx.commit();
+					const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
+					if (rc == FutureRC::OK) {
+						// Keep going with reset transaction if commit was successful
+						systemTx.reset();
+						break;
+					} else if (rc == FutureRC::RETRY) {
+						// We want to retry this batch. Transaction is already reset
+					} else {
+						// Abort
+						return -1;
+					}
+				}
+
+				Tenant tenants[batch_size];
+				fdb::TypedFuture<fdb::future_var::Bool> blobbifyResults[batch_size];
+
+				// blobbify tenant ranges explicitly
+				// FIXME: skip if database not configured for blob granules?
 				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-					std::string tenant_name = "tenant" + std::to_string(i);
-					Tenant::createTenant(systemTx, toBytesRef(tenant_name));
+					std::string tenant_str = "tenant" + std::to_string(i);
+					BytesRef tenant_name = toBytesRef(tenant_str);
+					tenants[i] = db.openTenant(tenant_name);
+					std::string rangeEnd = "\xff";
+					blobbifyResults[i - (batch * batch_size)] =
+					    tenants[i].blobbifyRange(BytesRef(), toBytesRef(rangeEnd));
 				}
-				auto future_commit = systemTx.commit();
-				const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
-				if (rc == FutureRC::OK) {
-					// Keep going with reset transaction if commit was successful
-					systemTx.reset();
-				} else if (rc == FutureRC::RETRY) {
-					// We want to retry this batch, so decrement the number
-					// and go back through the loop to get the same value
-					// Transaction is already reset
-					--batch;
-				} else {
-					// Abort
-					return -1;
+
+				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
+					while (true) {
+						// not technically an operation that's part of systemTx, but it works
+						const auto rc =
+						    waitAndHandleError(systemTx, blobbifyResults[i - (batch * batch_size)], "BLOBBIFY_TENANT");
+						if (rc == FutureRC::OK) {
+							if (!blobbifyResults[i - (batch * batch_size)].get()) {
+								fmt::print("Blobbifying tenant {0} failed!\n", i);
+								return -1;
+							}
+							break;
+						} else if (rc == FutureRC::RETRY) {
+							continue;
+						} else {
+							// Abort
+							return -1;
+						}
+					}
 				}
+
+				systemTx.reset();
 			}
 		} else {
 			std::string last_tenant_name = "tenant" + std::to_string(args.total_tenants - 1);
@@ -1261,7 +1297,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			/* name, has_arg, flag, val */
 			{ "api_version", required_argument, NULL, 'a' },
 			{ "cluster", required_argument, NULL, 'c' },
-			{ "num_databases", optional_argument, NULL, 'd' },
+			{ "num_databases", required_argument, NULL, 'd' },
 			{ "procs", required_argument, NULL, 'p' },
 			{ "threads", required_argument, NULL, 't' },
 			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
@@ -1312,6 +1348,17 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
 			{ NULL, 0, NULL, 0 }
 		};
+
+/* For optional arguments, optarg is only set when the argument is passed as "--option=[ARGUMENT]" but not as
+ "--option [ARGUMENT]". This function sets optarg in the latter case. See
+ https://cfengine.com/blog/2021/optional-arguments-with-getopt-long/ for a more detailed explanation */
+#define SET_OPT_ARG_IF_PRESENT()                                                                                       \
+	{                                                                                                                  \
+		if (optarg == NULL && optind < argc && argv[optind][0] != '-') {                                               \
+			optarg = argv[optind++];                                                                                   \
+		}                                                                                                              \
+	}
+
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
 		if (c < 0) {
@@ -1513,9 +1560,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.disable_ryw = 1;
 			break;
 		case ARG_JSON_REPORT:
-			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
-				// if --report_json is the last option and no file is specified
-				// or --report_json is followed by another option
+			SET_OPT_ARG_IF_PRESENT();
+			if (!optarg) {
 				char default_file[] = "mako.json";
 				strncpy(args.json_output_path, default_file, sizeof(default_file));
 			} else {
@@ -1526,13 +1572,12 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
 		case ARG_EXPORT_PATH:
-			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
+			SET_OPT_ARG_IF_PRESENT();
+			if (!optarg) {
 				char default_file[] = "sketch_data.json";
 				strncpy(args.stats_export_path, default_file, sizeof(default_file));
 			} else {
-				strncpy(args.stats_export_path,
-				        argv[optind],
-				        std::min(sizeof(args.stats_export_path), strlen(argv[optind]) + 1));
+				strncpy(args.stats_export_path, optarg, std::min(sizeof(args.stats_export_path), strlen(optarg) + 1));
 			}
 			break;
 		case ARG_DISTRIBUTED_TRACER_CLIENT:

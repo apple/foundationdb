@@ -382,7 +382,6 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	// Note: this may cause some shards to be processed more than once or not at all in a non-quiescent database
 	state int effectiveClientCount = distributed ? clientCount : 1;
 	state int i = clientId * (shardSampleFactor + 1);
-	state int increment = (distributed && !firstClient) ? effectiveClientCount * shardSampleFactor : 1;
 	state int64_t rateLimitForThisRound =
 	    *bytesReadInPrevRound == 0
 	        ? maxRate
