@@ -3456,6 +3456,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
+			trState->totalCost +=
+			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0));
 
 			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
@@ -4285,6 +4287,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       RangeResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
+	trState->totalCost += getReadOperationCost(bytes);
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
 
@@ -5767,6 +5770,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange
 	auto r = singleKeyRange(key, req.arena);
 	auto v = ValueRef(req.arena, value);
 	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
+	trState->totalCost += getWriteOperationCost(key.expectedSize() + value.expectedSize());
 
 	if (addConflictRange) {
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5796,6 +5800,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	auto v = ValueRef(req.arena, operand);
 
 	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
+	trState->totalCost += getWriteOperationCost(key.expectedSize());
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5827,7 +5832,10 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 		return;
 
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
-
+	// NOTE: The throttling cost of each clear is assumed to be one page.
+	// This makes compuation fast, but can be inaccurate and may
+	// underestimate the cost of large clears.
+	trState->totalCost += CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6240,14 +6248,14 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 	state int i = 0;
 
 	for (; i < transaction->mutations.size(); ++i) {
-		auto* it = &transaction->mutations[i];
+		auto const& mutation = transaction->mutations[i];
 
-		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
+		if (mutation.type == MutationRef::Type::SetValue || mutation.isAtomicOp()) {
 			trCommitCosts.opsCount++;
-			trCommitCosts.writeCosts += getWriteOperationCost(it->expectedSize());
-		} else if (it->type == MutationRef::Type::ClearRange) {
+			trCommitCosts.writeCosts += getWriteOperationCost(mutation.expectedSize());
+		} else if (mutation.type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
-			keyRange = KeyRangeRef(it->param1, it->param2);
+			keyRange = KeyRangeRef(mutation.param1, mutation.param2);
 			if (trState->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(trState->cx->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY, trState));
 				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));
@@ -6376,8 +6384,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
-			wait(store(req.transaction.read_snapshot, readVersion) &&
-			     store(req.commitCostEstimation, estimateCommitCosts(trState, &req.transaction)));
+			state Future<Optional<ClientTrCommitCostEstimation>> commitCostFuture =
+			    estimateCommitCosts(trState, &req.transaction);
+			// We need to wait for the read version first so that we can be notified if the database is locked
+			wait(store(req.transaction.read_snapshot, readVersion));
+			wait(store(req.commitCostEstimation, commitCostFuture));
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
@@ -7548,12 +7559,11 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
                                                             Optional<Reference<TransactionState>> trState);
 
 ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
+                                                 TenantInfo tenantInfo,
                                                  KeyRange keys,
                                                  Reference<LocationInfo> locationInfo,
                                                  TenantMapEntry tenantEntry,
                                                  Optional<Reference<TransactionState>> trState) {
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	try {
 		WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
@@ -7562,12 +7572,16 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
 		return m;
 	} catch (Error& e) {
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+		if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+			cx->invalidateCache(tenantEntry.prefix, keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+		           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+			wait(trState.get()->handleUnknownTenant());
+		} else {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
 		}
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-		cx->invalidateCache(tenantEntry.prefix, keys);
 
 		StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
 		return m;
@@ -7598,7 +7612,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
 		fx[i] = doGetStorageMetrics(
-		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
+		    cx, tenantInfo, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -7753,27 +7767,18 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
                                                                       StorageMetrics min,
                                                                       StorageMetrics max,
                                                                       StorageMetrics permittedError) {
-	try {
-		Future<StorageMetrics> fx;
-		if (locations.size() > 1) {
-			fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
-		} else {
-			WaitMetricsRequest req(tenantInfo, keys, min, max);
-			fx = loadBalance(locations[0].locations->locations(),
-			                 &StorageServerInterface::waitMetrics,
-			                 req,
-			                 TaskPriority::DataDistribution);
-		}
-		StorageMetrics x = wait(fx);
-		return x;
-	} catch (Error& e) {
-		TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-			throw;
-		}
+	Future<StorageMetrics> fx;
+	if (locations.size() > 1) {
+		fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
+	} else {
+		WaitMetricsRequest req(tenantInfo, keys, min, max);
+		fx = loadBalance(locations[0].locations->locations(),
+		                 &StorageServerInterface::waitMetrics,
+		                 req,
+		                 TaskPriority::DataDistribution);
 	}
-	return Optional<StorageMetrics>();
+	StorageMetrics x = wait(fx);
+	return x;
 }
 
 ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
@@ -7786,9 +7791,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     int expectedShardCount,
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	loop {
+		state TenantInfo tenantInfo =
+		    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
 		                              tenantInfo,
@@ -7818,13 +7823,25 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			continue;
 		}
 
-		Optional<StorageMetrics> res =
-		    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
-		if (res.present()) {
-			return std::make_pair(res, -1);
+		try {
+			Optional<StorageMetrics> res =
+			    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+			if (res.present()) {
+				return std::make_pair(res, -1);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+			           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+				wait(trState.get()->handleUnknownTenant());
+			} else {
+				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+				throw;
+			}
 		}
-		cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 
