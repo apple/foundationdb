@@ -1385,7 +1385,7 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageS
 		auditState.setPhase(AuditPhase::Complete);
 		wait(persistAuditState(self->txnProcessor->context(), auditState));
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "DDResumeAuditStorageOperationError", self->ddId)
+		TraceEvent(SevInfo, "DDResumeAuditStorageOperationError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->id)
 		    .detail("Range", auditState.range)
@@ -1459,7 +1459,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				req.reply.send(audit->id);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "DDAuditStorageError", self->ddId)
+			TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", (audit == nullptr ? UID() : audit->id))
 			    .detail("Range", req.range)
@@ -1551,7 +1551,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 				wait(delay(0.01));
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "DDScheduleAuditRangeError", self->ddId)
+			TraceEvent(SevInfo, "DDScheduleAuditRangeError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", audit->id)
 			    .detail("Range", range);
@@ -1587,7 +1587,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("StorageServer", ssi.toString())
 		    .detail("TargetServers", describe(req.targetServers));
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "DDDoAuditOnStorageServerError", req.id)
+		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", req.id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", req.id)
 		    .detail("Range", req.range)

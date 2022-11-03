@@ -96,7 +96,7 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarnAlways, "StartAuditStorageError").errorUnsuppressed(e);
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
 				wait(delay(1));
 			}
 		}

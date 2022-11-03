@@ -4290,7 +4290,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				wait(persistAuditStateMap(data->cx, auditState));
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ValidateRangeAgainstServerError", data->thisServerID)
+			TraceEvent(SevInfo, "ValidateRangeAgainstServerError", data->thisServerID)
 			    .errorUnsuppressed(e)
 			    .detail("RemoteServer", remoteServer.toString())
 			    .detail("Range", range)
@@ -4364,7 +4364,7 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data,
 	}
 
 	if (ssis.size() < 2) {
-		TraceEvent(SevWarn, "ServeValidateRangeShardNotHAConfig", data->thisServerID)
+		TraceEvent(SevInfo, "ServeValidateRangeShardNotHAConfig", data->thisServerID)
 		    .detail("Range", range)
 		    .detail("Servers", describe(candidates));
 		return Void();
@@ -4385,7 +4385,7 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data,
 	if (remoteServer != nullptr) {
 		wait(validateRangeAgainstServer(data, auditState, range, version, *remoteServer));
 	} else {
-		TraceEvent(SevWarn, "ServeValidateRangeShardRemoteNotFound", data->thisServerID)
+		TraceEvent(SevInfo, "ServeValidateRangeShardRemoteNotFound", data->thisServerID)
 		    .detail("Range", range)
 		    .detail("Servers", describe(candidates));
 		throw audit_storage_failed();
@@ -4430,7 +4430,7 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
 	std::vector<Future<Void>> fs;
 	for (const auto& v : serverListValues) {
 		if (!v.present()) {
-			TraceEvent(SevWarn, "ValidateRangeRemoteServerNotFound", data->thisServerID).detail("Range", range);
+			TraceEvent(SevInfo, "ValidateRangeRemoteServerNotFound", data->thisServerID).detail("Range", range);
 			throw audit_storage_failed();
 		}
 		fs.push_back(validateRangeAgainstServer(data, auditState, range, version, decodeServerListValue(v.get())));
@@ -4492,7 +4492,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		res.setPhase(AuditPhase::Complete);
 		req.reply.send(res);
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "ServeAuditStorageError", data->thisServerID)
+		TraceEvent(SevInfo, "ServeAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("RequestID", req.id)
 		    .detail("Range", req.range)
