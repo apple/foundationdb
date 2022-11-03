@@ -143,9 +143,7 @@ target_link_options(flow PUBLIC
 # Link with runtime initialization stub (not needed on Darwin).
 if (NOT APPLE)
   string(REPLACE " " ";" SWIFT_LINK_PATHS_LIST "${SWIFT_LINK_PATHS}")
-  list(LENGTH SWIFT_LINK_PATHS_LIST ListLen)
-  math(EXPR ListLast "${ListLen} - 1")
-  list(GET SWIFT_LINK_PATHS_LIST ${ListLast} LastPath)
+  list(GET SWIFT_LINK_PATHS_LIST -1 LastPath) # get the last element the list
   target_link_options(flow PUBLIC "${LastPath}/swiftrt.o")
 endif()
 
