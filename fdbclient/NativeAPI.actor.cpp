@@ -6384,8 +6384,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
-			wait(store(req.transaction.read_snapshot, readVersion) &&
-			     store(req.commitCostEstimation, estimateCommitCosts(trState, &req.transaction)));
+			state Future<Optional<ClientTrCommitCostEstimation>> commitCostFuture =
+			    estimateCommitCosts(trState, &req.transaction);
+			// We need to wait for the read version first so that we can be notified if the database is locked
+			wait(store(req.transaction.read_snapshot, readVersion));
+			wait(store(req.commitCostEstimation, commitCostFuture));
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
@@ -7556,12 +7559,11 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
                                                             Optional<Reference<TransactionState>> trState);
 
 ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
+                                                 TenantInfo tenantInfo,
                                                  KeyRange keys,
                                                  Reference<LocationInfo> locationInfo,
                                                  TenantMapEntry tenantEntry,
                                                  Optional<Reference<TransactionState>> trState) {
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	try {
 		WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
@@ -7570,12 +7572,16 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
 		return m;
 	} catch (Error& e) {
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+		if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+			cx->invalidateCache(tenantEntry.prefix, keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+		           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+			wait(trState.get()->handleUnknownTenant());
+		} else {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
 		}
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-		cx->invalidateCache(tenantEntry.prefix, keys);
 
 		StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
 		return m;
@@ -7606,7 +7612,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
 		fx[i] = doGetStorageMetrics(
-		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
+		    cx, tenantInfo, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -7761,27 +7767,18 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
                                                                       StorageMetrics min,
                                                                       StorageMetrics max,
                                                                       StorageMetrics permittedError) {
-	try {
-		Future<StorageMetrics> fx;
-		if (locations.size() > 1) {
-			fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
-		} else {
-			WaitMetricsRequest req(tenantInfo, keys, min, max);
-			fx = loadBalance(locations[0].locations->locations(),
-			                 &StorageServerInterface::waitMetrics,
-			                 req,
-			                 TaskPriority::DataDistribution);
-		}
-		StorageMetrics x = wait(fx);
-		return x;
-	} catch (Error& e) {
-		TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-			throw;
-		}
+	Future<StorageMetrics> fx;
+	if (locations.size() > 1) {
+		fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
+	} else {
+		WaitMetricsRequest req(tenantInfo, keys, min, max);
+		fx = loadBalance(locations[0].locations->locations(),
+		                 &StorageServerInterface::waitMetrics,
+		                 req,
+		                 TaskPriority::DataDistribution);
 	}
-	return Optional<StorageMetrics>();
+	StorageMetrics x = wait(fx);
+	return x;
 }
 
 ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
@@ -7794,9 +7791,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     int expectedShardCount,
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	loop {
+		state TenantInfo tenantInfo =
+		    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
 		                              tenantInfo,
@@ -7826,13 +7823,25 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			continue;
 		}
 
-		Optional<StorageMetrics> res =
-		    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
-		if (res.present()) {
-			return std::make_pair(res, -1);
+		try {
+			Optional<StorageMetrics> res =
+			    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+			if (res.present()) {
+				return std::make_pair(res, -1);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+			           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+				wait(trState.get()->handleUnknownTenant());
+			} else {
+				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+				throw;
+			}
 		}
-		cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 
