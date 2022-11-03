@@ -101,6 +101,7 @@ public:
 	virtual Version getCommittedVersion() const = 0;
 	virtual VersionVector getVersionVector() const = 0;
 	virtual SpanContext getSpanContext() const = 0;
+	virtual int64_t getTotalCost() const = 0;
 	virtual int64_t getApproximateSize() const = 0;
 	virtual Future<Standalone<StringRef>> getVersionstamp() = 0;
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;

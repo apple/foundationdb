@@ -231,6 +231,10 @@ Int64Future Transaction::get_approximate_size() {
 	return Int64Future(fdb_transaction_get_approximate_size(tr_));
 }
 
+Int64Future Transaction::get_total_cost() {
+	return Int64Future(fdb_transaction_get_total_cost(tr_));
+}
+
 KeyFuture Transaction::get_versionstamp() {
 	return KeyFuture(fdb_transaction_get_versionstamp(tr_));
 }

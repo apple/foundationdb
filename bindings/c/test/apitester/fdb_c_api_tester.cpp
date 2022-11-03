@@ -36,7 +36,7 @@ namespace FdbApiTester {
 
 namespace {
 
-#define API_VERSION_CLIENT_TMP_DIR 720
+#define API_VERSION_CLIENT_TMP_DIR 730
 
 enum TesterOptionId {
 	OPT_CONNFILE,

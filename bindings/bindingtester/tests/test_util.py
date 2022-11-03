@@ -107,7 +107,7 @@ class RandomGenerator(object):
                 user_version = random.randint(0, 0xffff)
                 tup.append(fdb.tuple.Versionstamp(tr_version, user_version))
             else:
-                assert false
+                assert False
 
         return tuple(tup)
 

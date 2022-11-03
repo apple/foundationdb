@@ -27,6 +27,7 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/Error.h"
@@ -87,9 +88,10 @@ public:
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
-	                           const VectorRef<MutationRef>& mutations_)
+	                           const VectorRef<MutationRef>& mutations_,
+	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
+	    cipherKeys(cipherKeys_), txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
 	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
@@ -132,7 +134,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::unordered_map<int64_t, TenantName>* tenantIdIndex = nullptr;
+	std::unordered_map<int64_t, TenantNameUniqueSet>* tenantIdIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -160,11 +162,13 @@ private:
 
 private:
 	void writeMutation(const MutationRef& m) {
-		if (forResolver || !isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+		if (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
 			toCommit->writeTypedMessage(m);
 		} else {
 			ASSERT(cipherKeys != nullptr);
 			Arena arena;
+			CODE_PROBE(!forResolver, "encrypting metadata mutations");
+			CODE_PROBE(forResolver, "encrypting resolver mutations");
 			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
 	}
@@ -669,7 +673,7 @@ private:
 
 				(*tenantMap)[tenantName] = tenantEntry;
 				if (tenantIdIndex) {
-					(*tenantIdIndex)[tenantEntry.id] = tenantName;
+					(*tenantIdIndex)[tenantEntry.id].insert(tenantName);
 				}
 			}
 
@@ -799,7 +803,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
+					logSystem->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -807,11 +811,11 @@ private:
 				if (toCommit) {
 					MutationRef privatized = m;
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
-					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
+					privatized.param2 = keyAfter(privatized.param1, arena);
 
 					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
-					toCommit->addTag(decodeServerTagValue(kv.value));
+					toCommit->addTag(tag);
 					writeMutation(privatized);
 				}
 			}
@@ -1096,7 +1100,11 @@ private:
 					// TODO: O(n) operation, optimize cpu
 					auto itr = startItr;
 					while (itr != endItr) {
-						tenantIdIndex->erase(itr->second.id);
+						auto indexItr = tenantIdIndex->find(itr->second.id);
+						ASSERT(indexItr != tenantIdIndex->end());
+						if (indexItr->second.remove(itr->first)) {
+							tenantIdIndex->erase(indexItr);
+						}
 						itr++;
 					}
 				}
@@ -1343,8 +1351,9 @@ void applyMetadataMutations(SpanContext const& spanContext,
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations) {
-	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
+                            const VectorRef<MutationRef>& mutations,
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys) {
+	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, pCipherKeys).apply();
 }
 
 void applyMetadataMutations(SpanContext const& spanContext,

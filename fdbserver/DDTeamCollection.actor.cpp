@@ -1518,8 +1518,6 @@ public:
 	                                                      ServerStatus* status,
 	                                                      Version addedVersion) {
 		state StorageServerInterface interf = server->getLastKnownInterface();
-		state int targetTeamNumPerServer =
-		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 		loop {
 			state bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
 			if (self->healthyZone.get().present()) {
