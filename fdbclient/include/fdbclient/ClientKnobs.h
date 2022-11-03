@@ -261,8 +261,8 @@ public:
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 	int64_t WRITE_COST_BYTE_FACTOR; // Used to round up the cost of write operations
 	int64_t READ_COST_BYTE_FACTOR; // Used to round up the cost of read operations
-	double PROXY_MAX_TAG_THROTTLE_DURATION; // Maximum duration that a transaction can be tag throttled by proxy before
-	                                        // being rejected
+	// Cost multiplier for writes (because write operations are more expensive than reads):
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;

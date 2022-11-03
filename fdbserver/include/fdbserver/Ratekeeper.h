@@ -58,17 +58,19 @@ class StorageQueueInfo {
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 
+	UID ratekeeperID;
+	Smoother smoothFreeSpace, smoothTotalSpace;
+	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
+
+	// Currently unused
+	Smoother smoothDurableVersion, smoothLatestVersion;
+
 public:
 	bool valid;
-	UID ratekeeperID;
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
 	bool acceptingRequests;
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothDurableVersion, smoothLatestVersion;
-	Smoother smoothFreeSpace;
-	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
 	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 
@@ -81,17 +83,33 @@ public:
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
 	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
 
+	// Accessor methods for Smoothers
+	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
+	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
+	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
+	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
+	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
+
 	// Determine the ratio (limit / current throughput) for throttling based on write queue size
-	Optional<double> getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
+	Optional<double> getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
-struct TLogQueueInfo {
-	TLogQueuingMetricsReply lastReply;
-	bool valid;
-	UID id;
+class TLogQueueInfo {
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
+
+public:
+	TLogQueuingMetricsReply lastReply;
+	bool valid;
+	UID id;
+
+	// Accessor methods for Smoothers
+	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
+	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
+	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
+	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
+	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
 
 	TLogQueueInfo(UID id);
 	Version getLastCommittedVersion() const { return lastReply.v; }
