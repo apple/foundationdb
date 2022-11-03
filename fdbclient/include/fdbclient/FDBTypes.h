@@ -547,8 +547,10 @@ struct hash<KeyRange> {
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == "\xff\xff"_sr) {
-		return KeyRef(arena, key);
+	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
+	static const auto allKeysEnd = "\xff\xff"_sr;
+	if (key == allKeysEnd) {
+		return allKeysEnd;
 	}
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
 	memcpy(t, key.begin(), key.size());
