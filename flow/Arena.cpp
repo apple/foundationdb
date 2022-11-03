@@ -297,6 +297,7 @@ void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
 }
 
 void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
+	ASSERT(self->getData() != other->getData());
 	other->addref();
 	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef))
 		create(SMALL, self)->makeReference(other);
