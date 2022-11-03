@@ -232,10 +232,10 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 		    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
 		throw encrypt_header_metadata_mismatch();
 	}
-	// Validate encryption header 'cipherHeader' details sanity
-	if (!(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
-	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
-	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
+	// Validate encryption header 'cipherText' details sanity
+	if (!(header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() &&
+	      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() &&
+	      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt())) {
 		TraceEvent(SevError, "EncryptionHeader_CipherTextMismatch")
 		    .detail("TextDomainId", eKeys.textCipherKey->getDomainId())
 		    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
@@ -1057,6 +1057,9 @@ ParsedDeltaBoundaryRef deltaAtVersion(const DeltaBoundaryRef& delta, Version beg
 	                  beginVersion <= delta.clearVersion.get();
 	if (delta.values.empty()) {
 		return ParsedDeltaBoundaryRef(delta.key, clearAfter);
+	} else if (readVersion >= delta.values.back().version && beginVersion <= delta.values.back().version) {
+		// for all but zero or one delta files, readVersion >= the entire delta file. optimize this case
+		return ParsedDeltaBoundaryRef(delta.key, clearAfter, delta.values.back());
 	}
 	auto valueAtVersion = std::lower_bound(delta.values.begin(),
 	                                       delta.values.end(),
@@ -1338,6 +1341,10 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 	std::set<int16_t, std::greater<int16_t>> activeClears;
 	int16_t maxActiveClear = -1;
 
+	// trade off memory for cpu performance by assuming all inserts
+	RangeResult result;
+	int maxExpectedSize = 0;
+
 	// check if a given stream is actively clearing
 	bool clearActive[streams.size()];
 	for (int16_t i = 0; i < streams.size(); i++) {
@@ -1355,14 +1362,12 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 			item.streamIdx = i;
 			item.dataIdx = 0;
 			next.push(item);
+			maxExpectedSize += streams[i].size();
+			result.arena().dependsOn(streams[i].arena());
 		}
 	}
+	result.reserve(result.arena(), maxExpectedSize);
 
-	if (chunk.snapshotFile.present()) {
-		stats.snapshotRows += streams[0].size();
-	}
-
-	RangeResult result;
 	std::vector<MergeStreamNext> cur;
 	cur.reserve(streams.size());
 	while (!next.empty()) {
@@ -1397,7 +1402,7 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 				if (v.isSet() && maxActiveClear < it.streamIdx) {
 					KeyRef finalKey =
 					    chunk.tenantPrefix.present() ? v.key.removePrefix(chunk.tenantPrefix.get()) : v.key;
-					result.push_back_deep(result.arena(), KeyValueRef(finalKey, v.value));
+					result.push_back(result.arena(), KeyValueRef(finalKey, v.value));
 					if (!includesSnapshot) {
 						stats.rowsInserted++;
 					} else if (it.streamIdx > 0) {
@@ -1426,7 +1431,35 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 		}
 	}
 
+	// FIXME: if memory assumption was wrong and result is significantly smaller than total input size, could copy it
+	// with push_back_deep to a new result. This is rare though
+
 	stats.outputBytes += result.expectedSize();
+
+	return result;
+}
+
+RangeResult materializeJustSnapshot(const BlobGranuleChunkRef& chunk,
+                                    Optional<StringRef> snapshotData,
+                                    const KeyRange& requestRange,
+                                    GranuleMaterializeStats& stats) {
+	stats.inputBytes += snapshotData.get().size();
+
+	Standalone<VectorRef<ParsedDeltaBoundaryRef>> snapshotRows = loadSnapshotFile(
+	    chunk.snapshotFile.get().filename, snapshotData.get(), requestRange, chunk.snapshotFile.get().cipherKeysCtx);
+	RangeResult result;
+	if (!snapshotRows.empty()) {
+		result.arena().dependsOn(snapshotRows.arena());
+		result.reserve(result.arena(), snapshotRows.size());
+		for (auto& it : snapshotRows) {
+			// TODO REMOVE validation
+			ASSERT(it.op == MutationRef::Type::SetValue);
+			KeyRef finalKey = chunk.tenantPrefix.present() ? it.key.removePrefix(chunk.tenantPrefix.get()) : it.key;
+			result.push_back(result.arena(), KeyValueRef(finalKey, it.value));
+		}
+		stats.outputBytes += result.expectedSize();
+		stats.snapshotRows += result.size();
+	}
 
 	return result;
 }
@@ -1454,6 +1487,11 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		requestRange = keyRange;
 	}
 
+	// fast case for only-snapshot read
+	if (chunk.snapshotFile.present() && chunk.deltaFiles.empty() && chunk.newDeltas.empty()) {
+		return materializeJustSnapshot(chunk, snapshotData, requestRange, stats);
+	}
+
 	std::vector<Standalone<VectorRef<ParsedDeltaBoundaryRef>>> streams;
 	std::vector<bool> startClears;
 	// +1 for possible snapshot, +1 for possible memory deltas
@@ -1471,7 +1509,10 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 			streams.push_back(snapshotRows);
 			startClears.push_back(false);
 			arena.dependsOn(streams.back().arena());
+			stats.snapshotRows += snapshotRows.size();
 		}
+	} else {
+		ASSERT(!chunk.snapshotFile.present());
 	}
 
 	if (BG_READ_DEBUG) {
@@ -2879,6 +2920,28 @@ std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& da
 	return { serializedBytes, elapsed };
 }
 
+void chunkFromFileSet(const FileSet& fileSet,
+                      Standalone<BlobGranuleChunkRef>& chunk,
+                      StringRef* deltaPtrs,
+                      Version readVersion,
+                      Optional<BlobGranuleCipherKeysCtx> keys,
+                      int numDeltaFiles) {
+	size_t snapshotSize = std::get<3>(fileSet.snapshotFile).size();
+	chunk.snapshotFile =
+	    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize, keys);
+
+	for (int i = 0; i < numDeltaFiles; i++) {
+		size_t deltaSize = std::get<3>(fileSet.deltaFiles[i]).size();
+		chunk.deltaFiles.emplace_back_deep(
+		    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize, keys);
+		deltaPtrs[i] = std::get<2>(fileSet.deltaFiles[i]);
+	}
+
+	chunk.keyRange = fileSet.range;
+	chunk.includedVersion = readVersion;
+	chunk.snapshotVersion = std::get<1>(fileSet.snapshotFile);
+}
+
 FileSet rewriteChunkedFileSet(const FileSet& fileSet,
                               Optional<BlobGranuleCipherKeysCtx> keys,
                               Optional<CompressionFilter> compressionFilter) {
@@ -2905,42 +2968,30 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
                                        KeyRange readRange,
                                        bool clearAllAtEnd,
                                        Optional<BlobGranuleCipherKeysCtx> keys,
-                                       Optional<CompressionFilter> compressionFilter,
+                                       int numDeltaFiles,
                                        bool printStats = false) {
 	Version readVersion = std::get<1>(fileSet.deltaFiles.back());
 
 	Standalone<BlobGranuleChunkRef> chunk;
 	GranuleMaterializeStats stats;
-	StringRef deltaPtrs[fileSet.deltaFiles.size()];
+	ASSERT(numDeltaFiles >= 0 && numDeltaFiles <= fileSet.deltaFiles.size());
+	StringRef deltaPtrs[numDeltaFiles];
 
 	MutationRef clearAllAtEndMutation;
 	if (clearAllAtEnd) {
 		clearAllAtEndMutation = MutationRef(MutationRef::Type::ClearRange, readRange.begin, readRange.end);
 	}
 	if (chunked) {
-		size_t snapshotSize = std::get<2>(fileSet.snapshotFile).size();
-		chunk.snapshotFile =
-		    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize, keys);
-
-		for (int i = 0; i < fileSet.deltaFiles.size(); i++) {
-			size_t deltaSize = std::get<2>(fileSet.deltaFiles[i]).size();
-			chunk.deltaFiles.emplace_back_deep(
-			    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize, keys);
-			deltaPtrs[i] = std::get<2>(fileSet.deltaFiles[i]);
-		}
-
+		chunkFromFileSet(fileSet, chunk, deltaPtrs, readVersion, keys, numDeltaFiles);
 		if (clearAllAtEnd) {
 			readVersion++;
 			MutationsAndVersionRef lastDelta;
 			lastDelta.version = readVersion;
 			lastDelta.mutations.push_back(chunk.arena(), clearAllAtEndMutation);
+			chunk.includedVersion = readVersion;
 
 			chunk.newDeltas.push_back_deep(chunk.arena(), lastDelta);
 		}
-
-		chunk.keyRange = fileSet.range;
-		chunk.includedVersion = readVersion;
-		chunk.snapshotVersion = std::get<1>(fileSet.snapshotFile);
 	}
 
 	int64_t serializedBytes = 0;
@@ -3101,9 +3152,16 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 	std::vector<std::string> readRunNames = {};
 	std::vector<std::pair<int64_t, double>> readMetrics;
 
-	bool doEdgeCaseReadTests = true;
+	bool doEdgeCaseReadTests = false;
+	bool doVaryingDeltaTests = false;
 	std::vector<double> clearAllReadMetrics;
 	std::vector<double> readSingleKeyMetrics;
+	std::vector<std::vector<std::pair<int64_t, double>>> varyingDeltaMetrics;
+
+	size_t maxDeltaFiles = 100000;
+	for (auto& f : fileSets) {
+		maxDeltaFiles = std::min(maxDeltaFiles, f.deltaFiles.size());
+	}
 
 	for (bool chunk : chunkModes) {
 		for (bool encrypt : encryptionModes) {
@@ -3139,6 +3197,10 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				double totalElapsed = 0.0;
 				double totalElapsedClearAll = 0.0;
 				double totalElapsedSingleKey = 0.0;
+				std::vector<std::pair<int64_t, double>> varyingDeltas;
+				for (int i = 0; i <= maxDeltaFiles; i++) {
+					varyingDeltas.push_back({ 0, 0.0 });
+				}
 				for (auto& fileSet : fileSets) {
 					FileSet newFileSet;
 					if (!chunk) {
@@ -3147,23 +3209,37 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 						newFileSet = rewriteChunkedFileSet(fileSet, keys, compressionFilter);
 					}
 
-					auto res = doReadBench(newFileSet, chunk, fileSet.range, false, keys, compressionFilter);
+					auto res = doReadBench(newFileSet, chunk, fileSet.range, false, keys, newFileSet.deltaFiles.size());
 					totalBytesRead += res.first;
 					totalElapsed += res.second;
 
 					if (doEdgeCaseReadTests) {
 						totalElapsedClearAll +=
-						    doReadBench(newFileSet, chunk, fileSet.range, true, keys, compressionFilter).second;
+						    doReadBench(newFileSet, chunk, fileSet.range, true, keys, newFileSet.deltaFiles.size())
+						        .second;
 						Key k = std::get<3>(fileSet.snapshotFile).front().key;
 						KeyRange singleKeyRange(KeyRangeRef(k, keyAfter(k)));
 						totalElapsedSingleKey +=
-						    doReadBench(newFileSet, chunk, singleKeyRange, false, keys, compressionFilter).second;
+						    doReadBench(newFileSet, chunk, singleKeyRange, false, keys, newFileSet.deltaFiles.size())
+						        .second;
+					}
+
+					if (doVaryingDeltaTests && chunk) {
+						for (int i = 0; i <= maxDeltaFiles; i++) {
+							auto r = doReadBench(newFileSet, chunk, fileSet.range, false, keys, i);
+							varyingDeltas[i].first += r.first;
+							varyingDeltas[i].second += r.second;
+						}
 					}
 				}
 				readMetrics.push_back({ totalBytesRead, totalElapsed });
+
 				if (doEdgeCaseReadTests) {
 					clearAllReadMetrics.push_back(totalElapsedClearAll);
 					readSingleKeyMetrics.push_back(totalElapsedSingleKey);
+				}
+				if (doVaryingDeltaTests) {
+					varyingDeltaMetrics.push_back(varyingDeltas);
 				}
 			}
 		}
@@ -3198,6 +3274,25 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 		}
 	}
 
+	if (doVaryingDeltaTests) {
+		ASSERT(readRunNames.size() == varyingDeltaMetrics.size());
+		fmt::print("\n\nVarying Deltas Read Results:\nDF#\t");
+		for (int i = 0; i <= maxDeltaFiles; i++) {
+			fmt::print("{0}\t", i);
+		}
+		fmt::print("\n");
+
+		for (int i = 0; i < readRunNames.size(); i++) {
+			fmt::print("{0}", readRunNames[i]);
+
+			for (auto& it : varyingDeltaMetrics[i]) {
+				double MBperCPUsec = (it.first / 1024.0 / 1024.0) / it.second;
+				fmt::print("\t{:.6}", MBperCPUsec);
+			}
+			fmt::print("\n");
+		}
+	}
+
 	fmt::print("\n\nCombined Results:\n");
 	ASSERT(readRunNames.size() == runNames.size() - 1);
 	for (int i = 0; i < readRunNames.size(); i++) {
@@ -3223,7 +3318,7 @@ TEST_CASE("!/blobgranule/files/repeatFromFiles") {
 	double totalElapsed = 0.0;
 	for (auto& it : fileSetNames) {
 		FileSet fileSet = loadFileSet(basePath, it, true);
-		auto res = doReadBench(fileSet, true, fileSet.range, false, {}, {}, true);
+		auto res = doReadBench(fileSet, true, fileSet.range, false, {}, fileSet.deltaFiles.size(), true);
 		totalBytesRead += res.first;
 		totalElapsed += res.second;
 	}

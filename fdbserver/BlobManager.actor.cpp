@@ -296,7 +296,7 @@ struct BlobManagerStats {
 		specialCounter(cc, "HardBoundaries", [mergeHardBoundaries]() { return mergeHardBoundaries->size(); });
 		specialCounter(cc, "SoftBoundaries", [mergeBoundaries]() { return mergeBoundaries->size(); });
 		specialCounter(cc, "BlockedAssignments", [this]() { return this->blockedAssignments; });
-		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
+		logger = cc.traceCounters("BlobManagerMetrics", id, interval, "BlobManagerMetrics");
 	}
 };
 
@@ -2776,6 +2776,7 @@ ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 			if (bmData->iAmReplaced.canBeSet()) {
 				bmData->iAmReplaced.send(Void());
 			}
+			throw;
 		}
 	}
 
@@ -2896,6 +2897,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
 					}
+					throw blob_manager_replaced();
 				}
 
 				BoundaryEvaluation newEval(rep.continueEpoch,
@@ -3537,7 +3539,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	}
 
 	// skip the rest of the algorithm for the first blob manager
-	if (bmData->epoch == 1) {
+	if (bmData->epoch == 1 && !isFullRestoreMode()) {
 		bmData->doneRecovering.send(Void());
 		return Void();
 	}
@@ -5299,6 +5301,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 					fmt::print("BM {} exiting because it is replaced\n", self->epoch);
 				}
 				TraceEvent("BlobManagerReplaced", bmInterf.id()).detail("Epoch", epoch);
+				wait(delay(0.0));
 				break;
 			}
 			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {

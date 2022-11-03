@@ -48,6 +48,7 @@
 #endif
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
+#include "fdbserver/RocksDBLogForwarder.h"
 #include "flow/ActorCollection.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
@@ -202,6 +203,13 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+
+	if (SERVER_KNOBS->ROCKSDB_MUTE_LOGS) {
+		options.info_log = std::make_shared<NullRocksDBLogForwarder>();
+	} else {
+		options.info_log = std::make_shared<RocksDBLogForwarder>(id, options.info_log_level);
+	}
+
 	return options;
 }
 
@@ -389,13 +397,23 @@ struct Counters {
 };
 
 struct ReadIterator {
-	CF& cf;
 	uint64_t index; // incrementing counter to uniquely identify read iterator.
 	bool inUse;
 	std::shared_ptr<rocksdb::Iterator> iter;
 	double creationTime;
+	KeyRange keyRange;
+	std::shared_ptr<rocksdb::Slice> beginSlice, endSlice;
 	ReadIterator(CF& cf, uint64_t index, DB& db, rocksdb::ReadOptions& options)
-	  : cf(cf), index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
+	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
+	ReadIterator(CF& cf, uint64_t index, DB& db, rocksdb::ReadOptions options, KeyRange keyRange)
+	  : index(index), inUse(true), creationTime(now()), keyRange(keyRange) {
+		beginSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.begin)));
+		options.iterate_lower_bound = beginSlice.get();
+		endSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.end)));
+		options.iterate_upper_bound = endSlice.get();
+
+		iter = std::shared_ptr<rocksdb::Iterator>(db->NewIterator(options, cf));
+	}
 };
 
 /*
@@ -418,42 +436,84 @@ public:
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 		TraceEvent("ReadIteratorPool", id)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
+		    .detail("KnobRocksDBReadRangeReuseBoundedIterators",
+		            SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS)
+		    .detail("KnobRocksDBReadRangeBoundedIteratorsMaxLimit",
+		            SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT)
 		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS &&
+		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
+			TraceEvent(SevWarn, "ReadIteratorKnobsMismatch");
+		}
 	}
 
 	// Called on every db commit.
 	void update() {
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
+		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			iteratorsMap.clear();
 		}
 	}
 
 	// Called on every read operation.
-	ReadIterator getIterator() {
+	ReadIterator getIterator(KeyRange keyRange) {
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
-			std::lock_guard<std::mutex> lock(mutex);
+			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
 				if (!it->second.inUse) {
 					it->second.inUse = true;
 					iteratorsReuseCount++;
-					return it->second;
+					ReadIterator iter = it->second;
+					mutex.unlock();
+					return iter;
 				}
 			}
 			index++;
-			ReadIterator iter(cf, index, db, readRangeOptions);
-			iteratorsMap.insert({ index, iter });
+			uint64_t readIteratorIndex = index;
+			mutex.unlock();
+
+			ReadIterator iter(cf, readIteratorIndex, db, readRangeOptions);
+			mutex.lock();
+			iteratorsMap.insert({ readIteratorIndex, iter });
+			mutex.unlock();
+			return iter;
+		} else if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
+			// TODO: Based on the datasize in the keyrange, decide whether to store the iterator for reuse.
+			mutex.lock();
+			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
+				if (!it->second.inUse && it->second.keyRange.contains(keyRange)) {
+					it->second.inUse = true;
+					iteratorsReuseCount++;
+					ReadIterator iter = it->second;
+					mutex.unlock();
+					return iter;
+				}
+			}
+			index++;
+			uint64_t readIteratorIndex = index;
+			mutex.unlock();
+
+			ReadIterator iter(cf, readIteratorIndex, db, readRangeOptions, keyRange);
+			if (iteratorsMap.size() < SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT) {
+				// Not storing more than ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT of iterators
+				// to avoid 'out of memory' issues.
+				mutex.lock();
+				iteratorsMap.insert({ readIteratorIndex, iter });
+				mutex.unlock();
+			}
 			return iter;
 		} else {
 			index++;
-			ReadIterator iter(cf, index, db, readRangeOptions);
+			ReadIterator iter(cf, index, db, readRangeOptions, keyRange);
 			return iter;
 		}
 	}
 
 	// Called on every read operation, after the keys are collected.
 	void returnIterator(ReadIterator& iter) {
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
+		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			it = iteratorsMap.find(iter.index);
 			// iterator found: put the iterator back to the pool(inUse=false).
@@ -760,7 +820,7 @@ uint64_t PerfContextMetrics::getRocksdbPerfcontextMetric(int metric) {
 }
 
 ACTOR Future<Void> refreshReadIteratorPool(std::shared_ptr<ReadIteratorPool> readIterPool) {
-	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS || SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
 		loop {
 			wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
 			readIterPool->refreshIterators();
@@ -1551,7 +1611,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::Status s;
 			if (a.rowLimit >= 0) {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				ReadIterator readIter = readIterPool->getIterator();
+				ReadIterator readIter = readIterPool->getIterator(a.keys);
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                         timer_monotonic() - iterCreationBeginTime));
@@ -1580,7 +1640,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				readIterPool->returnIterator(readIter);
 			} else {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				ReadIterator readIter = readIterPool->getIterator();
+				ReadIterator readIter = readIterPool->getIterator(a.keys);
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                         timer_monotonic() - iterCreationBeginTime));
@@ -1846,22 +1906,52 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	void set(KeyValueRef kv, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
+			keysSet.clear();
 		}
 		ASSERT(defaultFdbCF != nullptr);
 		writeBatch->Put(defaultFdbCF, toSlice(kv.key), toSlice(kv.value));
+		if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE) {
+			keysSet.insert(kv.key);
+		}
 	}
 
-	void clear(KeyRangeRef keyRange, const Arena*) override {
+	void clear(KeyRangeRef keyRange, const StorageServerMetrics* storageMetrics, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
+			keysSet.clear();
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
-
 		if (keyRange.singleKeyRange()) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 		} else {
-			writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
+			    storageMetrics->byteSample.getEstimate(keyRange) <
+			        SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT) {
+				rocksdb::ReadOptions options = sharedState->getReadOptions();
+				auto beginSlice = toSlice(keyRange.begin);
+				auto endSlice = toSlice(keyRange.end);
+				options.iterate_lower_bound = &beginSlice;
+				options.iterate_upper_bound = &endSlice;
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, defaultFdbCF));
+				cursor->Seek(toSlice(keyRange.begin));
+				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
+					writeBatch->Delete(defaultFdbCF, cursor->key());
+					cursor->Next();
+				}
+				if (!cursor->status().ok()) {
+					// if readrange iteration fails, then do a deleteRange.
+					writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+				} else {
+					auto it = keysSet.lower_bound(keyRange.begin);
+					while (it != keysSet.end() && *it < keyRange.end) {
+						writeBatch->Delete(defaultFdbCF, toSlice(*it));
+						it++;
+					}
+				}
+			} else {
+				writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+			}
 		}
 	}
 
@@ -1890,6 +1980,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
+		keysSet.clear();
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
@@ -2083,6 +2174,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	std::set<Key> keysSet;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
 	int numReadWaiters;

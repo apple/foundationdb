@@ -665,23 +665,6 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	// Returns GRV and eats GRV errors
-	ACTOR static Future<Version> getReadVersion(Reference<ReadYourWritesTransaction> tr) {
-		loop {
-			try {
-				Version version = wait(tr->getReadVersion());
-				return version;
-			} catch (Error& e) {
-				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_batch_transaction_throttled) {
-					wait(tr->onError(e));
-				} else {
-					throw;
-				}
-			}
-		}
-	}
-
 	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
@@ -772,7 +755,8 @@ struct TenantManagementWorkload : TestWorkload {
 				state bool retried = false;
 				loop {
 					try {
-						state Version beforeVersion = wait(self->getReadVersion(tr));
+						state Version beforeVersion =
+						    wait(getLatestReadVersion(self, OperationType::MANAGEMENT_DATABASE));
 						Optional<Void> result =
 						    wait(timeout(deleteTenantImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
@@ -780,8 +764,8 @@ struct TenantManagementWorkload : TestWorkload {
 						if (result.present()) {
 							if (anyExists) {
 								if (self->oldestDeletionVersion == 0 && !tenants.empty()) {
-									tr->reset();
-									Version afterVersion = wait(self->getReadVersion(tr));
+									Version afterVersion =
+									    wait(self->getLatestReadVersion(self, OperationType::MANAGEMENT_DATABASE));
 									self->oldestDeletionVersion = afterVersion;
 								}
 								self->newestDeletionVersion = beforeVersion;

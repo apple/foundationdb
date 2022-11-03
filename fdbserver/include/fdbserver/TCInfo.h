@@ -268,5 +268,4 @@ public:
 	void removeTeam(TCTeamInfo team);
 	void updateCacheGeneration(int64_t generation) { m_cacheGeneration = generation; }
 	int64_t cacheGeneration() const { return m_cacheGeneration; }
-	void updateStorageUsage(int64_t size) { m_tenantInfo.storageUsage = size; }
 };

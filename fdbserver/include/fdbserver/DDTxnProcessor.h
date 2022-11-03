@@ -117,6 +117,7 @@ public:
 
 	virtual Future<Void> moveKeys(const MoveKeysParams& params) = 0;
 
+	// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
 	virtual Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
 	                                                                            StorageMetrics const& min,
 	                                                                            StorageMetrics const& max,
@@ -135,8 +136,6 @@ public:
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
 	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
-
-	virtual Future<UID> getClusterId() const { return {}; }
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
@@ -220,8 +219,6 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
 
 	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
-
-	Future<UID> getClusterId() const override;
 
 	Future<Void> waitDDTeamInfoPrintSignal() const override;
 

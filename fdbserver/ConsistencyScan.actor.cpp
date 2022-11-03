@@ -29,7 +29,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -382,7 +382,6 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	// Note: this may cause some shards to be processed more than once or not at all in a non-quiescent database
 	state int effectiveClientCount = distributed ? clientCount : 1;
 	state int i = clientId * (shardSampleFactor + 1);
-	state int increment = (distributed && !firstClient) ? effectiveClientCount * shardSampleFactor : 1;
 	state int64_t rateLimitForThisRound =
 	    *bytesReadInPrevRound == 0
 	        ? maxRate
@@ -393,6 +392,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	state double rateLimiterStartTime = now();
 	state int64_t bytesReadInthisRound = 0;
 	state bool resume = !(restart || shuffleShards);
+	state bool testResult = true;
 
 	state double dbSize = 100e12;
 	if (g_network->isSimulated()) {
@@ -710,7 +710,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 									    (!storageServerInterfaces[j].isTss() &&
 									     !storageServerInterfaces[firstValidServer].isTss())) {
 										testFailure("Data inconsistent", performQuiescentChecks, true);
-										return false;
+										testResult = false;
 									}
 								}
 							}
@@ -949,7 +949,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	}
 
 	*bytesReadInPrevRound = bytesReadInthisRound;
-	return true;
+	return testResult;
 }
 
 ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {

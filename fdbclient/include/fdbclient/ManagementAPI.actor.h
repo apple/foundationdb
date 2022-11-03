@@ -164,8 +164,8 @@ bool schemaMatch(json_spirit::mValue const& schema,
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Set and get the storage quota per tenant
-void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota);
-ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName);
+void setStorageQuota(Transaction& tr, StringRef tenantName, int64_t quota);
+ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantName);
 
 #include "flow/unactorcompiler.h"
 #endif

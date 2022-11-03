@@ -140,9 +140,27 @@ private:
 	Future<Void> collection;
 };
 
+// Defines granule info that interests full restore
+struct BlobGranuleRestoreVersion {
+	// Two constructors required by VectorRef
+	BlobGranuleRestoreVersion() {}
+	BlobGranuleRestoreVersion(Arena& a, const BlobGranuleRestoreVersion& copyFrom)
+	  : granuleID(copyFrom.granuleID), keyRange(a, copyFrom.keyRange), version(copyFrom.version),
+	    sizeInBytes(copyFrom.sizeInBytes) {}
+
+	UID granuleID;
+	KeyRangeRef keyRange;
+	Version version;
+	int64_t sizeInBytes;
+};
+
+// Defines a vector for BlobGranuleVersion
+typedef Standalone<VectorRef<BlobGranuleRestoreVersion>> BlobGranuleRestoreVersionVector;
+
 ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo);
 ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Reference<BlobConnectionProvider> blobConn);
 inline bool isFullRestoreMode() {
 	return SERVER_KNOBS->BLOB_FULL_RESTORE_MODE;
 };

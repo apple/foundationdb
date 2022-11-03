@@ -336,12 +336,13 @@ struct KeyRangeRef {
 	bool isCovered(std::vector<KeyRangeRef>& ranges) {
 		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		KeyRangeRef clone(begin, end);
+
 		for (auto r : ranges) {
-			if (begin < r.begin)
+			if (clone.begin < r.begin)
 				return false; // uncovered gap between clone.begin and r.begin
-			if (end <= r.end)
+			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (end > r.begin)
+			if (clone.end > r.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
@@ -588,6 +589,8 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // the shortest key exceeds that limit, then the end key is returned.
 // The returned reference is valid as long as keys is valid.
 KeyRef keyBetween(const KeyRangeRef& keys);
+
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
 
 struct KeySelectorRef {
 private:
@@ -1491,7 +1494,7 @@ struct EncryptionAtRestMode {
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
 
-	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
 		}
@@ -1503,6 +1506,14 @@ struct EncryptionAtRestMode {
 		}
 
 		return static_cast<Mode>(num);
+	}
+
+	static EncryptionAtRestMode fromValue(Optional<Value> val) {
+		if (!val.present()) {
+			return EncryptionAtRestMode();
+		}
+
+		return EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(val.get().contents()));
 	}
 
 	uint32_t mode;
@@ -1632,13 +1643,7 @@ struct StorageWiggleValue {
 	}
 };
 
-enum class ReadType {
-	EAGER,
-	FETCH,
-	LOW,
-	NORMAL,
-	HIGH,
-};
+enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
 
 FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
 
@@ -1654,13 +1659,13 @@ struct ReadOptions {
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
-
-	ReadOptions(Optional<UID> debugID,
+	ReadOptions(Optional<UID> debugID = Optional<UID>(),
 	            ReadType type = ReadType::NORMAL,
-	            CacheResult cache = CacheResult::False,
+	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
 	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
