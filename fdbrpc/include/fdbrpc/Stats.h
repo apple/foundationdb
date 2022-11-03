@@ -245,7 +245,7 @@ class LatencySample : public IMetric {
 public:
 	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
 	  : name(name), IMetric(name + "_" + id.toString(), knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id),
-	    sampleStart(now()), sample(sampleSize),
+	    sampleEmit(now()), sampleTrace(now()), sample(sampleSize), prev(sampleSize),
 	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
@@ -281,8 +281,14 @@ public:
 			break;
 		}
 
-		case MetricsDataModel::OTEL:
+		case MetricsDataModel::OTEL: {
+			const ContinuousSample<double>& emitSample = (sampleTrace > sampleEmit) ? prev : sample;
+			batch.hists.emplace_back(
+			    name, emitSample.getSamples(), emitSample.min(), emitSample.max(), emitSample.sum());
+			batch.hists.back().point.startTime = sampleTrace;
+			sampleEmit = now();
 			break;
+		}
 
 		default:
 			break;
@@ -292,9 +298,11 @@ public:
 private:
 	std::string name;
 	UID id;
-	double sampleStart;
+	double sampleEmit;
+	double sampleTrace;
 
 	ContinuousSample<double> sample;
+	ContinuousSample<double> prev;
 	Future<Void> logger;
 
 	Reference<EventCacheHolder> latencySampleEventHolder;
@@ -302,7 +310,7 @@ private:
 	void logSample() {
 		TraceEvent(name.c_str(), id)
 		    .detail("Count", sample.getPopulationSize())
-		    .detail("Elapsed", now() - sampleStart)
+		    .detail("Elapsed", now() - sampleTrace)
 		    .detail("Min", sample.min())
 		    .detail("Max", sample.max())
 		    .detail("Mean", sample.mean())
@@ -313,9 +321,9 @@ private:
 		    .detail("P99", sample.percentile(0.99))
 		    .detail("P99.9", sample.percentile(0.999))
 		    .trackLatest(latencySampleEventHolder->trackingKey);
-
+		std::swap(prev, sample);
 		sample.clear();
-		sampleStart = now();
+		sampleTrace = now();
 	}
 };
 

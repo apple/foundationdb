@@ -20,20 +20,64 @@
 #include "fdbserver/MetricClient.h"
 #include "flow/FastRef.h"
 #include "flow/Knobs.h"
+#include "flow/OTELMetrics.h"
+#include "flow/TDMetric.actor.h"
+#include "fdbrpc/Msgpack.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h"
 
-UDPClient::UDPClient(const std::string& addr, uint32_t port) : socket_fd(-1) {
-	NetworkAddress destAddress = NetworkAddress::parse(addr + ":" + std::to_string(port));
+UDPMetricClient::UDPMetricClient()
+  : socket_fd(-1), model(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
+    buf{ MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(1024), .data_size = 0, .buffer_size = 1024 } },
+    address((model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_ADDR : FLOW_KNOBS->OTEL_UDP_EMISSION_ADDR),
+    port((model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT) {
+	NetworkAddress destAddress = NetworkAddress::parse(address + ":" + std::to_string(port));
 	socket = INetworkConnections::net()->createUDPSocket(destAddress);
+	model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
 }
 
-void UDPClient::send(const MetricBatch& batch) {
+void UDPMetricClient::send(const MetricBatch& batch) {
 	if (!socket.isReady()) {
 		return;
 	}
 	socket_fd = socket.get()->native_handle();
 	if (socket_fd != -1) {
-		::send(socket_fd, batch.statsd_message.data(), batch.statsd_message.size(), MSG_DONTWAIT);
+		switch (model) {
+		case STATSD: {
+			::send(socket_fd, batch.statsd_message.data(), batch.statsd_message.size(), MSG_DONTWAIT);
+			break;
+		}
+		case OTEL: {
+			// Send the Counters, gauges and histograms as seperate packets
+			// Use ext32 msgpack to encode the different types
+			if (!batch.counters.empty()) {
+				auto f_Sum = [](const std::vector<OTELSum>& vec, MsgpackBuffer& buf) {
+					serialize_vector(vec, buf, serialize_otelsum);
+				};
+				serialize_ext(batch.counters, buf, OTELMetricType::Sum, f_Sum);
+				::send(socket_fd, buf.buffer.get(), buf.data_size, MSG_DONTWAIT);
+				buf.reset();
+			}
+			if (!batch.gauges.empty()) {
+				auto f_Gauge = [](const std::vector<OTELGauge>& vec, MsgpackBuffer& buf) {
+					serialize_vector(vec, buf, serialize_otelgauge);
+				};
+				serialize_ext(batch.gauges, buf, OTELMetricType::Gauge, f_Gauge);
+				::send(socket_fd, buf.buffer.get(), buf.data_size, MSG_DONTWAIT);
+				buf.reset();
+			}
+			if (!batch.hists.empty()) {
+				auto f_Hist = [](const std::vector<OTELHistogram>& vec, MsgpackBuffer& buf) {
+					serialize_vector(vec, buf, serialize_otelhist);
+				};
+				serialize_ext(batch.hists, buf, OTELMetricType::Hist, f_Hist);
+				::send(socket_fd, buf.buffer.get(), buf.data_size, MSG_DONTWAIT);
+				buf.reset();
+			}
+			break;
+		}
+		default:
+			break;
+		}
 	}
 }

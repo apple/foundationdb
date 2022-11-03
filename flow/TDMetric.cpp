@@ -273,8 +273,10 @@ std::string createStatsdMessage(const std::string& name,
 MetricsDataModel knobToMetricModel(const std::string& knob) {
 	if (knob == "statsd") {
 		return MetricsDataModel::STATSD;
+	} else if (knob == "otel") {
+		return MetricsDataModel::OTEL;
 	}
-	return MetricsDataModel::OTEL;
+	return NONE;
 }
 
 std::vector<std::string> splitString(const std::string& str, const std::string& delimit) {

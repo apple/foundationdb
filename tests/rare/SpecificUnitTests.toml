@@ -1,6 +1,6 @@
 # This is modified by scripted testing tools to specify specific unit tests
 [[test]]
-testTitle = 'UnitTests'
+testTitle = '/fdbserver/metrics/OTEL/VerifyMsgpack'
 useDB = false
 startDelay = 0
 

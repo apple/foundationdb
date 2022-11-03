@@ -17,17 +17,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#ifndef FLOW_OTELMETRIC_H
+#define FLOW_OTELMETRIC_H
 #include "flow/flow.h"
-#include <sys/_types/_int64_t.h>
 #include <vector>
 
 class Attribute {
-private:
+public:
 	std::string key;
 	std::string value;
 
-public:
 	Attribute(const std::string& k, const std::string& v) : key{ k }, value{ v } {}
 	Attribute(std::string&& k, std::string&& v) : key{ std::move(k) }, value{ std::move(v) } {}
 };
@@ -40,8 +39,6 @@ enum AggregationTemporality {
 
 enum DataPointFlags { FLAG_NONE = 0, FLAG_NO_RECORDED_VALUE };
 
-// TODO: Enforce that T should be one of (double, uint).
-//       This is possible in C++20 with concepts
 class NumberDataPoint {
 public:
 	double startTime;
@@ -50,45 +47,65 @@ public:
 	int64_t val;
 	DataPointFlags flags;
 
-	NumberDataPoint() : startTime{ now() }, flags{ DataPointFlags::FLAG_NONE } {}
+	NumberDataPoint() : recordTime{ now() }, val{ 0 }, flags{ DataPointFlags::FLAG_NONE } {}
+
+	NumberDataPoint(int64_t v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
 
 	NumberDataPoint& addAttribute(const std::string& key, const std::string& value) {
-		attributes.push_back(Attribute(key, value));
+		attributes.emplace_back(Attribute(key, value));
 		return *this;
 	}
 };
 
+enum OTELMetricType { Gauge = 0, Sum, Hist };
+
 class OTELSum {
 public:
-	std::vector<NumberDataPoint> points;
+	std::string name;
+	NumberDataPoint point;
 	AggregationTemporality aggregation;
 	bool isMonotonic;
+	OTELSum() : aggregation{ AGGREGATION_TEMPORALITY_DELTA }, isMonotonic{ true } {}
+	OTELSum(const std::string& n) : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_DELTA }, isMonotonic{ true } {}
+	OTELSum(const std::string& n, int64_t v)
+	  : name{ n }, point{ v }, aggregation{ AGGREGATION_TEMPORALITY_DELTA }, isMonotonic{ true } {}
 };
 
 class OTELGauge {
 public:
-	std::vector<NumberDataPoint> points;
+	std::string name;
+	NumberDataPoint point;
 	OTELGauge() {}
+	OTELGauge(const std::string& n) : name{ n } {}
 };
 
 class HistogramDataPoint {
 public:
 	std::vector<Attribute> attributes;
 	double startTime;
+	const std::vector<double>& samples;
 	double recordTime;
 	uint64_t count;
 	double sum;
 	double min;
 	double max;
-	std::vector<double> samples;
 	DataPointFlags flags;
-	HistogramDataPoint()
-	  : startTime{ now() }, count{ 0 }, sum{ 0 }, min{ 0 }, max{ 0 }, flags{ DataPointFlags::FLAG_NONE } {}
+	HistogramDataPoint(const std::vector<double>& s, double _min, double _max, double _sum)
+	  : recordTime{ now() }, samples{ s }, count{ samples.size() }, min{ _min }, max{ _max }, sum{ _sum }, flags{
+		    DataPointFlags::FLAG_NONE
+	    } {}
+	HistogramDataPoint& addAttribute(const std::string& key, const std::string& value) {
+		attributes.emplace_back(Attribute(key, value));
+		return *this;
+	}
 };
 
 class OTELHistogram {
 public:
-	std::vector<HistogramDataPoint> points;
+	std::string name;
+	HistogramDataPoint point;
 	AggregationTemporality aggregation;
-	OTELHistogram() {}
+	OTELHistogram(const std::string& n, const std::vector<double>& s, double min, double max, double sum)
+	  : name{ n }, point{ s, min, max, sum }, aggregation{ AGGREGATION_TEMPORALITY_DELTA } {}
 };
+#endif
