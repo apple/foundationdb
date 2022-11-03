@@ -192,61 +192,6 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
 	return Void();
 }
-// TODO: switch this to use bg_url instead of hardcoding file://fdbblob, so it works as FDBPerfKmsConnector
-// FIXME: make this (more) deterministic outside of simulation for FDBPerfKmsConnector
-static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainId domainId,
-                                                             BlobMetadataDomainName domainName) {
-	Standalone<BlobMetadataDetailsRef> metadata;
-	metadata.domainId = domainId;
-	metadata.arena().dependsOn(domainName.arena());
-	metadata.domainName = domainName;
-	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
-	int type = deterministicRandom()->randomInt(0, 3);
-	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
-	fmt::print("SimBlobMetadata ({})\n", domainId);
-	TraceEvent ev(SevDebug, "SimBlobMetadata");
-	ev.detail("DomainId", domainId).detail("TypeNum", type).detail("PartitionCount", partitionCount);
-	if (type == 0) {
-		// single storage location
-		metadata.base = StringRef(metadata.arena(), "file://fdbblob/" + std::to_string(domainId) + "/");
-		fmt::print("  {}\n", metadata.base.get().printable());
-		ev.detail("Base", metadata.base);
-	}
-	if (type == 1) {
-		// simulate hash prefixing in s3
-		metadata.base = StringRef(metadata.arena(), "file://fdbblob/"_sr);
-		ev.detail("Base", metadata.base);
-		fmt::print("    {} ({})\n", metadata.base.get().printable(), partitionCount);
-		for (int i = 0; i < partitionCount; i++) {
-			metadata.partitions.push_back_deep(metadata.arena(),
-			                                   deterministicRandom()->randomUniqueID().shortString() + "-" +
-			                                       std::to_string(domainId) + "/");
-			fmt::print("      {}\n", metadata.partitions.back().printable());
-			ev.detail("P" + std::to_string(i), metadata.partitions.back());
-		}
-	}
-	if (type == 2) {
-		// simulate separate storage location per partition
-		for (int i = 0; i < partitionCount; i++) {
-			metadata.partitions.push_back_deep(
-			    metadata.arena(), "file://fdbblob" + std::to_string(domainId) + "_" + std::to_string(i) + "/");
-			fmt::print("      {}\n", metadata.partitions.back().printable());
-			ev.detail("P" + std::to_string(i), metadata.partitions.back());
-		}
-	}
-
-	// set random refresh + expire time
-	if (deterministicRandom()->coinflip()) {
-		metadata.refreshAt = now() + deterministicRandom()->random01() * SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
-		metadata.expireAt =
-		    metadata.refreshAt + deterministicRandom()->random01() * SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
-	} else {
-		metadata.refreshAt = std::numeric_limits<double>::max();
-		metadata.expireAt = metadata.refreshAt;
-	}
-
-	return metadata;
-}
 
 ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobMetadataReq req) {
 	state KmsConnBlobMetadataRep rep;
@@ -261,7 +206,9 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 		if (it == simBlobMetadataStore.end()) {
 			// construct new blob metadata
 			it = simBlobMetadataStore
-			         .insert({ domainInfo.domainId, createBlobMetadata(domainInfo.domainId, domainInfo.domainName) })
+			         .insert({ domainInfo.domainId,
+			                   createRandomTestBlobMetadata(
+			                       SERVER_KNOBS->BG_URL, domainInfo.domainId, domainInfo.domainName) })
 			         .first;
 		} else if (now() >= it->second.expireAt) {
 			// update random refresh and expire time

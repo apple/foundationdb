@@ -21,7 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -903,6 +903,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_commit(FDBTransaction* tr) {
 
 extern "C" DLLEXPORT fdb_error_t fdb_transaction_get_committed_version(FDBTransaction* tr, int64_t* out_version) {
 	CATCH_AND_RETURN(*out_version = TXN(tr)->getCommittedVersion(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr) {
+	return (FDBFuture*)TXN(tr)->getTotalCost().extractPtr();
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
