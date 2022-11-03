@@ -31,12 +31,13 @@ import random
 import string
 import toml
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "tests", "TestRunner")]
-
 # fmt: off
 from tmp_cluster import TempCluster
 from local_cluster import TLSConfig
 # fmt: on
+
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "tests", "TestRunner")]
+
 
 TESTER_STATS_INTERVAL_SEC = 5
 

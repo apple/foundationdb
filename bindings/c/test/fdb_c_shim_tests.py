@@ -7,13 +7,13 @@ import subprocess
 import sys
 import os
 
-sys.path[:0] = [os.path.join(os.path.dirname(
-    __file__), '..', '..', '..', 'tests', 'TestRunner')]
-
 # fmt: off
 from binary_download import FdbBinaryDownloader, CURRENT_VERSION
 from local_cluster import LocalCluster, random_secret_string
 # fmt: on
+
+sys.path[:0] = [os.path.join(os.path.dirname(
+    __file__), '..', '..', '..', 'tests', 'TestRunner')]
 
 LAST_RELEASE_VERSION = "7.1.5"
 TESTER_STATS_INTERVAL_SEC = 5
