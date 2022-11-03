@@ -141,6 +141,26 @@ void ISimulator::displayWorkers() const {
 	return;
 }
 
+Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow) {
+	ASSERT_GT(authKeys.size(), 0);
+	auto tokenSpec = authz::jwt::TokenRef{};
+	auto [keyName, key] = *authKeys.begin();
+	tokenSpec.algorithm = key.algorithm() == PKeyAlgorithm::EC ? authz::Algorithm::ES256 : authz::Algorithm::RS256;
+	tokenSpec.keyId = keyName;
+	tokenSpec.issuer = "sim2_issuer"_sr;
+	tokenSpec.subject = "sim2_testing"_sr;
+	auto const now = static_cast<uint64_t>(g_network->timer());
+	tokenSpec.notBeforeUnixTime = now - 1;
+	tokenSpec.issuedAtUnixTime = now;
+	tokenSpec.expiresAtUnixTime = now + ttlSecondsFromNow;
+	auto const tokenId = deterministicRandom()->randomAlphaNumeric(10);
+	tokenSpec.tokenId = StringRef(tokenId);
+	tokenSpec.tenants = VectorRef<StringRef>(&tenantName, 1);
+	auto ret = Standalone<StringRef>();
+	ret.contents() = authz::jwt::signToken(ret.arena(), tokenSpec, key);
+	return ret;
+}
+
 int openCount = 0;
 
 struct SimClogging {

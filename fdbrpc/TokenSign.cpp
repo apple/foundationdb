@@ -47,8 +47,8 @@
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/error/en.h>
-#include "fdbrpc/Base64UrlEncode.h"
-#include "fdbrpc/Base64UrlDecode.h"
+#include "fdbrpc/Base64Encode.h"
+#include "fdbrpc/Base64Decode.h"
 
 namespace {
 
@@ -68,15 +68,11 @@ StringRef genRandomAlphanumStringRef(Arena& arena, IRandom& rng, int minLen, int
 	return StringRef(strRaw, len);
 }
 
-bool checkVerifyAlgorithm(PKeyAlgorithm algo, PublicKey key) {
+Optional<StringRef> checkVerifyAlgorithm(PKeyAlgorithm algo, PublicKey key) {
 	if (algo != key.algorithm()) {
-		TraceEvent(SevWarnAlways, "TokenVerifyAlgoMismatch")
-		    .suppressFor(10)
-		    .detail("Expected", pkeyAlgorithmName(algo))
-		    .detail("PublicKeyAlgorithm", key.algorithmName());
-		return false;
+		return "Token algorithm does not match key's"_sr;
 	} else {
-		return true;
+		return {};
 	}
 }
 
@@ -242,8 +238,11 @@ StringRef TokenRef::toStringRef(Arena& arena) {
 	return StringRef(str, buf.size());
 }
 
-template <class FieldType, class Writer>
-void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldName) {
+template <class FieldType, class Writer, bool MakeStringArrayBase64 = false>
+void putField(Optional<FieldType> const& field,
+              Writer& wr,
+              const char* fieldName,
+              std::bool_constant<MakeStringArrayBase64> _ = std::bool_constant<false>{}) {
 	if (!field.present())
 		return;
 	wr.Key(fieldName);
@@ -256,14 +255,22 @@ void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldNam
 		wr.Uint64(value);
 	} else {
 		wr.StartArray();
-		for (auto elem : value) {
-			wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
+		if constexpr (MakeStringArrayBase64) {
+			Arena arena;
+			for (auto elem : value) {
+				auto encodedElem = base64::encode(arena, elem);
+				wr.String(reinterpret_cast<const char*>(encodedElem.begin()), encodedElem.size());
+			}
+		} else {
+			for (auto elem : value) {
+				wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
+			}
 		}
 		wr.EndArray();
 	}
 }
 
-StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
+StringRef makeSignInput(Arena& arena, const TokenRef& tokenSpec) {
 	using Buffer = rapidjson::StringBuffer;
 	using Writer = rapidjson::Writer<Buffer>;
 	auto headerBuffer = Buffer();
@@ -288,222 +295,261 @@ StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
 	putField(tokenSpec.expiresAtUnixTime, payload, "exp");
 	putField(tokenSpec.notBeforeUnixTime, payload, "nbf");
 	putField(tokenSpec.tokenId, payload, "jti");
-	putField(tokenSpec.tenants, payload, "tenants");
+	putField(tokenSpec.tenants, payload, "tenants", std::bool_constant<true>{} /* encode tenants in base64 */);
 	payload.EndObject();
-	auto const headerPartLen = base64url::encodedLength(headerBuffer.GetSize());
-	auto const payloadPartLen = base64url::encodedLength(payloadBuffer.GetSize());
+	auto const headerPartLen = base64::url::encodedLength(headerBuffer.GetSize());
+	auto const payloadPartLen = base64::url::encodedLength(payloadBuffer.GetSize());
 	auto const totalLen = headerPartLen + 1 + payloadPartLen;
 	auto out = new (arena) uint8_t[totalLen];
 	auto cur = out;
-	cur += base64url::encode(reinterpret_cast<const uint8_t*>(headerBuffer.GetString()), headerBuffer.GetSize(), cur);
+	cur += base64::url::encode(reinterpret_cast<const uint8_t*>(headerBuffer.GetString()), headerBuffer.GetSize(), cur);
 	ASSERT_EQ(cur - out, headerPartLen);
 	*cur++ = '.';
-	cur += base64url::encode(reinterpret_cast<const uint8_t*>(payloadBuffer.GetString()), payloadBuffer.GetSize(), cur);
+	cur +=
+	    base64::url::encode(reinterpret_cast<const uint8_t*>(payloadBuffer.GetString()), payloadBuffer.GetSize(), cur);
 	ASSERT_EQ(cur - out, totalLen);
 	return StringRef(out, totalLen);
 }
 
-StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
+StringRef signToken(Arena& arena, StringRef signInput, Algorithm algorithm, PrivateKey privateKey) {
 	auto tmpArena = Arena();
-	auto tokenPart = makeTokenPart(tmpArena, tokenSpec);
-	auto [signAlgo, digest] = getMethod(tokenSpec.algorithm);
+	auto [signAlgo, digest] = getMethod(algorithm);
 	if (!checkSignAlgorithm(signAlgo, privateKey)) {
 		throw digital_signature_ops_error();
 	}
-	auto plainSig = privateKey.sign(tmpArena, tokenPart, *digest);
-	if (tokenSpec.algorithm == Algorithm::ES256) {
+	auto plainSig = privateKey.sign(tmpArena, signInput, *digest);
+	if (algorithm == Algorithm::ES256) {
 		// Need to convert ASN.1/DER signature to IEEE-P1363
 		auto convertedSig = convertEs256DerToP1363(tmpArena, plainSig);
 		if (!convertedSig.present()) {
 			auto tmpArena = Arena();
-			TraceEvent(SevWarn, "TokenSigConversionFailure")
-			    .detail("TokenSpec", tokenSpec.toStringRef(tmpArena).toString());
+			TraceEvent(SevWarn, "TokenSigConversionFailure").log();
 			throw digital_signature_ops_error();
 		}
 		plainSig = convertedSig.get();
 	}
-	auto const sigPartLen = base64url::encodedLength(plainSig.size());
-	auto const totalLen = tokenPart.size() + 1 + sigPartLen;
+	auto const sigPartLen = base64::url::encodedLength(plainSig.size());
+	auto const totalLen = signInput.size() + 1 + sigPartLen;
 	auto out = new (arena) uint8_t[totalLen];
 	auto cur = out;
-	::memcpy(cur, tokenPart.begin(), tokenPart.size());
-	cur += tokenPart.size();
+	::memcpy(cur, signInput.begin(), signInput.size());
+	cur += signInput.size();
 	*cur++ = '.';
-	cur += base64url::encode(plainSig.begin(), plainSig.size(), cur);
+	cur += base64::url::encode(plainSig.begin(), plainSig.size(), cur);
 	ASSERT_EQ(cur - out, totalLen);
 	return StringRef(out, totalLen);
 }
 
-bool parseHeaderPart(Arena& arena, TokenRef& token, StringRef b64urlHeader) {
+StringRef signToken(Arena& arena, const TokenRef& tokenSpec, PrivateKey privateKey) {
 	auto tmpArena = Arena();
-	auto optHeader = base64url::decode(tmpArena, b64urlHeader);
+	auto signInput = makeSignInput(tmpArena, tokenSpec);
+	return signToken(arena, signInput, tokenSpec.algorithm, privateKey);
+}
+
+Optional<StringRef> parseHeaderPart(Arena& arena, TokenRef& token, StringRef b64urlHeader) {
+	auto tmpArena = Arena();
+	auto optHeader = base64::url::decode(tmpArena, b64urlHeader);
 	if (!optHeader.present())
-		return false;
+		return "Failed to decode base64 header"_sr;
 	auto header = optHeader.get();
 	auto d = rapidjson::Document();
 	d.Parse(reinterpret_cast<const char*>(header.begin()), header.size());
 	if (d.HasParseError()) {
-		TraceEvent(SevWarnAlways, "TokenHeaderJsonParseError")
-		    .suppressFor(10)
-		    .detail("Header", header.toString())
-		    .detail("Message", GetParseError_En(d.GetParseError()))
-		    .detail("Offset", d.GetErrorOffset());
-		return false;
+		return "Failed to parse header as JSON"_sr;
 	}
 	if (!d.IsObject())
-		return false;
+		return "Header is not a JSON object"_sr;
 	auto typItr = d.FindMember("typ");
 	if (typItr == d.MemberEnd() || !typItr->value.IsString())
-		return false;
+		return "No 'typ' field"_sr;
 	auto algItr = d.FindMember("alg");
 	if (algItr == d.MemberEnd() || !algItr->value.IsString())
-		return false;
+		return "No 'alg' field"_sr;
 	auto kidItr = d.FindMember("kid");
 	if (kidItr == d.MemberEnd() || !kidItr->value.IsString())
-		return false;
+		return "No 'kid' field"_sr;
 	auto const& typ = typItr->value;
 	auto const& alg = algItr->value;
 	auto const& kid = kidItr->value;
 	auto typValue = StringRef(reinterpret_cast<const uint8_t*>(typ.GetString()), typ.GetStringLength());
 	if (typValue != "JWT"_sr)
-		return false;
+		return "'typ' is not 'JWT'"_sr;
 	auto algValue = StringRef(reinterpret_cast<const uint8_t*>(alg.GetString()), alg.GetStringLength());
 	auto algType = algorithmFromString(algValue);
 	if (algType == Algorithm::UNKNOWN)
-		return false;
+		return "Unsupported algorithm"_sr;
 	token.algorithm = algType;
 	token.keyId = StringRef(arena, reinterpret_cast<const uint8_t*>(kid.GetString()), kid.GetStringLength());
-	return true;
+	return {};
 }
 
-template <class FieldType>
-bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Document& d, const char* fieldName) {
+template <class FieldType, bool ExpectBase64StringArray = false>
+Optional<StringRef> parseField(Arena& arena,
+                               Optional<FieldType>& out,
+                               const rapidjson::Document& d,
+                               const char* fieldName,
+                               std::bool_constant<ExpectBase64StringArray> _ = std::bool_constant<false>{}) {
 	auto fieldItr = d.FindMember(fieldName);
 	if (fieldItr == d.MemberEnd())
-		return true;
+		return {};
 	auto const& field = fieldItr->value;
 	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
 	              std::is_same_v<FieldType, VectorRef<StringRef>>);
 	if constexpr (std::is_same_v<FieldType, StringRef>) {
-		if (!field.IsString())
-			return false;
+		if (!field.IsString()) {
+			return StringRef(arena, fmt::format("'{}' is not a string", fieldName));
+		}
 		out = StringRef(arena, reinterpret_cast<const uint8_t*>(field.GetString()), field.GetStringLength());
 	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
-		if (!field.IsNumber())
-			return false;
+		if (!field.IsNumber()) {
+			return StringRef(arena, fmt::format("'{}' is not a number", fieldName));
+		}
 		out = static_cast<uint64_t>(field.GetDouble());
 	} else {
-		if (!field.IsArray())
-			return false;
+		if (!field.IsArray()) {
+			return StringRef(arena, fmt::format("'{}' is not an array", fieldName));
+		}
 		if (field.Size() > 0) {
 			auto vector = new (arena) StringRef[field.Size()];
 			for (auto i = 0; i < field.Size(); i++) {
-				if (!field[i].IsString())
-					return false;
-				vector[i] = StringRef(
-				    arena, reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength());
+				if (!field[i].IsString()) {
+					return StringRef(arena, fmt::format("{}th element of '{}' is not a string", i + 1, fieldName));
+				}
+				if constexpr (ExpectBase64StringArray) {
+					Optional<StringRef> decodedString = base64::decode(
+					    arena,
+					    StringRef(reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength()));
+					if (decodedString.present()) {
+						vector[i] = decodedString.get();
+					} else {
+						CODE_PROBE(true, "Base64 token field has failed to be parsed");
+						return StringRef(arena,
+						                 fmt::format("Failed to base64-decode {}th element of '{}'", i + 1, fieldName));
+					}
+				} else {
+					vector[i] = StringRef(
+					    arena, reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength());
+				}
 			}
 			out = VectorRef<StringRef>(vector, field.Size());
 		} else {
 			out = VectorRef<StringRef>();
 		}
 	}
-	return true;
+	return {};
 }
 
-bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
+Optional<StringRef> parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 	auto tmpArena = Arena();
-	auto optPayload = base64url::decode(tmpArena, b64urlPayload);
+	auto optPayload = base64::url::decode(tmpArena, b64urlPayload);
 	if (!optPayload.present())
-		return false;
+		return "Failed to base64-decode payload part"_sr;
 	auto payload = optPayload.get();
 	auto d = rapidjson::Document();
 	d.Parse(reinterpret_cast<const char*>(payload.begin()), payload.size());
 	if (d.HasParseError()) {
-		TraceEvent(SevWarnAlways, "TokenPayloadJsonParseError")
-		    .suppressFor(10)
-		    .detail("Payload", payload.toString())
-		    .detail("Message", GetParseError_En(d.GetParseError()))
-		    .detail("Offset", d.GetErrorOffset());
-		return false;
+		return "Token payload part is not valid JSON"_sr;
 	}
 	if (!d.IsObject())
-		return false;
-	if (!parseField(arena, token.issuer, d, "iss"))
-		return false;
-	if (!parseField(arena, token.subject, d, "sub"))
-		return false;
-	if (!parseField(arena, token.audience, d, "aud"))
-		return false;
-	if (!parseField(arena, token.tokenId, d, "jti"))
-		return false;
-	if (!parseField(arena, token.issuedAtUnixTime, d, "iat"))
-		return false;
-	if (!parseField(arena, token.expiresAtUnixTime, d, "exp"))
-		return false;
-	if (!parseField(arena, token.notBeforeUnixTime, d, "nbf"))
-		return false;
-	if (!parseField(arena, token.tenants, d, "tenants"))
-		return false;
-	return true;
+		return "Token payload is not a JSON object"_sr;
+	Optional<StringRef> err;
+	if ((err = parseField(arena, token.issuer, d, "iss")).present())
+		return err;
+	if ((err = parseField(arena, token.subject, d, "sub")).present())
+		return err;
+	if ((err = parseField(arena, token.audience, d, "aud")).present())
+		return err;
+	if ((err = parseField(arena, token.tokenId, d, "jti")).present())
+		return err;
+	if ((err = parseField(arena, token.issuedAtUnixTime, d, "iat")).present())
+		return err;
+	if ((err = parseField(arena, token.expiresAtUnixTime, d, "exp")).present())
+		return err;
+	if ((err = parseField(arena, token.notBeforeUnixTime, d, "nbf")).present())
+		return err;
+	if ((err = parseField(arena,
+	                      token.tenants,
+	                      d,
+	                      "tenants",
+	                      std::bool_constant<true>{} /* expect field elements encoded in base64 */))
+	        .present())
+		return err;
+	return {};
 }
 
-bool parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature) {
-	auto optSig = base64url::decode(arena, b64urlSignature);
+Optional<StringRef> parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature) {
+	auto optSig = base64::url::decode(arena, b64urlSignature);
 	if (!optSig.present())
-		return false;
+		return "Failed to base64url-decode signature part"_sr;
 	token.signature = optSig.get();
-	return true;
+	return {};
 }
 
-StringRef signaturePart(StringRef token) {
-	token.eat("."_sr);
-	token.eat("."_sr);
-	return token;
-}
-
-bool parseToken(Arena& arena, TokenRef& token, StringRef signedToken) {
-	auto b64urlHeader = signedToken.eat("."_sr);
-	auto b64urlPayload = signedToken.eat("."_sr);
-	auto b64urlSignature = signedToken;
+Optional<StringRef> parseToken(Arena& arena,
+                               StringRef signedTokenIn,
+                               TokenRef& parsedTokenOut,
+                               StringRef& signInputOut) {
+	signInputOut = StringRef();
+	auto fullToken = signedTokenIn;
+	auto b64urlHeader = signedTokenIn.eat("."_sr);
+	auto b64urlPayload = signedTokenIn.eat("."_sr);
+	auto b64urlSignature = signedTokenIn;
 	if (b64urlHeader.empty() || b64urlPayload.empty() || b64urlSignature.empty())
-		return false;
-	if (!parseHeaderPart(arena, token, b64urlHeader))
-		return false;
-	if (!parsePayloadPart(arena, token, b64urlPayload))
-		return false;
-	if (!parseSignaturePart(arena, token, b64urlSignature))
-		return false;
-	return true;
+		return "Token does not follow header.payload.signature structure"_sr;
+	signInputOut = fullToken.substr(0, b64urlHeader.size() + 1 + b64urlPayload.size());
+	auto err = Optional<StringRef>();
+	if ((err = parseHeaderPart(arena, parsedTokenOut, b64urlHeader)).present())
+		return err;
+	if ((err = parsePayloadPart(arena, parsedTokenOut, b64urlPayload)).present())
+		return err;
+	if ((err = parseSignaturePart(arena, parsedTokenOut, b64urlSignature)).present())
+		return err;
+	return err;
 }
 
-bool verifyToken(StringRef signedToken, PublicKey publicKey) {
+std::pair<bool, Optional<StringRef>> verifyToken(StringRef signInput,
+                                                 const TokenRef& parsedToken,
+                                                 PublicKey publicKey) {
+	Arena tmpArena;
+	Optional<StringRef> err;
+	auto [verifyAlgo, digest] = getMethod(parsedToken.algorithm);
+	if ((err = checkVerifyAlgorithm(verifyAlgo, publicKey)).present())
+		return { false, err };
+	auto sig = parsedToken.signature;
+	if (parsedToken.algorithm == Algorithm::ES256) {
+		// Need to convert IEEE-P1363 signature to ASN.1/DER
+		auto convertedSig = convertEs256P1363ToDer(tmpArena, sig);
+		if (!convertedSig.present() || convertedSig.get().empty()) {
+			err = "Failed to convert signature for verification"_sr;
+			return { false, err };
+		}
+		sig = convertedSig.get();
+	}
+	return { publicKey.verify(signInput, sig, *digest), err };
+}
+
+std::pair<bool, Optional<StringRef>> verifyToken(StringRef signedToken, PublicKey publicKey) {
 	auto arena = Arena();
 	auto fullToken = signedToken;
 	auto b64urlHeader = signedToken.eat("."_sr);
 	auto b64urlPayload = signedToken.eat("."_sr);
 	auto b64urlSignature = signedToken;
-	if (b64urlHeader.empty() || b64urlPayload.empty() || b64urlSignature.empty())
-		return false;
-	auto b64urlTokenPart = fullToken.substr(0, b64urlHeader.size() + 1 + b64urlPayload.size());
-	auto optSig = base64url::decode(arena, b64urlSignature);
-	if (!optSig.present())
-		return false;
-	auto sig = optSig.get();
-	auto parsedToken = TokenRef();
-	if (!parseHeaderPart(arena, parsedToken, b64urlHeader))
-		return false;
-	auto [verifyAlgo, digest] = getMethod(parsedToken.algorithm);
-	if (!checkVerifyAlgorithm(verifyAlgo, publicKey))
-		return false;
-	if (parsedToken.algorithm == Algorithm::ES256) {
-		// Need to convert IEEE-P1363 signature to ASN.1/DER
-		auto convertedSig = convertEs256P1363ToDer(arena, sig);
-		if (!convertedSig.present())
-			return false;
-		sig = convertedSig.get();
+	auto err = Optional<StringRef>();
+	if (b64urlHeader.empty() || b64urlPayload.empty() || b64urlSignature.empty()) {
+		err = "Token does not follow header.payload.signature structure"_sr;
+		return { false, err };
 	}
-	return publicKey.verify(b64urlTokenPart, sig, *digest);
+	auto signInput = fullToken.substr(0, b64urlHeader.size() + 1 + b64urlPayload.size());
+	auto parsedToken = TokenRef();
+	if ((err = parseHeaderPart(arena, parsedToken, b64urlHeader)).present())
+		return { false, err };
+	auto optSig = base64::url::decode(arena, b64urlSignature);
+	if (!optSig.present()) {
+		err = "Failed to base64url-decode signature part"_sr;
+		return { false, err };
+	}
+	parsedToken.signature = optSig.get();
+	return verifyToken(signInput, parsedToken, publicKey);
 }
 
 TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
@@ -538,20 +584,19 @@ TEST_CASE("/fdbrpc/TokenSign/FlatBuffer") {
 	for (auto i = 0; i < numIters; i++) {
 		auto arena = Arena();
 		auto privateKey = mkcert::makeEcP256();
+		auto publicKey = privateKey.toPublic();
 		auto& rng = *deterministicRandom();
 		auto tokenSpec = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
 		auto keyName = genRandomAlphanumStringRef(arena, rng, MinKeyNameLen, MaxKeyNameLenPlus1);
 		auto signedToken = authz::flatbuffers::signToken(arena, tokenSpec, keyName, privateKey);
-		const auto verifyExpectOk = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
-		ASSERT(verifyExpectOk);
+		ASSERT(authz::flatbuffers::verifyToken(signedToken, publicKey));
 		// try tampering with signed token by adding one more tenant
 		tokenSpec.tenants.push_back(arena,
 		                            genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
 		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 		writer.serialize(tokenSpec);
 		signedToken.token = writer.toStringRef();
-		const auto verifyExpectFail = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
-		ASSERT(!verifyExpectFail);
+		ASSERT(!authz::flatbuffers::verifyToken(signedToken, publicKey));
 	}
 	printf("%d runs OK\n", numIters);
 	return Void();
@@ -562,19 +607,24 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 	for (auto i = 0; i < numIters; i++) {
 		auto arena = Arena();
 		auto privateKey = mkcert::makeEcP256();
+		auto publicKey = privateKey.toPublic();
 		auto& rng = *deterministicRandom();
 		auto tokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 		auto signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
-		const auto verifyExpectOk = authz::jwt::verifyToken(signedToken, privateKey.toPublic());
-		ASSERT(verifyExpectOk);
+		auto verifyOk = false;
+		auto verifyErr = Optional<StringRef>();
+		std::tie(verifyOk, verifyErr) = authz::jwt::verifyToken(signedToken, publicKey);
+		ASSERT(!verifyErr.present());
+		ASSERT(verifyOk);
 		auto signaturePart = signedToken;
 		signaturePart.eat("."_sr);
 		signaturePart.eat("."_sr);
 		{
-			auto parsedToken = authz::jwt::TokenRef{};
 			auto tmpArena = Arena();
-			auto parseOk = parseToken(tmpArena, parsedToken, signedToken);
-			ASSERT(parseOk);
+			auto parsedToken = authz::jwt::TokenRef{};
+			auto signInput = StringRef();
+			auto parseError = parseToken(tmpArena, signedToken, parsedToken, signInput);
+			ASSERT(!parseError.present());
 			ASSERT_EQ(tokenSpec.algorithm, parsedToken.algorithm);
 			ASSERT(tokenSpec.issuer == parsedToken.issuer);
 			ASSERT(tokenSpec.subject == parsedToken.subject);
@@ -585,17 +635,21 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
 			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
 			ASSERT(tokenSpec.tenants == parsedToken.tenants);
-			auto optSig = base64url::decode(tmpArena, signaturePart);
+			auto optSig = base64::url::decode(tmpArena, signaturePart);
 			ASSERT(optSig.present());
 			ASSERT(optSig.get() == parsedToken.signature);
+			std::tie(verifyOk, verifyErr) = authz::jwt::verifyToken(signInput, parsedToken, publicKey);
+			ASSERT(!verifyErr.present());
+			ASSERT(verifyOk);
 		}
 		// try tampering with signed token by adding one more tenant
 		tokenSpec.tenants.get().push_back(
 		    arena, genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
-		auto tamperedTokenPart = makeTokenPart(arena, tokenSpec);
+		auto tamperedTokenPart = makeSignInput(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
-		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublic());
-		ASSERT(!verifyExpectFail);
+		std::tie(verifyOk, verifyErr) = authz::jwt::verifyToken(StringRef(tamperedTokenString), publicKey);
+		ASSERT(!verifyErr.present());
+		ASSERT(!verifyOk);
 	}
 	printf("%d runs OK\n", numIters);
 	return Void();
