@@ -497,7 +497,7 @@ public:
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
 			if (meta.ranges.empty()) {
-				TraceEvent(SevWarnAlways, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
 				continue;
 			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
@@ -1459,7 +1459,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				req.reply.send(audit->id);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "DDAuditStorageError", self->ddId)
+			TraceEvent(SevWarn, "DDAuditStorageError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", (audit == nullptr ? UID() : audit->id))
 			    .detail("Range", req.range)
