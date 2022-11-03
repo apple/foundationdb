@@ -73,7 +73,6 @@ EncryptCipherMode encryptModeFromString(const std::string& modeStr);
 typedef enum {
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE = 1,
-	ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI = 2,
 	ENCRYPT_HEADER_AUTH_TOKEN_LAST = 3 // Always the last element
 } EncryptAuthTokenMode;
 

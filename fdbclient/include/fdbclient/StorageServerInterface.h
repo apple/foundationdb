@@ -22,6 +22,7 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
@@ -102,7 +103,7 @@ struct StorageServerInterface {
 	PublicRequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
-	RequestStream<struct WaitMetricsRequest> waitMetrics;
+	PublicRequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
@@ -120,8 +121,8 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
-
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
+	RequestStream<struct AuditStorageRequest> auditStorage;
 
 private:
 	bool acceptingRequests;
@@ -160,7 +161,8 @@ public:
 				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
-				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
+				waitMetrics =
+				    PublicRequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
 				splitMetrics = RequestStream<struct SplitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(5));
 				getStorageMetrics =
 				    RequestStream<struct GetStorageMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(6));
@@ -194,6 +196,8 @@ public:
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
 				updateCommitCostRequest =
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
+				auditStorage =
+				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -245,6 +249,7 @@ public:
 		streams.push_back(fetchCheckpoint.getReceiver());
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
+		streams.push_back(auditStorage.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -709,18 +714,25 @@ struct WaitMetricsRequest {
 	// Waits for any of the given minimum or maximum metrics to be exceeded, and then returns the current values
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
+	// Setting the tenantInfo makes the request tenant-aware.
+	Optional<TenantInfo> tenantInfo;
 	Arena arena;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
 
+	bool verify() const { return tenantInfo.present() && tenantInfo.get().isAuthorized(); }
+
 	WaitMetricsRequest() {}
-	WaitMetricsRequest(KeyRangeRef const& keys, StorageMetrics const& min, StorageMetrics const& max)
-	  : keys(arena, keys), min(min), max(max) {}
+	WaitMetricsRequest(TenantInfo tenantInfo,
+	                   KeyRangeRef const& keys,
+	                   StorageMetrics const& min,
+	                   StorageMetrics const& max)
+	  : tenantInfo(tenantInfo), keys(arena, keys), min(min), max(max) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, min, max, reply, arena);
+		serializer(ar, keys, min, max, reply, tenantInfo, arena);
 	}
 };
 
@@ -878,16 +890,16 @@ struct ChangeFeedStreamRequest {
 	KeyRange range;
 	int replyBufferSize = -1;
 	bool canReadPopped = true;
-	UID debugUID; // This is only used for debugging and tracing, but being able to link a client + server side stream
-	              // is so useful for testing, and this is such small overhead compared to streaming large amounts of
-	              // change feed data, it is left in the interface
+	UID id; // This must be globally unique among ChangeFeedStreamRequest instances
+	Optional<ReadOptions> options;
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, debugUID, arena);
+		serializer(
+		    ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, id, options, arena);
 	}
 };
 

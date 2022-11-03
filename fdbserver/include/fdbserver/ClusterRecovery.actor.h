@@ -289,11 +289,10 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_DURATION_EVENT_NAME));
 		clusterRecoveryAvailableEventHolder = makeReference<EventCacheHolder>(
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME));
-		logger = traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
-		                       dbgid,
-		                       SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
-		                       &cc,
-		                       getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME));
+		logger = cc.traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
+		                          dbgid,
+		                          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+		                          getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME));
 		if (forceRecovery && !controllerData->clusterControllerDcId.present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;

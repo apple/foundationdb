@@ -199,6 +199,7 @@ public:
 	int32_t DEFAULT_MAX_GRV_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
+	bool DELETE_NATIVE_LIB_AFTER_LOADING;
 
 	double GLOBAL_CONFIG_REFRESH_BACKOFF;
 	double GLOBAL_CONFIG_REFRESH_MAX_BACKOFF;
@@ -261,6 +262,8 @@ public:
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 	int64_t WRITE_COST_BYTE_FACTOR; // Used to round up the cost of write operations
 	int64_t READ_COST_BYTE_FACTOR; // Used to round up the cost of read operations
+	// Cost multiplier for writes (because write operations are more expensive than reads):
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -269,6 +272,7 @@ public:
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
 	int BG_TOO_MANY_GRANULES;
+	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.

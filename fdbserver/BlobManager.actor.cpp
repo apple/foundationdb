@@ -296,7 +296,7 @@ struct BlobManagerStats {
 		specialCounter(cc, "HardBoundaries", [mergeHardBoundaries]() { return mergeHardBoundaries->size(); });
 		specialCounter(cc, "SoftBoundaries", [mergeBoundaries]() { return mergeBoundaries->size(); });
 		specialCounter(cc, "BlockedAssignments", [this]() { return this->blockedAssignments; });
-		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
+		logger = cc.traceCounters("BlobManagerMetrics", id, interval, "BlobManagerMetrics");
 	}
 };
 
@@ -562,11 +562,12 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 
 	state Transaction tr = Transaction(bmData->db);
 	state int idx = 1;
-	state Reference<GranuleTenantData> tenantData = bmData->tenantData.getDataForGranule(granuleRange);
+	state Reference<GranuleTenantData> tenantData;
+	wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
 	while (SERVER_KNOBS->BG_METADATA_SOURCE == "tenant" && !tenantData.isValid()) {
 		// this is a bit of a hack, but if we know this range is supposed to have a tenant, and it doesn't, just wait
 		wait(delay(1.0));
-		tenantData = bmData->tenantData.getDataForGranule(granuleRange);
+		wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
 	}
 	for (; idx < splits.size() - 1; idx++) {
 		loop {
@@ -2775,6 +2776,7 @@ ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 			if (bmData->iAmReplaced.canBeSet()) {
 				bmData->iAmReplaced.send(Void());
 			}
+			throw;
 		}
 	}
 
@@ -2895,6 +2897,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
 					}
+					throw blob_manager_replaced();
 				}
 
 				BoundaryEvaluation newEval(rep.continueEpoch,
@@ -3536,7 +3539,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	}
 
 	// skip the rest of the algorithm for the first blob manager
-	if (bmData->epoch == 1) {
+	if (bmData->epoch == 1 && !isFullRestoreMode()) {
 		bmData->doneRecovering.send(Void());
 		return Void();
 	}
@@ -4212,7 +4215,8 @@ ACTOR Future<Reference<BlobConnectionProvider>> getBStoreForGranule(Reference<Bl
 		return self->bstore;
 	}
 	loop {
-		state Reference<GranuleTenantData> data = self->tenantData.getDataForGranule(granuleRange);
+		state Reference<GranuleTenantData> data;
+		wait(store(data, self->tenantData.getDataForGranule(granuleRange)));
 		if (data.isValid()) {
 			wait(data->bstoreLoaded.getFuture());
 			wait(delay(0));
@@ -5297,6 +5301,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 					fmt::print("BM {} exiting because it is replaced\n", self->epoch);
 				}
 				TraceEvent("BlobManagerReplaced", bmInterf.id()).detail("Epoch", epoch);
+				wait(delay(0.0));
 				break;
 			}
 			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {

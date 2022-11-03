@@ -35,7 +35,7 @@
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -188,7 +188,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
 
-		logger = traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ResolverMetrics");
+		logger = cc.traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ResolverMetrics");
 	}
 	~Resolver() { destroyConflictSet(conflictSet); }
 };
@@ -204,6 +204,17 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	state NetworkAddress proxyAddress =
 	    req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
+
+	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
+			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
+			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
+		};
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+		    wait(getLatestEncryptCipherKeys(db, metadataDomains, BlobCipherMetrics::TLOG));
+		cipherKeys = cks;
+	}
 
 	++self->resolveBatchIn;
 
@@ -278,8 +289,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
+		const Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 		for (int t = 0; t < req.transactions.size(); t++) {
-			conflictBatch.addTransaction(req.transactions[t]);
+			conflictBatch.addTransaction(req.transactions[t], newOldestVersion);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
 			self->resolvedWriteConflictRanges += req.transactions[t].write_conflict_ranges.size();
 
@@ -292,8 +304,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 					    it.begin, SERVER_KNOBS->SAMPLE_OFFSET_PER_KEY + it.begin.size(), expire);
 			}
 		}
-		conflictBatch.detectConflicts(
-		    req.version, req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS, commitList, &tooOldList);
+		conflictBatch.detectConflicts(req.version, newOldestVersion, commitList, &tooOldList);
 
 		reply.debugID = req.debugID;
 		reply.committed.resize(reply.arena, req.transactions.size());
@@ -351,7 +362,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
-				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations, db);
+				applyMetadataMutations(spanContext,
+				                       *resolverData,
+				                       req.transactions[t].mutations,
+				                       isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys
+				                                                                                      : nullptr);
 			}
 			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
@@ -506,8 +521,10 @@ struct TransactionStateResolveContext {
 	}
 };
 
-ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext,
-                                                          Reference<AsyncVar<ServerDBInfo> const> db) {
+ACTOR Future<Void> processCompleteTransactionStateRequest(
+    TransactionStateResolveContext* pContext,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;
 
@@ -574,7 +591,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		bool confChanges; // Ignore configuration changes for initial commits.
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
-		applyMetadataMutations(SpanContext(), resolverData, mutations, db);
+		applyMetadataMutations(SpanContext(), resolverData, mutations, cipherKeys);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
@@ -615,7 +632,18 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(pContext, db));
+		state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+		if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+			static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
+				{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
+				{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
+			};
+			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+			    wait(getLatestEncryptCipherKeys(db, metadataDomains, BlobCipherMetrics::TLOG));
+			cipherKeys = cks;
+		}
+		wait(processCompleteTransactionStateRequest(
+		    pContext, db, isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys : nullptr));
 		pContext->processed = true;
 	}
 
@@ -653,15 +681,14 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore =
-		    keyValueStoreLogSystem(self->logAdapter,
-		                           db,
-		                           resolver.id(),
-		                           2e9,
-		                           true,
-		                           true,
-		                           true,
-		                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client));
+		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter,
+		                                             db,
+		                                             resolver.id(),
+		                                             2e9,
+		                                             true,
+		                                             true,
+		                                             true,
+		                                             isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));

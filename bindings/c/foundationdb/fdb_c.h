@@ -27,10 +27,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 720)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 730)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 720
+#elif FDB_API_VERSION > 730
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -376,6 +376,39 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_wait_purge_granules_complete(
                                                                                 uint8_t const* purge_key_name,
                                                                                 int purge_key_name_length);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* tenant,
+                                                                  uint8_t const* begin_key_name,
+                                                                  int begin_key_name_length,
+                                                                  uint8_t const* end_key_name,
+                                                                  int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
+                                                                    uint8_t const* begin_key_name,
+                                                                    int begin_key_name_length,
+                                                                    uint8_t const* end_key_name,
+                                                                    int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_list_blobbified_ranges(FDBTenant* tenant,
+                                                                          uint8_t const* begin_key_name,
+                                                                          int begin_key_name_length,
+                                                                          uint8_t const* end_key_name,
+                                                                          int end_key_name_length,
+                                                                          int rangeLimit);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_list_blobbified_ranges(FDBTenant* tenant,
+                                                                          uint8_t const* begin_key_name,
+                                                                          int begin_key_name_length,
+                                                                          uint8_t const* end_key_name,
+                                                                          int end_key_name_length,
+                                                                          int rangeLimit);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* tenant,
+                                                                     uint8_t const* begin_key_name,
+                                                                     int begin_key_name_length,
+                                                                     uint8_t const* end_key_name,
+                                                                     int end_key_name_length,
+                                                                     int64_t version);
+
 DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
@@ -481,12 +514,14 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_transaction_get_committed_version(F
                                                                                int64_t* out_version);
 
 /*
- * This function intentionally returns an FDBFuture instead of an integer
- * directly, so that calling this API can see the effect of previous
+ * These functions intentionally return an FDBFuture instead of an integer
+ * directly, so that calling the API can see the effect of previous
  * mutations on the transaction. Specifically, mutations are applied
  * asynchronously by the main thread. In order to see them, this call has to
  * be serviced by the main thread too.
  */
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* tr);

@@ -29,6 +29,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "DiskFailureInjection";
 	bool enabled;
 	double testDuration = 60.0;
 	double startDelay = 0.0;
@@ -67,13 +68,6 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	}
 
 	void initFailureInjectionMode(DeterministicRandom& random) override { enabled = clientId == 0; }
-
-	std::string description() const override {
-		if (g_simulator == g_network)
-			return "DiskFailureInjection";
-		else
-			return "NoSimDiskFailureInjection";
-	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -278,5 +272,5 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		}
 	}
 };
-WorkloadFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFactory("DiskFailureInjection");
+WorkloadFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFactory;
 FailureInjectorFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFailureInjectionFactory;

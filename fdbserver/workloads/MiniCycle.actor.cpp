@@ -32,6 +32,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MiniCycleWorkload : TestWorkload {
+	static constexpr auto NAME = "MiniCycle";
+
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -51,8 +53,6 @@ struct MiniCycleWorkload : TestWorkload {
 		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
-
-	std::string description() const override { return "MiniCycleWorkload"; }
 
 	Future<Void> setup(Database const& cx) override {
 		return bulkSetup(cx->clone(),
@@ -340,4 +340,4 @@ struct MiniCycleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<MiniCycleWorkload> MiniCycleWorkloadFactory("MiniCycle");
+WorkloadFactory<MiniCycleWorkload> MiniCycleWorkloadFactory;
