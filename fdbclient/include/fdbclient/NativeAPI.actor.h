@@ -249,6 +249,9 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
+	// Measured by summing the bytes accessed by each read and write operation
+	// after rounding up to the nearest page size and applying a write penalty
+	int64_t totalCost = 0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
 	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
@@ -447,6 +450,8 @@ public:
 	// May be called only after commit() returns success
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
+	int64_t getTotalCost() const { return trState->totalCost; }
+
 	// Will be fulfilled only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
 
@@ -566,9 +571,16 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
-// Round up to the nearest page size
+// Measured in bytes, rounded up to the nearest page size. Multiply by fungibility ratio
+// because writes are more expensive than reads.
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
-	return (bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1;
+	return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR *
+	       ((bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1);
+}
+
+// Measured in bytes, rounded up to the nearest page size.
+inline uint64_t getReadOperationCost(uint64_t bytes) {
+	return ((bytes - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value

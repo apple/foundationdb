@@ -2001,7 +2001,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	// Key size is not included in "BytesQueried", but still contributes to cost,
+	// so it must be accounted for here.
+	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -2011,7 +2013,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(duration, resultSize > maxReadBytes);
+		data->counters.readLatencyBands.addMeasurement(duration, 1, Filtered(resultSize > maxReadBytes));
 	}
 
 	return Void();
@@ -3014,7 +3016,11 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			req.reply.setByteLimit(std::min((int64_t)req.replyBufferSize, SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES));
 		}
 
-		wait(delay(0, TaskPriority::DefaultEndpoint));
+		// Change feeds that are not atLatest must have a lower priority than UpdateStorage to not starve it out, and
+		// change feed disk reads generally only happen on blob worker recovery or data movement, so they should be
+		// lower priority. AtLatest change feeds are triggered directly from the SS update loop with no waits, so they
+		// will still be low latency
+		wait(delay(0, TaskPriority::SSSpilledChangeFeedReply));
 
 		if (DEBUG_CF_TRACE) {
 			TraceEvent(SevDebug, "TraceChangeFeedStreamStart", data->thisServerID)
@@ -3935,9 +3941,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(duration,
-		                                               resultSize > maxReadBytes ||
-		                                                   abs(req.begin.offset) > maxSelectorOffset ||
-		                                                   abs(req.end.offset) > maxSelectorOffset);
+		                                               1,
+		                                               Filtered(resultSize > maxReadBytes ||
+		                                                        abs(req.begin.offset) > maxSelectorOffset ||
+		                                                        abs(req.end.offset) > maxSelectorOffset));
 	}
 
 	return Void();
@@ -4722,7 +4729,9 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	TenantPrefixIndex index;
 	index.createNewVersion(1);
 	for (auto entry : entries) {
-		index.insert(entry.second.prefix, entry.first);
+		TenantNameUniqueSet nameSet;
+		nameSet.insert(entry.first);
+		index.insert(entry.second.prefix, nameSet);
 	}
 
 	// Before all tenants
@@ -5017,9 +5026,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(duration,
-		                                               resultSize > maxReadBytes ||
-		                                                   abs(req.begin.offset) > maxSelectorOffset ||
-		                                                   abs(req.end.offset) > maxSelectorOffset);
+		                                               1,
+		                                               Filtered(resultSize > maxReadBytes ||
+		                                                        abs(req.begin.offset) > maxSelectorOffset ||
+		                                                        abs(req.end.offset) > maxSelectorOffset));
 	}
 
 	return Void();
@@ -5337,7 +5347,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		int maxSelectorOffset =
 		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(
-		    duration, resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
+		    duration, 1, Filtered(resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset));
 	}
 
 	return Void();
@@ -8365,7 +8375,16 @@ bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenant
 		tenantPrefixIndex->createNewVersion(version);
 
 		tenantMap.insert(tenantName, tenantEntry);
-		tenantPrefixIndex->insert(tenantEntry.prefix, tenantName);
+
+		auto view = tenantPrefixIndex->at(version);
+		auto itr = view.find(tenantEntry.prefix);
+		TenantNameUniqueSet nameSet;
+		if (itr != view.end()) {
+			nameSet = *itr;
+		}
+
+		nameSet.insert(tenantName);
+		tenantPrefixIndex->insert(tenantEntry.prefix, nameSet);
 
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
 		return true;
@@ -8389,9 +8408,17 @@ void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTen
 
 		auto view = tenantMap.at(version);
 		for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
+			auto indexView = tenantPrefixIndex->at(version);
 			// Trigger any watches on the prefix associated with the tenant.
 			watches.triggerRange(itr->prefix, strinc(itr->prefix));
-			tenantPrefixIndex->erase(itr->prefix);
+			auto indexItr = indexView.find(itr->prefix);
+			ASSERT(indexItr != indexView.end());
+			TenantNameUniqueSet nameSet = *indexItr;
+			if (nameSet.remove(itr.key())) {
+				tenantPrefixIndex->erase(itr->prefix);
+			} else {
+				tenantPrefixIndex->insert(itr->prefix, nameSet);
+			}
 			TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
 		}
 
@@ -8565,6 +8592,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
+					if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+					    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+					      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
+						ASSERT(false);
+					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
 							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
@@ -8718,6 +8750,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else {
 				MutationRef msg;
 				rd >> msg;
+				if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+				    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
+				      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
+					ASSERT(false);
+				}
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
 					msg = msg.decrypt(cipherKeys.get(), rd.arena(), BlobCipherMetrics::TLOG);
@@ -9872,7 +9909,16 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		TenantMapEntry tenantEntry = TenantMapEntry::decode(result.value);
 
 		data->tenantMap.insert(tenantName, tenantEntry);
-		data->tenantPrefixIndex->insert(tenantEntry.prefix, tenantName);
+
+		auto view = data->tenantPrefixIndex->at(version);
+		auto itr = view.find(tenantEntry.prefix);
+		TenantNameUniqueSet nameSet;
+		if (itr != view.end()) {
+			nameSet = *itr;
+		}
+
+		nameSet.insert(tenantName);
+		data->tenantPrefixIndex->insert(tenantEntry.prefix, nameSet);
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
@@ -10131,8 +10177,14 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 
 ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
-		wait(success(waitForVersionNoTooOld(self, latestVersion)));
-		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
+		state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
+		state Optional<TenantMapEntry> entry;
+		try {
+			entry = self->getTenantEntry(version, req.tenantInfo.get());
+		} catch (Error& e) {
+			self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
+			return Void();
+		}
 		Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
