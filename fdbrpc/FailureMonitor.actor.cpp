@@ -154,10 +154,19 @@ void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
 }
 
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoint) {
+	static int numWeirdTokens = 0;
 	// If the endpoint or address is already failed, return right away
 	auto i = addressStatus.find(endpoint.getPrimaryAddress());
 	if (i == addressStatus.end() || i->second.isFailed() || failedEndpoints.count(endpoint)) {
-		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
+		TraceEvent event("AlreadyDisconnected");
+		if (endpoint.token.first() == 0xffffffffffffffff) {
+			// well known endpoint
+			event.suppressFor(5.0);
+		}
+		event.detail("Addr", endpoint.getPrimaryAddress())
+		    .detail("Reason", i == addressStatus.end() || i->second.isFailed() ? "Disconnected" : "EndpointFailed")
+		    .detail("Tok", endpoint.token)
+		    .log();
 		return Void();
 	}
 
