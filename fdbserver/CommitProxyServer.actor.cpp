@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <tuple>
+#include <variant>
 
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -67,6 +68,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+
+using WriteMutationRefVar = std::variant<MutationRef, VectorRef<MutationRef>>;
 
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
 	state ReplyPromise<Void> reply = req.reply;
@@ -1256,20 +1259,21 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
-ACTOR Future<MutationRef> writeMutationEncryptedMutation(CommitBatchContext* self,
-                                                         int64_t tenantId,
-                                                         const MutationRef* mutation,
-                                                         Optional<MutationRef>* encryptedMutationOpt,
-                                                         Arena* arena) {
+ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchContext* self,
+                                                                 int64_t tenantId,
+                                                                 const MutationRef* mutation,
+                                                                 Optional<MutationRef>* encryptedMutationOpt,
+                                                                 Arena* arena) {
+	state MutationRef encryptedMutation = encryptedMutationOpt->get();
+	state const BlobCipherEncryptHeader* header;
 
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 	ASSERT(self->pProxyCommitData->isEncryptionEnabled);
 	ASSERT(g_network && g_network->isSimulated());
 
-	state MutationRef encryptedMutation = encryptedMutationOpt->get();
 	ASSERT(encryptedMutation.isEncrypted());
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo = self->pProxyCommitData->db;
-	state const BlobCipherEncryptHeader* header = encryptedMutation.encryptionHeader();
+	header = encryptedMutation.encryptionHeader();
 	TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
 	MutationRef decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
 
@@ -1280,16 +1284,18 @@ ACTOR Future<MutationRef> writeMutationEncryptedMutation(CommitBatchContext* sel
 	return encryptedMutation;
 }
 
-ACTOR Future<MutationRef> writeMutationFetchEncryptKey(CommitBatchContext* self,
-                                                       int64_t tenantId,
-                                                       const MutationRef* mutation,
-                                                       Arena* arena) {
+ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContext* self,
+                                                               int64_t tenantId,
+                                                               const MutationRef* mutation,
+                                                               Arena* arena) {
+
+	state EncryptCipherDomainId domainId = tenantId;
+	state MutationRef encryptedMutation;
+
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 	ASSERT(self->pProxyCommitData->isEncryptionEnabled);
 	ASSERT_NE((MutationRef::Type)mutation->type, MutationRef::Type::ClearRange);
 
-	state EncryptCipherDomainId domainId = tenantId;
-	state MutationRef encryptedMutation;
 	std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
 	    getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
 	domainId = p.second;
@@ -1304,12 +1310,23 @@ ACTOR Future<MutationRef> writeMutationFetchEncryptKey(CommitBatchContext* self,
 	return encryptedMutation;
 }
 
-MutationRef writeMutation(CommitBatchContext* self,
-                          int64_t tenantId,
-                          const MutationRef* mutation,
-                          Optional<MutationRef>* encryptedMutationOpt,
-                          Arena* arena) {
+Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
+                                          int64_t tenantId,
+                                          const MutationRef* mutation,
+                                          Optional<MutationRef>* encryptedMutationOpt,
+                                          Arena* arena) {
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
+
+	// WriteMutation routine is responsible for appending mutations to be persisted in TLog, the operation
+	// isn't a 'blocking' operation, except for few cases when Encryption is supported by the cluster such
+	// as:
+	// 1. Fetch encryption keys to encrypt the mutation.
+	// 2. Split ClearRange mutation to respect Encryption domain boundaries.
+	// 3. Ensure sanity of already encrypted mutation - simulation limited check.
+	//
+	// Approach optimizes "fast" path by avoiding alloc/dealloc overhead due to be ACTOR framework support,
+	// the penalty happens iff any of above conditions are met. Otherwise, corresponding handle routine (ACTOR
+	// compliant) gets invoked ("slow path").
 
 	if (self->pProxyCommitData->isEncryptionEnabled) {
 		EncryptCipherDomainId domainId = tenantId;
@@ -1327,7 +1344,7 @@ MutationRef writeMutation(CommitBatchContext* self,
 			ASSERT(encryptedMutation.isEncrypted());
 			// During simulation check whether the encrypted mutation matches the decrpyted mutation
 			if (g_network && g_network->isSimulated()) {
-				throw commit_proxy_write_mutation_encrypted();
+				return writeMutationEncryptedMutation(self, tenantId, mutation, encryptedMutationOpt, arena);
 			}
 		} else {
 			if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
@@ -1336,7 +1353,7 @@ MutationRef writeMutation(CommitBatchContext* self,
 				domainId = p.second;
 
 				if (self->cipherKeys.find(domainId) == self->cipherKeys.end()) {
-					throw commit_proxy_write_mutation_fetch_encrypt_key();
+					return writeMutationFetchEncryptKey(self, tenantId, mutation, arena);
 				}
 
 				CODE_PROBE(true, "Raw access mutation encryption");
@@ -1348,10 +1365,10 @@ MutationRef writeMutation(CommitBatchContext* self,
 		ASSERT(encryptedMutation.isEncrypted());
 		CODE_PROBE(true, "encrypting non-metadata mutations");
 		self->toCommit.writeTypedMessage(encryptedMutation);
-		return encryptedMutation;
+		return std::variant<MutationRef, VectorRef<MutationRef>>{ encryptedMutation };
 	} else {
 		self->toCommit.writeTypedMessage(*mutation);
-		return *mutation;
+		return std::variant<MutationRef, VectorRef<MutationRef>>{ *mutation };
 	}
 }
 
@@ -1439,32 +1456,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (encryptedMutation.present()) {
 					ASSERT(encryptedMutation.get().isEncrypted());
 				}
-
-				// WriteMutation routine is responsible for appending mutations to be persisted in TLog, the operation
-				// isn't a 'blocking' operation, except for few cases when Encryption is supported by the cluster such
-				// as:
-				// 1. Fetch encryption keys to encrypt the mutation.
-				// 2. Split ClearRange mutation to respect Encryption domain boundaries.
-				// 3. Ensure sanity of already encrypted mutation - simulation limited check.
-				//
-				// Approach optimizes "fast" path by avoiding alloc/dealloc overhead due to be ACTOR framework support,
-				// the penalty happens iff any of above conditions are met.
-
-				try {
-					MutationRef tempMutation = writeMutation(self, tenantId, &m, &encryptedMutation, &arena);
-					writtenMutation = tempMutation;
-				} catch (Error& e) {
-					if (e.code() == error_code_commit_proxy_write_mutation_encrypted) {
-						MutationRef tempMutation =
-						    wait(writeMutationEncryptedMutation(self, tenantId, &m, &encryptedMutation, &arena));
-						writtenMutation = tempMutation;
-					} else if (e.code() == error_code_commit_proxy_write_mutation_fetch_encrypt_key) {
-						MutationRef tempMutation = wait(writeMutationFetchEncryptKey(self, tenantId, &m, &arena));
-						writtenMutation = tempMutation;
-					} else {
-						throw;
-					}
-				}
+				WriteMutationRefVar var = wait(writeMutation(self, tenantId, &m, &encryptedMutation, &arena));
+				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
+				ASSERT(std::holds_alternative<MutationRef>(var));
+				writtenMutation = std::get<MutationRef>(var);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
@@ -1517,32 +1512,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-
-				// WriteMutation routine is responsible for appending mutations to be persisted in TLog, the operation
-				// isn't a 'blocking' operation, except for few cases when Encryption is supported by the cluster such
-				// as:
-				// 1. Fetch encryption keys to encrypt the mutation.
-				// 2. Split ClearRange mutation to respect Encryption domain boundaries.
-				// 3. Ensure sanity of already encrypted mutation - simulation limited check.
-				//
-				// Approach optimizes "fast" path by avoiding alloc/dealloc overhead due to be ACTOR framework support,
-				// the penalty happens iff any of above conditions are met.
-
-				try {
-					MutationRef tempMutation = writeMutation(self, tenantId, &m, &encryptedMutation, &arena);
-					writtenMutation = tempMutation;
-				} catch (Error& e) {
-					if (e.code() == error_code_commit_proxy_write_mutation_encrypted) {
-						MutationRef tempMutation =
-						    wait(writeMutationEncryptedMutation(self, tenantId, &m, &encryptedMutation, &arena));
-						writtenMutation = tempMutation;
-					} else if (e.code() == error_code_commit_proxy_write_mutation_fetch_encrypt_key) {
-						MutationRef tempMutation = wait(writeMutationFetchEncryptKey(self, tenantId, &m, &arena));
-						writtenMutation = tempMutation;
-					} else {
-						throw;
-					}
-				}
+				WriteMutationRefVar var = wait(writeMutation(self, tenantId, &m, &encryptedMutation, &arena));
+				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
+				ASSERT(std::holds_alternative<MutationRef>(var));
+				writtenMutation = std::get<MutationRef>(var);
 			} else {
 				UNREACHABLE();
 			}
@@ -1729,27 +1702,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		self->toCommit.addTags(tags);
 		state Arena arena;
 
-		// WriteMutation routine is responsible for appending mutations to be persisted in TLog, the operation
-		// isn't a 'blocking' operation, except for few cases when Encryption is supported by the cluster such
-		// as:
-		// 1. Fetch encryption keys to encrypt the mutation.
-		// 2. Split ClearRange mutation to respect Encryption domain boundaries.
-		// 3. Ensure sanity of already encrypted mutation - simulation limited check.
-		//
-		// Approach optimizes "fast" path by avoiding alloc/dealloc overhead due to be ACTOR framework support,
-		// the penalty happens iff any of above conditions are met.
-
-		try {
-			writeMutation(
-			    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena);
-		} catch (Error& e) {
-			if (e.code() == error_code_commit_proxy_write_mutation_fetch_encrypt_key) {
-				wait(success(writeMutationFetchEncryptKey(
-				    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], &arena)));
-			} else {
-				throw;
-			}
-		}
+		WriteMutationRefVar var = wait(writeMutation(
+		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
+		ASSERT(std::holds_alternative<MutationRef>(var));
 	}
 	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
 
