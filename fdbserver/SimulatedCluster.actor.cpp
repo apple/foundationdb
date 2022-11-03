@@ -2514,6 +2514,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					localities.set("data_hall"_sr, dcUID);
 					systemActors->push_back(
 					    reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
+					                                  conn,
 					                                  extraIps,
 					                                  sslEnabled,
 					                                  localities,
@@ -2525,7 +2526,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					                                  sslOnly,
 					                                  whitelistBinPaths,
 					                                  protocolVersion,
-					                                  configDBType),
+					                                  configDBType,
+					                                  true),
 					                 "SimulatedMachine"));
 					++cluster;
 				}
