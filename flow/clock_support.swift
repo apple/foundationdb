@@ -55,9 +55,8 @@ extension FlowClock: Clock {
 
     /// The minimum non-zero resolution between any two calls to `now`.
     public var minimumResolution: Swift.Duration {
-        var seconds = Int64(0)
+        let seconds = Int64(0)
         var nanoseconds = Int64(0)
-
         nanoseconds += Duration.milliseconds(100).nanoseconds
 
         return .seconds(seconds) + .nanoseconds(nanoseconds)
@@ -68,7 +67,7 @@ extension FlowClock: Clock {
         var seconds = Int64(0)
         var nanoseconds = Int64(0)
 
-        var nowDouble: Double = flow_gNetwork_now()
+        let nowDouble: Double = flow_gNetwork_now()
         seconds += Duration.seconds(nowDouble).seconds
         nanoseconds = Duration.seconds(nowDouble).nanoseconds
 
@@ -89,16 +88,17 @@ extension FlowClock: Clock {
             tolerance: Swift.Duration? = nil
     ) async throws {
         let (seconds, attoseconds) = deadline._value.components
+        _ = seconds // silence warning
         let nanoseconds = attoseconds / 1_000_000_000
+        _ = nanoseconds // silence warning
 
-        var duration = FlowClock.now.duration(to: deadline)
-        var secondsDouble = Double(duration.seconds)
-        var nanosDouble = 0 // TODO: fix this
-
-        print("[swift] sleep: \(secondsDouble)s")
+        let duration = FlowClock.now.duration(to: deadline)
+        let secondsDouble = Double(duration.seconds)
+        let nanosDouble = 0 // TODO: fix this handling of nanos from the deadline
+        _ = nanosDouble // silence warning
 
         var f = flow_gNetwork_delay(/*secondsDouble=*/secondsDouble, /*priority=*/TaskPriority.DefaultDelay)
-        try? await f.waitValue
+        _ = try await f.waitValue
     }
 }
 

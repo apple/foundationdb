@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <utility>
 
-#include "swift_compat.h"
+#include "swift_support.h"
 
 // The thread safety this class provides is that it's safe to call addref and
 // delref on the same object concurrently in different threads. Subclass does
@@ -196,10 +196,5 @@ template <class P>
 bool operator!=(const Reference<P>& lhs, const Reference<P>& rhs) {
 	return !(lhs == rhs);
 }
-
-#define SWIFT_CXX_REF   \
-    __attribute__((swift_attr("import_as_ref")))   \
-    __attribute__((swift_attr("retain:addref")))   \
-    __attribute__((swift_attr("release:delref")))
 
 #endif

@@ -118,7 +118,6 @@ struct MasterDataSwiftReference; // FIXME(swift): remove once MasterDataSwiftRef
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // FIXME(swift): remove those
-extern "C" void testSwiftInFDB();
 extern "C" void swiftCallMeFuture(Promise<int>* promise);
 
 using namespace std::literals;
@@ -400,6 +399,18 @@ ACTOR Future<Void> swiftCallsActor() {
 
     wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
   }
+}
+
+ACTOR void swiftTestRunner() {
+	printf("[c++][%s:%d](%s) ============================== swift/flow tests ==============================\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+	auto p = PromiseVoid();
+	fdbserver_swift::swiftyTestRunner(p);
+	wait(p.getFuture());
+	printf("[c++][%s:%d](%s) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ end of swift/flow tests ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+
+	printf("[c++][%s:%d](%s) Shutting down...\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+	wait(delay(3.0));
+	flushAndExit(0);
 }
 
 ACTOR Future<Void> histogramReport() {
@@ -2071,6 +2082,8 @@ int main(int argc, char* argv[]) {
 					abort();
 
 				auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
+
+				swiftTestRunner(); // spawns actor that will call Swift functions
 
 				g_network->run();
 				while (true);

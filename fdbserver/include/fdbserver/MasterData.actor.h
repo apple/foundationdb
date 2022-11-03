@@ -31,7 +31,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
-#include "flow/swift_compat.h"
+#include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
@@ -164,14 +164,17 @@ void swift_workaround_releaseMasterData(MasterData *rd);
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
 
+
 // FIXME: Remove after https://github.com/apple/swift/issues/61730 is fixed.
 inline void swift_workaround_vtable_link_issue_direct_call() {
-    MetricNameRef *nr = nullptr;
-    VersionMetric m(*nr, 0);
-    MetricKeyRef *mk = nullptr;
-    MetricUpdateBatch *b = nullptr;
-    m.flushData(*mk, 0, *b);
-    m.onEnable();
+	Void();
+	NotifiedQueue<int>(0, 0).~NotifiedQueue<int>();
+	MetricNameRef *nr = nullptr;
+	VersionMetric m(*nr, 0);
+	MetricKeyRef *mk = nullptr;
+	MetricUpdateBatch *b = nullptr;
+	m.flushData(*mk, 0, *b);
+	m.onEnable();
 }
 
 #include "flow/unactorcompiler.h"

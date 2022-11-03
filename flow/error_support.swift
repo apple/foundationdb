@@ -1,5 +1,5 @@
 /*
- * SwiftBridging.swift
+ * clock_support.swift
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,17 +20,8 @@
 
 import Flow
 
-/// Swift equivalent for the BUGGIFY macro from flow.
-public func BUGGIFY(file: @autoclosure () -> StaticString = #file,
-                    line: @autoclosure () -> Int = #line) -> Bool {
-    let file_ = file()
-    assert(file_.hasPointerRepresentation)
-    return SwiftBridging.buggify(file_.utf8Start, CInt(line()))
-}
-
-public func pprint(_ message: String,
-                   file: String = #fileID,
-                   line: UInt = #line,
-                   function: String = #function) {
-    print("[swift][\(file):\(line)](\(function)) \(message)")
+extension Flow.Error {
+    public var isEndOfStream: Bool {
+        self.code() == error_code_end_of_stream
+    }
 }

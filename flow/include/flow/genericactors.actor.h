@@ -24,7 +24,7 @@
 // version.
 #include "flow/FastRef.h"
 #include "flow/network.h"
-#include "flow/swift_compat.h"
+#include "flow/swift_support.h"
 #include <utility>
 #include <functional>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)

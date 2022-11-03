@@ -110,6 +110,8 @@ generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
 add_library(flow_swift STATIC
     future_support.swift
     clock_support.swift
+    stream_support.swift
+    error_support.swift
     SwiftBridging.swift
     SwiftFileB.swift)
 
@@ -140,6 +142,7 @@ target_link_directories(flow PUBLIC "${SWIFT_LINK_PATHS}")
 target_link_options(flow PUBLIC 
     "-lswiftCore"
     "-lswift_Concurrency")
+    
 # Link with runtime initialization stub (not needed on Darwin).
 if (NOT APPLE)
   string(REPLACE " " ";" SWIFT_LINK_PATHS_LIST "${SWIFT_LINK_PATHS}")

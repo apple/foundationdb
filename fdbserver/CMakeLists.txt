@@ -30,6 +30,9 @@ add_library(fdbserver_swift STATIC
         SwiftUtils.swift
         swift_fdbserver_collections.swift
         UID.swift
+        # tests
+        swift/tests/Rainbow.swift
+        swift/tests/swift_test_streams.swift
         )
 
 target_include_directories(fdbserver_swift PUBLIC

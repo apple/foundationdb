@@ -21,7 +21,7 @@
 #ifndef FLOW_SWIFT_H
 #define FLOW_SWIFT_H
 
-#include "swift_compat.h"
+#include "swift_support.h"
 #include "swift/ABI/Task.h"
 #include "flow/ProtocolVersion.h"
 #pragma once

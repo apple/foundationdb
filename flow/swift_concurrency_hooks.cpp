@@ -40,11 +40,9 @@
 
 struct SwiftJobTask final : public N2::Task, public FastAllocated<SwiftJobTask> {
 	swift::Job* job;
-	explicit SwiftJobTask(swift::Job* job) noexcept : job(job) { printf("[c++][job:%p] prepare job\n", job); }
+	explicit SwiftJobTask(swift::Job* job) noexcept : job(job) {}
 
 	void operator()() override {
-		printf("[c++][job:%p] run job (priority: %zu)\n", job, job->getPriority());
-
 		swift_job_run(job, ExecutorRef::generic());
 		delete this;
 	}
@@ -76,18 +74,12 @@ SWIFT_CC(swift)
 void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
                                   //                              swift_task_enqueueGlobal_original _Nonnull original) {
                                   void (*_Nonnull)(swift::Job*) __attribute__((swiftcall))) {
-	// auto net = N2::g_net2; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on
-	// INetwork I suppose
-	auto net = g_network; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on
-	                      // INetwork I suppose
+	// TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on INetwork I suppose
+	auto net = g_network;
 	ASSERT(net);
 
-	printf("[c++][%s:%d](%s) intercepted job enqueue: %p to g_network (%p)\n", __FILE_NAME__, __LINE__, __FUNCTION__, job, net);
-
 	auto swiftPriority = job->getPriority();
-	printf("[c++][%s:%d](%s) net2_enqueueGlobal_hook_impl - swift task priority: %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, static_cast<std::underlying_type<TaskPriority>::type>(swiftPriority));
 	int64_t priority = swift_priority_to_net2(swiftPriority); // default to lowest "Min"
-	printf("[c++][%s:%d](%s) net2_enqueueGlobal_hook_impl - swift task priority: %d -> %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, static_cast<std::underlying_type<TaskPriority>::type>(swiftPriority), static_cast<std::underlying_type<TaskPriority>::type>(priority));
 
 	TaskPriority taskID = TaskPriority::DefaultOnMainThread; // FIXME: how to determine
 

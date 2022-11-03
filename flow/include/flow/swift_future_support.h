@@ -1,5 +1,5 @@
 /*
- * network.h
+ * swift_future_support.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,12 @@
  * limitations under the License.
  */
 
-#ifndef SWIFT_FUTURE_COMPAT_H
-#define SWIFT_FUTURE_COMPAT_H
+#ifndef SWIFT_FUTURE_SUPPORT_H
+#define SWIFT_FUTURE_SUPPORT_H
 
 #include "swift.h"
 #include "flow.h"
+#include "swift_stream_support.h"
 #include "pthread.h"
 #include <stdint.h>
 
@@ -40,6 +41,7 @@ using CallbackVoid = Callback<Void>;
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
+// FIXME(swift): either implement in Swift, or manage lifetime properly
 struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackCInt : Callback<int> {
 private:
 	void* _Nonnull continuationBox;
@@ -60,11 +62,7 @@ public:
 		return new SwiftContinuationCallbackCInt(continuationBox, returning, throwing);
 	}
 
-//	CallbackInt* _Nonnull cast() { return this; }
-
-	void addCallbackAndClearTo(FutureCInt f) {
-    f.addCallbackAndClear(this);
-  }
+	void addCallbackAndClearTo(FutureCInt f) { f.addCallbackAndClear(this); }
 
 	// TODO(swift): virtual is an issue
 	void fire(int const& value) {
@@ -87,6 +85,7 @@ public:
 	}
 };
 
+// FIXME(swift): either implement in Swift, or manage lifetime properly
 struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackVoid : Callback<Void> {
 private:
 	void* continuationBox;

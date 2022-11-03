@@ -32,8 +32,8 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/TLogInterface.h"
-#include "flow/swift_compat.h"
-#include "flow/swift_future_compat.h"
+#include "flow/swift_support.h"
+#include "flow/swift_future_support.h"
 
 using DBRecoveryCount = uint64_t;
 

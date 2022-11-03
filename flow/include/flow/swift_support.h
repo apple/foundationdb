@@ -1,5 +1,5 @@
 /*
- * network.h
+ * swift_support.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,29 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_SWIFT_COMPAT_H
-#define FLOW_SWIFT_COMPAT_H
+#ifndef FLOW_SWIFT_SUPPORT_H
+#define FLOW_SWIFT_SUPPORT_H
 
 #pragma once
 #include "flow/swift/ABI/Task.h"
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
-#define SWIFT_CXX_REF_IMMORTAL                                                                                         \
-	__attribute__((swift_attr("import_as_ref")))                                                                       \
-    __attribute__((swift_attr("retain:immortal")))                                                                     \
+#define SWIFT_CXX_REF_IMMORTAL                                      		   \
+	__attribute__((swift_attr("import_as_ref")))                    		   \
+    __attribute__((swift_attr("retain:immortal")))                  		   \
 	__attribute__((swift_attr("release:immortal")))
 
-#define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
+#define SWIFT_CXX_REF   													   \
+    __attribute__((swift_attr("import_as_ref")))   							   \
+    __attribute__((swift_attr("retain:addref")))   							   \
+    __attribute__((swift_attr("release:delref")))
+
+#define SWIFT_CXX_IMPORT_UNSAFE												   \
+    __attribute__((swift_attr("import_unsafe")))   							   \
+
+#define SWIFT_SENDABLE 														   \
+	__attribute__((swift_attr("@Sendable")))
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
@@ -47,6 +56,7 @@ int64_t swift_priority_to_net2(swift::JobPriority p);
   _Pragma("clang diagnostic push")                                             \
   _Pragma("clang diagnostic ignored \"-Wnullability-extension\"")              \
   _Pragma("clang assume_nonnull begin")
+
 # define SWIFT_END_NULLABILITY_ANNOTATIONS                                     \
   _Pragma("clang diagnostic pop")                                              \
   _Pragma("clang assume_nonnull end")

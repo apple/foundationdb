@@ -21,7 +21,7 @@
 #ifndef FDBRPC_STATS_H
 #define FDBRPC_STATS_H
 #include <type_traits>
-#include "flow/swift_compat.h"
+#include "flow/swift_support.h"
 #pragma once
 
 // Yet another performance statistics interface

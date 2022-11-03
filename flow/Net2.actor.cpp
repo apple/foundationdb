@@ -1542,7 +1542,6 @@ void Net2::run() {
 
 			try {
 				++tasksSinceReact;
-				printf("[c++][net:%p] Net2::run execute task: %p\n", this, task);
 				(*task)();
 			} catch (Error& e) {
 				TraceEvent(SevError, "TaskError").error(e);

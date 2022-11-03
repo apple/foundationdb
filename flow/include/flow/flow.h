@@ -931,10 +931,8 @@ public:
 		sav->send(std::forward<U>(value));
 	}
 
-  // Workaround for Swift's send && issue.
-  void sendCopy(const T& valueCopy) const {
-    sav->send(valueCopy);
-  }
+	// Workaround for Swift's send && issue.
+	void sendCopy(const T& valueCopy) const { sav->send(valueCopy); }
 
 	template <class E>
 	void sendError(const E& exc) const {
@@ -994,7 +992,9 @@ private:
 };
 
 template <class T>
-struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
+struct NotifiedQueue : private SingleCallback<T>
+//    , FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
+{
 	int promises; // one for each promise (and one for an active actor if this is an actor)
 	int futures; // one for each future and one more if there are any callbacks
 
@@ -1034,12 +1034,16 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	template <class U>
 	void send(U&& value) {
+		printf("[c++][%s:%d](%s) [stream] queue send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+
 		if (error.isValid())
 			return;
 
 		if (SingleCallback<T>::next != this) {
+			printf("[c++][%s:%d](%s) [stream] queue send, to queue: %p ====> fire! cb=%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this, SingleCallback<T>::next);
 			SingleCallback<T>::next->fire(std::forward<U>(value));
 		} else {
+			printf("[c++][%s:%d](%s) [stream] queue send, to queue: %p ====> forward\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 			queue.emplace(std::forward<U>(value));
 		}
 	}
@@ -1119,7 +1123,7 @@ protected:
 };
 
 template <class T>
-class FutureStream {
+class SWIFT_SENDABLE FutureStream {
 public:
 	bool isValid() const { return queue != 0; }
 	bool isReady() const { return queue->isReady(); }
@@ -1129,6 +1133,7 @@ public:
 		return queue->isError();
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
+		printf("[c++][%s:%d](%s) [stream] add single callback cb=%p, to queue=%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, queue);
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = 0;
 	}
@@ -1162,7 +1167,9 @@ public:
 		return queue->error;
 	}
 
-	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue) {}
+	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue) {
+		printf("[c++][%s:%d](%s) [stream] new future stream, queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
+	}
 
 private:
 	NotifiedQueue<T>* queue;
@@ -1204,8 +1211,18 @@ public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
-	void send(const T& value) { queue->send(value); }
-	void send(T&& value) { queue->send(std::move(value)); }
+	void send(const T& value) {
+		printf("[c++][%s:%d](%s) [stream] send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
+		queue->send(value);
+	}
+	void sendCopy(T value) {
+		printf("[c++][%s:%d](%s) [stream] send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
+		queue->send(value);
+	}
+	void send(T&& value) {
+		printf("[c++][%s:%d](%s) [stream] send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
+		queue->send(std::move(value));
+	}
 	void sendError(const Error& error) { queue->sendError(error); }
 
 	// stream.getReply( request )

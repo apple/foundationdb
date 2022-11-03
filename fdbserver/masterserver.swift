@@ -1,6 +1,6 @@
 import Flow
 import flow_swift
-import FDBServer
+@preconcurrency import FDBServer
 import FDBClient
 import fdbclient_swift
 

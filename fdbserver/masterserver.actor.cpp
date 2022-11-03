@@ -30,7 +30,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
-#include "flow/swift_compat.h"
+#include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbserver/MasterData.actor.h"
 
