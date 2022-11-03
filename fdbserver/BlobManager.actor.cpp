@@ -2776,6 +2776,7 @@ ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 			if (bmData->iAmReplaced.canBeSet()) {
 				bmData->iAmReplaced.send(Void());
 			}
+			throw;
 		}
 	}
 
@@ -2896,6 +2897,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
 					}
+					throw blob_manager_replaced();
 				}
 
 				BoundaryEvaluation newEval(rep.continueEpoch,
@@ -5299,6 +5301,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 					fmt::print("BM {} exiting because it is replaced\n", self->epoch);
 				}
 				TraceEvent("BlobManagerReplaced", bmInterf.id()).detail("Epoch", epoch);
+				wait(delay(0.0));
 				break;
 			}
 			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {

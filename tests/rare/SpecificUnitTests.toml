@@ -3,8 +3,9 @@
 testTitle = 'UnitTests'
 useDB = false
 startDelay = 0
+runSetup=false
 
     [[test.workload]]
     testName = 'UnitTests'
-    maxTestCases = 0
-    testsMatching = '/'
+    maxTestCases = 1
+    testsMatching = 'noSim/'

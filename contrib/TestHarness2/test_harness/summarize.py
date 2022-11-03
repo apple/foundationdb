@@ -291,11 +291,12 @@ class Summary:
     def __init__(self, binary: Path, runtime: float = 0, max_rss: int | None = None,
                  was_killed: bool = False, uid: uuid.UUID | None = None, expected_unseed: int | None = None,
                  exit_code: int = 0, valgrind_out_file: Path | None = None, stats: str | None = None,
-                 error_out: str = None, will_restart: bool = False):
+                 error_out: str = None, will_restart: bool = False, long_running: bool = False):
         self.binary = binary
         self.runtime: float = runtime
         self.max_rss: int | None = max_rss
         self.was_killed: bool = was_killed
+        self.long_running = long_running
         self.expected_unseed: int | None = expected_unseed
         self.exit_code: int = exit_code
         self.out: SummaryTree = SummaryTree('Test')
@@ -396,6 +397,10 @@ class Summary:
         if self.was_killed:
             child = SummaryTree('ExternalTimeout')
             child.attributes['Severity'] = '40'
+            if self.long_running:
+                # debugging info for long-running tests
+                child.attributes['LongRunning'] = '1'
+                child.attributes['Runtime'] = str(self.runtime)
             self.out.append(child)
             self.error = True
         if self.max_rss is not None:

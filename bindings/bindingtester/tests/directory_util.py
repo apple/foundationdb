@@ -18,7 +18,6 @@
 # limitations under the License.
 #
 
-import random
 import struct
 
 import fdb
@@ -34,6 +33,7 @@ fdb.api_version(FDB_API_VERSION)
 DEFAULT_DIRECTORY_INDEX = 4
 DEFAULT_DIRECTORY_PREFIX = b'default'
 DIRECTORY_ERROR_STRING = b'DIRECTORY_ERROR'
+
 
 def setup_directories(instructions, default_path, random):
     # Clients start with the default directory layer in the directory list
