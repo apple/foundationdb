@@ -1640,7 +1640,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		MutationRef& m = pProxyCommitData->idempotencyClears[i];
 		auto& tags = pProxyCommitData->tagsForKey(m.param1);
 		self->toCommit.addTags(tags);
-		Arena arena;
+		// We already have an arena with an appropriate lifetime handy
+		Arena& arena = pProxyCommitData->idempotencyClears.arena();
 		wait(success(writeMutation(self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &m, nullptr, &arena)));
 	}
 	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
