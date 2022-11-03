@@ -545,35 +545,32 @@ struct hash<KeyRange> {
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
-inline Key keyAfter(const KeyRef& key) {
-	if (key == "\xff\xff"_sr)
-		return key;
-
-	Standalone<StringRef> r;
-	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
-	if (key.size() > 0) {
-		memcpy(s, key.begin(), key.size());
-	}
-	s[key.size()] = 0;
-	((StringRef&)r) = StringRef(s, key.size() + 1);
-	return r;
-}
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == "\xff\xff"_sr)
-		return key;
+	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
+	static const auto allKeysEnd = "\xff\xff"_sr;
+	if (key == allKeysEnd) {
+		return allKeysEnd;
+	}
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
 	memcpy(t, key.begin(), key.size());
 	t[key.size()] = 0;
 	return KeyRef(t, key.size() + 1);
 }
-inline KeyRange singleKeyRange(const KeyRef& a) {
-	return KeyRangeRef(a, keyAfter(a));
+inline Key keyAfter(const KeyRef& key) {
+	Key result;
+	result.contents() = keyAfter(key, result.arena());
+	return result;
 }
 inline KeyRangeRef singleKeyRange(KeyRef const& key, Arena& arena) {
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
 	memcpy(t, key.begin(), key.size());
 	t[key.size()] = 0;
 	return KeyRangeRef(KeyRef(t, key.size()), KeyRef(t, key.size() + 1));
+}
+inline KeyRange singleKeyRange(const KeyRef& a) {
+	KeyRange result;
+	result.contents() = singleKeyRange(a, result.arena());
+	return result;
 }
 inline KeyRange prefixRange(KeyRef prefix) {
 	Standalone<KeyRangeRef> range;
