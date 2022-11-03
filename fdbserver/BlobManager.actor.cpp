@@ -4517,7 +4517,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	state std::queue<std::tuple<KeyRange, Version, Version, Optional<UID>>> historyEntryQueue;
 
 	// stacks of <granuleId, historyKey> and <granuleId> (and mergeChildID) to track which granules to delete
-	state std::vector<std::tuple<UID, Key, KeyRange, Optional<UID>>> toFullyDelete;
+	state std::vector<std::tuple<UID, Key, KeyRange, Optional<UID>, Version>> toFullyDelete;
 	state std::vector<std::pair<UID, KeyRange>> toPartiallyDelete;
 
 	// track which granules we have already added to traversal
@@ -4753,7 +4753,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				fmt::print(
 				    "BM {0}   Granule {1} will be FULLY deleted\n", self->epoch, currHistoryNode.granuleID.toString());
 			}
-			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange, mergeChildID });
+			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange, mergeChildID, startVersion });
 		} else if (startVersion < purgeVersion) {
 			if (BM_PURGE_DEBUG) {
 				fmt::print("BM {0}   Granule {1} will be partially deleted\n",
@@ -4826,37 +4826,59 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("DeletingFullyCount", toFullyDelete.size())
 	    .detail("DeletingPartiallyCount", toPartiallyDelete.size());
 
-	state std::vector<Future<Void>> fullDeletions;
 	state int i;
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to fully delete\n", self->epoch, toFullyDelete.size());
 	}
 	// Go backwards through set of granules to guarantee deleting oldest first. This avoids orphaning granules in the
 	// deletion process
-	KeyRangeMap<Future<Void>> parentDelete;
-	parentDelete.insert(normalKeys, Future<Void>(Void()));
-	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
-		state UID granuleId;
-		Key historyKey;
-		KeyRange keyRange;
-		Optional<UID> mergeChildId;
-		std::tie(granuleId, historyKey, keyRange, mergeChildId) = toFullyDelete[i];
-		// FIXME: consider batching into a single txn (need to take care of txn size limit)
-		if (BM_PURGE_DEBUG) {
-			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
-		}
-		std::vector<Future<Void>> parents;
-		auto parentRanges = parentDelete.intersectingRanges(keyRange);
-		for (auto& it : parentRanges) {
-			parents.push_back(it.cvalue());
-		}
-		Future<Void> deleteFuture = fullyDeleteGranule(
-		    self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force, waitForAll(parents));
-		fullDeletions.push_back(deleteFuture);
-		parentDelete.insert(keyRange, deleteFuture);
-	}
+	if (!toFullyDelete.empty()) {
+		state std::vector<Future<Void>> fullDeletions;
+		KeyRangeMap<std::pair<Version, Future<Void>>> parentDelete;
+		parentDelete.insert(normalKeys, { 0, Future<Void>(Void()) });
 
-	wait(waitForAll(fullDeletions));
+		std::vector<std::pair<Version, int>> deleteOrder;
+		deleteOrder.reserve(toFullyDelete.size());
+		for (int i = 0; i < toFullyDelete.size(); i++) {
+			deleteOrder.push_back({ std::get<4>(toFullyDelete[i]), i });
+		}
+		std::sort(deleteOrder.begin(), deleteOrder.end());
+
+		for (i = 0; i < deleteOrder.size(); i++) {
+			state UID granuleId;
+			Key historyKey;
+			KeyRange keyRange;
+			Optional<UID> mergeChildId;
+			Version startVersion;
+			std::tie(granuleId, historyKey, keyRange, mergeChildId, startVersion) =
+			    toFullyDelete[deleteOrder[i].second];
+			// FIXME: consider batching into a single txn (need to take care of txn size limit)
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
+			}
+			std::vector<Future<Void>> parents;
+			auto parentRanges = parentDelete.intersectingRanges(keyRange);
+			for (auto& it : parentRanges) {
+				if (startVersion <= it.cvalue().first) {
+					fmt::print("ERROR: [{0} - {1}) @ {2} <= [{3} - {4}) @ {5}\n",
+					           keyRange.begin.printable(),
+					           keyRange.end.printable(),
+					           startVersion,
+					           it.begin().printable(),
+					           it.end().printable(),
+					           it.cvalue().first);
+				}
+				ASSERT(startVersion > it.cvalue().first);
+				parents.push_back(it.cvalue().second);
+			}
+			Future<Void> deleteFuture = fullyDeleteGranule(
+			    self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force, waitForAll(parents));
+			fullDeletions.push_back(deleteFuture);
+			parentDelete.insert(keyRange, { startVersion, deleteFuture });
+		}
+
+		wait(waitForAll(fullDeletions));
+	}
 
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to partially delete\n", self->epoch, toPartiallyDelete.size());
