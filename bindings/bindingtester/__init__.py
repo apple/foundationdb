@@ -21,10 +21,9 @@
 import math
 import sys
 import os
+import util
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
-
-import util
 
 FDB_API_VERSION = 720
 
@@ -80,7 +79,7 @@ class Result:
         if len(t1) != len(t2):
             return False
 
-        return all([Result.elements_equal(x,y) for x,y in zip(t1, t2)])        
+        return all([Result.elements_equal(x, y) for x, y in zip(t1, t2)])
 
     def matches_key(self, rhs, specification):
         if not isinstance(rhs, Result):
