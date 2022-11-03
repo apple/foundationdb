@@ -1688,9 +1688,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			                            CODE_PROBE(true, "encrypting idempotency mutation");
 			                            std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
-			                            Arena arena;
 			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
-			                                self->cipherKeys, p.second, arena, BlobCipherMetrics::TLOG);
+			                                self->cipherKeys, p.second, self->arena, BlobCipherMetrics::TLOG);
 			                            self->toCommit.writeTypedMessage(encryptedMutation);
 		                            } else {
 			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
@@ -1700,8 +1699,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
 		auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
 		self->toCommit.addTags(tags);
-		state Arena arena;
-
+		// We already have an arena with an appropriate lifetime handy
+		Arena& arena = pProxyCommitData->idempotencyClears.arena();
 		WriteMutationRefVar var = wait(writeMutation(
 		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
 		ASSERT(std::holds_alternative<MutationRef>(var));
