@@ -339,7 +339,7 @@ public:
 
 	std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key, Optional<int64_t> possibleDomainId) override {
 		// System key.
-		if (key.startsWith("\xff\xff"_sr)) {
+		if (key.startsWith("\xff"_sr)) {
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, 2 };
 		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
