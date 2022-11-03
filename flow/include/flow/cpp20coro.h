@@ -40,7 +40,7 @@ struct CoroutineSingleCallback : public SingleCallback<T> {
 	}
 
 	virtual void fire(T&& value) override {
-		std::cerr << "CoroutineSingleCallback::fire " << std::endl;
+		// std::cerr << "CoroutineSingleCallback::fire " << std::endl;
 
 		new (&value_storage) T(std::move(value));
 
@@ -50,7 +50,7 @@ struct CoroutineSingleCallback : public SingleCallback<T> {
 	}
 
 	virtual void fire(T const& value) override {
-		std::cerr << "CoroutineSingleCallback::fire " << std::endl;
+		// std::cerr << "CoroutineSingleCallback::fire " << std::endl;
 
 		new (&value_storage) T(value);
 
@@ -82,10 +82,10 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 		n_coroutine::coroutine_handle<promise_type> h;
 
 		promise_type() : Actor<ReturnValue>(), h(n_coroutine::coroutine_handle<promise_type>::from_promise(*this)) {
-			// std::cerr << "promise_type()" << std::endl;
+			// std::cerr << "promise_type() " << this << std::endl;
 		}
 		~promise_type() {
-			// std::cout << "~promise_type() " << SAV<ReturnValue>::getFutureReferenceCount() << " "
+			// std::cout << "~promise_type() " << this << " " << SAV<ReturnValue>::getFutureReferenceCount() << " "
 			//           << SAV<ReturnValue>::getPromiseReferenceCount() << std::endl;
 		}
 
@@ -96,41 +96,92 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 		static void* operator new(size_t s) {
 			// std::cerr << "promise_type::new(" << s << ")" << std::endl;
 			return ::malloc(s);
+
+			// if (s <= 256) {
+			// 	void* p = allocateFast(s <= 64 ? 64 : nextFastAllocatedSize(s));
+			// 	return p;
+			// } else {
+			// 	void* p = new uint8_t[nextFastAllocatedSize(s)];
+			// 	return p;
+			// }
 		}
-		static void operator delete(void* p) {
-			// std::cerr << "promise_type::delete()" << std::endl;
+		static void operator delete(void* p, size_t s) {
+			// std::cerr << "promise_type::delete(" << p << " " << s << ")" << std::endl;
 			::free(p);
+
+			// if (s <= 256) {
+			// 	freeFast(s <= 64 ? 64 : s, p);
+			// } else {
+			// 	delete[] reinterpret_cast<uint8_t*>(p);
+			// }
 		}
 
 		Future<ReturnValue> get_return_object() noexcept { return Future<ReturnValue>(this); }
 
 		n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
-		n_coroutine::suspend_always final_suspend() noexcept {
-			// std::cerr << "final_suspend()" << SAV<ReturnValue>::getFutureReferenceCount() << " "
-			//           << SAV<ReturnValue>::getPromiseReferenceCount() << std::endl;
 
-			SAV<ReturnValue>::delPromiseRef();
+		struct final_awaitable {
+			bool destroy;
 
-			return {};
+			final_awaitable(bool destroy) : destroy(destroy) {}
+
+			bool await_ready() const noexcept { return destroy; }
+			void await_resume() const noexcept {}
+			constexpr void await_suspend(n_coroutine::coroutine_handle<>) const noexcept {}
+		};
+
+		final_awaitable final_suspend() noexcept {
+			// std::cerr << "final_suspend() " << this << " " << SAV<ReturnValue>::getFutureReferenceCount() << " "
+			//   << SAV<ReturnValue>::getPromiseReferenceCount() << " " << Actor<ReturnValue>::actor_wait_state
+			//   << std::endl;
+			return { !--SAV<ReturnValue>::promises && !SAV<ReturnValue>::futures };
 		}
 
 		template <class U>
 		void return_value(U&& value) {
-			// std::cerr << "return_value()" << std::endl;
+			// std::cerr << "return_value() " << this << " " << SAV<ReturnValue>::futures << " "
+			//           << SAV<ReturnValue>::promises << std::endl;
+
 			if (SAV<ReturnValue>::futures) {
 				SAV<ReturnValue>::send(std::forward<U>(value));
 			}
 		}
 
 		void unhandled_exception() {
-			// std::cerr << "unhandled_exception()" << std::endl;
+			// std::cerr << "unhandled_exception() " << this << " " << SAV<ReturnValue>::futures << " "
+			//   << SAV<ReturnValue>::promises << std::endl;
 
-			// The exception should always be type Error, otherwise crash the program.
+			// The exception should always be type Error.
 			try {
 				std::rethrow_exception(std::current_exception());
 			} catch (const Error& error) {
-				SAV<ReturnValue>::sendError(error);
+				if (error.code() == error_code_operation_cancelled)
+					return;
+
+				if (SAV<ReturnValue>::futures) {
+					SAV<ReturnValue>::sendError(error);
+				}
 			}
+		}
+
+		void cancel() override {
+			// std::cerr << "cancel() " << this << std::endl;
+
+			auto prev_wait_state = Actor<ReturnValue>::actor_wait_state;
+
+			// Set wait state to -1
+			Actor<ReturnValue>::actor_wait_state = -1;
+
+			// If the actor is waiting, then resume the coroutine to throw actor_cancelled().
+			if (prev_wait_state > 0) {
+				h.resume();
+			}
+		}
+
+		virtual void destroy() override {
+			// std::cerr << "destroy() " << this << std::endl;
+
+			h.destroy();
 		}
 
 		template <typename U>
@@ -210,7 +261,7 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 
 				AwaitableFutureStream(FutureStream<U> fs, promise_type* pt) : FutureStream<U>(fs), pt(pt) {}
 				~AwaitableFutureStream() {
-					std::cout << " ~AwaitableFutureStream() " << std::endl;
+					// std::cout << " ~AwaitableFutureStream() " << std::endl;
 					if (cb) {
 						delete cb;
 						cb = nullptr;
@@ -218,13 +269,14 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 				}
 
 				bool await_ready() const {
-					std::cerr << "await_ready() " << (FutureStream<U>::isValid() && FutureStream<U>::isReady())
-					          << std::endl;
+					// std::cerr << "await_ready() "
+					//           << (FutureStream<U>::isValid() && FutureStream<U>::isReady())
+					//           << std::endl;
 					return FutureStream<U>::isValid() && FutureStream<U>::isReady();
 				}
 
 				void await_suspend(n_coroutine::coroutine_handle<> h) {
-					std::cerr << "await_suspend" << std::endl;
+					// std::cerr << "await_suspend" << std::endl;
 
 					if (!cb) {
 						cb = new CoroutineSingleCallback<U>(h);
@@ -239,7 +291,7 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 				}
 
 				U await_resume() {
-					std::cerr << "await_resume" << std::endl;
+					// std::cerr << "await_resume" << std::endl;
 
 					if (pt->actor_wait_state < 0) {
 						cb->remove();
@@ -271,25 +323,6 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 			};
 
 			return AwaitableFutureStream{ futureStream, this };
-		}
-		void cancel() override {
-			// std::cerr << "cancel()" << std::endl;
-
-			auto prev_wait_state = Actor<ReturnValue>::actor_wait_state;
-
-			// Set wait state to -1
-			Actor<ReturnValue>::actor_wait_state = -1;
-
-			// If the actor is waiting, then resume the coroutine to throw actor_cancelled().
-			if (prev_wait_state > 0) {
-				h.resume();
-			}
-		}
-
-		virtual void destroy() override {
-			// std::cerr << "destroy()" << std::endl;
-
-			h.destroy();
 		}
 	};
 };
