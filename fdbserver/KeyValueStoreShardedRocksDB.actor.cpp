@@ -155,7 +155,7 @@ struct ShardedRocksDBState {
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
-rocksdb::Slice toSlice(StringRef s) {
+const rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
 }
 
@@ -309,8 +309,20 @@ struct ReadIterator {
 	bool inUse;
 	std::shared_ptr<rocksdb::Iterator> iter;
 	double creationTime;
-	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db, rocksdb::ReadOptions& options)
+	KeyRange keyRange;
+	std::shared_ptr<rocksdb::Slice> beginSlice, endSlice;
+
+	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db, const rocksdb::ReadOptions& options)
 	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
+	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db, const KeyRange& range)
+	  : index(index), inUse(true), creationTime(now()), keyRange(range) {
+		auto options = getReadOptions();
+		beginSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.begin)));
+		options.iterate_lower_bound = beginSlice.get();
+		endSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.end)));
+		options.iterate_upper_bound = endSlice.get();
+		iter = std::shared_ptr<rocksdb::Iterator>(db->NewIterator(options, cf));
+	}
 };
 
 /*
@@ -348,7 +360,7 @@ public:
 	}
 
 	// Called on every read operation.
-	ReadIterator getIterator() {
+	ReadIterator getIterator(const KeyRange& range) {
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
@@ -364,7 +376,7 @@ public:
 			return iter;
 		} else {
 			index++;
-			ReadIterator iter(cf, index, db, readRangeOptions);
+			ReadIterator iter(cf, index, db, range);
 			return iter;
 		}
 	}
@@ -511,7 +523,7 @@ struct PhysicalShard {
 	double deleteTimeSec;
 };
 
-int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, int byteLimit, RangeResult* result) {
+int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, int byteLimit, RangeResult* result) {
 	if (rowLimit == 0 || byteLimit == 0) {
 		return 0;
 	}
@@ -523,7 +535,7 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, 
 	// When using a prefix extractor, ensure that keys are returned in order even if they cross
 	// a prefix boundary.
 	if (rowLimit >= 0) {
-		ReadIterator readIter = shard->readIterPool->getIterator();
+		ReadIterator readIter = shard->readIterPool->getIterator(range);
 		auto cursor = readIter.iter;
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
@@ -540,7 +552,7 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, 
 		s = cursor->status();
 		shard->readIterPool->returnIterator(readIter);
 	} else {
-		ReadIterator readIter = shard->readIterPool->getIterator();
+		ReadIterator readIter = shard->readIterPool->getIterator(range);
 		auto cursor = readIter.iter;
 		cursor->SeekForPrev(toSlice(range.end));
 		if (cursor->Valid() && toStringRef(cursor->key()) == range.end) {
