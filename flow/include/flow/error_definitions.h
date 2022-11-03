@@ -103,7 +103,7 @@ ERROR( grv_proxy_memory_limit_exceeded, 1078, "GetReadVersion proxy memory limit
 ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
 ERROR ( commit_proxy_write_mutation_encrypted, 1081, "Commit Proxy encrypted mutation write" )
-ERROR ( commit_proxy_write_mutation_fetch_encrypt_key, 1082, "Commit Proxy encrypted mutation write" )
+ERROR ( commit_proxy_write_mutation_fetch_encrypt_key, 1082, "Commit Proxy write mutation needs fetching encryption key" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

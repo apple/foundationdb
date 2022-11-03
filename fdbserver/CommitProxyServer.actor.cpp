@@ -1283,7 +1283,6 @@ ACTOR Future<MutationRef> writeMutationEncryptedMutation(CommitBatchContext* sel
 ACTOR Future<MutationRef> writeMutationFetchEncryptKey(CommitBatchContext* self,
                                                        int64_t tenantId,
                                                        const MutationRef* mutation,
-                                                       Optional<MutationRef>* encryptedMutationOpt,
                                                        Arena* arena) {
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 	ASSERT(self->pProxyCommitData->isEncryptionEnabled);
@@ -1460,8 +1459,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						    wait(writeMutationEncryptedMutation(self, tenantId, &m, &encryptedMutation, &arena));
 						writtenMutation = tempMutation;
 					} else if (e.code() == error_code_commit_proxy_write_mutation_fetch_encrypt_key) {
-						MutationRef tempMutation =
-						    wait(writeMutationFetchEncryptKey(self, tenantId, &m, &encryptedMutation, &arena));
+						MutationRef tempMutation = wait(writeMutationFetchEncryptKey(self, tenantId, &m, &arena));
 						writtenMutation = tempMutation;
 					} else {
 						throw;
@@ -1539,8 +1537,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						    wait(writeMutationEncryptedMutation(self, tenantId, &m, &encryptedMutation, &arena));
 						writtenMutation = tempMutation;
 					} else if (e.code() == error_code_commit_proxy_write_mutation_fetch_encrypt_key) {
-						MutationRef tempMutation =
-						    wait(writeMutationFetchEncryptKey(self, tenantId, &m, &encryptedMutation, &arena));
+						MutationRef tempMutation = wait(writeMutationFetchEncryptKey(self, tenantId, &m, &arena));
 						writtenMutation = tempMutation;
 					} else {
 						throw;
@@ -1747,11 +1744,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena);
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_write_mutation_fetch_encrypt_key) {
-				wait(success(writeMutationEncryptedMutation(self,
-				                                            SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
-				                                            &pProxyCommitData->idempotencyClears[i],
-				                                            nullptr,
-				                                            &arena)));
+				wait(success(writeMutationFetchEncryptKey(
+				    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], &arena)));
 			} else {
 				throw;
 			}
