@@ -87,16 +87,6 @@ set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMA
 
 swift_get_linker_search_paths(SWIFT_LINK_PATHS)
 target_link_directories(fdbserver PRIVATE "${SWIFT_LINK_PATHS}")
-target_link_options(fdbserver PRIVATE "-lswiftCore")
-target_link_options(fdbserver PRIVATE "-lswift_Concurrency")
-# Link with runtime initialization stub (not needed on Darwin).
-if (NOT APPLE)
-  string(REPLACE " " ";" SWIFT_LINK_PATHS_LIST "${SWIFT_LINK_PATHS}")
-  list(LENGTH SWIFT_LINK_PATHS_LIST ListLen)
-  math(EXPR ListLast "${ListLen} - 1")
-  list(GET SWIFT_LINK_PATHS_LIST ${ListLast} LastPath)
-  target_link_options(fdbserver PRIVATE "${LastPath}/swiftrt.o")
-endif()
 
 # Generate the module map for FDBServer.
 include(GenerateModulemap)
