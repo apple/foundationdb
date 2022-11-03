@@ -343,7 +343,8 @@ public:
 	void setWatchMetadata(Reference<WatchMetadata> metadata);
 
 	// Removes the watch metadata
-	void deleteWatchMetadata(int64_t tenant, KeyRef key);
+	// If removeReferenceCount is set to be true, the corresponding WatchRefCount record is removed, too.
+	void deleteWatchMetadata(int64_t tenant, KeyRef key, bool removeReferenceCount = false);
 
 	// Increases reference count to the given watch. Returns the number of references to the watch.
 	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
@@ -351,8 +352,6 @@ public:
 	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
 	// removed. Returns the number of references to the watch.
 	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
-
-	void clearWatchMetadata();
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 

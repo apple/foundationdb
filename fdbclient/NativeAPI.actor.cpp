@@ -5422,6 +5422,10 @@ ACTOR Future<Void> restartWatch(Database cx,
                                 TaskPriority taskID,
                                 Optional<UID> debugID,
                                 UseProvisionalProxies useProvisionalProxies) {
+	// Remove the reference count as the old watches should be all dropped when switching connectionFile.
+	// The tenantId should be the old one.
+	cx->deleteWatchMetadata(tenantInfo.tenantId, key, /* removeReferenceCount */ true);
+
 	// The ID of the tenant may be different on the cluster that we switched to, so obtain the new ID
 	if (tenantInfo.name.present()) {
 		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
@@ -5476,7 +5480,6 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
-							cx->clearWatchMetadata();
 							watch->watchFuture = restartWatch(cx,
 							                                  tenantInfo,
 							                                  watch->key,

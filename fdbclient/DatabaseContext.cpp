@@ -70,12 +70,10 @@ int32_t DatabaseContext::decreaseWatchRefCount(const int64_t tenantID, KeyRef ke
 	return count;
 }
 
-void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key) {
+void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key, bool removeReferenceCount) {
 	const WatchMapKey mapKey(tenantId, key);
 	watchMap.erase(mapKey);
-}
-
-void DatabaseContext::clearWatchMetadata() {
-	watchMap.clear();
-	watchCounterMap.clear();
+	if (removeReferenceCount) {
+		watchCounterMap.erase(mapKey);
+	}
 }
