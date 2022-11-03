@@ -19,7 +19,13 @@
  */
 
 #include <cmath>
+#include <cstddef>
+#include <memory>
+#include <string>
+#include "fdbrpc/Stats.h"
+#include "fdbrpc/Msgpack.h"
 #include "flow/ApiVersion.h"
+#include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
@@ -408,9 +414,8 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 // 	return Void();
 // }
 
-ACTOR Future<Void> startMetricsSimulationServer() {
-	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
-	uint32_t port = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
+ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
+	state uint32_t port = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
 	TraceEvent(SevInfo, "MetricsUDPServerStarted").detail("Address", "127.0.0.1").detail("Port", port);
 	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(port));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
@@ -438,12 +443,13 @@ ACTOR Future<Void> runMetrics() {
 	state MetricCollection* metrics = nullptr;
 	state MetricBatch batch;
 	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
-	std::string address = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_ADDR : FLOW_KNOBS->OTEL_UDP_EMISSION_ADDR;
-	uint32_t port = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
-	state UDPClient metricClient{ address, port };
+	if (model == MetricsDataModel::NONE) {
+		return Void{};
+	}
+	state UDPMetricClient metricClient;
 	state Future<Void> metrics_actor;
 	if (g_network->isSimulated()) {
-		metrics_actor = startMetricsSimulationServer();
+		metrics_actor = startMetricsSimulationServer(model);
 	}
 	loop {
 		metrics = MetricCollection::getMetricCollection();
@@ -472,6 +478,171 @@ TEST_CASE("/fdbserver/metrics/statsd/CreateStatsdMessage") {
 	ASSERT(!verifyStatsdMessage(msg5));
 	ASSERT(!verifyStatsdMessage(msg6));
 	return Void{};
+}
+
+TEST_CASE("/fdbserver/metrics/OTEL/VerifyMsgpack") {
+	// This test only really makes sense if we set the knob below
+	IKnobCollection::getMutableGlobalKnobCollection().setKnob("metrics_data_model", KnobValueRef::create("otel"));
+	state MetricBatch batch = MetricBatch();
+	state std::unique_ptr<LatencySample> s;
+	state std::unique_ptr<CounterCollection> collection;
+	state std::unique_ptr<Counter> c;
+	collection = std::make_unique<CounterCollection>("CounterCollection", "msgpack");
+	s = std::make_unique<LatencySample>("testh", UID(), 5, 2);
+	c = std::make_unique<Counter>("test", *collection);
+	// Sample of raw opentelemetry msgpack encoded counter
+	state std::vector<uint8_t> counterBytes = { 0xc9, 0x00, 0x00, 0x00, 0x2F, 0x01, 0x91, 0xA4, 0x74, 0x65, 0x73,
+		                                        0x74, 203,  65,   216,  167,  126,  179,  33,   156,  246,  203,
+		                                        65,   216,  167,  126,  179,  33,   156,  246,  0x91, 0xA3, 0x6B,
+		                                        0x65, 0x79, 0xA3, 0x76, 0x61, 0x6C, 0xD3, 0x00, 0x00, 0x00, 0x00,
+		                                        0x00, 0x00, 0x00, 0x01, 0xCC, 0x00, 0xCC, 0x01, 0xC3 };
+
+	/*
+	    Byte count
+	    0x00 0x00 0x00 0x31
+	    String "test"
+	    0xA4 0x74 0x65 0x73 0x74 (5 bytes)
+
+	    Number data point
+	    startTime
+	    203, 65, 216, 167, 126, 179, 33, 156, 246, (9 bytes)
+
+	    recordTime
+	    203, 65, 216, 167, 126, 179, 33, 156, 246, (9 bytes)
+
+	    Attributes "key", "val"
+	    0x91 0xA3 0x6B 0x65 0x79 0xA3 0x76 0x61 0x6C (9 bytes)
+
+	    Value 1
+	    0xD3 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x01 (9 bytes)
+
+	    Flags 0
+	    0xCC 0x00									 (2 bytes)
+
+	    Aggregation DELTA
+	    0xCC 0x01									(2 bytes)
+
+	    isMonotonic true
+	    0xC3 										(1 byte)
+	*/
+
+	*c += 1;
+	c->flush(batch);
+	ASSERT(batch.counters.size() == 1);
+	batch.counters.back().point.addAttribute("key", "val");
+
+	// Sample of raw opentelemtry msgpack encoded histogram
+	state std::vector<uint8_t> histBytes = {
+		0xc9, 0x00, 0x00, 0x00, 0x65, 0x02, 0x91, 0xA5, 0x74, 0x65, 0x73, 0x74, 0x68, 0x92, 0xA3, 0x6B, 0x65, 0x79,
+		0xA3, 0x76, 0x61, 0x6C, 0xA3, 0x66, 0x6F, 0x6F, 0xA3, 0x62, 0x61, 0x72, 203,  65,   216,  167,  126,  179,
+		33,   156,  246,  203,  65,   216,  167,  126,  179,  33,   156,  246,  0xCF, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x02, 0xCB, 0x40, 0x51, 0xD3, 0x33, 0x33, 0x33, 0x33, 0x33, 0xCB, 0x40, 0x37, 0x80, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0xCB, 0x40, 0x47, 0xE6, 0x66, 0x66, 0x66, 0x66, 0x66, 0x92, 0xCB, 0x40, 0x37, 0x80, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0xCB, 0x40, 0x47, 0xE6, 0x66, 0x66, 0x66, 0x66, 0x66, 0xCC, 0x00, 0xCC, 0x01
+	};
+
+	// byte count = 31
+	// byte count 39
+	// byte count 48
+	/*
+	    histBytes.size() == 108
+	    Byte count
+	    0x00 0x00 0x00 0x67
+
+	    String "testh_"
+	    0xA6 0x74 0x65 0x73 0x74 0x68 0x5F
+
+	    HistDatapoint
+	    Attributes ("key", "val"), ("foo", "bar")
+	    0x92 0xA3 0x6B 0x65 0x79 0xA3 0x76 0x61 0x6C 0xA3 0x66 0x6F 0x6F
+	    0xA3 0x62 0x61 0x72
+
+	    startTime
+	    203, 65, 216, 167, 126, 179, 33, 156, 246,
+
+	    recordTime
+	    203, 65, 216, 167, 126, 179, 33, 156, 246,
+
+	    count (uint64, 2)
+	    0xCF 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x02
+
+	    sum (float64, 71.3)
+	    0xCB 0x40 0x51 0xD3 0x33 0x33 0x33 0x33 0x33
+
+	    min (float64, 23.5)
+	    0xCB 0x40 0x37 0x80 0x00 0x00 0x00 0x00 0x00
+
+	    max (float64, 47.8)
+	    0xCB 0x40 0x47 0xE6 0x66 0x66 0x66 0x66 0x66
+
+	    sample (array of float 64) {23.5, 47.8}
+	    0x92
+	    0xCB 0x40 0x37 0x80 0x00 0x00 0x00 0x00 0x00
+	    0xCB 0x40 0x47 0xE6 0x66 0x66 0x66 0x66 0x66
+
+	    Flags 0
+	    0xCC 0x00
+
+	    Aggregation DELTA
+	    0xCC 0x01
+	*/
+
+	s->addMeasurement(23.5);
+	s->addMeasurement(47.8);
+
+	state MsgpackBuffer buf;
+	buf.buffer = std::make_unique<uint8_t[]>(1024);
+	buf.data_size = 0;
+	buf.buffer_size = 1024;
+	std::function<void(const MetricBatch&, MsgpackBuffer&)> f_Sum = [](const MetricBatch& b, MsgpackBuffer& buf) {
+		serialize_vector(b.counters, buf, serialize_otelsum);
+	};
+	serialize_ext(batch, buf, OTELMetricType::Sum, f_Sum);
+
+	ASSERT(buf.data_size == counterBytes.size());
+	// Check if the data matches what is expected
+	// We don't care what the actual time values are
+	// Just that it is a valid float64 type
+	for (size_t i = 0; i < 13; i++) {
+		ASSERT(buf.buffer[i] == counterBytes[i]);
+	}
+	// Checking the float type
+	ASSERT(buf.buffer[21] == 203);
+	// Check the rest of the data
+	for (size_t i = 31; i < buf.data_size; i++) {
+		ASSERT(buf.buffer[i] == counterBytes[i]);
+	}
+	buf.reset();
+	s->flush(batch);
+	ASSERT(batch.hists.size() == 1);
+	batch.hists.back().point.addAttribute("key", "val").addAttribute("foo", "bar");
+	auto f_Hist = [](const std::vector<OTELHistogram>& vec, MsgpackBuffer& buf) {
+		serialize_vector(vec, buf, serialize_otelhist);
+	};
+	serialize_ext(batch.hists, buf, OTELMetricType::Hist, f_Hist);
+	ASSERT(buf.data_size == histBytes.size());
+
+	// Again we skip the startTime and recordTime value and instead ensure
+	// that they are valid msgpack float64
+	for (int i = 0; i < 31; i++) {
+		ASSERT(buf.buffer[i] == histBytes[i]);
+	}
+	ASSERT(buf.buffer[39] == 0xCB);
+	for (int i = 48; i < buf.data_size; i++) {
+		ASSERT(buf.buffer[i] == histBytes[i]);
+	}
+	buf.reset();
+	batch.clear();
+	wait(delay(7));
+	s->flush(batch);
+	for (int i = 0; i < 31; i++) {
+		ASSERT(buf.buffer[i] == histBytes[i]);
+	}
+	ASSERT(buf.buffer[39] == 0xCB);
+	for (int i = 48; i < buf.data_size; i++) {
+		ASSERT(buf.buffer[i] == histBytes[i]);
+	}
+	return Void();
 }
 
 TEST_CASE("/fdbserver/metrics/TraceEvents") {

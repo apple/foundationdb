@@ -20,6 +20,7 @@
 
 #include "fdbrpc/Stats.h"
 #include "flow/Knobs.h"
+#include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 #include <string>
@@ -98,6 +99,8 @@ void Counter::flush(MetricBatch& batch) {
 		break;
 	}
 	case MetricsDataModel::OTEL: {
+		batch.counters.emplace_back(name, val);
+		batch.counters.back().point.startTime = last_event;
 		break;
 	}
 	default:

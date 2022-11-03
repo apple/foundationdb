@@ -27,6 +27,7 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/network.h"
+#include "flow/OTELMetrics.h"
 
 struct MsgpackBuffer {
 	std::unique_ptr<uint8_t[]> buffer;
@@ -154,4 +155,72 @@ inline void serialize_map(const Map& map, MsgpackBuffer& buf) {
 		serialize_string(value.begin(), value.size(), buf);
 	}
 }
+
+// Serializes object T according to ext msgpack specification
+template <typename T, typename F>
+inline void serialize_ext(const T& t, MsgpackBuffer& buf, uint8_t type, F f) {
+	buf.write_byte(0xc9);
+	// We don't know for sure the amount of bytes we'll be writing.
+	// So for now we set the payload size as zero and then we take the difference in data size
+	// from now and after we invoke f to determine how many bytes were written
+	size_t byte_idx = buf.data_size;
+	for (int i = 0; i < 4; i++) {
+		buf.write_byte(0);
+	}
+	buf.write_byte(type);
+	size_t prev_size = buf.data_size;
+	f(t, buf);
+	uint32_t updated_size = static_cast<uint32_t>(buf.data_size - prev_size);
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[3], byte_idx);
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[2], byte_idx + 1);
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[1], byte_idx + 2);
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[0], byte_idx + 3);
+}
+
+inline void serialize_otelattribute(const Attribute& attr, MsgpackBuffer& buf) {
+	serialize_string(attr.key, buf);
+	serialize_string(attr.value, buf);
+}
+
+inline void serialize_numberdatapoint(const NumberDataPoint& point, MsgpackBuffer& buf) {
+	serialize_value(point.startTime, buf, 0xcb);
+	serialize_value(point.recordTime, buf, 0xcb);
+	serialize_vector(point.attributes, buf, serialize_otelattribute);
+	serialize_value(point.val, buf, 0xd3);
+	serialize_value<uint8_t>(point.flags, buf, 0xcc);
+}
+
+inline void serialize_otelsum(const OTELSum& sum, MsgpackBuffer& buf) {
+	serialize_string(sum.name, buf);
+	serialize_numberdatapoint(sum.point, buf);
+	serialize_value<uint8_t>(sum.aggregation, buf, 0xcc);
+	serialize_bool(sum.isMonotonic, buf);
+}
+
+inline void serialize_otelgauge(const OTELGauge& g, MsgpackBuffer& buf) {
+	serialize_string(g.name, buf);
+	serialize_numberdatapoint(g.point, buf);
+}
+
+inline void serialize_histdatapoint(const HistogramDataPoint& point, MsgpackBuffer& buf) {
+	serialize_vector(point.attributes, buf, serialize_otelattribute);
+	serialize_value(point.startTime, buf, 0xcb);
+	serialize_value(point.recordTime, buf, 0xcb);
+	serialize_value(point.count, buf, 0xcf);
+	serialize_value(point.sum, buf, 0xcb);
+	serialize_value(point.min, buf, 0xcb);
+	serialize_value(point.max, buf, 0xcb);
+	std::function<void(const double&, MsgpackBuffer&)> f_Bucket = [](const double& d, MsgpackBuffer& buf) {
+		serialize_value(d, buf, 0xcb);
+	};
+	serialize_vector(point.samples, buf, f_Bucket);
+	serialize_value<uint8_t>(point.flags, buf, 0xcc);
+}
+
+inline void serialize_otelhist(const OTELHistogram& h, MsgpackBuffer& buf) {
+	serialize_string(h.name, buf);
+	serialize_histdatapoint(h.point, buf);
+	serialize_value<uint8_t>(h.aggregation, buf, 0xcc);
+}
+
 #endif

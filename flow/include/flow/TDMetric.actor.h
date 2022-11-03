@@ -35,6 +35,7 @@
 #include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
 #include "flow/CompressedInt.h"
+#include "flow/OTELMetrics.h"
 #include <algorithm>
 #include <functional>
 #include <cmath>
@@ -168,6 +169,9 @@ struct FDBScope {
 struct MetricBatch {
 	FDBScope scope;
 	std::string statsd_message;
+	std::vector<OTELGauge> gauges;
+	std::vector<OTELSum> counters;
+	std::vector<OTELHistogram> hists;
 
 	MetricBatch() {}
 
@@ -182,6 +186,9 @@ struct MetricBatch {
 	void clear() {
 		scope.clear();
 		statsd_message.clear();
+		gauges.clear();
+		counters.clear();
+		hists.clear();
 	}
 };
 
@@ -1444,7 +1451,7 @@ typedef MetricHandle<DoubleMetric> DoubleMetricHandle;
 template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
 
-enum MetricsDataModel { STATSD = 0, OTEL };
+enum MetricsDataModel { STATSD = 0, OTEL, NONE };
 
 enum StatsDMetric { GAUGE = 0, COUNTER };
 
