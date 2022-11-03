@@ -81,7 +81,7 @@ struct CounterCollection {
 	void logToTraceEvent(TraceEvent& te) const;
 };
 
-struct SWIFT_CXX_REF_IMMORTAL Counter final : ICounter, NonCopyable {
+struct Counter final : ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 

@@ -30,7 +30,7 @@
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;
 
-class SWIFT_CXX_REF_IMMORTAL ServerKnobs : public KnobsImpl<ServerKnobs> {
+class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions

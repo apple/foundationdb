@@ -24,6 +24,7 @@
 #include "swift.h"
 #include "flow.h"
 #include "pthread.h"
+#include "unsafe_swift_compat.h"
 #include <stdint.h>
 
 // ==== ----------------------------------------------------------------------------------------------------------------
@@ -37,7 +38,7 @@ using FutureStreamCInt = FutureStream<int>;
 // 		 Used for waiting on FutureStreams, which don't support multiple callbacks.
 
 // FIXME(swift): either implement in Swift, or manage lifetime properly
-struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationSingleCallbackCInt : SingleCallback<int> {
+struct UNSAFE_SWIFT_CXX_IMMORTAL_REF SwiftContinuationSingleCallbackCInt : SingleCallback<int> {
 private:
 	void* _Nonnull continuationBox;
 	void (*_Nonnull resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
