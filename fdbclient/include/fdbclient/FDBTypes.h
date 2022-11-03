@@ -1494,7 +1494,7 @@ struct EncryptionAtRestMode {
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
 
-	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
 		}
@@ -1506,6 +1506,14 @@ struct EncryptionAtRestMode {
 		}
 
 		return static_cast<Mode>(num);
+	}
+
+	static EncryptionAtRestMode fromValue(Optional<Value> val) {
+		if (!val.present()) {
+			return EncryptionAtRestMode();
+		}
+
+		return EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(val.get().contents()));
 	}
 
 	uint32_t mode;

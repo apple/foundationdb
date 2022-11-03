@@ -175,6 +175,7 @@ struct ClusterControllerFullInterface {
 	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
+	RequestStream<struct GetEncryptionAtRestModeRequest> getEncryptionAtRestMode;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -189,7 +190,7 @@ struct ClusterControllerFullInterface {
 		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
 		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
 		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-		       changeCoordinators.getFuture().isReady();
+		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -206,6 +207,7 @@ struct ClusterControllerFullInterface {
 		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
 		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
 		changeCoordinators.getEndpoint(TaskPriority::DefaultEndpoint);
+		getEncryptionAtRestMode.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -226,7 +228,8 @@ struct ClusterControllerFullInterface {
 		           updateWorkerHealth,
 		           tlogRejoin,
 		           notifyBackupWorkerDone,
-		           changeCoordinators);
+		           changeCoordinators,
+		           getEncryptionAtRestMode);
 	}
 };
 
@@ -569,6 +572,33 @@ struct BackupWorkerDoneRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, workerUID, backupEpoch, reply);
+	}
+};
+
+struct GetEncryptionAtRestModeResponse {
+	constexpr static FileIdentifier file_identifier = 2932156;
+	uint32_t mode;
+
+	GetEncryptionAtRestModeResponse() : mode(EncryptionAtRestMode::Mode::DISABLED) {}
+	GetEncryptionAtRestModeResponse(uint32_t m) : mode(m) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+};
+
+struct GetEncryptionAtRestModeRequest {
+	constexpr static FileIdentifier file_identifier = 2670826;
+	UID tlogId;
+	ReplyPromise<GetEncryptionAtRestModeResponse> reply;
+
+	GetEncryptionAtRestModeRequest() {}
+	GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tlogId, reply);
 	}
 };
 

@@ -892,7 +892,7 @@ Optional<TenantName> getTenantName(ProxyCommitData* commitData, int64_t tenantId
 	if (tenantId != TenantInfo::INVALID_TENANT) {
 		auto itr = commitData->tenantIdIndex.find(tenantId);
 		if (itr != commitData->tenantIdIndex.end()) {
-			return Optional<TenantName>(itr->second);
+			return Optional<TenantName>(itr->second.get());
 		}
 	}
 
