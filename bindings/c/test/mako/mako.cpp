@@ -1297,7 +1297,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			/* name, has_arg, flag, val */
 			{ "api_version", required_argument, NULL, 'a' },
 			{ "cluster", required_argument, NULL, 'c' },
-			{ "num_databases", optional_argument, NULL, 'd' },
+			{ "num_databases", required_argument, NULL, 'd' },
 			{ "procs", required_argument, NULL, 'p' },
 			{ "threads", required_argument, NULL, 't' },
 			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
@@ -1348,6 +1348,17 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
 			{ NULL, 0, NULL, 0 }
 		};
+
+/* For optional arguments, optarg is only set when the argument is passed as "--option=[ARGUMENT]" but not as
+ "--option [ARGUMENT]". This function sets optarg in the latter case. See
+ https://cfengine.com/blog/2021/optional-arguments-with-getopt-long/ for a more detailed explanation */
+#define SET_OPT_ARG_IF_PRESENT()                                                                                       \
+	{                                                                                                                  \
+		if (optarg == NULL && optind < argc && argv[optind][0] != '-') {                                               \
+			optarg = argv[optind++];                                                                                   \
+		}                                                                                                              \
+	}
+
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
 		if (c < 0) {
@@ -1549,9 +1560,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.disable_ryw = 1;
 			break;
 		case ARG_JSON_REPORT:
-			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
-				// if --report_json is the last option and no file is specified
-				// or --report_json is followed by another option
+			SET_OPT_ARG_IF_PRESENT();
+			if (!optarg) {
 				char default_file[] = "mako.json";
 				strncpy(args.json_output_path, default_file, sizeof(default_file));
 			} else {
@@ -1562,13 +1572,12 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
 		case ARG_EXPORT_PATH:
-			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
+			SET_OPT_ARG_IF_PRESENT();
+			if (!optarg) {
 				char default_file[] = "sketch_data.json";
 				strncpy(args.stats_export_path, default_file, sizeof(default_file));
 			} else {
-				strncpy(args.stats_export_path,
-				        argv[optind],
-				        std::min(sizeof(args.stats_export_path), strlen(argv[optind]) + 1));
+				strncpy(args.stats_export_path, optarg, std::min(sizeof(args.stats_export_path), strlen(optarg) + 1));
 			}
 			break;
 		case ARG_DISTRIBUTED_TRACER_CLIENT:

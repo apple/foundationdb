@@ -316,6 +316,7 @@ public:
 	int64_t ROCKSDB_MEMTABLE_BYTES;
 	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
+	bool ROCKSDB_MUTE_LOGS;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
@@ -333,6 +334,8 @@ public:
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 	double ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME;
 	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
+	bool ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS;
+	int ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
@@ -629,14 +632,14 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
-	// Cost multiplier for writes (because write operations are more expensive than reads)
-	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
 	// until some existing tags expire
 	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
 	// Global tag throttler forgets about throughput from a tag once no new transactions from that
 	// tag have been received for this duration (in seconds):
 	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
+	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
+	double PROXY_MAX_TAG_THROTTLE_DURATION;
 	// Interval at which latency bands are logged for each tag on grv proxy
 	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
 
@@ -742,7 +745,6 @@ public:
 	int64_t MIN_TAG_READ_PAGES_RATE;
 	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
-	int64_t READ_COST_BYTE_FACTOR;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
 	bool REPORT_DD_METRICS;
 	double DD_METRICS_REPORT_INTERVAL;
@@ -982,6 +984,7 @@ public:
 	bool BLOB_MANIFEST_BACKUP;
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	bool BLOB_FULL_RESTORE_MODE;
+	double BLOB_MIGRATOR_CHECK_INTERVAL;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

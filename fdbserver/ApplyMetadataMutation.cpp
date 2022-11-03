@@ -134,7 +134,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::unordered_map<int64_t, TenantName>* tenantIdIndex = nullptr;
+	std::unordered_map<int64_t, TenantNameUniqueSet>* tenantIdIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -673,7 +673,7 @@ private:
 
 				(*tenantMap)[tenantName] = tenantEntry;
 				if (tenantIdIndex) {
-					(*tenantIdIndex)[tenantEntry.id] = tenantName;
+					(*tenantIdIndex)[tenantEntry.id].insert(tenantName);
 				}
 			}
 
@@ -803,7 +803,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
+					logSystem->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -811,11 +811,11 @@ private:
 				if (toCommit) {
 					MutationRef privatized = m;
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
-					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
+					privatized.param2 = keyAfter(privatized.param1, arena);
 
 					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
-					toCommit->addTag(decodeServerTagValue(kv.value));
+					toCommit->addTag(tag);
 					writeMutation(privatized);
 				}
 			}
@@ -1100,7 +1100,11 @@ private:
 					// TODO: O(n) operation, optimize cpu
 					auto itr = startItr;
 					while (itr != endItr) {
-						tenantIdIndex->erase(itr->second.id);
+						auto indexItr = tenantIdIndex->find(itr->second.id);
+						ASSERT(indexItr != tenantIdIndex->end());
+						if (indexItr->second.remove(itr->first)) {
+							tenantIdIndex->erase(indexItr);
+						}
 						itr++;
 					}
 				}

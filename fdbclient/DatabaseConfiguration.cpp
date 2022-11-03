@@ -658,7 +658,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse((&type), value);
 		blobGranulesEnabled = (type != 0);
 	} else if (ck == "encryption_at_rest_mode"_sr) {
-		encryptionAtRestMode = EncryptionAtRestMode::fromValue(value);
+		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
 	} else {
 		return false;
 	}

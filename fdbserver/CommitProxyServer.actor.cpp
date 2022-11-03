@@ -892,7 +892,7 @@ Optional<TenantName> getTenantName(ProxyCommitData* commitData, int64_t tenantId
 	if (tenantId != TenantInfo::INVALID_TENANT) {
 		auto itr = commitData->tenantIdIndex.find(tenantId);
 		if (itr != commitData->tenantIdIndex.end()) {
-			return Optional<TenantName>(itr->second);
+			return Optional<TenantName>(itr->second.get());
 		}
 	}
 
@@ -1627,9 +1627,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			                            CODE_PROBE(true, "encrypting idempotency mutation");
 			                            std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
-			                            Arena arena;
 			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
-			                                self->cipherKeys, p.second, arena, BlobCipherMetrics::TLOG);
+			                                self->cipherKeys, p.second, self->arena, BlobCipherMetrics::TLOG);
 			                            self->toCommit.writeTypedMessage(encryptedMutation);
 		                            } else {
 			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
@@ -1640,7 +1639,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		MutationRef& m = pProxyCommitData->idempotencyClears[i];
 		auto& tags = pProxyCommitData->tagsForKey(m.param1);
 		self->toCommit.addTags(tags);
-		Arena arena;
+		// We already have an arena with an appropriate lifetime handy
+		Arena& arena = pProxyCommitData->idempotencyClears.arena();
 		wait(success(writeMutation(self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &m, nullptr, &arena)));
 	}
 	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();

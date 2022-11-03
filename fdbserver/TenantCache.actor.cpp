@@ -137,8 +137,13 @@ public:
 						tenantCache->tenantStorageMap[tenants[i]].usage = size;
 						break;
 					} catch (Error& e) {
-						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
-						wait(tr.onError(e));
+						if (e.code() == error_code_tenant_not_found) {
+							tenantCache->tenantStorageMap.erase(tenants[i]);
+							break;
+						} else {
+							TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
+							wait(tr.onError(e));
+						}
 					}
 				}
 			}

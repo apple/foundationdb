@@ -3549,7 +3549,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				continue;
 			}
 			state Reference<GranuleMetadata> metadata = m;
-			state Version granuleBeginVersion = req.beginVersion;
+			// state Version granuleBeginVersion = req.beginVersion;
 			// skip waiting for CF ready for recovery mode
 			if (!isFullRestoreMode()) {
 				choose {
