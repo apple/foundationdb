@@ -175,11 +175,13 @@ Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::st
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
 	}
-	f = makeReference<AsyncFileReadAheadCache>(f,
-	                                           m_bstore->knobs.read_block_size,
-	                                           m_bstore->knobs.read_ahead_blocks,
-	                                           m_bstore->knobs.concurrent_reads_per_file,
-	                                           m_bstore->knobs.read_cache_blocks_per_file);
+	if (m_bstore->knobs.enable_read_cache) {
+		f = makeReference<AsyncFileReadAheadCache>(f,
+		                                           m_bstore->knobs.read_block_size,
+		                                           m_bstore->knobs.read_ahead_blocks,
+		                                           m_bstore->knobs.concurrent_reads_per_file,
+		                                           m_bstore->knobs.read_cache_blocks_per_file);
+	}
 	return f;
 }
 
