@@ -25,6 +25,7 @@
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
+#include <exception>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <cctype>
@@ -514,25 +515,29 @@ public:
 
 	void close() {
 		if (opened) {
-			MutexHolder hold(mutex);
+			try {
+				MutexHolder hold(mutex);
 
-			// Write remaining contents
-			auto a = new WriterThread::WriteBuffer(std::move(eventBuffer));
-			loggedLength += bufferLength;
-			eventBuffer = std::vector<TraceEventFields>();
-			bufferLength = 0;
-			writer->post(a);
+				// Write remaining contents
+				auto a = new WriterThread::WriteBuffer(std::move(eventBuffer));
+				loggedLength += bufferLength;
+				eventBuffer = std::vector<TraceEventFields>();
+				bufferLength = 0;
+				writer->post(a);
 
-			auto c = new WriterThread::Close();
-			writer->post(c);
+				auto c = new WriterThread::Close();
+				writer->post(c);
 
-			ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
-			barriers->push(f);
-			writer->post(new WriterThread::Barrier);
+				ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
+				barriers->push(f);
+				writer->post(new WriterThread::Barrier);
 
-			f.getBlocking();
+				f.getBlocking();
 
-			opened = false;
+				opened = false;
+			} catch (const std::exception& e) {
+				fprintf(stderr, "Error closing trace file: %s\n", e.what());
+			}
 		}
 	}
 
