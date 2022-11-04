@@ -768,7 +768,7 @@ Future<Void> monitorActor(GlobalTagThrottler* globalTagThrottler, Check check) {
 }
 
 bool isNear(double a, double b) {
-	return abs(a - b) < std::max(0.1 * a, 1.0);
+	return abs(a - b) < 0.1 * a;
 }
 
 bool isNear(Optional<double> a, Optional<double> b) {
@@ -1199,7 +1199,7 @@ TEST_CASE("/GlobalTagThrottler/TagLimit") {
 // Client attempts 5 6-byte transactions per second.
 // Target rate adjusts to 100/6 transactions per second, ignoring the worst storage server.
 // Then, a second storage server becomes unhealthy and can only handle 1 byte/second.
-// Target rate adjusts down to 1/6 transactions per second, because only one bad zone can be ignored.
+// Target rate adjusts down to its minimum rate, because only one bad zone can be ignored.
 TEST_CASE("/GlobalTagThrottler/IgnoreWorstZone") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 1);
 	state StorageServerCollection storageServers(10, 100);
@@ -1214,8 +1214,9 @@ TEST_CASE("/GlobalTagThrottler/IgnoreWorstZone") {
 	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	storageServers.setCapacity(1, 1);
-	monitor =
-	    monitorActor(&globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 1.0 / 6.0); });
+	monitor = monitorActor(&globalTagThrottler, [](auto& gtt) {
+		return targetRateIsNear(gtt, "sampleTag1"_sr, SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE);
+	});
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
