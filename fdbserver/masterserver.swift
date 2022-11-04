@@ -184,7 +184,7 @@ public actor MasterDataActor {
         // NOTE.  To fix: error: cannot find 'updateLiveCommittedVersion' in scope
         // Add the C++ declaration to the .h...
         // Note:  To fix. cannot convert value of type 'MasterData' to expected argument type '__CxxTemplateInst9ReferenceI10MasterDataE'
-        // Change the C++ method to take a raw C++ reference instead of an FDB Reference<Foo> 
+        // Change the C++ method to take a raw C++ reference instead of an FDB Reference<Foo>
         updateLiveCommittedVersion(myself, req)
 
         // req.reply.send(Void());

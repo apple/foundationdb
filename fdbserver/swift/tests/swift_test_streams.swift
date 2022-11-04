@@ -43,8 +43,8 @@ func swift_flow_trivial_promisestreams() async {
     print("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
     defer { print("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
 
-    var ps = PromiseStream<CInt>()
-    var fs: FutureStream<CInt> = ps.__getFutureUnsafe()
+    var ps = PromiseStreamCInt()
+    var fs: FutureStreamCInt = ps.__getFutureUnsafe()
 
     var i: CInt = 1
     ps.send(&i)
@@ -64,8 +64,8 @@ func swift_flow_trivial_promisestreams_asyncSequence() async throws {
     print("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
     defer { print("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
 
-    var ps = PromiseStream<CInt>()
-    var fs: FutureStream<CInt> = ps.__getFutureUnsafe()
+    var ps = PromiseStreamCInt()
+    var fs: FutureStreamCInt = ps.__getFutureUnsafe()
 
     Task { [ps] in
         var ps = ps

@@ -81,12 +81,12 @@ its lifetime. Do this by adding one of the `SWIFT_CXX_...` attributes:
 
 ```c++ 
 template <class T>
-class SWIFT_CXX_REF_IMMORTAL StrictFuture : public Future<T> {
+class UNSAFE_SWIFT_CXX_IMMORTAL_REF StrictFuture : public Future<T> {
 ```
 
 This is just convenience for:
 ```
-#define SWIFT_CXX_REF_IMMORTAL 
+#define UNSAFE_SWIFT_CXX_IMMORTAL_REF
     __attribute__((swift_attr("import_as_ref"))) 
     __attribute__((swift_attr("retain:immortal"))) 
     __attribute__((swift_attr("release:immortal")))
