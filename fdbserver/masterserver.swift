@@ -64,11 +64,10 @@ public actor MasterDataActor {
     init() {
     }
 
-    func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs) async {
+    func registerLastCommitProxyVersionReplies(uids: [Flow.UID]) async {
         lastCommitProxyVersionReplies = [:]
-        // FIXME: Make this a for-in loop once we have automatic Sequence conformance.
-        for i in 0..<uids.size() {
-            lastCommitProxyVersionReplies[uids[i]] = CommitProxyVersionReplies()
+        for uid in uids {
+            lastCommitProxyVersionReplies[uid] = CommitProxyVersionReplies()
         }
     }
 
@@ -202,7 +201,7 @@ public struct MasterDataActorCxx {
         myself = MasterDataActor()
     }
 
-    public func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs, result promise: PromiseVoid) {
+    public func registerLastCommitProxyVersionReplies(uids: [Flow.UID], result promise: PromiseVoid) {
         Task {
             await myself.registerLastCommitProxyVersionReplies(uids: uids)
             var result = Flow.Void()
