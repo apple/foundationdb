@@ -1811,9 +1811,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	loop {
 		poppedVer = poppedVersion(logData, reqTag);
 
+		auto tagData = logData->getTagData(reqTag);
+		bool tagRecovered = tagData && !tagData->unpoppedRecovered;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
 		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-		    !reqReturnIfBlocked) {
+		    !reqReturnIfBlocked && tagRecovered) {
 			state double startTime = now();
 			// TODO (version vector) check if this should be included in "status details" json
 			// TODO (version vector) all tags may be too many, instead,  standard deviation?
@@ -1830,12 +1832,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			poppedVer = poppedVersion(logData, reqTag);
 		}
 
-		DisabledTraceEvent("TLogPeekMessages1", self->dbgid)
+		DebugLogTraceEvent("TLogPeekMessages2", self->dbgid)
 		    .detail("LogId", logData->logId)
 		    .detail("Tag", reqTag.toString())
 		    .detail("ReqBegin", reqBegin)
 		    .detail("PoppedVer", poppedVer);
-
 		if (poppedVer > reqBegin) {
 			TLogPeekReply rep;
 			rep.maxKnownVersion = logData->version.get();
@@ -1856,7 +1857,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				}
 				if (sequenceData.isSet()) {
 					if (sequenceData.getFuture().get().first != rep.end) {
-						TEST(true); // tlog peek second attempt ended at a different version
+						CODE_PROBE(true, "tlog peek second attempt ended at a different version");
 						replyPromise.sendError(operation_obsolete());
 						return Void();
 					}
