@@ -178,7 +178,6 @@ class DDTxnProcessorImpl {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 				RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
@@ -209,7 +208,6 @@ class DDTxnProcessorImpl {
 		state Transaction tr(cx);
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
