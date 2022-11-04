@@ -51,6 +51,7 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/DDSharedContext.h"
+#include "StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
@@ -694,7 +695,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
-			primaryTeamCollection = makeReference<DDTeamCollection>(
+			primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
 			    self->txnProcessor,
 			    self->ddId,
 			    self->lock,
@@ -710,28 +711,28 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
-			    getUnhealthyRelocationCount);
+			    getUnhealthyRelocationCount });
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
-				remoteTeamCollection =
-				    makeReference<DDTeamCollection>(self->txnProcessor,
-				                                    self->ddId,
-				                                    self->lock,
-				                                    self->relocationProducer,
-				                                    self->shardsAffectedByTeamFailure,
-				                                    self->configuration,
-				                                    self->remoteDcIds,
-				                                    Optional<std::vector<Optional<Key>>>(),
-				                                    self->initialized.getFuture() && remoteRecovered(self->dbInfo),
-				                                    zeroHealthyTeams[1],
-				                                    IsPrimary::False,
-				                                    processingUnhealthy,
-				                                    processingWiggle,
-				                                    getShardMetrics,
-				                                    removeFailedServer,
-				                                    getUnhealthyRelocationCount);
+				remoteTeamCollection = makeReference<DDTeamCollection>(
+				    DDTeamCollectionInitParams{ self->txnProcessor,
+				                                self->ddId,
+				                                self->lock,
+				                                self->relocationProducer,
+				                                self->shardsAffectedByTeamFailure,
+				                                self->configuration,
+				                                self->remoteDcIds,
+				                                Optional<std::vector<Optional<Key>>>(),
+				                                self->initialized.getFuture() && remoteRecovered(self->dbInfo),
+				                                zeroHealthyTeams[1],
+				                                IsPrimary::False,
+				                                processingUnhealthy,
+				                                processingWiggle,
+				                                getShardMetrics,
+				                                removeFailedServer,
+				                                getUnhealthyRelocationCount });
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(remoteTeamCollection,

@@ -43,6 +43,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "StorageWiggleMetrics.actor.h"
 
 const char* RecoveryStatus::names[] = { "reading_coordinated_state",
 	                                    "locking_coordinated_state",
