@@ -160,11 +160,21 @@ struct ProxyStats {
 	}
 };
 
+struct ExpectedIdempotencyIdCountForKey {
+	Version commitVersion = invalidVersion;
+	int16_t idempotencyIdCount = 0;
+	uint8_t batchIndexHighByte = 0;
+
+	ExpectedIdempotencyIdCountForKey() {}
+	ExpectedIdempotencyIdCountForKey(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
+	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
+};
+
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
 	std::map<TenantName, TenantMapEntry> tenantMap;
-	std::unordered_map<int64_t, TenantName> tenantIdIndex;
+	std::unordered_map<int64_t, TenantNameUniqueSet> tenantIdIndex;
 	std::vector<TenantName> tenantsOverStorageQuota;
 	ProxyStats stats;
 	MasterInterface master;
@@ -226,6 +236,9 @@ struct ProxyCommitData {
 	int localTLogCount = -1;
 
 	bool isEncryptionEnabled = false;
+
+	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey;
+	Standalone<VectorRef<MutationRef>> idempotencyClears;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to

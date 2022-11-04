@@ -48,6 +48,7 @@ ERROR( tlog_stopped, 1011, "TLog stopped" )
 ERROR( server_request_queue_full, 1012, "Server request queue is full" )
 ERROR( not_committed, 1020, "Transaction not committed due to conflict with another transaction" )
 ERROR( commit_unknown_result, 1021, "Transaction may or may not have committed" )
+ERROR( commit_unknown_result_fatal, 1022, "Idempotency id for transaction may have expired, so the commit status of the transaction cannot be determined" )
 ERROR( transaction_cancelled, 1025, "Operation aborted because the transaction was cancelled" )
 ERROR( connection_failed, 1026, "Network connection failed" )
 ERROR( coordinators_changed, 1027, "Coordination servers have changed" )
@@ -132,6 +133,7 @@ ERROR( incompatible_software_version, 1220, "Current software does not support d
 ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
 ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
 ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
+ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

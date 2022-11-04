@@ -28,6 +28,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/MasterInterface.h"
+#include "flow/ObjectSerializerTraits.h"
 
 class LogSet;
 struct OldLogData;
@@ -143,7 +144,7 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
-	EncryptionAtRestMode encryptionAtRestMode;
+	EncryptionAtRestMode encryptionAtRestMode; // cluster encryption data at-rest mode
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),

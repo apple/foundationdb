@@ -836,14 +836,13 @@ private:
 					useDelta = false;
 
 					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
-					//TraceEvent("SnapshotEnd", self->id)
-					//	.detail("LastKey", lastKey.present() ? lastKey.get() : "<none>"_sr)
-					//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
-					//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
-					//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
-					//	.detail("Items", snapItems)
-					//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
-					//	.detail("SnapshotSize", snapshotBytes);
+					DisabledTraceEvent("SnapshotEnd", self->id)
+					    .detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
+					    .detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+					    .detail("ThisSnapshotEnd", thisSnapshotEnd)
+					    .detail("Items", snapItems)
+					    .detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
+					    .detail("SnapshotSize", snapshotBytes);
 
 					ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
 					self->previousSnapshotEnd = self->currentSnapshotEnd;
