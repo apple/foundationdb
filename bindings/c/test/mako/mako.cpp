@@ -458,10 +458,15 @@ int populate(Database db,
 	return 0;
 }
 
-void updateErrorStatsRunMode(ThreadStatistics& stats, fdb::Error err, int op) {
+void updateErrorStatsRunMode(ThreadStatistics& stats, const Arguments& args, fdb::Error err, int op) {
 	if (err) {
 		if (err.is(1020 /*not_commited*/)) {
 			stats.incrConflictCount();
+		} else if (err.is(1031 /*timeout*/)) {
+			if (args.transaction_timeout == 0) {
+				stats.incrErrorCount(op);
+			}
+			stats.incrTimeoutCount(op);
 		} else {
 			stats.incrErrorCount(op);
 		}
@@ -494,11 +499,11 @@ transaction_begin:
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(tx, f, opTable[op].name());
+				future_rc = waitAndHandleError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
 			} else {
-				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
 			}
-			updateErrorStatsRunMode(stats, f.error(), op);
+			updateErrorStatsRunMode(stats, args, f.error(), op);
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
 			postStepFn(f, tx, args, key1, key2, val);
@@ -542,8 +547,8 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
-		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.transaction_timeout > 0);
+		updateErrorStatsRunMode(stats, args, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
 		if (rc == FutureRC::OK) {
@@ -1000,6 +1005,9 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		if (args.disable_ryw) {
 			databases[i].setOption(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
 		}
+		if (args.transaction_timeout > 0 && args.mode == MODE_RUN) {
+			databases[i].setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, args.transaction_timeout);
+		}
 	}
 
 	if (!args.async_xacts) {
@@ -1112,6 +1120,7 @@ Arguments::Arguments() {
 	bg_materialize_files = false;
 	bg_file_path[0] = '\0';
 	distributed_tracer_client = 0;
+	transaction_timeout = 0;
 }
 
 /* parse transaction specification */
@@ -1300,6 +1309,9 @@ void usage() {
 	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 	printf(
 	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
+	printf("%-24s %s\n",
+	       "    --transaction_timeout=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode.");
 }
 
 /* parse benchmark paramters */
@@ -1362,6 +1374,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
 			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
 			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
+			{ "transaction_timeout", required_argument, NULL, ARG_TRANSACTION_TIMEOUT },
 			{ NULL, 0, NULL, 0 }
 		};
 
@@ -1646,6 +1659,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			          args.authorization_tokens.size(),
 			          tokenFilename);
 		} break;
+		case ARG_TRANSACTION_TIMEOUT:
+			args.transaction_timeout = atoi(optarg);
+			break;
 		}
 	}
 
@@ -1733,6 +1749,15 @@ int Arguments::validate() {
 				return -1;
 			}
 		}
+		if (transaction_timeout < 0) {
+			logr.error("--transaction_timeout must be a non-negative integer");
+			return -1;
+		}
+	}
+
+	if (mode != MODE_RUN && transaction_timeout != 0) {
+		logr.error("--transaction_timeout only supported in run mode");
+		return -1;
 	}
 
 	if (mode == MODE_RUN || mode == MODE_BUILD) {
@@ -2162,6 +2187,7 @@ void printReport(Arguments const& args,
 	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TRANSACTION));
 	fmt::printf("Total Conflicts:   %8lu\n", final_stats.getConflictCount());
 	fmt::printf("Total Errors:      %8lu\n", final_stats.getTotalErrorCount());
+	fmt::printf("Total Timeouts:    %8lu\n", final_stats.getTotalTimeoutCount());
 	fmt::printf("Overall TPS:       %8lu\n\n", tps_i);
 
 	if (fp) {
@@ -2174,6 +2200,7 @@ void printReport(Arguments const& args,
 		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TRANSACTION));
 		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
 		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
+		fmt::fprintf(fp, "\"totalTimeouts\": %lu,", final_stats.getTotalTimeoutCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
 	}
 
@@ -2217,7 +2244,7 @@ void printReport(Arguments const& args,
 	putTitle("Errors");
 	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
 			putField(final_stats.getErrorCount(op));
 			if (fp) {
 				if (first_op) {
@@ -2229,6 +2256,28 @@ void printReport(Arguments const& args,
 			}
 		}
 	}
+	fmt::print("\n");
+
+	/* Timeouts */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"timeouts\": {");
+	}
+	putTitle("Timeouts");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
+			putField(final_stats.getTimeoutCount(op));
+			if (fp) {
+				if (first_op) {
+					first_op = false;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getTimeoutCount(op));
+			}
+		}
+	}
+
 	if (fp) {
 		fmt::fprintf(fp, "}, \"numSamples\": {");
 	}
@@ -2320,6 +2369,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"txntagging_prefix\": \"%s\",", args.txntagging_prefix);
 		fmt::fprintf(fp, "\"streaming_mode\": %d,", args.streaming_mode);
 		fmt::fprintf(fp, "\"disable_ryw\": %d,", args.disable_ryw);
+		fmt::fprintf(fp, "\"transaction_timeout\": %d,", args.transaction_timeout);
 		fmt::fprintf(fp, "\"json_output_path\": \"%s\"", args.json_output_path);
 		fmt::fprintf(fp, "},\"samples\": [");
 	}
