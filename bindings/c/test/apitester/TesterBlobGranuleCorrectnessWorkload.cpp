@@ -61,7 +61,7 @@ private:
 
 	inline bool seenReadSuccess(std::optional<int> tenantId) { return tenantsWithReadSuccess.count(tenantId); }
 
-	std::string tenantDebugString(std::optional<int> tenantId) {
+	std::string debugTenantStr(std::optional<int> tenantId) {
 		return tenantId.has_value() ? fmt::format(" (tenant {0})", tenantId.value()) : "";
 	}
 
@@ -71,7 +71,7 @@ private:
 			                 opName,
 			                 fdb::toCharsRef(begin),
 			                 fdb::toCharsRef(end),
-			                 tenantDebugString(tenantId),
+			                 debugTenantStr(tenantId),
 			                 message));
 		}
 	}
@@ -117,7 +117,7 @@ private:
 				    results.get()->assign(resVector.begin(), resVector.end());
 				    bool previousSuccess = seenReadSuccess(tenantId);
 				    if (!previousSuccess) {
-					    info(fmt::format("Read{0}: first success\n", tenantDebugString(tenantId)));
+					    info(fmt::format("Read{0}: first success\n", debugTenantStr(tenantId)));
 					    setReadSuccess(tenantId);
 				    } else {
 					    debugOp("Read", begin, end, tenantId, "complete");
@@ -344,7 +344,7 @@ private:
 			    if (*verifyVersion == -1) {
 				    ASSERT(!previousSuccess);
 			    } else if (!previousSuccess) {
-				    info(fmt::format("Verify{0}: first success\n", tenantDebugString(tenantId)));
+				    info(fmt::format("Verify{0}: first success\n", debugTenantStr(tenantId)));
 				    setReadSuccess(tenantId);
 			    }
 			    schedule(cont);
