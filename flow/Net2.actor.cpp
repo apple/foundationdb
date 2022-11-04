@@ -881,8 +881,8 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [self = self](bool verifyOk) {
-				self->has_trusted_peer = verifyOk;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
+				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
@@ -959,8 +959,8 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [self = self](bool verifyOk) {
-				self->has_trusted_peer = verifyOk;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
+				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
