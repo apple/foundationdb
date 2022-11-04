@@ -266,7 +266,7 @@ static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
 	// get some errors printed for spawned process
 	std::cout << "Output bytesRead: " << bytesRead << std::endl;
-	std::cout << "output buffer: " << std::string(outputBuffer) << std::endl;
+	std::cout << "output buffer: " << std::string_view(outputBuffer, bytesRead) << std::endl;
 	if (bytesRead == 0)
 		return;
 	ASSERT(bytesRead <= SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT);

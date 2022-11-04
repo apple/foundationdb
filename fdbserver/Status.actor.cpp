@@ -764,6 +764,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				// Map the address of the worker to the error message object
 				tracefileOpenErrorMap[traceFileErrorsItr->first.toString()] = msgObj;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				incomplete_reasons->insert("file_open_error details could not be retrieved");
 			}
 		}
@@ -1070,6 +1073,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			}
 
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			// Something strange occurred, process list is incomplete but what was built so far, if anything, will be
 			// returned.
 			incomplete_reasons->insert("Cannot retrieve all process status information.");
@@ -1400,6 +1406,9 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 
 		wait(waitForAll(probes));
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
 	}
 
@@ -1439,6 +1448,9 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
 	}
 	return Void();
@@ -1526,6 +1538,9 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve log ranges (%s).", e.what()));
 	}
 	return Void();
@@ -1659,7 +1674,10 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 		}
 		int count = coordinators.clientLeaderServers.size();
 		statusObj["coordinators_count"] = count;
-	} catch (Error&) {
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
 	}
 	return statusObj;
@@ -2657,6 +2675,9 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "LayerStatusError").error(e);
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve layer status (%s).", e.what()));
 		json.create("_error") = format("Unable to retrieve layer status (%s).", e.what());
 		json.create("_valid") = false;
