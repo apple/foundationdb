@@ -70,10 +70,13 @@ void ApiWorkload::start() {
 	schedule([this]() {
 		// 1. Clear data
 		clearData([this]() {
-			// 2. Populate initial data
-			populateData([this]() {
-				// 3. Generate random workload
-				runTests();
+			// 2. Workload setup
+			setup([this]() {
+				// 3. Populate initial data
+				populateData([this]() {
+					// 4. Generate random workload
+					runTests();
+				});
 			});
 		});
 	});
@@ -247,6 +250,10 @@ void ApiWorkload::populateData(TTaskFct cont) {
 	} else {
 		populateTenantData(cont, {});
 	}
+}
+
+void ApiWorkload::setup(TTaskFct cont) {
+	schedule(cont);
 }
 
 void ApiWorkload::randomInsertOp(TTaskFct cont, std::optional<int> tenantId) {

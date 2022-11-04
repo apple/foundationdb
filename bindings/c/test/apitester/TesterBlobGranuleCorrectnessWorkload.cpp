@@ -52,9 +52,31 @@ private:
 	};
 	std::vector<OpType> excludedOpTypes;
 
+	void setup(TTaskFct cont) override {
+		fdb::Key begin = { 0x00 };
+		fdb::Key end = { 0xff };
+		auto verifyVersion = std::make_shared<int64_t>(-1);
+
+		execOperation(
+		    [begin, end, verifyVersion](auto ctx) {
+			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
+			    ctx->continueAfter(f, [ctx, verifyVersion, f]() {
+				    *verifyVersion = f.get<fdb::future_var::Int64>();
+				    ctx->done();
+			    });
+		    },
+		    [this, begin, end, verifyVersion, cont]() {
+			    if (*verifyVersion == -1) {
+				    schedule([this, cont]() { setup(cont); });
+			    } else {
+				    schedule(cont);
+			    }
+		    },
+		    /* failOnError = */ false);
+	}
+
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	// FIXME: should still guarantee a read succeeds eventually somehow
-	// FIXME: this needs to be per tenant if tenant ids are set
 	std::unordered_set<std::optional<int>> tenantsWithReadSuccess;
 
 	inline void setReadSuccess(std::optional<int> tenantId) { tenantsWithReadSuccess.insert(tenantId); }
