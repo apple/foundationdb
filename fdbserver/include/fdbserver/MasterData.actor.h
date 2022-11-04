@@ -166,18 +166,5 @@ void swift_workaround_releaseMasterData(MasterData *rd);
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
 
-
-// FIXME: Remove after https://github.com/apple/swift/issues/61730 is fixed.
-inline void swift_workaround_vtable_link_issue_direct_call() {
-	Void();
-	NotifiedQueue<int>(0, 0).~NotifiedQueue<int>();
-	MetricNameRef *nr = nullptr;
-	VersionMetric m(*nr, 0);
-	MetricKeyRef *mk = nullptr;
-	MetricUpdateBatch *b = nullptr;
-	m.flushData(*mk, 0, *b);
-	m.onEnable();
-}
-
 #include "flow/unactorcompiler.h"
 #endif

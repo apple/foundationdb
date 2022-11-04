@@ -251,10 +251,4 @@ public struct MasterDataActorCxx {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
     }
-
-
-    // FIXME: remove once https://github.com/apple/swift/issues/61730 is fixed.
-    public func workaround_swift_vtable_issue() {
-        swift_workaround_vtable_link_issue_direct_call()
-    }
 }
