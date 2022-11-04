@@ -11,6 +11,7 @@ Release Notes
 * Released with AVX disabled.
 * Fixed a transaction log data corruption bug. `(PR #8525) <https://github.com/apple/foundationdb/pull/8525>`_, `(PR #8562) <https://github.com/apple/foundationdb/pull/8562>`_, and `(PR #8647) <https://github.com/apple/foundationdb/pull/8647>`_
 * Fixed a rare data race in transaction logs when PEEK_BATCHING_EMPTY_MSG is enabled. `(PR #8660) <https://github.com/apple/foundationdb/pull/8660>`_
+* Fixed a heap-use-after-free bug in cluster controller.  `(PR #8683) <https://github.com/apple/foundationdb/pull/8683>`_
 * Changed consistency check to report all corruptions. `(PR #8571) <https://github.com/apple/foundationdb/pull/8571>`_
 * Fixed a rare storage server crashing bug after recovery. `(PR #8468) <https://github.com/apple/foundationdb/pull/8468>`_
 * Added client knob UNLINKONLOAD_FDBCLIB to control deletion of external client libraries. `(PR #8434) <https://github.com/apple/foundationdb/pull/8434>`_
