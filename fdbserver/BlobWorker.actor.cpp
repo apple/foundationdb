@@ -297,7 +297,14 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
 	    resnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_PARALLELISM)),
 	    deltaWritesLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM)),
-	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotLock, deltaWritesLock),
+	    stats(id,
+	          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+	          initialSnapshotLock,
+	          resnapshotLock,
+	          deltaWritesLock,
+	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	          SERVER_KNOBS->FILE_LATENCY_SAMPLE_SIZE,
+	          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {}
 
 	bool managerEpochOk(int64_t epoch) {
@@ -815,6 +822,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state std::string fname;
 	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
 
+	state double writeStartTimer = g_network->timer();
+
 	if (SERVER_KNOBS->BG_WRITE_MULTIPART) {
 		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
 		wait(objectFile->append(serialized.begin(), serializedSize));
@@ -828,6 +837,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.deltaFilesWritten;
 	bwData->stats.deltaBytesWritten += serializedSize;
+	double duration = g_network->timer() - writeStartTimer;
+	bwData->stats.deltaBlobWriteLatencySample.addMeasurement(duration);
 
 	// free serialized since it is persisted in blob
 	serialized = Value();
@@ -1032,6 +1043,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state std::string fname;
 	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
 
+	state double writeStartTimer = g_network->timer();
+
 	if (SERVER_KNOBS->BG_WRITE_MULTIPART) {
 		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
 		wait(objectFile->append(serialized.begin(), serializedSize));
@@ -1045,6 +1058,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.snapshotFilesWritten;
 	bwData->stats.snapshotBytesWritten += serializedSize;
+	double duration = g_network->timer() - writeStartTimer;
+	bwData->stats.snapshotBlobWriteLatencySample.addMeasurement(duration);
 
 	// free serialized since it is persisted in blob
 	serialized = Value();
@@ -1237,6 +1252,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	state Arena filenameArena;
 	state std::vector<Future<RangeResult>> chunksToRead;
 	state int64_t compactBytesRead = 0;
+	state double resnapshotStartTimer = g_network->timer();
+
 	for (auto& f : fileSet) {
 		ASSERT(!f.snapshotFiles.empty());
 		ASSERT(!f.deltaFiles.empty());
@@ -1336,6 +1353,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 		BlobFileIndex f = wait(snapshotWriter);
 		DEBUG_KEY_RANGE("BlobWorkerBlobSnapshot", version, metadata->keyRange, bwData->id);
+		double duration = g_network->timer() - resnapshotStartTimer;
+		bwData->stats.reSnapshotLatencySample.addMeasurement(duration);
 		return f;
 	} catch (Error& e) {
 		if (BW_DEBUG) {
@@ -3858,6 +3877,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		if (didCollapse) {
 			++bwData->stats.readRequestsCollapsed;
 		}
+
+		double duration = g_network->timer() - req.requestTime();
+		bwData->stats.readLatencySample.addMeasurement(duration);
+
 		ASSERT(!req.reply.isSet());
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;

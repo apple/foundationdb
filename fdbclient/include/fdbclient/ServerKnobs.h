@@ -916,6 +916,7 @@ public:
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
+	int FILE_LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	// Cluster recovery

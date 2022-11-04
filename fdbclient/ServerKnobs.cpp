@@ -938,6 +938,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
+	init( FILE_LATENCY_SAMPLE_SIZE,                            10000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// Cluster recovery
