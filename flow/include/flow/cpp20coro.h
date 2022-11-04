@@ -95,25 +95,13 @@ struct n_coroutine::coroutine_traits<Future<ReturnValue>, Args...> {
 		// FastAlloc class.
 		static void* operator new(size_t s) {
 			// std::cerr << "promise_type::new(" << s << ")" << std::endl;
-			return ::malloc(s);
-
-			// if (s <= 256) {
-			// 	void* p = allocateFast(s <= 64 ? 64 : nextFastAllocatedSize(s));
-			// 	return p;
-			// } else {
-			// 	void* p = new uint8_t[nextFastAllocatedSize(s)];
-			// 	return p;
-			// }
+			// return ::malloc(s);
+			return allocateFast(s);
 		}
 		static void operator delete(void* p, size_t s) {
 			// std::cerr << "promise_type::delete(" << p << " " << s << ")" << std::endl;
-			::free(p);
-
-			// if (s <= 256) {
-			// 	freeFast(s <= 64 ? 64 : s, p);
-			// } else {
-			// 	delete[] reinterpret_cast<uint8_t*>(p);
-			// }
+			// ::free(p);
+			freeFast(s, p);
 		}
 
 		Future<ReturnValue> get_return_object() noexcept { return Future<ReturnValue>(this); }
