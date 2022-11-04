@@ -32,8 +32,6 @@
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 #include "flow/swift_support.h"
-// FIXME: Remove unsafe inc once https://github.com/apple/swift/issues/61627 is fixed.
-#include "flow/unsafe_swift_compat.h"
 #include "fdbclient/VersionVector.h"
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
@@ -75,8 +73,7 @@ class MasterDataActor;
 }
 
 // FIXME (after the one below): Use SWIFT_CXX_REF once https://github.com/apple/swift/issues/61620 is fixed.
-// FIXME (before one above): Use SWIFT_CXX_REF_MASTERDATA once https://github.com/apple/swift/issues/61627 is fixed.
-struct UNSAFE_SWIFT_CXX_IMMORTAL_REF MasterData : NonCopyable, ReferenceCounted<MasterData> {
+struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<MasterData> {
     UID dbgid;
 
     Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
@@ -157,27 +154,9 @@ using ReferenceMasterData = Reference<MasterData>;
 
 using StdVectorOfUIDs = std::vector<UID>;
 
-// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_retainMasterData(MasterData *rd);
-// FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_releaseMasterData(MasterData *rd);
-
 // FIXME: Workaround for linker issue (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
-
-
-// FIXME: Remove after https://github.com/apple/swift/issues/61730 is fixed.
-inline void swift_workaround_vtable_link_issue_direct_call() {
-	Void();
-	NotifiedQueue<int>(0, 0).~NotifiedQueue<int>();
-	MetricNameRef *nr = nullptr;
-	VersionMetric m(*nr, 0);
-	MetricKeyRef *mk = nullptr;
-	MetricUpdateBatch *b = nullptr;
-	m.flushData(*mk, 0, *b);
-	m.onEnable();
-}
 
 #include "flow/unactorcompiler.h"
 #endif

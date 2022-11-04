@@ -58,17 +58,25 @@ public class CommitProxyVersionReplies {
     }
 }
 
+@_expose(Cxx)
 public actor MasterDataActor {
     var lastCommitProxyVersionReplies: [Flow.UID: CommitProxyVersionReplies] = [:]
 
-    init() {
+    public init() {
     }
 
-    func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs) async {
+    func registerLastCommitProxyVersionReplies(uids: [Flow.UID]) async {
         lastCommitProxyVersionReplies = [:]
-        // FIXME: Make this a for-in loop once we have automatic Sequence conformance.
-        for i in 0..<uids.size() {
-            lastCommitProxyVersionReplies[uids[i]] = CommitProxyVersionReplies()
+        for uid in uids {
+            lastCommitProxyVersionReplies[uid] = CommitProxyVersionReplies()
+        }
+    }
+
+    nonisolated public func registerLastCommitProxyVersionReplies(uids: [Flow.UID], result promise: PromiseVoid) {
+        Task {
+            await registerLastCommitProxyVersionReplies(uids: uids)
+            var result = Flow.Void()
+            promise.send(&result)
         }
     }
 
@@ -149,6 +157,24 @@ public actor MasterDataActor {
         return rep
     }
 
+    /// Promise type must match result type of the target function.
+    /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
+    nonisolated public func getVersion(cxxState: MasterData, req: GetCommitVersionRequest, result promise: PromiseVoid) {
+        // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+        Task {
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
+            if let rep = await getVersion(cxxState: cxxState, req: req) {
+                var repMut = rep
+                req.reply.send(&repMut)
+            } else {
+                req.reply.sendNever()
+            }
+            var result = Flow.Void()
+            promise.send(&result)
+            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
+        }
+    }
+
     // ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
     func waitForPrev(cxxState myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Void? {
         print("[swift] waitForPrev impl, version: \(req.version) -> ")
@@ -190,55 +216,12 @@ public actor MasterDataActor {
         // req.reply.send(Void());
         return Void()
     }
-}
 
-/// Bridge type that wraps the target actor.
-@_expose(Cxx, "MasterDataActor")
-public struct MasterDataActorCxx {
-    let myself: MasterDataActor
-
-    /// Mirror actor initializer, and initialize `myself`.
-    public init() {
-        myself = MasterDataActor()
-    }
-
-    public func registerLastCommitProxyVersionReplies(uids: StdVectorOfUIDs, result promise: PromiseVoid) {
-        Task {
-            await myself.registerLastCommitProxyVersionReplies(uids: uids)
-            var result = Flow.Void()
-            promise.send(&result)
-        }
-    }
-
-    /// Promise type must match result type of the target function.
-    /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
-    public func getVersion(cxxState: MasterData, req: GetCommitVersionRequest, result promise: PromiseVoid) {
-        // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
-        // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-        swift_workaround_retainMasterData(cxxState)
-        Task {
-            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
-            if let rep = await myself.getVersion(cxxState: cxxState, req: req) {
-                var repMut = rep
-                req.reply.send(&repMut)
-            } else {
-                req.reply.sendNever()
-            }
-            var result = Flow.Void()
-            promise.send(&result)
-            // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-            swift_workaround_releaseMasterData(cxxState)
-            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
-        }
-    }
-
-    public func waitForPrev(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {
+    nonisolated public func waitForPrev(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {
         // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift waitForPrev impl!")
-        // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-        swift_workaround_retainMasterData(cxxState)
         Task {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
-            if let rep = await myself.waitForPrev(cxxState: cxxState, req: req) {
+            if let rep = await waitForPrev(cxxState: cxxState, req: req) {
                 var repMut = rep
                 req.reply.send(&repMut)
             } else {
@@ -246,15 +229,7 @@ public struct MasterDataActorCxx {
             }
             var result = Flow.Void()
             promise.send(&result)
-            // FIXME: remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-            swift_workaround_releaseMasterData(cxxState)
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
-    }
-
-
-    // FIXME: remove once https://github.com/apple/swift/issues/61730 is fixed.
-    public func workaround_swift_vtable_issue() {
-        swift_workaround_vtable_link_issue_direct_call()
     }
 }

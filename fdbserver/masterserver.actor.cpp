@@ -60,15 +60,6 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-// FIXME(swift): remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_retainMasterData(MasterData* _Nonnull rd) {
-    rd->addref();
-}
-// FIXME(swift): remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_releaseMasterData(MasterData* _Nonnull rd) {
-    rd->delref();
-}
-
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
@@ -245,9 +236,9 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		self->lastEpochEnd = req.lastEpochEnd;
 
 		if (req.commitProxies.size() > 0) {
-            std::vector<UID> registeredUIDs;
+            auto registeredUIDs = Swift::Array<UID>::init();
             for (size_t j = 0; j < req.commitProxies.size(); ++j)
-                registeredUIDs.push_back(req.commitProxies[j].id());
+                registeredUIDs.append(req.commitProxies[j].id());
             auto promise = Promise<Void>();
             self->swiftImpl->registerLastCommitProxyVersionReplies(registeredUIDs, promise);
             wait(promise.getFuture());

@@ -25,6 +25,4 @@ function(generate_cxx_compat_header target headerName)
  
   # Generate the C++ compatibility header for the Swift module.
   target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -emit-clang-header-path -Xfrontend ${destpath}/${headerName}>")
-  # Note: do not generate Stdlib bindings yet (C++20 only).
-  target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -clang-header-expose-decls=has-expose-attr>")
 endfunction()
