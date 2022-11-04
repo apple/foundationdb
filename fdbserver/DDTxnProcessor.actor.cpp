@@ -328,7 +328,7 @@ class DDTxnProcessorImpl {
 					std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
 
 					auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
-					for (const auto& r : ranges) {
+					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
 					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
@@ -339,10 +339,10 @@ class DDTxnProcessorImpl {
 
 				break;
 			} catch (Error& e) {
+				TraceEvent("GetInitialTeamsRetry", distributorId).error(e);
 				wait(tr.onError(e));
 
 				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("GetInitialTeamsRetry", distributorId).error(e);
 			}
 		}
 
