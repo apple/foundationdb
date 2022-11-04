@@ -3275,18 +3275,16 @@ bool DDTeamCollection::isMachineTeamHealthy(std::vector<Standalone<StringRef>> c
 }
 
 bool DDTeamCollection::isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam) const {
-	int healthyNum = 0;
-
 	// A healthy machine team should have the desired number of machines
 	if (machineTeam.size() != configuration.storageTeamSize)
 		return false;
 
 	for (auto const& machine : machineTeam.getMachines()) {
-		if (isMachineHealthy(machine)) {
-			healthyNum++;
+		if (!isMachineHealthy(machine)) {
+			return false;
 		}
 	}
-	return (healthyNum == machineTeam.getMachines().size());
+	return true;
 }
 
 bool DDTeamCollection::isMachineHealthy(Reference<TCMachineInfo> const& machine) const {
@@ -4088,8 +4086,6 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 
 		std::vector<UID*> team;
 		std::vector<LocalityEntry> forcedAttributes;
-
-		// Step 4: Reuse Policy's selectReplicas() to create team for the representative process.
 		std::vector<UID*> bestTeam;
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
@@ -4117,6 +4113,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			// that have the least-utilized server
 			team.clear();
 			ASSERT_WE_THINK(forcedAttributes.size() == 1);
+			// Step 4: Reuse Policy's selectReplicas() to create team for the representative process.
 			auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
 			// NOTE: selectReplicas() should always return success when storageTeamSize = 1
 			ASSERT_WE_THINK(configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success));
@@ -4484,13 +4481,12 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 	}
 
 	while (addedTeams < teamsToBuild || notEnoughTeamsForAServer()) {
-		// Step 1: Create 1 best machine team
 		std::vector<UID> bestServerTeam;
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 		bool earlyQuitBuild = false;
 		for (int i = 0; i < maxAttempts && i < 100; ++i) {
-			// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
+			// Step 1: Choose 1 least used server and then choose 1 least used machine team from the server
 			Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
 			if (!chosenServer.isValid()) {
 				TraceEvent(SevWarn, "NoValidServer").detail("Primary", primary);
@@ -4512,12 +4508,14 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			}
 
 			// From here, chosenMachineTeam must have a healthy server team
-			// Step 3: Randomly pick 1 server from each machine in the chosen machine team to form a server team
+			// Step 2: Randomly pick 1 server from each machine in the chosen machine team to form a server team
 			std::vector<UID> serverTeam;
 			int chosenServerCount = 0;
 			for (auto& machine : chosenMachineTeam->getMachines()) {
 				UID serverID;
 				if (machine == chosenServer->machine) {
+					// If the machine is from `chosenServer`, use `chosenServer` from this machine, since it is a least
+					// utilized server on this machine.
 					serverID = chosenServer->getId();
 					++chosenServerCount;
 				} else {
