@@ -728,6 +728,41 @@ public:
 			throw std::runtime_error("blobbifyRange from null tenant");
 		return native::fdb_tenant_blobbify_range(tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
+
+	TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) {
+		if (!tenant)
+			throw std::runtime_error("unblobbifyRange() from null tenant");
+		return native::fdb_tenant_unblobbify_range(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
+	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) {
+		if (!tenant)
+			throw std::runtime_error("listBlobbifiedRanges() from null tenant");
+		return native::fdb_tenant_list_blobbified_ranges(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
+	}
+
+	TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) {
+		if (!tenant)
+			throw std::runtime_error("verifyBlobRange() from null tenant");
+		return native::fdb_tenant_verify_blob_range(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
+	}
+
+	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) {
+		if (!tenant)
+			throw std::runtime_error("purgeBlobGranules() from null tenant");
+		native::fdb_bool_t forceBool = force;
+		return native::fdb_tenant_purge_blob_granules(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version, forceBool);
+	}
+
+	TypedFuture<future_var::None> waitPurgeGranulesComplete(KeyRef purgeKey) {
+		if (!tenant)
+			throw std::runtime_error("waitPurgeGranulesComplete() from null tenant");
+		return native::fdb_tenant_wait_purge_granules_complete(tenant.get(), purgeKey.data(), intSize(purgeKey));
+	}
 };
 
 class Database {
