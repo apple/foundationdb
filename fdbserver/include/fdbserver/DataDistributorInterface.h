@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/fdbrpc.h"
+#include <unordered_set>
 
 struct DataDistributorInterface {
 	constexpr static FileIdentifier file_identifier = 12383874;
@@ -196,10 +197,10 @@ struct GetStorageWigglerStateRequest {
 
 struct TenantsOverStorageQuotaReply {
 	constexpr static FileIdentifier file_identifier = 5952266;
-	std::vector<TenantName> tenants;
+	std::unordered_set<TenantName> tenants;
 
 	TenantsOverStorageQuotaReply() {}
-	explicit TenantsOverStorageQuotaReply(std::vector<TenantName> tenants) : tenants(tenants) {}
+	explicit TenantsOverStorageQuotaReply(std::unordered_set<TenantName> tenants) : tenants(tenants) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
