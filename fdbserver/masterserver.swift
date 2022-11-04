@@ -72,8 +72,7 @@ public actor MasterDataActor {
         }
     }
 
-    @_expose(Cxx, "registerLastCommitProxyVersionReplies")
-    nonisolated public func registerLastCommitProxyVersionRepliesSync(uids: [Flow.UID], result promise: PromiseVoid) {
+    nonisolated public func registerLastCommitProxyVersionReplies(uids: [Flow.UID], result promise: PromiseVoid) {
         Task {
             await registerLastCommitProxyVersionReplies(uids: uids)
             var result = Flow.Void()
@@ -160,8 +159,7 @@ public actor MasterDataActor {
 
     /// Promise type must match result type of the target function.
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
-    @_expose(Cxx, "getVersion")
-    nonisolated public func getVersionSync(cxxState: MasterData, req: GetCommitVersionRequest, result promise: PromiseVoid) {
+    nonisolated public func getVersion(cxxState: MasterData, req: GetCommitVersionRequest, result promise: PromiseVoid) {
         // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         Task {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
@@ -219,8 +217,7 @@ public actor MasterDataActor {
         return Void()
     }
 
-    @_expose(Cxx, "waitForPrev")
-    nonisolated public func waitForPrevSync(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {
+    nonisolated public func waitForPrev(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {
         // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift waitForPrev impl!")
         Task {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
