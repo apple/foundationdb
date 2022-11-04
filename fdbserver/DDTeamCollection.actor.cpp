@@ -2143,15 +2143,15 @@ public:
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection) {
+	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
 		state int speed = 0;
 		state AsyncVar<bool> stopWiggleSignal(true);
 		state PromiseStream<Void> finishStorageWiggleSignal;
 		state SignalableActorCollection collection;
-		teamCollection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
+		self->pauseWiggle = makeReference<AsyncVar<bool>>(true);
 
 		loop {
-			state ReadYourWritesTransaction tr(teamCollection->cx);
+			state ReadYourWritesTransaction tr(self->cx);
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2166,20 +2166,19 @@ public:
 					ASSERT(speed == 1 || speed == 0);
 					if (speed == 1 && stopWiggleSignal.get()) { // avoid duplicated start
 						stopWiggleSignal.set(false);
-						collection.add(teamCollection->perpetualStorageWiggleIterator(
-						    stopWiggleSignal, finishStorageWiggleSignal.getFuture()));
-						collection.add(
-						    teamCollection->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
-						TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId)
-						    .detail("Primary", teamCollection->primary);
+						wait(self->storageWiggler->restoreStats());
+						collection.add(self->perpetualStorageWiggleIterator(stopWiggleSignal,
+						                                                    finishStorageWiggleSignal.getFuture()));
+						collection.add(self->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
+						TraceEvent("PerpetualStorageWiggleOpen", self->distributorId).detail("Primary", self->primary);
 					} else if (speed == 0) {
 						if (!stopWiggleSignal.get()) {
 							stopWiggleSignal.set(true);
 							wait(collection.signalAndReset());
-							teamCollection->pauseWiggle->set(true);
+							self->pauseWiggle->set(true);
 						}
-						TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
-						    .detail("Primary", teamCollection->primary);
+						wait(self->storageWiggler->resetStats());
+						TraceEvent("PerpetualStorageWiggleClose", self->distributorId).detail("Primary", self->primary);
 					}
 					wait(watchFuture);
 					break;
@@ -3594,41 +3593,27 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	return result && resultEntries.size() == 0;
 }
 
-DDTeamCollection::DDTeamCollection(Database const& cx,
-                                   UID distributorId,
-                                   MoveKeysLock const& lock,
-                                   PromiseStream<RelocateShard> const& output,
-                                   Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-                                   DatabaseConfiguration configuration,
-                                   std::vector<Optional<Key>> includedDCs,
-                                   Optional<std::vector<Optional<Key>>> otherTrackedDCs,
-                                   Future<Void> readyToStart,
-                                   Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                   IsPrimary primary,
-                                   Reference<AsyncVar<bool>> processingUnhealthy,
-                                   Reference<AsyncVar<bool>> processingWiggle,
-                                   PromiseStream<GetMetricsRequest> getShardMetrics,
-                                   Promise<UID> removeFailedServer,
-                                   PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
-    unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
-    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
+  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(params.lock), output(params.output),
+    unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(params.processingWiggle),
+    shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
-        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
-    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),
-    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0), zeroHealthyTeams(zeroHealthyTeams),
-    optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false), includedDCs(includedDCs),
-    otherTrackedDCs(otherTrackedDCs), processingUnhealthy(processingUnhealthy), readyToStart(readyToStart),
+        delayed(params.readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
+    initializationDoneActor(logOnCompletion(params.readyToStart && initialFailureReactionDelay)), recruitingStream(0),
+    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
+    zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
+    includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
+    processingUnhealthy(params.processingUnhealthy), readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
-    lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(getShardMetrics),
-    getUnhealthyRelocationCount(getUnhealthyRelocationCount), removeFailedServer(removeFailedServer),
+    lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(params.getShardMetrics),
+    getUnhealthyRelocationCount(params.getUnhealthyRelocationCount), removeFailedServer(params.removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
-        makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
-    primary(primary), distributorId(distributorId), cx(cx), configuration(configuration),
+        makeReference<EventCacheHolder>("StorageServerRecruitment_" + params.distributorId.toString())),
+    primary(params.primary), distributorId(params.distributorId), cx(params.db), configuration(params.configuration),
     storageServerSet(new LocalityMap<UID>()) {
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
@@ -5163,23 +5148,23 @@ public:
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
 
-		auto collection =
-		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
-		                                                           UID(0, 0),
-		                                                           MoveKeysLock(),
-		                                                           PromiseStream<RelocateShard>(),
-		                                                           makeReference<ShardsAffectedByTeamFailure>(),
-		                                                           conf,
-		                                                           {},
-		                                                           {},
-		                                                           Future<Void>(Void()),
-		                                                           makeReference<AsyncVar<bool>>(true),
-		                                                           IsPrimary::True,
-		                                                           makeReference<AsyncVar<bool>>(false),
-		                                                           makeReference<AsyncVar<bool>>(false),
-		                                                           PromiseStream<GetMetricsRequest>(),
-		                                                           Promise<UID>(),
-		                                                           PromiseStream<Promise<int>>()));
+		auto collection = std::unique_ptr<DDTeamCollection>(
+		    new DDTeamCollection(DDTeamCollectionInitParams{ database,
+		                                                     UID(0, 0),
+		                                                     MoveKeysLock(),
+		                                                     PromiseStream<RelocateShard>(),
+		                                                     makeReference<ShardsAffectedByTeamFailure>(),
+		                                                     conf,
+		                                                     {},
+		                                                     {},
+		                                                     Future<Void>(Void()),
+		                                                     makeReference<AsyncVar<bool>>(true),
+		                                                     IsPrimary::True,
+		                                                     makeReference<AsyncVar<bool>>(false),
+		                                                     makeReference<AsyncVar<bool>>(false),
+		                                                     PromiseStream<GetMetricsRequest>(),
+		                                                     Promise<UID>(),
+		                                                     PromiseStream<Promise<int>>() }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -5207,23 +5192,23 @@ public:
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
 
-		auto collection =
-		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
-		                                                           UID(0, 0),
-		                                                           MoveKeysLock(),
-		                                                           PromiseStream<RelocateShard>(),
-		                                                           makeReference<ShardsAffectedByTeamFailure>(),
-		                                                           conf,
-		                                                           {},
-		                                                           {},
-		                                                           Future<Void>(Void()),
-		                                                           makeReference<AsyncVar<bool>>(true),
-		                                                           IsPrimary::True,
-		                                                           makeReference<AsyncVar<bool>>(false),
-		                                                           makeReference<AsyncVar<bool>>(false),
-		                                                           PromiseStream<GetMetricsRequest>(),
-		                                                           Promise<UID>(),
-		                                                           PromiseStream<Promise<int>>()));
+		auto collection = std::unique_ptr<DDTeamCollection>(
+		    new DDTeamCollection(DDTeamCollectionInitParams{ database,
+		                                                     UID(0, 0),
+		                                                     MoveKeysLock(),
+		                                                     PromiseStream<RelocateShard>(),
+		                                                     makeReference<ShardsAffectedByTeamFailure>(),
+		                                                     conf,
+		                                                     {},
+		                                                     {},
+		                                                     Future<Void>(Void()),
+		                                                     makeReference<AsyncVar<bool>>(true),
+		                                                     IsPrimary::True,
+		                                                     makeReference<AsyncVar<bool>>(false),
+		                                                     makeReference<AsyncVar<bool>>(false),
+		                                                     PromiseStream<GetMetricsRequest>(),
+		                                                     Promise<UID>(),
+		                                                     PromiseStream<Promise<int>>() }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
