@@ -34,6 +34,8 @@
 using PromiseCInt = Promise<int>;
 using FutureCInt = Future<int>;
 using CallbackInt = Callback<int>;
+using PromiseStreamCInt = PromiseStream<int>;
+using FutureStreamCInt = FutureStream<int>;
 
 using PromiseVoid = Promise<Void>;
 using FutureVoid = Future<Void>;
