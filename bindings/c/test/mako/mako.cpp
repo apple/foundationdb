@@ -422,6 +422,16 @@ int populate(Database db,
 	return 0;
 }
 
+void updateErrorStatsRunMode(ThreadStatistics& stats, fdb::Error err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else {
+			stats.incrErrorCount(op);
+		}
+	}
+}
+
 /* run one iteration of configured transaction */
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
@@ -448,10 +458,11 @@ transaction_begin:
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(tx, f, opTable[op].name(), &stats, op);
+				future_rc = waitAndHandleError(tx, f, opTable[op].name());
 			} else {
-				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), &stats, op, true);
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
 			}
+			updateErrorStatsRunMode(stats, f.error(), op);
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
 			postStepFn(f, tx, args, key1, key2, val);
@@ -495,7 +506,8 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", &stats, OP_COMMIT);
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
+		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
 		if (rc == FutureRC::OK) {

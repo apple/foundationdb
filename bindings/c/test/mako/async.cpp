@@ -131,7 +131,7 @@ repeat_immediate_steps:
 					                       iter.opName(),
 					                       iter.step,
 					                       err.what());
-					updateErrorStats(stats, err, iter.op);
+					updateErrorStats(err, iter.op);
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
 						const auto rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
 						onIterationEnd(rc);
@@ -148,7 +148,7 @@ repeat_immediate_steps:
 				}
 			} else {
 				// blob granules op error
-				updateErrorStats(stats, f.error(), iter.op);
+				updateErrorStats(f.error(), iter.op);
 				FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR");
 				onIterationEnd(rc);
 			}
@@ -195,7 +195,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				                       "ERROR",
 				                       "Post-iteration commit returned error: {}",
 				                       err.what());
-				updateErrorStats(stats, err, OP_COMMIT);
+				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
 					const auto rc = handleForOnError(tx, f, "ON_ERROR");
 					onIterationEnd(rc);
@@ -241,6 +241,16 @@ void ResumableStateForRunWorkload::onIterationEnd(FutureRC rc) {
 		iter = getOpBegin(args);
 		needs_commit = false;
 		postNextTick();
+	}
+}
+
+void ResumableStateForRunWorkload::updateErrorStats(fdb::Error err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else {
+			stats.incrErrorCount(op);
+		}
 	}
 }
 

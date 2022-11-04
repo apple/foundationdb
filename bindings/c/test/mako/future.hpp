@@ -26,7 +26,6 @@
 #include <string_view>
 #include "logger.hpp"
 #include "macro.hpp"
-#include "stats.hpp"
 
 extern thread_local mako::Logger logr;
 
@@ -34,29 +33,25 @@ namespace mako {
 
 enum class FutureRC { OK, RETRY, ABORT };
 
-force_inline void updateErrorStats(ThreadStatistics& stats, const fdb::Error& err, int op) {
+template <class FutureType>
+force_inline bool waitFuture(FutureType& f, std::string_view step) {
+	assert(f);
+	auto err = f.blockUntilReady();
 	if (err) {
-		if (err.is(1020 /*not_commited*/)) {
-			stats.incrConflictCount();
-		} else {
-			stats.incrErrorCount(op);
-		}
+		assert(!err.retryable());
+		logr.error("'{}' found at blockUntilReady during step '{}'", err.what(), step);
+		return false;
+	} else {
+		return true;
 	}
 }
 
 template <class FutureType>
-force_inline FutureRC handleForOnError(fdb::Transaction& tx,
-                                       FutureType& f,
-                                       std::string_view step,
-                                       ThreadStatistics* stats = nullptr,
-                                       int op = 0) {
+force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	if (auto err = f.error()) {
 		assert(!(err.retryable()));
 		logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
 		tx.reset();
-		if (stats) {
-			updateErrorStats(*stats, err, op);
-		}
 		return FutureRC::ABORT;
 	} else {
 		return FutureRC::RETRY;
@@ -64,37 +59,24 @@ force_inline FutureRC handleForOnError(fdb::Transaction& tx,
 }
 
 template <class FutureType>
-force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx,
-                                              FutureType& f,
-                                              std::string_view step,
-                                              ThreadStatistics* stats = nullptr,
-                                              int op = 0,
-                                              bool on_error_future_updates = false) {
+force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	assert(f);
-	if (!waitFuture(f, step, stats, op)) {
+	if (!waitFuture(f, step)) {
 		return FutureRC::ABORT;
 	}
-
-	return handleForOnError(tx, f, step, on_error_future_updates ? stats : nullptr, op);
+	return handleForOnError(tx, f, step);
 }
 
 // wait on any non-immediate tx-related step to complete. Follow up with on_error().
 template <class FutureType>
-force_inline FutureRC waitAndHandleError(fdb::Transaction& tx,
-                                         FutureType& f,
-                                         std::string_view step,
-                                         ThreadStatistics* stats = nullptr,
-                                         int op = 0) {
+force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	assert(f);
-	if (!waitFuture(f, step, stats, op)) {
+	if (!waitFuture(f, step)) {
 		return FutureRC::ABORT;
 	}
 	auto err = f.error();
-	if (!err)
+	if (!err) {
 		return FutureRC::OK;
-
-	if (stats) {
-		updateErrorStats(*stats, err, op);
 	}
 	if (err.retryable()) {
 		logr.warn("step {} returned '{}'", step, err.what());
@@ -103,26 +85,7 @@ force_inline FutureRC waitAndHandleError(fdb::Transaction& tx,
 	}
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	return waitAndHandleForOnError(tx, follow_up, step, stats, op, false);
-}
-
-template <class FutureType>
-force_inline bool waitFuture(FutureType& f, std::string_view step, ThreadStatistics* stats = nullptr, int op = 0) {
-	assert(f);
-	auto err = f.blockUntilReady();
-	if (err) {
-		const auto retry = err.retryable();
-		logr.error("{} error '{}' found while waiting for future during step: {}",
-		           (retry ? "Retryable" : "Unretryable"),
-		           err.what(),
-		           step);
-		if (stats) {
-			updateErrorStats(*stats, err, op);
-		}
-		return false;
-	} else {
-		return true;
-	}
+	return waitAndHandleForOnError(tx, follow_up, step);
 }
 
 } // namespace mako
