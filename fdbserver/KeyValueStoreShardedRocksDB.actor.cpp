@@ -2163,10 +2163,16 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
+				std::set<PhysicalShard*> usedShards;
 				for (const DataShard* shard : shards) {
-					if (shard != nullptr) {
-						shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
-					}
+					ASSERT(shard);
+					shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
+					usedShards.insert(shard->physicalShard);
+				}
+				if (usedShards.size() != shards.size()) {
+					TraceEvent("ReadRangeMetrics")
+					    .detail("NumPhysicalShards", usedShards.size())
+					    .detail("NumDataShards", shards.size());
 				}
 			}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
