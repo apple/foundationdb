@@ -20,6 +20,7 @@
 
 #ifndef FDBRPC_STATS_H
 #define FDBRPC_STATS_H
+#include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/serialize.h"
 #include <string>
@@ -78,7 +79,11 @@ class CounterCollection {
 	std::vector<struct ICounter*> counters, countersToRemove;
 
 public:
-	CounterCollection(std::string const& name, std::string const& id = std::string()) : name(name), id(id) {}
+	CounterCollection(std::string const& name, std::string const& id = std::string()) : name(name), id(id) {
+		if (id.empty()) {
+			this->id = deterministicRandom()->randomUniqueID().toString();
+		}
+	}
 	~CounterCollection() {
 		for (auto c : countersToRemove)
 			c->remove();
