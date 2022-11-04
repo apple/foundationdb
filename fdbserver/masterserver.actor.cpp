@@ -60,15 +60,6 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-// FIXME(swift): remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_retainMasterData(MasterData* _Nonnull rd) {
-    rd->addref();
-}
-// FIXME(swift): remove after https://github.com/apple/swift/issues/61627 makes MasterData refcounted FRT.
-void swift_workaround_releaseMasterData(MasterData* _Nonnull rd) {
-    rd->delref();
-}
-
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
