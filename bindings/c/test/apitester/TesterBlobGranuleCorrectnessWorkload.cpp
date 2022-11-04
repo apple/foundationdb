@@ -72,6 +72,7 @@ private:
 				    schedule(cont);
 			    }
 		    },
+		    /*tenant=*/{},
 		    /* failOnError = */ false);
 	}
 
@@ -311,14 +312,13 @@ private:
 	}
 
 	// TODO: tenant support
-	void randomGetBlobRangesOp(TTaskFct cont) {
+	void randomGetBlobRangesOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		std::optional<int> tenantId = {};
 
 		debugOp("GetBlobRanges", begin, end, tenantId, "starting");
 
@@ -336,14 +336,14 @@ private:
 			    this->validateRanges(results, begin, end, seenReadSuccess(tenantId));
 			    schedule(cont);
 		    },
+		    getTenant(tenantId),
 		    /* failOnError = */ false);
 	}
 
 	// TODO: tenant support
-	void randomVerifyOp(TTaskFct cont) {
+	void randomVerifyOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
-		std::optional<int> tenantId;
 		if (begin > end) {
 			std::swap(begin, end);
 		}
@@ -370,6 +370,7 @@ private:
 			    }
 			    schedule(cont);
 		    },
+		    getTenant(tenantId),
 		    /* failOnError = */ false);
 	}
 
@@ -401,10 +402,10 @@ private:
 			randomSummarizeOp(cont, tenantId);
 			break;
 		case OP_GET_BLOB_RANGES:
-			randomGetBlobRangesOp(cont);
+			randomGetBlobRangesOp(cont, tenantId);
 			break;
 		case OP_VERIFY:
-			randomVerifyOp(cont);
+			randomVerifyOp(cont, tenantId);
 			break;
 		}
 	}
