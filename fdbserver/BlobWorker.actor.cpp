@@ -771,6 +771,28 @@ ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Tra
 	}
 }
 
+// tries to use writeEntireFile if possible, but if too big falls back to multi-part upload
+ACTOR Future<Void> writeFile(Reference<BackupContainerFileSystem> writeBStore, std::string fname, Value serialized) {
+	if (!SERVER_KNOBS->BG_WRITE_MULTIPART) {
+		try {
+			state std::string fileContents = serialized.toString();
+			wait(writeBStore->writeEntireFile(fname, fileContents));
+			return Void();
+		} catch (Error& e) {
+			// error_code_file_too_large means it was too big to do with single write
+			if (e.code() != error_code_file_too_large) {
+				throw e;
+			}
+		}
+	}
+
+	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+	wait(objectFile->append(serialized.begin(), serialized.size()));
+	wait(objectFile->finish());
+
+	return Void();
+}
+
 // writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
 // the data in it may not yet be committed, and even though previous delta files with lower versioned data may still be
 // in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
@@ -824,15 +846,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	state double writeStartTimer = g_network->timer();
 
-	if (SERVER_KNOBS->BG_WRITE_MULTIPART || serializedSize > bstore->knobs.multipart_max_part_size) {
-		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
-		wait(objectFile->append(serialized.begin(), serializedSize));
-		wait(objectFile->finish());
-	} else {
-		// TODO some way we can avoid copying to std::string?
-		state std::string fileContents = serialized.toString();
-		wait(writeBStore->writeEntireFile(fname, fileContents));
-	}
+	wait(writeFile(writeBStore, fname, serialized));
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.deltaFilesWritten;
@@ -1045,15 +1059,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	state double writeStartTimer = g_network->timer();
 
-	if (SERVER_KNOBS->BG_WRITE_MULTIPART || serializedSize > bstore->knobs.multipart_max_part_size) {
-		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
-		wait(objectFile->append(serialized.begin(), serializedSize));
-		wait(objectFile->finish());
-	} else {
-		// TODO some way we can avoid copying to std::string?
-		state std::string fileContents = serialized.toString();
-		wait(writeBStore->writeEntireFile(fname, fileContents));
-	}
+	wait(writeFile(writeBStore, fname, serialized));
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.snapshotFilesWritten;
