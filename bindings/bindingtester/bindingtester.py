@@ -36,6 +36,8 @@ import logging.config
 from collections import OrderedDict
 from functools import reduce
 
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
+
 from bindingtester import FDB_API_VERSION
 from bindingtester import Result
 
@@ -46,8 +48,6 @@ from bindingtester.known_testers import Tester
 
 import fdb
 import fdb.tuple
-
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
 
 
 API_VERSIONS = [
