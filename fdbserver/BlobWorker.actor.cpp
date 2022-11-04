@@ -824,7 +824,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	state double writeStartTimer = g_network->timer();
 
-	if (SERVER_KNOBS->BG_WRITE_MULTIPART) {
+	if (SERVER_KNOBS->BG_WRITE_MULTIPART || serializedSize > bstore->knobs.multipart_max_part_size) {
 		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
 		wait(objectFile->append(serialized.begin(), serializedSize));
 		wait(objectFile->finish());
@@ -1045,7 +1045,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	state double writeStartTimer = g_network->timer();
 
-	if (SERVER_KNOBS->BG_WRITE_MULTIPART) {
+	if (SERVER_KNOBS->BG_WRITE_MULTIPART || serializedSize > bstore->knobs.multipart_max_part_size) {
 		state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
 		wait(objectFile->append(serialized.begin(), serializedSize));
 		wait(objectFile->finish());
