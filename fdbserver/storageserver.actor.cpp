@@ -2978,7 +2978,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 		while (limit > 0 && *pLimitBytes > 0 && readBegin < range.end) {
 			ASSERT(!vCurrent || vCurrent.key() >= readBegin);
-			ASSERT(data->storageVersion() <= version);
+			ASSERT((!SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() <= version) ||
+			       (SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() <= origVersion));
 
 			/* Traverse the PTree further, if thare are no unconsumed resultCache items */
 			if (pos == resultCache.size()) {
@@ -3078,7 +3079,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 		while (limit < 0 && *pLimitBytes > 0 && readEnd > range.begin) {
 			ASSERT(!vCurrent || vCurrent.key() < readEnd);
-			ASSERT(data->storageVersion() <= version);
+			ASSERT((!SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() <= version) ||
+			       (SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() <= origVersion));
 
 			/* Traverse the PTree further, if thare are no unconsumed resultCache items */
 			if (pos == resultCache.size()) {
