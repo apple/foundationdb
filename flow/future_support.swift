@@ -17,14 +17,50 @@ import Flow
 public protocol _FlowFutureOps {
     /// Element type of the future
     associatedtype _T
-    /// Swift continuation wrapper type to use for the async/await bridging
-    associatedtype CB
-    typealias CCBox = _Box<CheckedContinuation<_T, Swift.Error>>
+}
+
+@_expose(Cxx)
+public struct ExposeVoidConf<T> {
+    let x: CInt
+}
+
+@_expose(Cxx)
+public func _exposeVoidValueTypeConformanceToCpp(_ val: ExposeVoidConf<Void>)  {
+}
+
+@_expose(Cxx)
+public struct ExposedCheckedContinuation<T> {
+    typealias CC = CheckedContinuation<T, Swift.Error>
+    var cc: CC?
+
+    public init() {}
+
+    init(_ cc: CC) {
+        self.cc = cc
+    }
+
+    public mutating func set(_ other: ExposedCheckedContinuation<T>) {
+        // precondition: other continuation must be set.
+        assert(other.cc != nil)
+        cc = other.cc
+    }
+
+    public func resume(returning value: T) {
+        // precondition: continuation must be set.
+        assert(cc != nil)
+        cc!.resume(returning: value)
+    }
+
+    public func resumeThrowing(_ value: Flow.Error) {
+        // precondition: continuation must be set.
+        assert(cc != nil)
+        // TODO: map errors.
+        cc!.resume(throwing: GeneralFlowError())
+    }
 }
 
 extension FutureCInt: _FlowFutureOps {
     public typealias _T = CInt
-    public typealias CB = SwiftContinuationCallbackCInt
 
     // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
     public var waitValue: _T {
@@ -42,23 +78,14 @@ extension FutureCInt: _FlowFutureOps {
                     return self.__getUnsafe().pointee
                 }
             }
-
+            var s = SwiftContinuationCallbackStructCInt()
             return try await withCheckedThrowingContinuation { cc in
-                let ccBox = CCBox(cc)
-                let rawCCBox = UnsafeMutableRawPointer(Unmanaged.passRetained(ccBox).toOpaque())
-
-                 let cb = CB.make(
-                    rawCCBox,
-                    /*returning:*/ { (_cc: UnsafeMutableRawPointer, value: _T) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(returning: value)
-                    },
-                    /*throwing:*/ { (_cc: UnsafeMutableRawPointer, error: Flow.Error) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(throwing: GeneralFlowError()) // TODO: map errors
+                withUnsafeMutablePointer(to: &s) { ptr in
+                    let ecc = ExposedCheckedContinuation<CInt>(cc)
+                    withUnsafePointer(to: ecc) { ccPtr in
+                        setContinutation(ptr, UnsafeRawPointer(ccPtr), self)
                     }
-                )
-                cb.addCallbackAndClearTo(self)
+                }
             }
         }
     }
@@ -66,7 +93,6 @@ extension FutureCInt: _FlowFutureOps {
 
 extension FutureVoid: _FlowFutureOps {
     public typealias _T = Void
-    public typealias CB = SwiftContinuationCallbackVoid
 
     // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
     public var waitValue: _T {
@@ -82,22 +108,14 @@ extension FutureVoid: _FlowFutureOps {
                 }
             }
 
+            var s = SwiftContinuationCallbackStructVoid()
             return try await withCheckedThrowingContinuation { cc in
-                let ccBox = CCBox(cc)
-                let rawCCBox = UnsafeMutableRawPointer(Unmanaged.passRetained(ccBox).toOpaque())
-
-                 let cb = CB.make(
-                    rawCCBox,
-                    /*returning:*/ { (_cc: UnsafeMutableRawPointer, value: _T) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(returning: value)
-                    },
-                    /*throwing:*/ { (_cc: UnsafeMutableRawPointer, error: Flow.Error) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(throwing: GeneralFlowError()) // TODO: map errors
+                withUnsafeMutablePointer(to: &s) { ptr in
+                    let ecc = ExposedCheckedContinuation<Void>(cc)
+                    withUnsafePointer(to: ecc) { ccPtr in
+                        setContinutation(ptr, UnsafeRawPointer(ccPtr), self)
                     }
-                )
-                cb.addCallbackAndClearTo(self)
+                }
             }
         }
     }

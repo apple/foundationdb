@@ -26,6 +26,7 @@
 #include "swift_stream_support.h"
 #include "pthread.h"
 #include "unsafe_swift_compat.h"
+#include "SwiftModules/Flow"
 #include <stdint.h>
 
 // ==== ----------------------------------------------------------------------------------------------------------------
@@ -44,94 +45,60 @@ using CallbackVoid = Callback<Void>;
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
-// FIXME(swift): either implement in Swift, or manage lifetime properly
-struct UNSAFE_SWIFT_CXX_IMMORTAL_REF SwiftContinuationCallbackCInt : Callback<int> {
-private:
-	void* _Nonnull continuationBox;
-	void (*_Nonnull resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
-	void (*_Nonnull resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
-
-	SwiftContinuationCallbackCInt(void* continuationBox,
-	                              void (*_Nonnull returning)(void* _Nonnull, int),
-	                              void (*_Nonnull throwing)(void* _Nonnull, Error))
-	  : continuationBox(continuationBox),
-      resumeWithValue(returning),
-      resumeWithError(throwing) {}
-
+template<class T>
+class SwiftContinuationCallbackStruct : Callback<T> {
+    using SwiftCC = flow_swift::ExposedCheckedContinuation<T>;
+    SwiftCC continuationInstance;
 public:
-	static SwiftContinuationCallbackCInt* _Nonnull make(void* continuationBox,
-	                                                    void (*_Nonnull returning)(void* _Nonnull, int),
-	                                                    void (*_Nonnull throwing)(void* _Nonnull, Error)) {
-		return new SwiftContinuationCallbackCInt(continuationBox, returning, throwing);
-	}
+    void set(const void * _Nonnull pointerToContinuationInstance,
+             Future<T> f) {
+        // FIXME: Propagate `SwiftCC` to Swift using forward
+        // interop, without relying on passing it via a `void *`
+        // here. That will let us avoid this hack.
+        const void *_Nonnull opaqueStorage = pointerToContinuationInstance;
+        static_assert(sizeof(SwiftCC) == sizeof(const void *));
+        const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC *>(&opaqueStorage));
+        // Set the continuation instance.
+        continuationInstance.set(ccCopy);
+        // Add this callback to the future.
+        f.addCallbackAndClear(this);
+    }
 
-	void addCallbackAndClearTo(FutureCInt f) { f.addCallbackAndClear(this); }
+    SwiftContinuationCallbackStruct() : continuationInstance(SwiftCC::init()) {
+    }
 
-	// TODO(swift): virtual is an issue
-	void fire(int const& value) {
-		printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
-		Callback<int>::remove();
-		Callback<int>::next = 0;
-		resumeWithValue(continuationBox, value);
-	}
-
-	// TODO(swift): virtual is an issue
-	void error(Error error) {
-		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
-		Callback<int>::remove();
-		Callback<int>::next = 0;
-		resumeWithError(continuationBox, error);
-	}
-	void unwait() {
-		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
-		// TODO(swift): implement
-	}
+    void fire(const T &value) override {
+        printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+        Callback<T>::remove();
+        Callback<T>::next = nullptr;
+        continuationInstance.resume(value);
+    }
+    void error(Error error) override {
+        printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
+        Callback<T>::remove();
+        Callback<T>::next = nullptr;
+        continuationInstance.resumeThrowing(error);
+    }
+    void unwait() override {
+        printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
+        // TODO(swift): implement
+    }
 };
 
-// FIXME(swift): either implement in Swift, or manage lifetime properly
-struct UNSAFE_SWIFT_CXX_IMMORTAL_REF SwiftContinuationCallbackVoid : Callback<Void> {
-private:
-	void* continuationBox;
-	void (*resumeWithValue)(void* _Nonnull /*context*/, /*value*/ Void);
-	void (*resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
+using SwiftContinuationCallbackStructCInt = SwiftContinuationCallbackStruct<int>;
+using SwiftContinuationCallbackStructVoid = SwiftContinuationCallbackStruct<Void>;
 
-	SwiftContinuationCallbackVoid(void* continuationBox,
-	                              void (*_Nonnull returning)(void* _Nonnull, Void),
-	                              void (*_Nonnull throwing)(void* _Nonnull, Error))
-	  : continuationBox(continuationBox),
-      resumeWithValue(returning),
-      resumeWithError(throwing) {}
+// FIXME: Remove these stubs, when we can gurantee that Swift won't copy .pointee.set when doing the method call from Swift.
+void setContinutation(SwiftContinuationCallbackStruct<int> * _Nonnull swiftCCStruct,
+                      const void * _Nonnull ptrToCC,
+                      const Future<int> &f) {
+    swiftCCStruct->set(ptrToCC, f);
+}
 
-public:
-	static SwiftContinuationCallbackVoid* _Nonnull make(void* continuationBox,
-	                                                    void (*_Nonnull returning)(void* _Nonnull, Void),
-	                                                    void (*_Nonnull throwing)(void* _Nonnull, Error)) {
-		return new SwiftContinuationCallbackVoid(continuationBox, returning, throwing);
-	}
-
-	void addCallbackAndClearTo(FutureVoid f) {
-    f.addCallbackAndClear(this);
-  }
-
-	// TODO(swift): virtual is an issue
-	void fire(Void const& value) {
-		printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
-		Callback<Void>::remove();
-		Callback<Void>::next = 0;
-		resumeWithValue(continuationBox, value);
-	}
-
-	// TODO(swift): virtual is an issue
-	void error(Error error) {
-		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
-		Callback<Void>::remove();
-		Callback<Void>::next = 0;
-		resumeWithError(continuationBox, error);
-	}
-	void unwait() {
-		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
-		// TODO(swift): implement
-	}
-};
+void setContinutation(SwiftContinuationCallbackStruct<Void> * _Nonnull swiftCCStruct,
+                      const void * _Nonnull ptrToCC,
+                      const Future<Void> &f) {
+    swiftCCStruct->set(ptrToCC, f);
+}
 
 #endif
