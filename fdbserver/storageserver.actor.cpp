@@ -2920,8 +2920,10 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
+// origVersion: original read version when version vector is enabled
 ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           Version version,
+                                          Version origVersion,
                                           KeyRange range,
                                           int limit,
                                           int* pLimitBytes,
@@ -3006,8 +3008,15 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= limit);
-			if (data->storageVersion() > version)
+			if ((!SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() > version) ||
+			    (SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() > origVersion)) {
+				DisabledTraceEvent("SS_TTO", data->thisServerID)
+				    .detail("StorageVersion", data->storageVersion())
+				    .detail("Version", version)
+				    .detail("OrigVersion", origVersion)
+				    .detail("Range", range);
 				throw transaction_too_old();
+			}
 
 			// merge the sets in resultCache with the sets on disk, stopping at the last key from disk if there is
 			// 'more'
@@ -3099,8 +3108,15 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= -limit);
-			if (data->storageVersion() > version)
+			if ((!SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() > version) ||
+			    (SERVER_KNOBS->ENABLE_VERSION_VECTOR && data->storageVersion() > origVersion)) {
+				DisabledTraceEvent("SS_TTO", data->thisServerID)
+				    .detail("StorageVersion", data->storageVersion())
+				    .detail("Version", version)
+				    .detail("OrigVersion", origVersion)
+				    .detail("Range", range);
 				throw transaction_too_old();
+			}
 
 			int prevSize = result.data.size();
 			merge(result.arena,
@@ -3200,6 +3216,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	state GetKeyValuesReply rep = wait(
 	    readRange(data,
 	              version,
+	              version,
 	              forward ? KeyRangeRef(sel.getKey(), range.end) : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
 	              (distance + skipEqualKey) * sign,
 	              &maxBytes,
@@ -3214,6 +3231,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 		TEST(true); // Reverse key selector returned only one result in range read
 		maxBytes = std::numeric_limits<int>::max();
 		GetKeyValuesReply rep2 = wait(readRange(data,
+		                                        version,
 		                                        version,
 		                                        KeyRangeRef(range.begin, keyAfter(sel.getKey())),
 		                                        -2,
@@ -3318,6 +3336,11 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		DisabledTraceEvent("VVV", data->thisServerID)
+		    .detail("Version", version)
+		    .detail("ReqVersion", req.version)
+		    .detail("VV", req.ssLatestCommitVersions.toString())
+		    .detail("DebugID", req.debugID.present() ? req.debugID.get() : UID());
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
@@ -3398,6 +3421,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			state double kvReadRange = g_network->timer();
 			GetKeyValuesReply _r = wait(readRange(data,
 			                                      version,
+			                                      req.version,
 			                                      KeyRangeRef(begin, end),
 			                                      req.limit,
 			                                      &remainingLimitBytes,
@@ -4029,6 +4053,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
 			                                                     version,
+			                                                     req.version,
 			                                                     KeyRangeRef(begin, end),
 			                                                     req.limit,
 			                                                     &remainingLimitBytes,
@@ -4232,8 +4257,15 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                       !data->isTss() && !data->isSSWithTSSPair())
 				                          ? 1
 				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-				GetKeyValuesReply _r = wait(readRange(
-				    data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context, type, tenantPrefix));
+				GetKeyValuesReply _r = wait(readRange(data,
+				                                      version,
+				                                      req.version,
+				                                      KeyRangeRef(begin, end),
+				                                      req.limit,
+				                                      &byteLimit,
+				                                      span.context,
+				                                      type,
+				                                      tenantPrefix));
 				GetKeyValuesStreamReply r(_r);
 
 				if (req.debugID.present())
