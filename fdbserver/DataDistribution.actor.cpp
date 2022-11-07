@@ -183,9 +183,9 @@ Future<Void> StorageWiggler::resetStats() {
 	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
 	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
 	metrics = newMetrics;
-	return runRYWTransaction(teamCollection->dbContext(),
-	                         [this, &newMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return updateStorageWiggleMetrics(tr, newMetrics, PrimaryRegion(teamCollection->isPrimary()));
+	return runRYWTransaction(
+	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		    return resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
 	    });
 }
 
