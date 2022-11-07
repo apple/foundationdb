@@ -2180,8 +2180,8 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
 		for (; it != self->checkpoints.end(); ++it) {
 			const CheckpointMetaData& md = it->second;
-			if (md.version == req.version && md.format == req.format && md.range.contains(req.range) &&
-			    md.getState() == CheckpointMetaData::Complete) {
+			if (md.version == req.version && md.format == req.format && !md.ranges.empty() &&
+			    md.ranges.front().contains(req.range) && md.getState() == CheckpointMetaData::Complete) {
 				req.reply.send(md);
 				TraceEvent(SevDebug, "ServeGetCheckpointEnd", self->thisServerID).detail("Checkpoint", md.toString());
 				break;
@@ -8903,9 +8903,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 }
 
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
-	ASSERT(metaData.ssID == data->thisServerID);
+	ASSERT(metaData.ssID == data->thisServerID && !metaData.ranges.empty());
 	const CheckpointRequest req(metaData.version,
-	                            metaData.range,
+	                            metaData.ranges.front(),
 	                            static_cast<CheckpointFormat>(metaData.format),
 	                            metaData.checkpointID,
 	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
@@ -9400,7 +9400,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	// When a shard is moved out, delete all related checkpoints created for data move.
 	if (!available) {
 		for (auto& [id, checkpoint] : self->checkpoints) {
-			if (checkpoint.range.intersects(keys)) {
+			if (!checkpoint.ranges.empty() && checkpoint.ranges.front().intersects(keys)) {
 				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 				checkpoint.setState(CheckpointMetaData::Deleting);
 				self->addMutationToMutationLog(
