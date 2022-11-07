@@ -118,14 +118,14 @@ Arena::Arena(Arena&& r) noexcept = default;
 Arena& Arena::operator=(const Arena& r) = default;
 Arena& Arena::operator=(Arena&& r) noexcept = default;
 void Arena::dependsOn(const Arena& p) {
-	if (p.impl) {
+	// x.dependsOn(y) is a no-op if they refer to the same ArenaBlocks.
+	// They will already have the same lifetime.
+	if (p.impl && p.impl.getPtr() != impl.getPtr()) {
 		allowAccess(impl.getPtr());
 		allowAccess(p.impl.getPtr());
 		ArenaBlock::dependOn(impl, p.impl.getPtr());
 		disallowAccess(p.impl.getPtr());
-		if (p.impl.getPtr() != impl.getPtr()) {
-			disallowAccess(impl.getPtr());
-		}
+		disallowAccess(impl.getPtr());
 	}
 }
 
@@ -772,6 +772,16 @@ TEST_CASE("/flow/Arena/Size") {
 	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
+
+	return Void();
+}
+
+// Test that x.dependsOn(x) works, and is effectively a no-op.
+TEST_CASE("/flow/Arena/SelfRef") {
+	Arena a(4096);
+
+	// This should be a no-op.
+	a.dependsOn(a);
 
 	return Void();
 }
