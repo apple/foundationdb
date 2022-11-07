@@ -1116,7 +1116,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
 	printf("  --encrypt-files 0/1"
 	       "                 If passed, this argument will allow the user to override the database encryption state to "
-	       "either enable (1) or disable (0) encryption at rest with snapshot backups.\n");
+	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
+	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
+	       "Generally, these two options should not be used together.\n");
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -3391,6 +3393,7 @@ int main(int argc, char* argv[]) {
 		bool restoreSystemKeys = false;
 		bool restoreUserKeys = false;
 		bool encryptionEnabled = true;
+		bool encryptSnapshotFilesPresent = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3575,6 +3578,7 @@ int main(int argc, char* argv[]) {
 					fprintf(stderr, "ERROR: encrypt-files must be either 0 or 1\n");
 					return FDB_EXIT_ERROR;
 				}
+				encryptSnapshotFilesPresent = true;
 				if (encryptFiles == 0) {
 					encryptionEnabled = false;
 				} else {
@@ -3813,6 +3817,10 @@ int main(int argc, char* argv[]) {
 				jsonOutput = true;
 				break;
 			}
+		}
+
+		if (encryptionKeyFile.present() && encryptSnapshotFilesPresent) {
+			fprintf(stderr, "WARNING: Use of --encrypt-files and --encryption-key-file together is discouraged\n");
 		}
 
 		// Process the extra arguments
