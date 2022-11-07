@@ -5306,7 +5306,6 @@ public:
 			wait(lockDatabase(tr, uid));
 		else
 			wait(checkDatabaseLock(tr, uid));
-
 		return Void();
 	}
 
@@ -5924,6 +5923,7 @@ public:
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
 		}
 
+		state int retryCount = 0;
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		loop {
 			try {
@@ -5947,8 +5947,16 @@ public:
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
+				if (e.code() == error_code_transaction_too_old) {
+					retryCount++;
+				}
 				if (e.code() == error_code_restore_duplicate_tag) {
 					throw;
+				}
+				if (g_network->isSimulated() && retryCount > 50) {
+					CODE_PROBE(true, "submitRestore simulation speedup");
+					// try to make the read window back to normal size (5 * version_per_sec)
+					g_simulator->speedUpSimulation = true;
 				}
 				wait(tr->onError(e));
 			}
