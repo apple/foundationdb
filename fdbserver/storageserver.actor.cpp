@@ -647,11 +647,14 @@ struct BusiestWriteTagContext {
 // A SSPhysicalShard represents a physical shard, it contains a list of keyranges.
 class SSPhysicalShard {
 public:
-	SSPhysicalShard() : id(0LL) {}
 	SSPhysicalShard(const int64_t id) : id(id) {}
 
 	void addRange(Reference<ShardInfo> shard);
+
+	// Remove the shard if a shard to the same pointer (ShardInfo*) exists.
 	void removeRange(Reference<ShardInfo> shard);
+
+	// Clear all shards overlapping with `range`.
 	void removeRange(KeyRangeRef range);
 
 	bool supportCheckpoint() const;
@@ -668,10 +671,7 @@ void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
 	    .detail("ShardID", format("%016llx", this->id))
 	    .detail("Assigned", !shard->notAssigned())
 	    .detail("Range", shard->keys);
-
-	if (shard->notAssigned()) {
-		return;
-	}
+	ASSERT(!shard->notAssigned());
 
 	removeRange(shard->keys);
 
