@@ -3498,6 +3498,30 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 	return Void();
 }
 
+// Update blob manager epoc for restore. The blob manager should have larger epoch after restore
+// so that it could generate new manifest files with larger epoch number. Blob manifest files
+// with largest epoch number is treated as the newest.
+ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		try {
+			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			state int64_t oldEpochValue = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) : 1;
+			if (oldEpochValue < epoch) {
+				tr->set(blobManagerEpochKey, blobManagerEpochValueFor(epoch));
+				wait(tr->commit());
+				TraceEvent("BlobManagerEpoc").detail("Epoch", epoch);
+				bmData->epoch = epoch;
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
@@ -3513,8 +3537,12 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bmData->startRecruiting.trigger();
 
 	bmData->initBStore();
-	if (isFullRestoreMode())
+	if (isFullRestoreMode()) {
 		wait(loadManifest(bmData->db, bmData->bstore));
+
+		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
+		wait(updateEpoch(bmData, epoc + 1));
+	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
@@ -3539,7 +3567,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	}
 
 	// skip the rest of the algorithm for the first blob manager
-	if (bmData->epoch == 1 && !isFullRestoreMode()) {
+	if (bmData->epoch == 1) {
 		bmData->doneRecovering.send(Void());
 		return Void();
 	}
