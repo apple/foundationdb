@@ -35,6 +35,8 @@ template <bool UrlDecode>
 inline uint8_t decodeValue(uint8_t valueIn) noexcept {
 	if constexpr (UrlDecode) {
 		// clang-format off
+		// Decodes base64url-encoding's 64 legal ASCII character byte: i.e. alphanumeric, '-', and '_'
+		// into 6-bit fragment, a sequence containing four of which would form 3 original bytes.
 		constexpr const uint8_t decoding[] = { // 20x13
 			_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
 			_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
@@ -54,6 +56,8 @@ inline uint8_t decodeValue(uint8_t valueIn) noexcept {
 		return decoding[valueIn];
 	} else {
 		// clang-format off
+		// same as url-encoded base64, except that this encoding assumes '+' instead of '-',
+		// and '/' instead of '_'.
 		constexpr const uint8_t decoding[] = { // 20x13
 			_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
 			_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
