@@ -59,7 +59,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	    crossTenantGetNegative("CrossTenantGetNegative"), crossTenantCommitPositive("CrossTenantCommitPositive"),
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
 	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
-		tLogReadReplyUnset("TLogReadReplyUnset") {
+	    tLogReadReplyUnset("TLogReadReplyUnset") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		actorCount = getOption(options, "actorsPerClient"_sr, 20);
 		tenant = getOption(options, "tenantA"_sr, "authzSecurityTestTenant"_sr);
@@ -81,8 +81,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    [this](Database cx) { return testCrossTenantCommitDisallowed(PositiveTestcase::False, cx, this); });
 		testFunctions.push_back(
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(cx, this); });
-		testFunctions.push_back(
-		    [this](Database cx) { return testTLogReadDisallowed(cx, this); });
+		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(cx, this); });
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -320,14 +319,15 @@ struct AuthzSecurityWorkload : TestWorkload {
 			if (reply.canGet()) {
 				TLogPeekReply r = reply.getValue();
 				TraceEvent(SevError, "AuthzExpectedErrorNotFound")
-					.detail("TLogIndex", i)
-					.detail("Messages", r.messages.toString())
-					.detail("End", r.end)
-					.detail("Popped", r.popped)
-					.detail("MaxKnownVersion", r.maxKnownVersion)
-					.detail("MinKnownCommitVersion", r.minKnownCommittedVersion)
-					.detail("Begin", r.begin)
-					.detail("OnlySpilled", r.onlySpilled).log();
+				    .detail("TLogIndex", i)
+				    .detail("Messages", r.messages.toString())
+				    .detail("End", r.end)
+				    .detail("Popped", r.popped)
+				    .detail("MaxKnownVersion", r.maxKnownVersion)
+				    .detail("MinKnownCommitVersion", r.minKnownCommittedVersion)
+				    .detail("Begin", r.begin)
+				    .detail("OnlySpilled", r.onlySpilled)
+				    .log();
 			} else if (reply.isReady()) {
 				ASSERT(reply.isError());
 				Error e = reply.getError();

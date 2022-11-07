@@ -71,7 +71,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
 			// make it comfortably longer than the timeout of the workload
 			this->signedToken = g_simulator->makeToken(
-				this->tenant, uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
+			    this->tenant, uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
 		}
 	}
 
