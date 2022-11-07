@@ -3526,7 +3526,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     processingWiggle(params.processingWiggle), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
         delayed(params.readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
-    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),
+    initializationDoneActor(logOnCompletion(params.readyToStart && initialFailureReactionDelay)), recruitingStream(0),
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
@@ -3539,7 +3539,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
-        makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
+        makeReference<EventCacheHolder>("StorageServerRecruitment_" + params.distributorId.toString())),
     primary(params.primary), distributorId(params.distributorId), configuration(params.configuration),
     storageServerSet(new LocalityMap<UID>()) {
 

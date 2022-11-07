@@ -491,8 +491,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 					// the caller need to reset the perpetual wiggle stats in case the reset txn on DD side is cancelled
 					// due to DD can die at the same time
-					if(newConfig.perpetualStorageWiggleSpeed == 0 && oldConfig.perpetualStorageWiggleSpeed == 0) {
-
+					if (newConfig.perpetualStorageWiggleSpeed == 0 && oldConfig.perpetualStorageWiggleSpeed == 1) {
 					}
 				}
 			}

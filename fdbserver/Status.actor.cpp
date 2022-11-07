@@ -42,8 +42,8 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbserver/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "StorageWiggleMetrics.actor.h"
 
 const char* RecoveryStatus::names[] = { "reading_coordinated_state",
 	                                    "locking_coordinated_state",
@@ -2832,18 +2832,19 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 	}
 }
 
-ACTOR Future<std::pair<Optional<Value>, Optional<Value>>> readStorageWiggleMetrics(Database cx,
-                                                                                   bool use_system_priority) {
+ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
+    Database cx,
+    bool use_system_priority) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Optional<Value> primaryV;
-	state Optional<Value> remoteV;
+	state Optional<StorageWiggleMetrics> primaryV;
+	state Optional<StorageWiggleMetrics> remoteV;
 	loop {
 		try {
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
-			     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
+			wait(store(primaryV, loadStorageWiggleMetrics(tr, true)) &&
+			     store(remoteV, loadStorageWiggleMetrics(tr, false)));
 			return std::make_pair(primaryV, remoteV);
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -2858,7 +2859,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
                                                            JsonBuilderArray* messages) {
 
 	state Future<GetStorageWigglerStateReply> stateFut;
-	state Future<std::pair<Optional<Value>, Optional<Value>>> wiggleMetricsFut =
+	state Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> wiggleMetricsFut =
 	    timeoutError(readStorageWiggleMetrics(cx, use_system_priority), 2.0);
 	state JsonBuilderObject res;
 	if (ddWorker.present()) {
@@ -2876,7 +2877,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 		wait(success(wiggleMetricsFut) && success(stateFut));
 		auto [primaryV, remoteV] = wiggleMetricsFut.get();
 		if (primaryV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+			auto obj = primaryV.get().toJSON();
 			auto& reply = stateFut.get();
 			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.primary));
 			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
@@ -2884,7 +2885,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 			res["primary"] = obj;
 		}
 		if (conf.regions.size() > 1 && remoteV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+			auto obj = remoteV.get().toJSON();
 			auto& reply = stateFut.get();
 			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.remote));
 			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
