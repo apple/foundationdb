@@ -5306,6 +5306,7 @@ public:
 			wait(lockDatabase(tr, uid));
 		else
 			wait(checkDatabaseLock(tr, uid));
+
 		return Void();
 	}
 
