@@ -1,25 +1,28 @@
 /*
-* StorageWiggleMetrics.actor.h
-*
-* This source file is part of the FoundationDB open source project
-*
-* Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * StorageWiggleMetrics.actor.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-#ifndef FOUNDATIONDB_STORAGEWIGGLEMETRICS_ACTOR_H
-#define FOUNDATIONDB_STORAGEWIGGLEMETRICS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_G_H)
+#define FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_G_H
+#include "fdbserver/StorageWiggleMetrics.actor.g.h"
+#elif !defined(FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_H)
+#define FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_H
 
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/Smoother.h"
@@ -27,7 +30,6 @@
 #include "flow/serialize.h"
 #include "fdbclient/Status.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-
 
 struct StorageWiggleMetrics {
 	constexpr static FileIdentifier file_identifier = 4728961;
@@ -73,37 +75,6 @@ struct StorageWiggleMetrics {
 		}
 	}
 
-	ACTOR static Future<Void> runSetTransaction(Reference<ReadYourWritesTransaction> tr,
-	                                      bool primary,
-	                                      StorageWiggleMetrics metrics) {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		Optional<Value> v = wait(tr->get(perpetualStorageWiggleKey));
-		if(v.present() && v == "1"_sr) {
-			tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
-			        ObjectWriter::toValue(metrics, IncludeVersion()));
-		}
-		return Void();
-	}
-
-	static Future<Void> runSetTransaction(Database cx, bool primary, StorageWiggleMetrics metrics) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			return runSetTransaction(tr, primary, metrics);
-		});
-	}
-
-	static Future<Optional<Value>> runGetTransaction(Reference<ReadYourWritesTransaction> tr, bool primary) {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-		return tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
-	}
-
-	static Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-			return runGetTransaction(tr, primary);
-		});
-	}
-
 	StatusObject toJSON() const {
 		StatusObject result;
 		result["last_round_start_datetime"] = epochsToGMTString(last_round_start);
@@ -122,6 +93,31 @@ struct StorageWiggleMetrics {
 		return result;
 	}
 };
-#endif // FOUNDATIONDB_STORAGEWIGGLEMETRICS_ACTOR_H
+
+ACTOR template <typename TxnType>
+Future<Optional<StorageWiggleMetrics>> loadStorageWiggleMetrics(TxnType tr, bool primary) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+	Optional<Value> value =
+	    wait(tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr)));
+	if (!value.present()) {
+		return Optional<StorageWiggleMetrics>();
+	}
+	return ObjectReader::fromStringRef<StorageWiggleMetrics>(value.get(), IncludeVersion());
+}
+
+ACTOR template <typename TxnType>
+Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics, bool primary) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> v = wait(tr->get(perpetualStorageWiggleKey));
+	if (v.present() && v == "1"_sr) {
+		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+		        ObjectWriter::toValue(metrics, IncludeVersion()));
+	}
+	return Void();
+}
 
 #include "flow/unactorcompiler.h"
+#endif // FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_H
