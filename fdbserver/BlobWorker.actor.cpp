@@ -2134,13 +2134,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// will get an exception if we try to read any popped data, killing this actor
 			readOldChangeFeed = true;
 
+			// because several feeds will be reading the same version range of this change feed at the same time, set
+			// cache result to true
 			oldChangeFeedFuture = bwData->db->getChangeFeedStream(cfData,
 			                                                      oldCFKey.get(),
 			                                                      startVersion + 1,
 			                                                      startState.changeFeedStartVersion,
 			                                                      metadata->keyRange,
 			                                                      bwData->changeFeedStreamReplyBufferSize,
-			                                                      false);
+			                                                      false,
+			                                                      { ReadType::NORMAL, CacheResult::True });
 
 		} else {
 			readOldChangeFeed = false;
@@ -2423,6 +2426,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									if (readOldChangeFeed) {
 										ASSERT(cfRollbackVersion + 1 < startState.changeFeedStartVersion);
 										ASSERT(oldCFKey.present());
+										// because several feeds will be reading the same version range of this change
+										// feed at the same time, set cache result to true
 										oldChangeFeedFuture =
 										    bwData->db->getChangeFeedStream(cfData,
 										                                    oldCFKey.get(),
@@ -2430,7 +2435,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    startState.changeFeedStartVersion,
 										                                    metadata->keyRange,
 										                                    bwData->changeFeedStreamReplyBufferSize,
-										                                    false);
+										                                    false,
+										                                    { ReadType::NORMAL, CacheResult::True });
 
 									} else {
 										if (cfRollbackVersion + 1 < startState.changeFeedStartVersion) {

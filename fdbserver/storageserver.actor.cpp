@@ -566,6 +566,8 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	// back, we can avoid notifying other SS of change feeds that don't durably exist
 	Version metadataCreateVersion = invalidVersion;
 
+	FlowLock fetchLock = FlowLock(1);
+
 	bool removing = false;
 	bool destroyed = false;
 
@@ -6126,6 +6128,15 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              Version beginVersion,
                                              Version endVersion,
                                              ReadOptions readOptions) {
+	state FlowLock::Releaser feedFetchReleaser;
+
+	// avoid fetching the same version range of the same change feed multiple times.
+	choose {
+		when(wait(changeFeedInfo->fetchLock.take())) {
+			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
+		}
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
+	}
 
 	state Version startVersion = beginVersion;
 	startVersion = std::max(startVersion, emptyVersion + 1);
@@ -6145,6 +6156,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		return invalidVersion;
 	}
 
+	// FIXME: if this feed range is not wholly contained within the shard, set cache to true on reading
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
 	state Future<Void> feed = data->cx->getChangeFeedStream(feedResults,
 	                                                        rangeId,
@@ -6660,6 +6672,16 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	return feedIds;
 }
 
+ReadOptions readOptionsForFeedFetch(const ReadOptions& options, const KeyRangeRef& keys, const KeyRangeRef& feedRange) {
+	if (!feedRange.contains(keys)) {
+		return options;
+	}
+	// If feed range wholly contains shard range, cache on fetch because other shards will likely also fetch it
+	ReadOptions newOptions = options;
+	newOptions.cacheResult = true;
+	return newOptions;
+}
+
 // returns max version fetched for each feed
 // newFeedIds is used for the second fetch to get data for new feeds that weren't there for the first fetch
 ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer* data,
@@ -6684,8 +6706,9 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			auto feedIt = data->uidChangeFeed.find(feedId);
 			// feed may have been moved away or deleted after move was scheduled, do nothing in that case
 			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
+				ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
 				feedFetches[feedIt->second->id] =
-				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, readOptions);
+				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, fetchReadOptions);
 			}
 		}
 		for (auto& feedId : newFeedIds) {
@@ -6693,7 +6716,8 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			// we just read the change feed data map earlier in fetchKeys without yielding, so these feeds must exist
 			ASSERT(feedIt != data->uidChangeFeed.end());
 			ASSERT(!feedIt->second->removing);
-			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, readOptions);
+			ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
+			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, fetchReadOptions);
 		}
 
 		loop {
