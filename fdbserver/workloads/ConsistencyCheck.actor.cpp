@@ -1343,6 +1343,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 						req.version = version;
 						req.tags = TagSet();
+						req.debugID = debugRandom()->randomUniqueID();
+						DisabledTraceEvent("CCD", req.debugID.get()).detail("Version", version);
 
 						// Try getting the entries in the specified range
 						state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
