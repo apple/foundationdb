@@ -1447,7 +1447,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::PinnableSlice value;
 			auto& options = sharedState->getReadOptions();
-
 			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				uint64_t deadlineMircos =
 				    db->GetEnv()->NowMicros() + (readValueTimeout - (readBeginTime - a.startTime)) * 1000000;

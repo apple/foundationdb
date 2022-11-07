@@ -1,9 +1,3 @@
-[configuration]
-storageEngineType = 5
-
-[[knobs]]
-shard_encode_location_metadata = true
-
 [[test]]
 testTitle = 'DDBalance_Test'
 

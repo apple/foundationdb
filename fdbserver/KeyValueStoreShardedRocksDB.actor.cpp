@@ -168,8 +168,7 @@ std::string getShardMappingKey(KeyRef key, StringRef prefix) {
 }
 
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
-	// auto level = status.IsTimedOut() ? SevWarn : SevError;
-	auto level = SevError;
+	auto level = status.IsTimedOut() ? SevWarn : SevError;
 	TraceEvent e(level, "ShardedRocksDBError");
 	e.detail("Error", status.ToString()).detail("Method", method).detail("ShardedRocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
