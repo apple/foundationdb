@@ -410,6 +410,12 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						continue;
 					}
 
+					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
+					if (tenantName.present() && commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+						req.reply.sendError(storage_quota_exceeded());
+						continue;
+					}
+
 					++commitData->stats.txnCommitIn;
 
 					if (req.debugID.present()) {
