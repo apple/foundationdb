@@ -3113,7 +3113,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version) {
-				TraceEvent("SS_TTO", data->thisServerID)
+				DisabledTraceEvent("SS_TTO", data->thisServerID)
 				    .detail("StorageVersion", data->storageVersion())
 				    .detail("Version", version)
 				    .detail("Range", range);
