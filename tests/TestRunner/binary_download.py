@@ -10,7 +10,7 @@ import hashlib
 
 from local_cluster import random_secret_string
 
-CURRENT_VERSION = "71.2.1"
+CURRENT_VERSION = "71.2.3"
 FUTURE_VERSION = "71.3.0"
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]

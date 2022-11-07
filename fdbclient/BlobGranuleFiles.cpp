@@ -636,12 +636,12 @@ struct IndexedBlobGranuleFile {
 		IndexBlobGranuleFileChunkRef chunkRef =
 		    IndexBlobGranuleFileChunkRef::fromBytes(cipherKeysCtx, childData, childArena);
 
-		ChildType child;
-		ObjectReader dataReader(chunkRef.chunkBytes.get().begin(), IncludeVersion());
-		dataReader.deserialize(FileIdentifierFor<ChildType>::value, child, childArena);
-
 		// TODO implement some sort of decrypted+decompressed+deserialized cache, if this object gets reused?
-		return Standalone<ChildType>(child, childArena);
+
+		BinaryReader br(chunkRef.chunkBytes.get(), IncludeVersion());
+		Standalone<ChildType> child;
+		br >> child;
+		return child;
 	}
 
 	template <class Ar>
@@ -737,7 +737,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 
 		if (currentChunkBytesEstimate >= targetChunkBytes || i == snapshot.size() - 1) {
 			Value serialized =
-			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
@@ -1006,7 +1006,7 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
 
 		if (currentChunkBytesEstimate >= chunkSize || i == boundaries.size() - 1) {
 			Value serialized =
-			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
@@ -1043,6 +1043,9 @@ ParsedDeltaBoundaryRef deltaAtVersion(const DeltaBoundaryRef& delta, Version beg
 	                  beginVersion <= delta.clearVersion.get();
 	if (delta.values.empty()) {
 		return ParsedDeltaBoundaryRef(delta.key, clearAfter);
+	} else if (readVersion >= delta.values.back().version && beginVersion <= delta.values.back().version) {
+		// for all but zero or one delta files, readVersion >= the entire delta file. optimize this case
+		return ParsedDeltaBoundaryRef(delta.key, clearAfter, delta.values.back());
 	}
 	auto valueAtVersion = std::lower_bound(delta.values.begin(),
 	                                       delta.values.end(),
@@ -1382,6 +1385,10 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 	std::set<int16_t, std::greater<int16_t>> activeClears;
 	int16_t maxActiveClear = -1;
 
+	// trade off memory for cpu performance by assuming all inserts
+	RangeResult result;
+	int maxExpectedSize = 0;
+
 	// check if a given stream is actively clearing
 	bool clearActive[streams.size()];
 	for (int16_t i = 0; i < streams.size(); i++) {
@@ -1399,10 +1406,12 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 			item.streamIdx = i;
 			item.dataIdx = 0;
 			next.push(item);
+			maxExpectedSize += streams[i].size();
+			result.arena().dependsOn(streams[i].arena());
 		}
 	}
+	result.reserve(result.arena(), maxExpectedSize);
 
-	RangeResult result;
 	std::vector<MergeStreamNext> cur;
 	cur.reserve(streams.size());
 	while (!next.empty()) {
@@ -1436,7 +1445,7 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 				if (v.isSet() && maxActiveClear < it.streamIdx) {
 					KeyRef finalKey =
 					    chunk.tenantPrefix.present() ? v.key.removePrefix(chunk.tenantPrefix.get()) : v.key;
-					result.push_back_deep(result.arena(), KeyValueRef(finalKey, v.value));
+					result.push_back(result.arena(), KeyValueRef(finalKey, v.value));
 				}
 			}
 		}
@@ -1455,6 +1464,28 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 				it.key = streams[it.streamIdx][it.dataIdx].key;
 				next.push(it);
 			}
+		}
+	}
+
+	// FIXME: if memory assumption was wrong and result is significantly smaller than total input size, could copy it
+	// with push_back_deep to a new result. This is rare though
+
+	return result;
+}
+
+RangeResult materializeJustSnapshot(const BlobGranuleChunkRef& chunk,
+                                    Optional<StringRef> snapshotData,
+                                    const KeyRange& requestRange) {
+
+	Standalone<VectorRef<ParsedDeltaBoundaryRef>> snapshotRows = loadSnapshotFile(
+	    chunk.snapshotFile.get().filename, snapshotData.get(), requestRange, chunk.snapshotFile.get().cipherKeysCtx);
+	RangeResult result;
+	if (!snapshotRows.empty()) {
+		result.arena().dependsOn(snapshotRows.arena());
+		result.reserve(result.arena(), snapshotRows.size());
+		for (auto& it : snapshotRows) {
+			KeyRef finalKey = chunk.tenantPrefix.present() ? it.key.removePrefix(chunk.tenantPrefix.get()) : it.key;
+			result.push_back(result.arena(), KeyValueRef(finalKey, it.value));
 		}
 	}
 
@@ -1481,6 +1512,11 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		requestRange = keyRange.withPrefix(chunk.tenantPrefix.get());
 	} else {
 		requestRange = keyRange;
+	}
+
+	// fast case for only-snapshot read
+	if (chunk.snapshotFile.present() && chunk.deltaFiles.empty() && chunk.newDeltas.empty()) {
+		return materializeJustSnapshot(chunk, snapshotData, requestRange);
 	}
 
 	std::vector<Standalone<VectorRef<ParsedDeltaBoundaryRef>>> streams;

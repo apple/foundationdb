@@ -55,7 +55,7 @@ struct StringBuffer {
 	StringBuffer(UID fromFileID) : reserved(0), id(fromFileID) {}
 
 	int size() const { return str.size(); }
-	StringRef& ref() { return str; }
+	Standalone<StringRef> get() { return str; }
 	void clear() {
 		str = Standalone<StringRef>();
 		reserved = 0;
@@ -63,19 +63,19 @@ struct StringBuffer {
 	void clearReserve(int size) {
 		str = Standalone<StringRef>();
 		reserved = size;
-		ref() = StringRef(new (str.arena()) uint8_t[size], 0);
+		str.contents() = StringRef(new (str.arena()) uint8_t[size], 0);
 	}
 	void append(StringRef x) { memcpy(append(x.size()), x.begin(), x.size()); }
 	void* append(int bytes) {
 		ASSERT(str.size() + bytes <= reserved);
 		void* p = const_cast<uint8_t*>(str.end());
-		ref() = StringRef(str.begin(), str.size() + bytes);
+		str.contents() = StringRef(str.begin(), str.size() + bytes);
 		return p;
 	}
 	StringRef pop_front(int bytes) {
 		ASSERT(bytes <= str.size());
 		StringRef result = str.substr(0, bytes);
-		ref() = str.substr(bytes);
+		str.contents() = str.substr(bytes);
 		return result;
 	}
 	void alignReserve(int alignment, int size) {
@@ -101,7 +101,7 @@ struct StringBuffer {
 			if (str.size() > 0) {
 				memcpy(p, str.begin(), str.size());
 			}
-			ref() = StringRef(p, str.size());
+			str.contents() = StringRef(p, str.size());
 		}
 	}
 };
@@ -196,7 +196,7 @@ public:
 		stallCount.init(LiteralStringRef("RawDiskQueue.StallCount"));
 	}
 
-	Future<Void> pushAndCommit(StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {
+	Future<Void> pushAndCommit(Standalone<StringRef> pageData, StringBuffer* pageMem, uint64_t poppedPages) {
 		return pushAndCommit(this, pageData, pageMem, poppedPages);
 	}
 
@@ -332,13 +332,13 @@ public:
 	}
 #endif
 
-	Future<Future<Void>> push(StringRef pageData, std::vector<Reference<SyncQueue>>* toSync) {
+	Future<Future<Void>> push(Standalone<StringRef> pageData, std::vector<Reference<SyncQueue>>* toSync) {
 		return push(this, pageData, toSync);
 	}
 
-	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
-	                                       StringRef pageData,
-	                                       std::vector<Reference<SyncQueue>>* toSync) {
+	ACTOR static UNCANCELLABLE Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
+	                                                     Standalone<StringRef> pageData,
+	                                                     std::vector<Reference<SyncQueue>>* toSync) {
 		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT(self->readingFile == 2);
@@ -357,8 +357,9 @@ public:
 					toSync->push_back(self->files[1].syncQueue);
 					/*TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
 					    .detail("WritingPos", self->writingPos).detail("WritingBytes", p);*/
-					waitfor.push_back(self->files[1].f->write(pageData.begin(), p, self->writingPos));
-					pageData = pageData.substr(p);
+					waitfor.push_back(uncancellable(
+					    holdWhile(pageData, self->files[1].f->write(pageData.begin(), p, self->writingPos))));
+					pageData.contents() = pageData.substr(p);
 				}
 
 				self->dbg_file0BeginSeq += self->files[0].size;
@@ -426,16 +427,17 @@ public:
 		    .detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size());*/
 		self->files[1].size = std::max(self->files[1].size, self->writingPos + pageData.size());
 		toSync->push_back(self->files[1].syncQueue);
-		waitfor.push_back(self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos));
+		waitfor.push_back(uncancellable(
+		    holdWhile(pageData, self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos))));
 		self->writingPos += pageData.size();
 
-		return waitForAll(waitfor);
+		return waitForAllReadyThenThrow(waitfor);
 	}
 
 	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem)
 	// that hold the pageData
 	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self,
-	                                                      StringRef pageData,
+	                                                      Standalone<StringRef> pageData,
 	                                                      StringBuffer* pageMem,
 	                                                      uint64_t poppedPages) {
 		state Promise<Void> pushing, committed;
@@ -655,7 +657,7 @@ public:
 			for (int i = 0; i < 2; i++)
 				if (self->files[i].size > 0)
 					reads.push_back(self->files[i].f->read(self->firstPages[i], sizeof(Page), 0));
-			wait(waitForAll(reads));
+			wait(waitForAllReadyThenThrow(reads));
 
 			// Determine which file comes first
 			if (compare(self->firstPages[1], self->firstPages[0])) {
@@ -743,7 +745,10 @@ public:
 	}
 
 	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
-	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
+	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self,
+	                                                              int file,
+	                                                              int pageOffset,
+	                                                              int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
@@ -980,7 +985,7 @@ public:
 
 		lastCommittedSeq = backPage().endSeq();
 		auto f = rawQueue->pushAndCommit(
-		    pushed_page_buffer->ref(), pushed_page_buffer, poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
+		    pushed_page_buffer->get(), pushed_page_buffer, poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
 		lastPoppedSeq = poppedSeq;
 		pushed_page_buffer = 0;
 		return f;
@@ -1176,7 +1181,7 @@ private:
 			Standalone<StringRef> pagedData = wait(readPages(self, start, end));
 			const int startOffset = start % _PAGE_SIZE;
 			const int dataLen = end - start;
-			ASSERT(pagedData.substr(startOffset, dataLen).compare(buffer->ref().substr(0, dataLen)) == 0);
+			ASSERT(pagedData.substr(startOffset, dataLen).compare(buffer->get().substr(0, dataLen)) == 0);
 		} catch (Error& e) {
 			if (e.code() != error_code_io_error) {
 				delete buffer;
@@ -1543,9 +1548,9 @@ private:
 	StringBuffer* pushed_page_buffer;
 	Page& backPage() {
 		ASSERT(pushedPageCount());
-		return ((Page*)pushed_page_buffer->ref().end())[-1];
+		return ((Page*)pushed_page_buffer->get().end())[-1];
 	}
-	Page const& backPage() const { return ((Page*)pushed_page_buffer->ref().end())[-1]; }
+	Page const& backPage() const { return ((Page*)pushed_page_buffer->get().end())[-1]; }
 	int pushedPageCount() const { return pushed_page_buffer ? pushed_page_buffer->size() / sizeof(Page) : 0; }
 
 	// Recovery state

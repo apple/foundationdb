@@ -1392,6 +1392,60 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+struct EncryptionAtRestMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	enum Mode { DISABLED = 0, AES_256_CTR = 1, END = 2 };
+
+	EncryptionAtRestMode() : mode(DISABLED) {}
+	EncryptionAtRestMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = DISABLED;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case DISABLED:
+			return "disabled";
+		case AES_256_CTR:
+			return "aes_256_ctr";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
+
+	bool isEquals(const EncryptionAtRestMode& e) const { return this->mode == e.mode; }
+
+	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
+	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+
+	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+		if (!val.present()) {
+			return DISABLED;
+		}
+
+		// A failed parsing returns 0 (DISABLED)
+		int num = atoi(val.get().toString().c_str());
+		if (num < 0 || num >= END) {
+			return DISABLED;
+		}
+
+		return static_cast<Mode>(num);
+	}
+
+	uint32_t mode;
+};
+
 typedef StringRef ClusterNameRef;
 typedef Standalone<ClusterNameRef> ClusterName;
 

@@ -100,16 +100,6 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<bool> setRange(Database cx, KeyRange range, bool active) {
-		if (active) {
-			bool success = wait(cx->blobbifyRange(range));
-			return success;
-		} else {
-			bool success = wait(cx->unblobbifyRange(range));
-			return success;
-		}
-	}
-
 	ACTOR Future<Void> registerNewRange(Database cx, BlobGranuleRangesWorkload* self) {
 		std::string nextRangeKey = "R_" + self->newKey();
 		state KeyRange range(KeyRangeRef(StringRef(nextRangeKey), strinc(StringRef(nextRangeKey))));
@@ -119,7 +109,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		// don't put in active ranges until AFTER set range command succeeds, to avoid checking a range that maybe
 		// wasn't initialized
-		bool success = wait(self->setRange(cx, range, true));
+		bool success = wait(cx->blobbifyRange(range));
 		ASSERT(success);
 
 		if (BGRW_DEBUG) {
@@ -157,7 +147,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 		}
-		bool success = wait(self->setRange(cx, range, false));
+		bool success = wait(cx->unblobbifyRange(range));
 		ASSERT(success);
 
 		if (BGRW_DEBUG) {
@@ -320,7 +310,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		// tear down range at end
 		Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
-		bool success = wait(self->setRange(cx, range, false));
+		bool success = wait(cx->unblobbifyRange(range));
 		ASSERT(success);
 
 		if (BGRW_DEBUG) {
@@ -337,7 +327,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		if (BGRW_DEBUG) {
 			fmt::print("VerifyRangeUnit: [{0} - {1})\n", range.begin.printable(), range.end.printable());
 		}
-		bool setSuccess = wait(self->setRange(cx, activeRange, true));
+		bool setSuccess = wait(cx->blobbifyRange(activeRange));
 		ASSERT(setSuccess);
 		wait(self->checkRange(cx, self, activeRange, true));
 
@@ -390,7 +380,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		for (i = 0; i < rangeCount; i++) {
 			state KeyRange subRange(KeyRangeRef(boundaries[i], boundaries[i + 1]));
 			if (i != rangeToNotBlobbify) {
-				bool setSuccess = wait(self->setRange(cx, subRange, true));
+				bool setSuccess = wait(cx->blobbifyRange(subRange));
 				ASSERT(setSuccess);
 				wait(self->checkRange(cx, self, subRange, true));
 			} else {
@@ -436,7 +426,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> rangesMisalignedUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
-		bool setSuccess = wait(self->setRange(cx, range, true));
+		bool setSuccess = wait(cx->blobbifyRange(range));
 		ASSERT(setSuccess);
 		state KeyRange subRange(KeyRangeRef(range.begin.withSuffix("A"_sr), range.begin.withSuffix("B"_sr)));
 
@@ -489,57 +479,70 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		// unblobbifying range that already doesn't exist should be no-op
 		if (deterministicRandom()->coinflip()) {
-			bool unblobbifyStartSuccess = wait(self->setRange(cx, activeRange, false));
+			bool unblobbifyStartSuccess = wait(cx->blobbifyRange(activeRange));
 			ASSERT(unblobbifyStartSuccess);
 		}
 
-		bool success = wait(self->setRange(cx, activeRange, true));
+		bool success = wait(cx->blobbifyRange(activeRange));
 		ASSERT(success);
 		wait(self->checkRange(cx, self, activeRange, true));
 
 		// check that re-blobbifying same range is successful
-		bool retrySuccess = wait(self->setRange(cx, activeRange, true));
+		bool retrySuccess = wait(cx->blobbifyRange(activeRange));
 		ASSERT(retrySuccess);
 		wait(self->checkRange(cx, self, activeRange, true));
 
 		// check that blobbifying range that overlaps but does not match existing blob range fails
-		bool fail1 = wait(self->setRange(cx, range, true));
+		bool fail1 = wait(cx->blobbifyRange(range));
 		ASSERT(!fail1);
 
-		bool fail2 = wait(self->setRange(cx, KeyRangeRef(range.begin, activeRange.end), true));
+		bool fail2 = wait(cx->blobbifyRange(KeyRangeRef(range.begin, activeRange.end)));
 		ASSERT(!fail2);
 
-		bool fail3 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, range.end), true));
+		bool fail3 = wait(cx->blobbifyRange(KeyRangeRef(activeRange.begin, range.end)));
 		ASSERT(!fail3);
 
-		bool fail4 = wait(self->setRange(cx, KeyRangeRef(range.begin, middleKey), true));
+		bool fail4 = wait(cx->blobbifyRange(KeyRangeRef(range.begin, middleKey)));
 		ASSERT(!fail4);
 
-		bool fail5 = wait(self->setRange(cx, KeyRangeRef(middleKey, range.end), true));
+		bool fail5 = wait(cx->blobbifyRange(KeyRangeRef(middleKey, range.end)));
 		ASSERT(!fail5);
 
-		bool fail6 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), true));
+		bool fail6 = wait(cx->blobbifyRange(KeyRangeRef(activeRange.begin, middleKey)));
 		ASSERT(!fail6);
 
-		bool fail7 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), true));
+		bool fail7 = wait(cx->blobbifyRange(KeyRangeRef(middleKey, activeRange.end)));
 		ASSERT(!fail7);
 
-		bool fail8 = wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), true));
+		bool fail8 = wait(cx->blobbifyRange(KeyRangeRef(middleKey, middleKey2)));
 		ASSERT(!fail8);
 
 		Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(range, 1000000));
 		ASSERT(blobRanges.size() == 1);
 		ASSERT(blobRanges[0] == activeRange);
 
-		state Transaction tr(cx);
-		loop {
-			try {
-				Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000000));
-				ASSERT(granules.size() == 1);
-				ASSERT(granules[0] == activeRange);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+		{
+			state Transaction tr(cx);
+			loop {
+				try {
+					Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000000));
+					ASSERT(granules.size() == 1);
+					ASSERT(granules[0] == activeRange);
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+
+			state Version purgeVersion = deterministicRandom()->coinflip() ? latestVersion : 1;
+			state KeyRangeRef purgeRange = deterministicRandom()->coinflip() ? activeRange : range;
+			Key purgeKey = wait(cx->purgeBlobGranules(purgeRange, purgeVersion, {}, true));
+			wait(cx->waitPurgeGranulesComplete(purgeKey));
+
+			if (deterministicRandom()->coinflip()) {
+				// force purge again and ensure it is idempotent
+				Key purgeKeyAgain = wait(cx->purgeBlobGranules(purgeRange, purgeVersion, {}, true));
+				wait(cx->waitPurgeGranulesComplete(purgeKeyAgain));
 			}
 		}
 
@@ -553,46 +556,48 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			wait(cx->waitPurgeGranulesComplete(purgeKeyAgain));
 		}
 
-		// Check that the blob range is still listed
-		Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(range, 1000000));
-		ASSERT(blobRanges.size() == 1);
-		ASSERT(blobRanges[0] == activeRange);
+		{
+			// Check that the blob range is still listed
+			Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(range, 1000000));
+			ASSERT(blobRanges.size() == 1);
+			ASSERT(blobRanges[0] == activeRange);
 
-		bool unblobbifyFail1 = wait(self->setRange(cx, range, false));
-		ASSERT(!unblobbifyFail1);
+			bool unblobbifyFail1 = wait(cx->unblobbifyRange(range));
+			ASSERT(!unblobbifyFail1);
 
-		bool unblobbifyFail2 = wait(self->setRange(cx, KeyRangeRef(range.begin, activeRange.end), false));
-		ASSERT(!unblobbifyFail2);
+			bool unblobbifyFail2 = wait(cx->unblobbifyRange(KeyRangeRef(range.begin, activeRange.end)));
+			ASSERT(!unblobbifyFail2);
 
-		bool unblobbifyFail3 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, range.end), false));
-		ASSERT(!unblobbifyFail3);
+			bool unblobbifyFail3 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, range.end)));
+			ASSERT(!unblobbifyFail3);
 
-		bool unblobbifyFail4 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false));
-		ASSERT(!unblobbifyFail4);
+			bool unblobbifyFail4 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, middleKey)));
+			ASSERT(!unblobbifyFail4);
 
-		bool unblobbifyFail5 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false));
-		ASSERT(!unblobbifyFail5);
+			bool unblobbifyFail5 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, activeRange.end)));
+			ASSERT(!unblobbifyFail5);
 
-		bool unblobbifyFail6 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false));
-		ASSERT(!unblobbifyFail6);
+			bool unblobbifyFail6 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, middleKey)));
+			ASSERT(!unblobbifyFail6);
 
-		bool unblobbifyFail7 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false));
-		ASSERT(!unblobbifyFail7);
+			bool unblobbifyFail7 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, activeRange.end)));
+			ASSERT(!unblobbifyFail7);
 
-		bool unblobbifyFail8 = wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), false));
-		ASSERT(!unblobbifyFail8);
+			bool unblobbifyFail8 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, middleKey2)));
+			ASSERT(!unblobbifyFail8);
 
-		bool unblobbifySuccess = wait(self->setRange(cx, activeRange, true));
-		ASSERT(unblobbifySuccess);
+			bool unblobbifySuccess = wait(cx->unblobbifyRange(activeRange));
+			ASSERT(unblobbifySuccess);
 
-		bool unblobbifySuccessAgain = wait(self->setRange(cx, activeRange, true));
-		ASSERT(unblobbifySuccessAgain);
+			bool unblobbifySuccessAgain = wait(cx->unblobbifyRange(activeRange));
+			ASSERT(unblobbifySuccessAgain);
+		}
 
 		return Void();
 	}
 
 	ACTOR Future<Void> reBlobbifyUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
-		bool setSuccess = wait(self->setRange(cx, range, true));
+		bool setSuccess = wait(cx->blobbifyRange(range));
 		ASSERT(setSuccess);
 		wait(self->checkRange(cx, self, range, true));
 
@@ -601,11 +606,11 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
 		wait(self->checkRange(cx, self, range, false));
 
-		bool unsetSuccess = wait(self->setRange(cx, range, false));
+		bool unsetSuccess = wait(cx->unblobbifyRange(range));
 		ASSERT(unsetSuccess);
 		wait(self->checkRange(cx, self, range, false));
 
-		bool reSetSuccess = wait(self->setRange(cx, range, true));
+		bool reSetSuccess = wait(cx->blobbifyRange(range));
 		ASSERT(reSetSuccess);
 		wait(self->checkRange(cx, self, range, true));
 

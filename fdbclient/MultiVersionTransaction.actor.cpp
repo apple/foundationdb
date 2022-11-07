@@ -1461,7 +1461,10 @@ Optional<TenantName> MultiVersionTransaction::getTenant() {
 // Waits for the specified duration and signals the assignment variable with a timed out error
 // This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
 ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
-	wait(delay(duration));
+	state double endTime = now() + duration;
+	while (now() < endTime) {
+		wait(delayUntil(std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL)));
+	}
 
 	tsav->trySendError(transaction_timed_out());
 	return Void();
@@ -1501,14 +1504,17 @@ void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
-
-		Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
-		ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
-			return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
-		});
-
 		prevTimeout = currentTimeout;
-		currentTimeout = newTimeout;
+
+		if (timeoutDuration > 0) {
+			Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
+			ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
+				return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
+			});
+			currentTimeout = newTimeout;
+		} else {
+			currentTimeout = ThreadFuture<Void>();
+		}
 	}
 
 	// Cancel the previous timeout now that we have a new one. This means that changing the timeout
@@ -1577,6 +1583,9 @@ void MultiVersionTransaction::reset() {
 
 MultiVersionTransaction::~MultiVersionTransaction() {
 	timeoutTsav->trySendError(transaction_cancelled());
+	if (currentTimeout.isValid()) {
+		currentTimeout.cancel();
+	}
 }
 
 bool MultiVersionTransaction::isValid() {
