@@ -172,6 +172,7 @@ if(NOT WIN32)
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
+    add_library(fdb_c_client_config_tester OBJECT test/client_config_tester.cpp)
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -190,6 +191,7 @@ if(NOT WIN32)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
     strip_debug_symbols(fdb_c_client_memory_test)
+    add_executable(fdb_c_client_config_tester test/client_config_tester.cpp)
   endif()
 
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c Threads::Threads)
@@ -211,6 +213,8 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest)
+  target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c Threads::Threads fmt::fmt)
+  target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -309,6 +313,12 @@ if(NOT WIN32)
       )
 
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+      add_test(NAME fdb_c_client_config_tests
+        COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --client-config-tester-bin $<TARGET_FILE:fdb_c_client_config_tester>
+        )
+
       add_test(NAME fdb_c_upgrade_single_threaded_630api
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
