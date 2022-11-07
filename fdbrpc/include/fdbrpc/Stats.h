@@ -22,6 +22,7 @@
 #define FDBRPC_STATS_H
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
+#include "flow/OTELMetrics.h"
 #include "flow/serialize.h"
 #include <string>
 #include <type_traits>
@@ -79,11 +80,7 @@ class CounterCollection {
 	std::vector<struct ICounter*> counters, countersToRemove;
 
 public:
-	CounterCollection(std::string const& name, std::string const& id = std::string()) : name(name), id(id) {
-		if (id.empty()) {
-			this->id = deterministicRandom()->randomUniqueID().toString();
-		}
-	}
+	CounterCollection(std::string const& name, std::string const& id = std::string()) : name(name), id(id) {}
 	~CounterCollection() {
 		for (auto c : countersToRemove)
 			c->remove();
@@ -226,57 +223,9 @@ public:
 
 class LatencySample : public IMetric {
 public:
-	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
-	  : name(name), IMetric(name + "_" + id.toString(), knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id),
-	    sampleEmit(now()), sampleTrace(now()), sample(sampleSize), prev(sampleSize),
-	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
-		logger = recurring([this]() { logSample(); }, loggingInterval);
-	}
-
-	void addMeasurement(double measurement) { sample.addSample(measurement); }
-	void flush(MetricBatch& batch) override {
-		std::string msg;
-		switch (model) {
-		case MetricsDataModel::STATSD: {
-			auto median_gauge = createStatsdMessage(name + "p50", StatsDMetric::GAUGE, std::to_string(sample.median()));
-			auto p90_gauge =
-			    createStatsdMessage(name + "p90", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.9)));
-			auto p95_gauge =
-			    createStatsdMessage(name + "p95", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.95)));
-			auto p99_gauge =
-			    createStatsdMessage(name + "p99", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.99)));
-			auto p999_gauge =
-			    createStatsdMessage(name + "p99.9", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.999)));
-
-			if (!batch.statsd_message.empty()) {
-				msg += "\n";
-			}
-			msg += median_gauge;
-			msg += "\n";
-			msg += p90_gauge;
-			msg += "\n";
-			msg += p95_gauge;
-			msg += "\n";
-			msg += p99_gauge;
-			msg += "\n";
-			msg += p999_gauge;
-			batch.statsd_message += msg;
-			break;
-		}
-
-		case MetricsDataModel::OTEL: {
-			const ContinuousSample<double> emitSample = (sample.getPopulationSize() == 0) ? prev : sample;
-			batch.hists.emplace_back(
-			    name, emitSample.getSamples(), emitSample.min(), emitSample.max(), emitSample.sum());
-			batch.hists.back().point.startTime = sampleTrace;
-			sampleEmit = now();
-			break;
-		}
-
-		default:
-			break;
-		}
-	}
+	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize);
+	void addMeasurement(double measurement);
+	void flush(MetricBatch& batch) override;
 
 private:
 	std::string name;
@@ -290,24 +239,7 @@ private:
 
 	Reference<EventCacheHolder> latencySampleEventHolder;
 
-	void logSample() {
-		TraceEvent(name.c_str(), id)
-		    .detail("Count", sample.getPopulationSize())
-		    .detail("Elapsed", now() - sampleTrace)
-		    .detail("Min", sample.min())
-		    .detail("Max", sample.max())
-		    .detail("Mean", sample.mean())
-		    .detail("Median", sample.median())
-		    .detail("P25", sample.percentile(0.25))
-		    .detail("P90", sample.percentile(0.9))
-		    .detail("P95", sample.percentile(0.95))
-		    .detail("P99", sample.percentile(0.99))
-		    .detail("P99.9", sample.percentile(0.999))
-		    .trackLatest(latencySampleEventHolder->trackingKey);
-		std::swap(prev, sample);
-		sample.clear();
-		sampleTrace = now();
-	}
+	void logSample();
 };
 
 #endif

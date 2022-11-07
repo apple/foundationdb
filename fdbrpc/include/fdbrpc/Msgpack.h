@@ -170,7 +170,8 @@ inline void serialize_ext(const T& t, MsgpackBuffer& buf, uint8_t type, F f) {
 	buf.write_byte(type);
 	size_t prev_size = buf.data_size;
 	f(t, buf);
-	uint32_t updated_size = static_cast<uint32_t>(buf.data_size - prev_size);
+	size_t updated_size = static_cast<size_t>(buf.data_size - prev_size);
+	ASSERT_WE_THINK(updated_size <= std::numeric_limits<uint32_t>::max());
 	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[3], byte_idx);
 	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[2], byte_idx + 1);
 	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[1], byte_idx + 2);

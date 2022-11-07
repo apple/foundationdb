@@ -34,25 +34,15 @@ public:
 	explicit ContinuousSample(int sampleSize)
 	  : sampleSize(sampleSize), populationSize(0), sorted(true), _min(T()), _max(T()), _sum(T()) {}
 
-	ContinuousSample(ContinuousSample&& other)
-	  : sampleSize(other.sampleSize), populationSize(other.populationSize), sorted(other.sorted), _min(other._min),
-	    _max(other._max), _sum(other._sum), samples(std::move(other.samples)) {}
-
-	ContinuousSample(const ContinuousSample& other)
-	  : sampleSize(other.sampleSize), populationSize(other.populationSize), _min(other._min), _max(other._max),
-	    _sum(other._sum), samples(other.samples) {}
-	ContinuousSample& operator=(ContinuousSample&& other) {
-		swap(samples, other.samples);
-		sampleSize = other.sampleSize;
-		populationSize = other.populationSize;
-		_min = other._min;
-		_max = other._max;
-		_sum = other._sum;
-		sorted = other.sorted;
-		return *this;
+	void swap(ContinuousSample<T>& other) {
+		std::swap(samples, other.samples);
+		std::swap(_min, other._min);
+		std::swap(_max, other._max);
+		std::swap(_sum, other._sum);
+		std::swap(populationSize, other.populationSize);
+		std::swap(sorted, other.sorted);
+		std::swap(sampleSize, other.sampleSize);
 	}
-
-	ContinuousSample& operator=(const ContinuousSample& other) = default;
 
 	ContinuousSample<T>& addSample(T sample) {
 		if (!populationSize)
@@ -74,7 +64,7 @@ public:
 		return *this;
 	}
 
-	std::vector<double> getSamples() const { return samples; }
+	std::vector<T> getSamples() const { return samples; }
 
 	double sum() const { return _sum; }
 

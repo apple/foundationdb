@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FLOW_TDMETRIC_ACTOR_G_H)
 #define FLOW_TDMETRIC_ACTOR_G_H
@@ -256,7 +257,7 @@ public:
 
 class MetricCollection {
 public:
-	std::unordered_map<std::string, IMetric*> map;
+	std::unordered_map<UID, IMetric*> map;
 
 	MetricCollection() {}
 
@@ -1457,22 +1458,22 @@ enum StatsDMetric { GAUGE = 0, COUNTER };
 
 class IMetric {
 protected:
-	std::string metric_name;
+	UID id;
 	MetricsDataModel model;
 
 public:
-	IMetric(const std::string& n, MetricsDataModel m) : metric_name{ n }, model{ m } {
+	IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
 		ASSERT(metrics != nullptr);
-		if (metrics->map.count(metric_name) > 0) {
-			TraceEvent(SevError, "MetricCollection_NameCollision").detail("NameConflict", metric_name.c_str());
-			ASSERT(metrics->map.count(metric_name) > 0);
+		if (metrics->map.count(id) > 0) {
+			TraceEvent(SevError, "MetricCollection_NameCollision").detail("NameConflict", id.toString().c_str());
+			ASSERT(metrics->map.count(id) > 0);
 		}
-		metrics->map[metric_name] = this;
+		metrics->map[id] = this;
 	}
 	virtual ~IMetric() {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
-		metrics->map.erase(metric_name);
+		metrics->map.erase(id);
 	}
 	virtual void flush(MetricBatch&) = 0;
 };

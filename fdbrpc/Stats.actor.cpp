@@ -26,10 +26,8 @@
 #include <string>
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-  : name(name), IMetric(collection.getName() + "_" + name + "_" + collection.getId(),
-                        knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
-    interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
-    interval_start_value(0) {
+  : name(name), IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), interval_start(0), last_event(0),
+    interval_sq_time(0), roughness_interval_start(0), interval_delta(0), interval_start_value(0) {
 	metric.init(collection.getName() + "." + (char)toupper(name.at(0)) + name.substr(1), collection.getId());
 	collection.addCounter(this);
 }
@@ -162,7 +160,7 @@ Future<Void> CounterCollection::traceCounters(std::string const& traceEventName,
 }
 
 void LatencyBands::insertBand(double value) {
-	bands.emplace(std::make_pair(value, std::make_unique<Counter>(name + format("Band%f", value), *cc)));
+	bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
 }
 
 FDB_DEFINE_BOOLEAN_PARAM(Filtered);
@@ -179,7 +177,7 @@ void LatencyBands::addThreshold(double value) {
 			ASSERT(!cc && !filteredCount);
 			cc = std::make_unique<CounterCollection>(name, id.toString());
 			logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name, decorator);
-			filteredCount = std::make_unique<Counter>(name + "Filtered", *cc);
+			filteredCount = std::make_unique<Counter>("Filtered", *cc);
 			insertBand(std::numeric_limits<double>::infinity());
 		}
 
@@ -206,4 +204,77 @@ void LatencyBands::clearBands() {
 
 LatencyBands::~LatencyBands() {
 	clearBands();
+}
+
+LatencySample::LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
+  : name(name), IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id), sampleEmit(now()),
+    sampleTrace(now()), sample(sampleSize), prev(sampleSize),
+    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
+	logger = recurring([this]() { logSample(); }, loggingInterval);
+}
+
+void LatencySample::addMeasurement(double measurement) {
+	sample.addSample(measurement);
+}
+
+void LatencySample::flush(MetricBatch& batch) {
+	std::string msg;
+	switch (model) {
+	case MetricsDataModel::STATSD: {
+		auto median_gauge = createStatsdMessage(name + "p50", StatsDMetric::GAUGE, std::to_string(sample.median()));
+		auto p90_gauge = createStatsdMessage(name + "p90", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.9)));
+		auto p95_gauge =
+		    createStatsdMessage(name + "p95", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.95)));
+		auto p99_gauge =
+		    createStatsdMessage(name + "p99", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.99)));
+		auto p999_gauge =
+		    createStatsdMessage(name + "p99.9", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.999)));
+
+		if (!batch.statsd_message.empty()) {
+			msg += "\n";
+		}
+		msg += median_gauge;
+		msg += "\n";
+		msg += p90_gauge;
+		msg += "\n";
+		msg += p95_gauge;
+		msg += "\n";
+		msg += p99_gauge;
+		msg += "\n";
+		msg += p999_gauge;
+		batch.statsd_message += msg;
+		break;
+	}
+
+	case MetricsDataModel::OTEL: {
+		const ContinuousSample<double> emitSample = (sample.getPopulationSize() == 0) ? prev : sample;
+		batch.hists.push_back(
+		    OTELHistogram(name, emitSample.getSamples(), emitSample.min(), emitSample.max(), emitSample.sum()));
+		batch.hists.back().point.startTime = sampleTrace;
+		sampleEmit = now();
+		break;
+	}
+
+	default:
+		break;
+	}
+}
+
+void LatencySample::logSample() {
+	TraceEvent(name.c_str(), id)
+	    .detail("Count", sample.getPopulationSize())
+	    .detail("Elapsed", now() - sampleTrace)
+	    .detail("Min", sample.min())
+	    .detail("Max", sample.max())
+	    .detail("Mean", sample.mean())
+	    .detail("Median", sample.median())
+	    .detail("P25", sample.percentile(0.25))
+	    .detail("P90", sample.percentile(0.9))
+	    .detail("P95", sample.percentile(0.95))
+	    .detail("P99", sample.percentile(0.99))
+	    .detail("P99.9", sample.percentile(0.999))
+	    .trackLatest(latencySampleEventHolder->trackingKey);
+	prev.swap(sample);
+	sample.clear();
+	sampleTrace = now();
 }
