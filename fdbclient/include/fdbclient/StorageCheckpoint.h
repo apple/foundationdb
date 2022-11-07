@@ -45,7 +45,7 @@ struct CheckpointMetaData {
 
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
-	KeyRange range;
+	std::vector<KeyRange> ranges;
 	int16_t format; // CheckpointFormat.
 	UID ssID; // Storage server ID on which this checkpoint is created.
 	UID checkpointID; // A unique id for this checkpoint.
@@ -58,11 +58,15 @@ struct CheckpointMetaData {
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
-	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {}
+	  : version(invalidVersion), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
+	    referenceCount(0), gcTime(0) {
+		this->ranges.push_back(range);
+	}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(version), range(range), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {}
+	  : version(version), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending), referenceCount(0),
+	    gcTime(0) {
+		this->ranges.push_back(range);
+	}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 
@@ -73,7 +77,7 @@ struct CheckpointMetaData {
 	void setFormat(CheckpointFormat format) { this->format = static_cast<int16_t>(format); }
 
 	std::string toString() const {
-		std::string res = "Checkpoint MetaData:\nRange: " + range.toString() + "\nVersion: " + std::to_string(version) +
+		std::string res = "Checkpoint MetaData:\nRange: " + describe(ranges) + "\nVersion: " + std::to_string(version) +
 		                  "\nFormat: " + std::to_string(format) + "\nServer: " + ssID.toString() +
 		                  "\nID: " + checkpointID.toString() + "\nState: " + std::to_string(static_cast<int>(state)) +
 		                  "\n";
@@ -82,7 +86,7 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, serializedCheckpoint);
+		serializer(ar, version, ranges, format, state, checkpointID, ssID, gcTime, serializedCheckpoint);
 	}
 };
 
@@ -99,23 +103,28 @@ struct DataMoveMetaData {
 	constexpr static FileIdentifier file_identifier = 13804362;
 	UID id; // A unique id for this data move.
 	Version version;
-	KeyRange range;
+	std::vector<KeyRange> ranges;
 	int priority;
 	std::set<UID> src;
 	std::set<UID> dest;
+	std::set<UID> checkpoints;
 	int16_t phase; // DataMoveMetaData::Phase.
+	int8_t mode;
 
 	DataMoveMetaData() = default;
-	DataMoveMetaData(UID id, Version version, KeyRange range)
-	  : id(id), version(version), range(std::move(range)), priority(0) {}
-	DataMoveMetaData(UID id, KeyRange range) : id(id), version(invalidVersion), range(std::move(range)), priority(0) {}
+	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
+		this->ranges.push_back(range);
+	}
+	DataMoveMetaData(UID id, KeyRange range) : id(id), version(invalidVersion), priority(0), mode(0) {
+		this->ranges.push_back(range);
+	}
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 
 	void setPhase(Phase phase) { this->phase = static_cast<int16_t>(phase); }
 
 	std::string toString() const {
-		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + " [Range]: " + range.toString() +
+		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + " [Range]: " + describe(ranges) +
 		                  " [Phase]: " + std::to_string(static_cast<int>(phase)) +
 		                  " [Source Servers]: " + describe(src) + " [Destination Servers]: " + describe(dest);
 		return res;
@@ -123,7 +132,7 @@ struct DataMoveMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, range, phase, src, dest);
+		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode);
 	}
 };
 
