@@ -39,6 +39,7 @@
 #include "flow/Knobs.h"
 #include "flow/Util.h"
 #include "flow/IndexedSet.h"
+#include "flow/cpp20coro.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #ifdef _MSC_VER
@@ -385,10 +386,10 @@ Future<Void> mapAsync(FutureStream<T> input, F actorFunc, PromiseStream<U> outpu
 }
 
 // Waits for a future to be ready, and then applies a function to it.
-ACTOR template <class T, class F>
+template <class T, class F>
 Future<std::invoke_result_t<F, T>> map(Future<T> what, F func) {
-	T val = wait(what);
-	return func(val);
+	T val = co_await(what);
+	co_return func(val);
 }
 
 // maps a vector of futures
@@ -1088,21 +1089,21 @@ Future<Void> onEqual(Future<T> in, T equalTo) {
 	throw internal_error(); // does not happen
 }
 
-ACTOR template <class T>
+template <class T>
 Future<Void> success(Future<T> of) {
-	T t = wait(of);
+	T t = co_await(of);
 	(void)t;
-	return Void();
+	co_return Void();
 }
 
-ACTOR template <class T>
+template <class T>
 Future<Void> ready(Future<T> f) {
 	try {
-		T t = wait(f);
+		T t = co_await(f);
 		(void)t;
 	} catch (...) {
 	}
-	return Void();
+	co_return Void();
 }
 
 ACTOR template <class T>
@@ -1160,22 +1161,22 @@ Future<T> waitForFirst(std::vector<Future<T>> items) {
 	}
 }
 
-ACTOR template <class T>
+template <class T>
 Future<T> tag(Future<Void> future, T what) {
-	wait(future);
-	return what;
+	co_await(future);
+	co_return what;
 }
 
-ACTOR template <class T>
+template <class T>
 Future<Void> tag(Future<Void> future, T what, PromiseStream<T> stream) {
-	wait(future);
+	co_await(future);
 	stream.send(what);
-	return Void();
+	co_return Void();
 }
 
-ACTOR template <class T>
+template <class T>
 Future<T> tagError(Future<Void> future, Error e) {
-	wait(future);
+	co_await(future);
 	throw e;
 }
 
