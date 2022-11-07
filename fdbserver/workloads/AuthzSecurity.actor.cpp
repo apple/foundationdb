@@ -41,7 +41,7 @@ FDB_BOOLEAN_PARAM(PositiveTestcase);
 struct AuthzSecurityWorkload : TestWorkload {
 	static constexpr auto NAME = "AuthzSecurity";
 	int actorCount;
-	double testDuration;
+	double testDuration, transactionsPerSecond;
 
 	std::vector<Future<Void>> clients;
 	Arena arena;
@@ -51,17 +51,17 @@ struct AuthzSecurityWorkload : TestWorkload {
 	Standalone<StringRef> signedTokenAnotherTenant;
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
-	    publicNonTenantRequestPositive, tLogReadNegative, tLogReadReplyUnset;
+	    publicNonTenantRequestPositive, tLogReadNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
 
 	AuthzSecurityWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), crossTenantGetPositive("CrossTenantGetPositive"),
 	    crossTenantGetNegative("CrossTenantGetNegative"), crossTenantCommitPositive("CrossTenantCommitPositive"),
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
-	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
-	    tLogReadReplyUnset("TLogReadReplyUnset") {
+	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
-		actorCount = getOption(options, "actorsPerClient"_sr, 20);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond);
 		tenant = getOption(options, "tenantA"_sr, "authzSecurityTestTenant"_sr);
 		anotherTenant = getOption(options, "tenantB"_sr, "authzSecurityTestTenant"_sr);
 		tLogConfigKey = getOption(options, "tLogConfigKey"_sr, "TLogInterface"_sr);
@@ -108,7 +108,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(crossTenantCommitNegative.getMetric());
 		m.push_back(publicNonTenantRequestPositive.getMetric());
 		m.push_back(tLogReadNegative.getMetric());
-		m.push_back(tLogReadReplyUnset.getMetric());
 	}
 
 	void setAuthToken(Transaction& tr, Standalone<StringRef> token) {
@@ -120,13 +119,37 @@ struct AuthzSecurityWorkload : TestWorkload {
 			try {
 				tr->set(key, value);
 				wait(tr->commit());
-				tr->reset();
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
 		return Void();
+	}
+
+	ACTOR Future<KeyRangeLocationInfo> extractCachedLocation(Transaction* tr,
+	                                                         Database cx,
+	                                                         StringRef tenant,
+	                                                         StringRef key) {
+		loop {
+			try {
+				// trigger GetKeyServerLocationsRequest and subsequent cache update
+				Optional<Value> value = wait(tr->get(key));
+				(void)value;
+				auto loc = cx->getCachedLocation(tenant, key);
+				if (loc.present()) {
+					return loc.get();
+				} else {
+					wait(delay(0.1));
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_tag_throttled) {
+					wait(tr->onError(e));
+				} else {
+					wait(tr->onError(e));
+				}
+			}
+		}
 	}
 
 	Standalone<StringRef> randomString() {
@@ -141,20 +164,17 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                          Optional<Standalone<StringRef>> expectedValue,
 	                                          Standalone<StringRef> token,
 	                                          Database cx,
+	                                          KeyRangeLocationInfo loc,
 	                                          AuthzSecurityWorkload* self) {
 		loop {
-			auto loc = cx->getCachedLocation(tenant, key);
-			ASSERT(loc.present());
-			auto const& tenantEntry = loc.get().tenantEntry;
-			ASSERT(!tenantEntry.prefix.empty());
 			GetValueRequest req;
 			req.key = key;
 			req.version = committedVersion;
-			req.tenantInfo.tenantId = tenantEntry.id;
+			req.tenantInfo.tenantId = loc.tenantEntry.id;
 			req.tenantInfo.name = tenant;
 			req.tenantInfo.token = token;
 			try {
-				GetValueReply reply = wait(loadBalance(loc.get().locations->locations(),
+				GetValueReply reply = wait(loadBalance(loc.locations->locations(),
 				                                       &StorageServerInterface::getValue,
 				                                       req,
 				                                       TaskPriority::DefaultPromiseEndpoint,
@@ -184,13 +204,20 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Value value = self->randomString();
 		self->setAuthToken(tr, self->signedToken);
 		wait(self->setKeyValue(&tr, key, value));
-		Optional<Error> outcome = wait(self->tryGetValue(
-		    self->tenant, tr.getCommittedVersion(), key, value, self->signedTokenAnotherTenant, cx, self));
+		state Version committedVersion = tr.getCommittedVersion();
+		// refresh key location cache via get()
+		KeyRangeLocationInfo loc = wait(self->extractCachedLocation(&tr, cx, self->tenant, key));
 		if (positive) {
 			// Supposed to succeed. Expected to occasionally fail because of buggify, faultInjection, or data
 			// distribution, but should not return permission_denied
-			Optional<Error> outcome = wait(
-			    self->tryGetValue(self->tenant, tr.getCommittedVersion(), key, value, self->signedToken, cx, self));
+			Optional<Error> outcome = wait(self->tryGetValue(self->tenant,
+			                                                 committedVersion,
+			                                                 key,
+			                                                 value,
+			                                                 self->signedToken /* passing correct token */,
+			                                                 cx,
+			                                                 loc,
+			                                                 self));
 			if (!outcome.present()) {
 				++self->crossTenantGetPositive;
 			} else if (outcome.get().code() == error_code_permission_denied) {
@@ -200,6 +227,15 @@ struct AuthzSecurityWorkload : TestWorkload {
 				    .log();
 			}
 		} else {
+			Optional<Error> outcome =
+			    wait(self->tryGetValue(self->tenant,
+			                           committedVersion,
+			                           key,
+			                           value,
+			                           self->signedTokenAnotherTenant /* deliberately passing bad token */,
+			                           cx,
+			                           loc,
+			                           self));
 			// Should always fail. Expected to return permission_denied, but expected to occasionally fail with
 			// different errors
 			if (!outcome.present()) {
@@ -220,18 +256,15 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                        Value newValue,
 	                                        Version readVersion,
 	                                        Database cx,
+	                                        KeyRangeLocationInfo loc,
 	                                        AuthzSecurityWorkload* self) {
 		loop {
-			state Transaction tr(cx);
-			Version freshReadVersion = wait(tr.getReadVersion());
-			auto loc = cx->getCachedLocation(tenant, key);
-			ASSERT(loc.present());
-			auto const& tenantEntry = loc.get().tenantEntry;
+			auto const& tenantEntry = loc.tenantEntry;
 			ASSERT(!tenantEntry.prefix.empty());
 			state Key prefixedKey = key.withPrefix(tenantEntry.prefix);
 			CommitTransactionRequest req;
 			req.transaction.mutations.push_back(req.arena, MutationRef(MutationRef::SetValue, prefixedKey, newValue));
-			req.transaction.read_snapshot = std::max(readVersion, freshReadVersion);
+			req.transaction.read_snapshot = readVersion;
 			req.tenantInfo.name = tenant;
 			req.tenantInfo.token = token;
 			req.tenantInfo.tenantId = tenantEntry.id;
@@ -258,10 +291,12 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Value newValue = self->randomString();
 		self->setAuthToken(tr, self->signedToken);
 		wait(self->setKeyValue(&tr, key, value));
+		// refresh key location cache to extract tenant prefix
+		KeyRangeLocationInfo loc = wait(self->extractCachedLocation(&tr, cx, self->tenant, key));
 		if (positive) {
 			// Expected to succeed, may occasionally fail
-			Optional<Error> outcome = wait(
-			    self->tryCommit(self->tenant, self->signedToken, key, newValue, tr.getCommittedVersion(), cx, self));
+			Optional<Error> outcome = wait(self->tryCommit(
+			    self->tenant, self->signedToken, key, newValue, tr.getCommittedVersion(), cx, loc, self));
 			if (!outcome.present()) {
 				++self->crossTenantCommitPositive;
 			} else if (outcome.get().code() == error_code_permission_denied) {
@@ -272,7 +307,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			}
 		} else {
 			Optional<Error> outcome = wait(self->tryCommit(
-			    self->tenant, self->signedTokenAnotherTenant, key, newValue, tr.getCommittedVersion(), cx, self));
+			    self->tenant, self->signedTokenAnotherTenant, key, newValue, tr.getCommittedVersion(), cx, loc, self));
 			if (!outcome.present()) {
 				TraceEvent(SevError, "AuthzSecurityError")
 				    .detail("Case", "CrossTenantGetDisallowed")
@@ -287,10 +322,16 @@ struct AuthzSecurityWorkload : TestWorkload {
 
 	ACTOR Future<Void> testPublicNonTenantRequestsAllowedWithoutTokens(Database cx, AuthzSecurityWorkload* self) {
 		state Transaction tr(cx, self->tenant);
-		Version version = wait(tr.getReadVersion());
-		(void)version;
-		++self->publicNonTenantRequestPositive;
-		return Void();
+		loop {
+			try {
+				Version version = wait(tr.getReadVersion());
+				(void)version;
+				++self->publicNonTenantRequestPositive;
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 	}
 
 	ACTOR Future<Void> testTLogReadDisallowed(Database cx, AuthzSecurityWorkload* self) {
@@ -300,9 +341,18 @@ struct AuthzSecurityWorkload : TestWorkload {
 		self->setAuthToken(tr, self->signedToken);
 		wait(self->setKeyValue(&tr, key, value));
 		state Version committedVersion = tr.getCommittedVersion();
-		tr.reset();
 		self->setAuthToken(tr, self->signedToken);
-		state Optional<Value> tLogConfigString = wait(tr.get(self->tLogConfigKey));
+		state Optional<Value> tLogConfigString;
+		loop {
+			try {
+				Optional<Value> value = wait(tr.get(self->tLogConfigKey));
+				ASSERT(value.present());
+				tLogConfigString = value;
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 		ASSERT(tLogConfigString.present());
 		state LogSystemConfig logSystemConfig =
 		    ObjectReader::fromStringRef<LogSystemConfig>(tLogConfigString.get(), IncludeVersion());
@@ -312,7 +362,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			replies.push_back(
 			    log.peekMessages.getReply(TLogPeekRequest(committedVersion, Tag(0, committedVersion), false, false)));
 		}
-		waitForAll(replies);
+		wait(waitForAllReady(replies));
 		for (auto i = 0u; i < logs.size(); i++) {
 			const auto& reply = replies[i];
 			ASSERT(reply.isValid());
@@ -328,7 +378,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 				    .detail("Begin", r.begin)
 				    .detail("OnlySpilled", r.onlySpilled)
 				    .log();
-			} else if (reply.isReady()) {
+			} else {
 				ASSERT(reply.isError());
 				Error e = reply.getError();
 				if (e.code() == error_code_unauthorized_attempt) {
@@ -336,17 +386,19 @@ struct AuthzSecurityWorkload : TestWorkload {
 				} else if (e.code() != error_code_actor_cancelled) {
 					TraceEvent(SevError, "AuthzSecurityUnexpectedError").detail("Error", e.name()).log();
 				}
-			} else {
-				// not set
-				++self->tLogReadReplyUnset;
 			}
 		}
 		return Void();
 	}
 
 	ACTOR Future<Void> runTestClient(Database cx, AuthzSecurityWorkload* self) {
+		state double lastTime = now();
+		state double delay = self->actorCount / self->transactionsPerSecond;
 		try {
-			loop { wait(deterministicRandom()->randomChoice(self->testFunctions)(cx)); }
+			loop {
+				wait(poisson(&lastTime, delay));
+				wait(deterministicRandom()->randomChoice(self->testFunctions)(cx));
+			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "AuthzSecurityClient").error(e);
 			throw;
