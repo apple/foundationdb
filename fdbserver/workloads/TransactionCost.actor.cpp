@@ -34,7 +34,7 @@ class TransactionCostWorkload : public TestWorkload {
 		return bw.toValue().withPrefix(prefix);
 	}
 
-	static Value getValue(uint32_t size) { return makeString(size); }
+	static Value getValue(uint32_t size) { return ValueRef(std::string(size, '\x00')); }
 
 	static UID getDebugID(uint64_t testNumber) { return UID(testNumber << 32, testNumber << 32); }
 
