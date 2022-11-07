@@ -30,22 +30,22 @@ struct LeakTLogInterfaceWorkload : TestWorkload {
 	static constexpr auto NAME = "LeakTLogInterface";
 	TenantName tenant;
 	Standalone<StringRef> fieldName;
+	double testDuration;
 
 	LeakTLogInterfaceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 		fieldName = getOption(options, "key"_sr, "TLogInterface"_sr);
+		testDuration = getOption(options, "testDuration"_sr, 3.0);
 	}
 
-	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
+	Future<Void> setup(Database const& cx) override { return persistSerializedTLogInterface(this, cx); }
 
-	Future<Void> start(Database const& cx) override { return Void(); }
-	Future<bool> check(Database const& cx) override { return checkKeyValueExists(this, cx); }
+	Future<Void> start(Database const& cx) override { return timeout(updateLoop(this, cx), testDuration, Void()); }
+	Future<bool> check(Database const& cx) override { return true; }
 	virtual void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<bool> checkKeyValueExists(LeakTLogInterfaceWorkload* self, Database db) { return true; }
-
-	ACTOR static Future<Void> _setup(LeakTLogInterfaceWorkload* self, Database db) {
-		state Transaction tr(db, self->tenant);
+	ACTOR static Future<Void> persistSerializedTLogInterface(LeakTLogInterfaceWorkload* self, Database cx) {
+		state Transaction tr(cx, self->tenant);
 		loop {
 			ObjectWriter writer(IncludeVersion());
 			writer.serialize(self->dbInfo->get().logSystemConfig);
@@ -54,12 +54,18 @@ struct LeakTLogInterfaceWorkload : TestWorkload {
 				tr.set(self->fieldName, logSystemString);
 				wait(tr.commit());
 				TraceEvent("LeakTLogInterface").detail("BytesWritten", logSystemString.size()).log();
-				break;
+				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
-		return Void();
+	}
+
+	ACTOR static Future<Void> updateLoop(LeakTLogInterfaceWorkload* self, Database cx) {
+		loop {
+			wait(self->dbInfo->onChange());
+			wait(persistSerializedTLogInterface(self, cx));
+		}
 	}
 };
 
