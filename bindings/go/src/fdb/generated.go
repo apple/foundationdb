@@ -251,9 +251,14 @@ func (o NetworkOptions) SetFutureVersionClientLibrary(param string) error {
 	return o.setOpt(66, []byte(param))
 }
 
+// Retain temporary external client library copies that are created for enabling multi-threading.
+func (o NetworkOptions) SetRetainClientLibraryCopies() error {
+	return o.setOpt(67, nil)
+}
+
 // Ignore the failure to initialize some of the external clients
 func (o NetworkOptions) SetIgnoreExternalClientFailures() error {
-	return o.setOpt(67, nil)
+	return o.setOpt(68, nil)
 }
 
 // Disables logging of client statistics, such as sampled transaction activity.
