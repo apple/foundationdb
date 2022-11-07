@@ -52,29 +52,7 @@ private:
 	};
 	std::vector<OpType> excludedOpTypes;
 
-	void setup(TTaskFct cont) override {
-		fdb::Key begin = { 0x00 };
-		fdb::Key end = { 0xff };
-		auto verifyVersion = std::make_shared<int64_t>(-1);
-
-		execOperation(
-		    [begin, end, verifyVersion](auto ctx) {
-			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
-			    ctx->continueAfter(f, [ctx, verifyVersion, f]() {
-				    *verifyVersion = f.get<fdb::future_var::Int64>();
-				    ctx->done();
-			    });
-		    },
-		    [this, begin, end, verifyVersion, cont]() {
-			    if (*verifyVersion == -1) {
-				    schedule([this, cont]() { setup(cont); });
-			    } else {
-				    schedule(cont);
-			    }
-		    },
-		    /*tenant=*/{},
-		    /* failOnError = */ false);
-	}
+	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
 
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	// FIXME: should still guarantee a read succeeds eventually somehow
@@ -84,13 +62,9 @@ private:
 
 	inline bool seenReadSuccess(std::optional<int> tenantId) { return tenantsWithReadSuccess.count(tenantId); }
 
-	std::string debugTenantStr(std::optional<int> tenantId) {
-		return tenantId.has_value() ? fmt::format(" (tenant {0})", tenantId.value()) : "";
-	}
-
 	void debugOp(std::string opName, fdb::Key begin, fdb::Key end, std::optional<int> tenantId, std::string message) {
 		if (BG_API_DEBUG_VERBOSE) {
-			info(fmt::format("{0}: [{1} - {2}){3}: {4}",
+			info(fmt::format("{0}: [{1} - {2}) {3}: {4}",
 			                 opName,
 			                 fdb::toCharsRef(begin),
 			                 fdb::toCharsRef(end),
@@ -140,7 +114,7 @@ private:
 				    results.get()->assign(resVector.begin(), resVector.end());
 				    bool previousSuccess = seenReadSuccess(tenantId);
 				    if (!previousSuccess) {
-					    info(fmt::format("Read{0}: first success\n", debugTenantStr(tenantId)));
+					    info(fmt::format("Read {0}: first success\n", debugTenantStr(tenantId)));
 					    setReadSuccess(tenantId);
 				    } else {
 					    debugOp("Read", begin, end, tenantId, "complete");
@@ -365,7 +339,7 @@ private:
 			    if (*verifyVersion == -1) {
 				    ASSERT(!previousSuccess);
 			    } else if (!previousSuccess) {
-				    info(fmt::format("Verify{0}: first success\n", debugTenantStr(tenantId)));
+				    info(fmt::format("Verify {0}: first success\n", debugTenantStr(tenantId)));
 				    setReadSuccess(tenantId);
 			    }
 			    schedule(cont);
