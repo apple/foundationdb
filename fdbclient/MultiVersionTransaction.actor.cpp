@@ -807,7 +807,7 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 	*(void**)(fp) = loadFunction(lib, functionName);
 	if (*fp == nullptr && requireFunction) {
 		TraceEvent(SevError, "ErrorLoadingFunction").detail("LibraryPath", libPath).detail("Function", functionName);
-		throw platform_error();
+		throw api_function_missing();
 	}
 }
 

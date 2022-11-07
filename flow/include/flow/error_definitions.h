@@ -267,6 +267,7 @@ ERROR( api_version_unset, 2200, "API version is not set" )
 ERROR( api_version_already_set, 2201, "API version may be set only once" )
 ERROR( api_version_invalid, 2202, "API version not valid" )
 ERROR( api_version_not_supported, 2203, "API version not supported" )
+ERROR( api_function_missing, 2204, "Failed to load a required FDB API function." )
 ERROR( exact_mode_without_limits, 2210, "EXACT streaming mode requires limits, but none were given" )
 
 ERROR( invalid_tuple_data_type, 2250, "Unrecognized data type in packed tuple")
