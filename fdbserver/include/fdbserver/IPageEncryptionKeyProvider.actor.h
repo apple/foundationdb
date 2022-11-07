@@ -26,6 +26,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 
 #include "fdbserver/EncryptionOpsUtils.h"
@@ -339,7 +340,7 @@ public:
 
 	std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key, Optional<int64_t> possibleDomainId) override {
 		// System key.
-		if (key.startsWith("\xff"_sr)) {
+		if (key.startsWith(systemKeys.begin)) {
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, 2 };
 		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
