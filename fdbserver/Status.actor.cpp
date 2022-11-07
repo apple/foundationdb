@@ -2843,8 +2843,8 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(primaryV, loadStorageWiggleMetrics(tr, true)) &&
-			     store(remoteV, loadStorageWiggleMetrics(tr, false)));
+			wait(store(primaryV, loadStorageWiggleMetrics(tr, PrimaryRegion(true))) &&
+			     store(remoteV, loadStorageWiggleMetrics(tr, PrimaryRegion(false))));
 			return std::make_pair(primaryV, remoteV);
 		} catch (Error& e) {
 			wait(tr->onError(e));

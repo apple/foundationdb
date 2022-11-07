@@ -185,8 +185,8 @@ Future<Void> StorageWiggler::resetStats() {
 	metrics = newMetrics;
 	return runRYWTransaction(teamCollection->dbContext(),
 	                         [this, &newMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		                         return updateStorageWiggleMetrics(tr, newMetrics, teamCollection->isPrimary());
-	                         });
+		    return updateStorageWiggleMetrics(tr, newMetrics, PrimaryRegion(teamCollection->isPrimary()));
+	    });
 }
 
 Future<Void> StorageWiggler::restoreStats() {
@@ -200,7 +200,7 @@ Future<Void> StorageWiggler::restoreStats() {
 	auto readFuture =
 	    runRYWTransaction(teamCollection->dbContext(),
 	                      [this](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<StorageWiggleMetrics>> {
-		                      return loadStorageWiggleMetrics(tr, teamCollection->isPrimary());
+		                      return loadStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()));
 	                      });
 	return map(readFuture, assignFunc);
 }
@@ -212,8 +212,8 @@ Future<Void> StorageWiggler::startWiggle() {
 	}
 	return runRYWTransaction(teamCollection->dbContext(),
 	                         [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		                         return updateStorageWiggleMetrics(tr, metrics, teamCollection->isPrimary());
-	                         });
+		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	    });
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -230,8 +230,8 @@ Future<Void> StorageWiggler::finishWiggle() {
 	}
 	return runRYWTransaction(teamCollection->dbContext(),
 	                         [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		                         return updateStorageWiggleMetrics(tr, metrics, teamCollection->isPrimary());
-	                         });
+		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	    });
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
