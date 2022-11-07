@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_G_H)
 #define FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_G_H
 #include "fdbclient/StorageWiggleMetrics.actor.g.h"
@@ -29,6 +30,8 @@
 #include "flow/serialize.h"
 #include "fdbclient/Status.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+FDB_DECLARE_BOOLEAN_PARAM(PrimaryRegion);
 
 struct StorageWiggleMetrics {
 	constexpr static FileIdentifier file_identifier = 4728961;
@@ -95,7 +98,7 @@ struct StorageWiggleMetrics {
 
 // read from DB
 ACTOR template <typename TxnType>
-Future<Optional<StorageWiggleMetrics>> loadStorageWiggleMetrics(TxnType tr, bool primary) {
+Future<Optional<StorageWiggleMetrics>> loadStorageWiggleMetrics(TxnType tr, PrimaryRegion primary) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	auto f = tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
@@ -108,7 +111,7 @@ Future<Optional<StorageWiggleMetrics>> loadStorageWiggleMetrics(TxnType tr, bool
 
 // update the serialized metrics when the perpetual wiggle is enabled
 ACTOR template <typename TxnType>
-Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics, bool primary) {
+Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics, PrimaryRegion primary) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	auto f = tr->get(perpetualStorageWiggleKey);
@@ -122,7 +125,7 @@ Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics
 
 // set all fields except for smoothed durations to default values
 ACTOR template <class TrType>
-Future<Void> resetStorageWiggleMetrics(TrType tr, bool primary) {
+Future<Void> resetStorageWiggleMetrics(TrType tr, PrimaryRegion primary) {
 	state Optional<StorageWiggleMetrics> metrics = wait(loadStorageWiggleMetrics(tr, primary));
 	if (metrics.present()) {
 		auto oldStepDuration = metrics.get().smoothed_wiggle_duration;
