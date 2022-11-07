@@ -38,6 +38,7 @@ from tmp_cluster import TempCluster
 from local_cluster import TLSConfig
 # fmt: on
 
+
 TESTER_STATS_INTERVAL_SEC = 5
 
 
