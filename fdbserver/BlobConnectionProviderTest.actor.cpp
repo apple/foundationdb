@@ -176,8 +176,7 @@ TEST_CASE("/fdbserver/blob/connectionprovider") {
 	providers.reserve(settings.numProviders);
 	for (int i = 0; i < settings.numProviders; i++) {
 		std::string nameStr = std::to_string(i);
-		BlobMetadataDomainName name(nameStr);
-		auto metadata = createRandomTestBlobMetadata(SERVER_KNOBS->BG_URL, i, name);
+		auto metadata = createRandomTestBlobMetadata(SERVER_KNOBS->BG_URL, i);
 		providers.emplace_back(BlobConnectionProvider::newBlobConnectionProvider(metadata));
 	}
 	fmt::print("BlobConnectionProviderTest\n");

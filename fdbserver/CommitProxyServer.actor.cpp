@@ -909,10 +909,8 @@ Optional<TenantName> getTenantName(ProxyCommitData* commitData, int64_t tenantId
 	return Optional<TenantName>();
 }
 
-std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromMutationRef(ProxyCommitData* commitData,
-                                                                                           MutationRef m) {
-	std::pair<EncryptCipherDomainName, EncryptCipherDomainId> details(EncryptCipherDomainName(),
-	                                                                  INVALID_ENCRYPT_DOMAIN_ID);
+EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitData, MutationRef m) {
+	EncryptCipherDomainId domainId = INVALID_ENCRYPT_DOMAIN_ID;
 
 	// Possible scenarios:
 	// 1. Encryption domain (Tenant details) weren't explicitly provided, extract Tenant details using
@@ -921,8 +919,7 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 
 	if (isSystemKey(m.param1)) {
 		// Encryption domain == FDB SystemKeyspace encryption domain
-		details.first = EncryptCipherDomainName(FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
-		details.second = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+		domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 	} else if (commitData->tenantMap.empty()) {
 		// Cluster serves no-tenants; use 'default encryption domain'
 	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
@@ -935,8 +932,7 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				Optional<TenantName> tenantName = getTenantName(commitData, tenantId);
 				if (tenantName.present()) {
-					details.first = tenantName.get();
-					details.second = tenantId;
+					domainId = tenantId;
 				}
 			} else {
 				// Leverage 'default encryption domain'
@@ -955,17 +951,13 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 	}
 
 	// Unknown tenant, fallback to fdb default encryption domain
-	if (details.second == INVALID_ENCRYPT_DOMAIN_ID) {
-		ASSERT_EQ(details.first.size(), 0);
-		details.first = EncryptCipherDomainName(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
-		details.second = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+	if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
+		domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 
 		CODE_PROBE(true, "Default domain mutation encryption");
 	}
 
-	ASSERT_GT(details.first.size(), 0);
-
-	return details;
+	return domainId;
 }
 
 } // namespace
@@ -1013,35 +1005,32 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
-		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME },
-			{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
-		};
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = defaultDomains;
+		static const std::unordered_set<EncryptCipherDomainId> defaultDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                                        ENCRYPT_HEADER_DOMAIN_ID,
+			                                                                        FDB_DEFAULT_ENCRYPT_DOMAIN_ID };
+		std::unordered_set<EncryptCipherDomainId> encryptDomainIds = defaultDomainIds;
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
 			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
-				encryptDomains[tenantId] = Standalone(tenantName.get(), tenantInfo.arena);
+				encryptDomainIds.emplace(tenantId);
 			} else {
 				// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
 				if (pProxyCommitData->tenantMap.size() > 0) {
 					for (auto m : trs[t].transaction.mutations) {
-						std::pair<EncryptCipherDomainName, int64_t> details =
-						    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
-						encryptDomains[details.second] = details.first;
+						EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, m);
+						encryptDomainIds.emplace(domainId);
 					}
 				} else {
 					// Ensure default encryption domain-ids are present.
-					ASSERT_EQ(encryptDomains.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
-					ASSERT_EQ(encryptDomains.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
+					ASSERT_EQ(encryptDomainIds.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
+					ASSERT_EQ(encryptDomainIds.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
 				}
 			}
 		}
-		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains, BlobCipherMetrics::TLOG);
+		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomainIds, BlobCipherMetrics::TLOG);
 	}
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
@@ -1303,11 +1292,9 @@ ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContex
 	ASSERT(self->pProxyCommitData->isEncryptionEnabled);
 	ASSERT_NE((MutationRef::Type)mutation->type, MutationRef::Type::ClearRange);
 
-	std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
-	    getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
-	domainId = p.second;
+	domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
 	Reference<BlobCipherKey> cipherKey =
-	    wait(getLatestEncryptCipherKey(self->pProxyCommitData->db, domainId, p.first, BlobCipherMetrics::TLOG));
+	    wait(getLatestEncryptCipherKey(self->pProxyCommitData->db, domainId, BlobCipherMetrics::TLOG));
 	self->cipherKeys[domainId] = cipherKey;
 
 	CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
@@ -1355,10 +1342,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			}
 		} else {
 			if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
-				std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
-				    getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
-				domainId = p.second;
-
+				domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
 				if (self->cipherKeys.find(domainId) == self->cipherKeys.end()) {
 					return writeMutationFetchEncryptKey(self, tenantId, mutation, arena);
 				}
@@ -1583,9 +1567,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						    encryptedMutation.present()) {
 							backupMutation = encryptedMutation.get();
 						} else {
-							std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+							EncryptCipherDomainId domainId =
 							    getEncryptDetailsFromMutationRef(self->pProxyCommitData, backupMutation);
-							EncryptCipherDomainId domainId = p.second;
 							backupMutation =
 							    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
 						}
@@ -1695,10 +1678,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                            self->toCommit.addTags(tags);
 		                            if (self->pProxyCommitData->isEncryptionEnabled) {
 			                            CODE_PROBE(true, "encrypting idempotency mutation");
-			                            std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+			                            EncryptCipherDomainId domainId =
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
 			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
-			                                self->cipherKeys, p.second, self->arena, BlobCipherMetrics::TLOG);
+			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
 			                            self->toCommit.writeTypedMessage(encryptedMutation);
 		                            } else {
 			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
@@ -2749,12 +2732,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	if (pContext->pCommitData->isEncryptionEnabled) {
-		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
-		};
+		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-		    wait(getLatestEncryptCipherKeys(pContext->pCommitData->db, metadataDomains, BlobCipherMetrics::TLOG));
+		    wait(getLatestEncryptCipherKeys(pContext->pCommitData->db, metadataDomainIds, BlobCipherMetrics::TLOG));
 		cipherKeys = cks;
 	}
 

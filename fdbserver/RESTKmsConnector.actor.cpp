@@ -60,7 +60,6 @@ const char* BASE_CIPHER_ID_TAG = "base_cipher_id";
 const char* BASE_CIPHER_TAG = "baseCipher";
 const char* CIPHER_KEY_DETAILS_TAG = "cipher_key_details";
 const char* ENCRYPT_DOMAIN_ID_TAG = "encrypt_domain_id";
-const char* ENCRYPT_DOMAIN_NAME_TAG = "encrypt_domain_name";
 const char* REFRESH_AFTER_SEC = "refresh_after_sec";
 const char* EXPIRE_AFTER_SEC = "expire_after_sec";
 const char* ERROR_TAG = "error";
@@ -83,7 +82,6 @@ const char* QUERY_MODE_LOOKUP_BY_KEY_ID = "lookupByKeyId";
 
 const char* BLOB_METADATA_DETAILS_TAG = "blob_metadata_details";
 const char* BLOB_METADATA_DOMAIN_ID_TAG = "domain_id";
-const char* BLOB_METADATA_DOMAIN_NAME_TAG = "domain_name";
 const char* BLOB_METADATA_BASE_LOCATION_TAG = "base_location";
 const char* BLOB_METADATA_PARTITIONS_TAG = "partitions";
 
@@ -477,21 +475,15 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		}
 
 		const bool isDomainIdPresent = detail.HasMember(BLOB_METADATA_DOMAIN_ID_TAG);
-		const bool isDomainNamePresent = detail.HasMember(BLOB_METADATA_DOMAIN_NAME_TAG);
 		const bool isBasePresent = detail.HasMember(BLOB_METADATA_BASE_LOCATION_TAG);
 		const bool isPartitionsPresent = detail.HasMember(BLOB_METADATA_PARTITIONS_TAG);
-		if (!isDomainIdPresent || !isDomainNamePresent || (!isBasePresent && !isPartitionsPresent)) {
+		if (!isDomainIdPresent || (!isBasePresent && !isPartitionsPresent)) {
 			TraceEvent(SevWarn, "ParseBlobMetadataResponseMalformedDetail", ctx->uid)
 			    .detail("DomainIdPresent", isDomainIdPresent)
-			    .detail("DomainNamePresent", isDomainNamePresent)
 			    .detail("BaseLocationPresent", isBasePresent)
 			    .detail("PartitionsPresent", isPartitionsPresent);
 			throw operation_failed();
 		}
-
-		const int domainNameLen = detail[BLOB_METADATA_DOMAIN_NAME_TAG].GetStringLength();
-		std::unique_ptr<uint8_t[]> domainName = std::make_unique<uint8_t[]>(domainNameLen);
-		memcpy(domainName.get(), detail[BLOB_METADATA_DOMAIN_NAME_TAG].GetString(), domainNameLen);
 
 		std::unique_ptr<uint8_t[]> baseStr;
 		Optional<StringRef> base;
@@ -524,13 +516,8 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		                       : std::numeric_limits<double>::max();
 		double expireAt = detail.HasMember(EXPIRE_AFTER_SEC) ? now() + detail[EXPIRE_AFTER_SEC].GetInt64()
 		                                                     : std::numeric_limits<double>::max();
-		result.emplace_back_deep(result.arena(),
-		                         detail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64(),
-		                         StringRef(domainName.get(), domainNameLen),
-		                         base,
-		                         partitions,
-		                         refreshAt,
-		                         expireAt);
+		result.emplace_back_deep(
+		    result.arena(), detail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64(), base, partitions, refreshAt, expireAt);
 	}
 
 	checkDocForNewKmsUrls(ctx, resp, doc);
@@ -550,21 +537,15 @@ void addQueryModeSection(Reference<RESTKmsConnectorCtx> ctx, rapidjson::Document
 void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
                                  const char* rootTagName,
                                  const char* idTagName,
-                                 const char* nameTagName,
-                                 const VectorRef<KmsConnLookupDomainIdsReqInfoRef>& details) {
+                                 const std::vector<EncryptCipherDomainId>& domainIds) {
 	rapidjson::Value keyIdDetails(rapidjson::kArrayType);
-	for (const auto& detail : details) {
+	for (const auto domId : domainIds) {
 		rapidjson::Value keyIdDetail(rapidjson::kObjectType);
 
 		rapidjson::Value key(idTagName, doc.GetAllocator());
 		rapidjson::Value domainId;
-		domainId.SetInt64(detail.domainId);
-		keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
-
-		key.SetString(nameTagName, doc.GetAllocator());
-		rapidjson::Value domainName;
-		domainName.SetString(detail.domainName.toString().c_str(), detail.domainName.size(), doc.GetAllocator());
-		keyIdDetail.AddMember(key, domainName, doc.GetAllocator());
+		domainId.SetInt64(domId);
+		keyIdDetail.AddMember(key, domId, doc.GetAllocator());
 
 		keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
 	}
@@ -635,7 +616,6 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	//     {
 	//        "base_cipher_id"      : <cipherKeyId>
 	//        "encrypt_domain_id"   : <domainId>
-	//        "encrypt_domain_name" : <domainName>
 	//     },
 	//     {
 	//         ....
@@ -676,12 +656,6 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 		rapidjson::Value domainId;
 		domainId.SetInt64(detail.domainId);
 		keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
-
-		// Add 'encrypt_domain_name'
-		key.SetString(ENCRYPT_DOMAIN_NAME_TAG, doc.GetAllocator());
-		rapidjson::Value domainName;
-		domainName.SetString(detail.domainName.toString().c_str(), detail.domainName.size(), doc.GetAllocator());
-		keyIdDetail.AddMember(key, domainName, doc.GetAllocator());
 
 		// push above object to the array
 		keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
@@ -817,7 +791,6 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	//   "cipher_key_details" = [
 	//     {
 	//        "encrypt_domain_id"   : <domainId>
-	//        "encrypt_domain_name" : <domainName>
 	//     },
 	//     {
 	//         ....
@@ -843,8 +816,7 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	addQueryModeSection(ctx, doc, QUERY_MODE_LOOKUP_BY_DOMAIN_ID);
 
 	// Append 'cipher_key_details' as json array
-	addLatestDomainDetailsToDoc(
-	    doc, CIPHER_KEY_DETAILS_TAG, ENCRYPT_DOMAIN_ID_TAG, ENCRYPT_DOMAIN_NAME_TAG, req.encryptDomainInfos);
+	addLatestDomainDetailsToDoc(doc, CIPHER_KEY_DETAILS_TAG, ENCRYPT_DOMAIN_ID_TAG, req.encryptDomainIds);
 
 	// Append 'validation_tokens' as json array
 	addValidationTokensSectionToJsonDoc(ctx, doc);
@@ -900,7 +872,6 @@ StringRef getBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	//   "blob_metadata_details" = [
 	//     {
 	//        "domain_id"   : <domainId>
-	//        "domain_name" : <domainName>
 	//     },
 	//     {
 	//         ....
@@ -923,8 +894,7 @@ StringRef getBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	doc.SetObject();
 
 	// Append 'blob_metadata_details' as json array
-	addLatestDomainDetailsToDoc(
-	    doc, BLOB_METADATA_DETAILS_TAG, BLOB_METADATA_DOMAIN_ID_TAG, BLOB_METADATA_DOMAIN_NAME_TAG, req.domainInfos);
+	addLatestDomainDetailsToDoc(doc, BLOB_METADATA_DETAILS_TAG, BLOB_METADATA_DOMAIN_ID_TAG, req.domainIds);
 
 	// Append 'validation_tokens' as json array
 	addValidationTokensSectionToJsonDoc(ctx, doc);
@@ -940,7 +910,7 @@ StringRef getBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
 
-	StringRef ref = makeString(sb.GetSize(), req.domainInfos.arena());
+	StringRef ref = makeString(sb.GetSize(), req.arena);
 	memcpy(mutateString(ref), sb.GetString(), sb.GetSize());
 	return ref;
 }
@@ -1367,11 +1337,6 @@ void getFakeBlobMetadataResponse(StringRef jsonReqRef,
 		domainId.SetInt64(detail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64());
 		keyDetail.AddMember(key, domainId, resDoc.GetAllocator());
 
-		key.SetString(BLOB_METADATA_DOMAIN_NAME_TAG, resDoc.GetAllocator());
-		rapidjson::Value domainName;
-		domainName.SetString(detail[BLOB_METADATA_DOMAIN_NAME_TAG].GetString(), resDoc.GetAllocator());
-		keyDetail.AddMember(key, domainName, resDoc.GetAllocator());
-
 		int type = deterministicRandom()->randomInt(0, 3);
 		if (type == 0 || type == 1) {
 			key.SetString(BLOB_METADATA_BASE_LOCATION_TAG, resDoc.GetAllocator());
@@ -1421,9 +1386,7 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	const int nKeys = deterministicRandom()->randomInt(7, 8);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainNameRef domainName = domainId < 0 ? StringRef(arena, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME)
-		                                                     : StringRef(arena, std::to_string(domainId));
-		req.encryptKeyInfos.emplace_back_deep(req.arena, domainId, i, domainName);
+		req.encryptKeyInfos.emplace_back(domainId, i);
 		keyMap[i] = domainId;
 	}
 
@@ -1454,15 +1417,12 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 
 void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena& arena) {
 	KmsConnLookupEKsByDomainIdsReq req;
-	std::unordered_map<EncryptCipherDomainId, KmsConnLookupDomainIdsReqInfoRef> domainInfoMap;
+	std::unordered_set<EncryptCipherDomainId> domainIds;
 	const int nKeys = deterministicRandom()->randomInt(7, 25);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainNameRef domainName = domainId < 0 ? StringRef(arena, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME)
-		                                                     : StringRef(arena, std::to_string(domainId));
-		KmsConnLookupDomainIdsReqInfoRef reqInfo(req.arena, domainId, domainName);
-		if (domainInfoMap.insert({ domainId, reqInfo }).second) {
-			req.encryptDomainInfos.push_back(req.arena, reqInfo);
+		if (domainIds.insert(domainId).second) {
+			req.encryptDomainIds.push_back(domainId);
 		}
 	}
 
@@ -1476,9 +1436,9 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("HttpRespStr", httpResp->content);
 
 	Standalone<VectorRef<EncryptCipherKeyDetailsRef>> cipherDetails = parseEncryptCipherResponse(ctx, httpResp);
-	ASSERT_EQ(domainInfoMap.size(), cipherDetails.size());
+	ASSERT_EQ(domainIds.size(), cipherDetails.size());
 	for (const auto& detail : cipherDetails) {
-		ASSERT(domainInfoMap.find(detail.encryptDomainId) != domainInfoMap.end());
+		ASSERT(domainIds.find(detail.encryptDomainId) != domainIds.end());
 		ASSERT_EQ(detail.encryptKey.size(), sizeof(BASE_CIPHER_KEY_TEST));
 		ASSERT_EQ(memcmp(detail.encryptKey.begin(), &BASE_CIPHER_KEY_TEST[0], sizeof(BASE_CIPHER_KEY_TEST)), 0);
 	}
@@ -1489,14 +1449,12 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 
 void testGetBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx) {
 	KmsConnBlobMetadataReq req;
-	std::unordered_map<BlobMetadataDomainId, KmsConnLookupDomainIdsReqInfoRef> domainInfoMap;
+	std::unordered_set<BlobMetadataDomainId> domainIds;
 	const int nKeys = deterministicRandom()->randomInt(7, 25);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = deterministicRandom()->randomInt(0, 1000);
-		EncryptCipherDomainNameRef domainName(req.domainInfos.arena(), std::to_string(domainId));
-		KmsConnLookupDomainIdsReqInfoRef reqInfo(req.domainInfos.arena(), domainId, domainName);
-		if (domainInfoMap.insert({ domainId, reqInfo }).second) {
-			req.domainInfos.push_back_deep(req.domainInfos.arena(), reqInfo);
+		if (domainIds.insert(domainId).second) {
+			req.domainIds.push_back(domainId);
 		}
 	}
 
@@ -1512,11 +1470,10 @@ void testGetBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx) {
 
 	Standalone<VectorRef<BlobMetadataDetailsRef>> details = parseBlobMetadataResponse(ctx, httpResp);
 
-	ASSERT_EQ(domainInfoMap.size(), details.size());
+	ASSERT_EQ(domainIds.size(), details.size());
 	for (const auto& detail : details) {
-		auto it = domainInfoMap.find(detail.domainId);
-		ASSERT(it != domainInfoMap.end());
-		ASSERT(it->second.domainName == std::to_string(it->first));
+		auto it = domainIds.find(detail.domainId);
+		ASSERT(it != domainIds.end());
 	}
 	if (refreshKmsUrls) {
 		validateKmsUrls(ctx);
