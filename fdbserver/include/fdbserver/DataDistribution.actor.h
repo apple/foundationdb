@@ -31,7 +31,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
-#include "fdbserver/StorageWiggleMetrics.actor.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 
