@@ -470,8 +470,10 @@ int main(int argc, char** argv) {
 			retCode = 1;
 		}
 
+		fprintf(stderr, "Stopping FDB network thread\n");
 		fdb_check(fdb::network::stop(), "Failed to stop FDB thread");
 		network_thread.join();
+		fprintf(stderr, "FDB network thread successfully stopped\n");
 	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		retCode = 1;
