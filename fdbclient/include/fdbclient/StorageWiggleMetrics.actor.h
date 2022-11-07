@@ -123,10 +123,16 @@ Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics
 	return Void();
 }
 
-// set all fields except for smoothed durations to default values
+// set all fields except for smoothed durations to default values. If the metrics is not given, load from system key
+// space
 ACTOR template <class TrType>
-Future<Void> resetStorageWiggleMetrics(TrType tr, PrimaryRegion primary) {
-	state Optional<StorageWiggleMetrics> metrics = wait(loadStorageWiggleMetrics(tr, primary));
+Future<Void> resetStorageWiggleMetrics(TrType tr,
+                                       PrimaryRegion primary,
+                                       Optional<StorageWiggleMetrics> metrics = Optional<StorageWiggleMetrics>()) {
+	if (!metrics.present()) {
+		wait(store(metrics, loadStorageWiggleMetrics(tr, primary)));
+	}
+
 	if (metrics.present()) {
 		auto oldStepDuration = metrics.get().smoothed_wiggle_duration;
 		auto oldRoundDuration = metrics.get().smoothed_round_duration;
