@@ -2051,8 +2051,10 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 			// NOTE: the DD throttling relies on DDQueue
 			delayF = delay(SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
 				if (!val.present()) {
@@ -2141,8 +2143,10 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueue* self, int teamCollectionIndex) {
 		try {
 			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
 				if (!val.present()) {
@@ -2240,8 +2244,10 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 		try {
 			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
 				if (!val.present()) {

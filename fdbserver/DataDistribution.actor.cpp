@@ -205,6 +205,9 @@ ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 ACTOR Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
 	state Transaction tr(cx);
 	loop {
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
 			Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 			if (!mode.present() && ddEnabledState->isDDEnabled())
