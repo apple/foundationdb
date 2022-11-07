@@ -553,7 +553,9 @@ inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
 		return allKeysEnd;
 	}
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRef(t, key.size() + 1);
 }
@@ -564,7 +566,9 @@ inline Key keyAfter(const KeyRef& key) {
 }
 inline KeyRangeRef singleKeyRange(KeyRef const& key, Arena& arena) {
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRangeRef(KeyRef(t, key.size()), KeyRef(t, key.size() + 1));
 }

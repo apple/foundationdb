@@ -1802,75 +1802,77 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	}
 
 	state double workStart = now();
-
-	state Version poppedVer = poppedVersion(logData, reqTag);
-
-	auto tagData = logData->getTagData(reqTag);
-	bool tagRecovered = tagData && !tagData->unpoppedRecovered;
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
-	    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-	    !reqReturnIfBlocked && tagRecovered) {
-		state double startTime = now();
-		// TODO (version vector) check if this should be included in "status details" json
-		// TODO (version vector) all tags may be too many, instead,  standard deviation?
-		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
-		double latency = now() - startTime;
-		if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
-			UID ssID = nondeterministicRandom()->randomUniqueID();
-			std::string s = "BlockingPeekLatencies-" + reqTag.toString();
-			logData->blockingPeekLatencies.try_emplace(
-			    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
-		}
-		LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
-		sample.addMeasurement(latency);
-		poppedVer = poppedVersion(logData, reqTag);
-	}
-
-	DebugLogTraceEvent("TLogPeekMessages2", self->dbgid)
-	    .detail("LogId", logData->logId)
-	    .detail("Tag", reqTag.toString())
-	    .detail("ReqBegin", reqBegin)
-	    .detail("PoppedVer", poppedVer);
-	if (poppedVer > reqBegin) {
-		TLogPeekReply rep;
-		rep.maxKnownVersion = logData->version.get();
-		rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-		rep.popped = poppedVer;
-		rep.end = poppedVer;
-		rep.onlySpilled = false;
-
-		if (reqSequence.present()) {
-			auto& trackerData = logData->peekTracker[peekId];
-			auto& sequenceData = trackerData.sequence_version[sequence + 1];
-			trackerData.lastUpdate = now();
-			if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
-				replyPromise.sendError(operation_obsolete());
-				if (!sequenceData.isSet())
-					sequenceData.sendError(operation_obsolete());
-				return Void();
-			}
-			if (sequenceData.isSet()) {
-				if (sequenceData.getFuture().get().first != rep.end) {
-					CODE_PROBE(true, "tlog peek second attempt ended at a different version");
-					replyPromise.sendError(operation_obsolete());
-					return Void();
-				}
-			} else {
-				sequenceData.send(std::make_pair(rep.end, rep.onlySpilled));
-			}
-			rep.begin = reqBegin;
-		}
-
-		replyPromise.send(rep);
-		return Void();
-	}
-
+	state Version poppedVer;
 	state Version endVersion;
 	state bool onlySpilled;
 
 	// Run the peek logic in a loop to account for the case where there is no data to return to the caller, and we may
 	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
 	loop {
+		poppedVer = poppedVersion(logData, reqTag);
+
+		auto tagData = logData->getTagData(reqTag);
+		bool tagRecovered = tagData && !tagData->unpoppedRecovered;
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
+		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
+		    !reqReturnIfBlocked && tagRecovered) {
+			state double startTime = now();
+			// TODO (version vector) check if this should be included in "status details" json
+			// TODO (version vector) all tags may be too many, instead,  standard deviation?
+			wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+			double latency = now() - startTime;
+			if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
+				UID ssID = nondeterministicRandom()->randomUniqueID();
+				std::string s = "BlockingPeekLatencies-" + reqTag.toString();
+				logData->blockingPeekLatencies.try_emplace(
+				    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+			}
+			LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
+			sample.addMeasurement(latency);
+			poppedVer = poppedVersion(logData, reqTag);
+		}
+
+		DebugLogTraceEvent("TLogPeekMessages2", self->dbgid)
+		    .detail("LogId", logData->logId)
+		    .detail("Tag", reqTag.toString())
+		    .detail("ReqBegin", reqBegin)
+		    .detail("PoppedVer", poppedVer);
+		if (poppedVer > reqBegin) {
+			TLogPeekReply rep;
+			rep.maxKnownVersion = logData->version.get();
+			rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+			rep.popped = poppedVer;
+			rep.end = poppedVer;
+			rep.onlySpilled = false;
+
+			if (reqSequence.present()) {
+				auto& trackerData = logData->peekTracker[peekId];
+				auto& sequenceData = trackerData.sequence_version[sequence + 1];
+				trackerData.lastUpdate = now();
+				if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
+					replyPromise.sendError(operation_obsolete());
+					if (!sequenceData.isSet())
+						sequenceData.sendError(operation_obsolete());
+					return Void();
+				}
+				if (sequenceData.isSet()) {
+					if (sequenceData.getFuture().get().first != rep.end) {
+						CODE_PROBE(true, "tlog peek second attempt ended at a different version");
+						replyPromise.sendError(operation_obsolete());
+						return Void();
+					}
+				} else {
+					sequenceData.send(std::make_pair(rep.end, rep.onlySpilled));
+				}
+				rep.begin = reqBegin;
+			}
+
+			replyPromise.send(rep);
+			return Void();
+		}
+
+		ASSERT(reqBegin >= poppedVersion(logData, reqTag));
+
 		endVersion = logData->version.get() + 1;
 		onlySpilled = false;
 

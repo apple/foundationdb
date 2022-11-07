@@ -4356,6 +4356,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
 	state Span span("NAPI:getRange"_loc, trState->spanContext);
+	state Optional<UID> getRangeID = Optional<UID>();
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
@@ -4440,11 +4441,14 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.spanContext = span.context;
+			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				getRangeID = nondeterministicRandom()->randomUniqueID();
+				g_traceBatch.addAttach(
+				    "TransactionAttachID", trState->readOptions.get().debugID.get().first(), getRangeID.get().first());
+			}
 			try {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Before");
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
@@ -4484,9 +4488,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					throw;
 				}
 
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
+					                      getRangeID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
 					/*TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
@@ -4600,11 +4604,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				}
 
 			} catch (Error& e) {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Error");
-					TraceEvent("TransactionDebugError", trState->readOptions.get().debugID.get()).error(e);
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Error");
+					TraceEvent("TransactionDebugError", getRangeID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
