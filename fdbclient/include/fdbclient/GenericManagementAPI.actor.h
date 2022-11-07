@@ -42,6 +42,7 @@ the contents of the system key space.
 #include "fdbclient/Metacluster.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
@@ -492,6 +493,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					// the caller need to reset the perpetual wiggle stats in case the reset txn on DD side is cancelled
 					// due to DD can die at the same time
 					if (newConfig.perpetualStorageWiggleSpeed == 0 && oldConfig.perpetualStorageWiggleSpeed == 1) {
+						wait(resetStorageWiggleMetrics(tr, true));
+						wait(resetStorageWiggleMetrics(tr, false));
 					}
 				}
 			}

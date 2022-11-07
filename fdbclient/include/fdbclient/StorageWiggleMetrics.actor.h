@@ -18,13 +18,12 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_G_H)
-#define FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_G_H
-#include "fdbserver/StorageWiggleMetrics.actor.g.h"
-#elif !defined(FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_H)
-#define FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_G_H)
+#define FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_G_H
+#include "fdbclient/StorageWiggleMetrics.actor.g.h"
+#elif !defined(FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_H)
+#define FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_H
 
-#include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/Smoother.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
@@ -94,24 +93,26 @@ struct StorageWiggleMetrics {
 	}
 };
 
+// read from DB
 ACTOR template <typename TxnType>
 Future<Optional<StorageWiggleMetrics>> loadStorageWiggleMetrics(TxnType tr, bool primary) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-	Optional<Value> value =
-	    wait(tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr)));
+	auto f = tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
+	Optional<Value> value = wait(safeThreadFutureToFuture(f));
 	if (!value.present()) {
 		return Optional<StorageWiggleMetrics>();
 	}
 	return ObjectReader::fromStringRef<StorageWiggleMetrics>(value.get(), IncludeVersion());
 }
 
+// update the serialized metrics when the perpetual wiggle is enabled
 ACTOR template <typename TxnType>
 Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics, bool primary) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> v = wait(tr->get(perpetualStorageWiggleKey));
+	auto f = tr->get(perpetualStorageWiggleKey);
+	Optional<Value> v = wait(safeThreadFutureToFuture(f));
 	if (v.present() && v == "1"_sr) {
 		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
 		        ObjectWriter::toValue(metrics, IncludeVersion()));
@@ -119,5 +120,21 @@ Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics
 	return Void();
 }
 
+// set all fields except for smoothed durations to default values
+ACTOR template <class TrType>
+Future<Void> resetStorageWiggleMetrics(TrType tr, bool primary) {
+	state Optional<StorageWiggleMetrics> metrics = wait(loadStorageWiggleMetrics(tr, primary));
+	if (metrics.present()) {
+		auto oldStepDuration = metrics.get().smoothed_wiggle_duration;
+		auto oldRoundDuration = metrics.get().smoothed_round_duration;
+		StorageWiggleMetrics newMetrics;
+		newMetrics.smoothed_wiggle_duration = oldStepDuration;
+		newMetrics.smoothed_round_duration = oldRoundDuration;
+		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+		        ObjectWriter::toValue(metrics, IncludeVersion()));
+	}
+	return Void();
+}
+
 #include "flow/unactorcompiler.h"
-#endif // FDBSERVER_STORAGEWIGGLEMETRICS_ACTOR_H
+#endif

@@ -182,9 +182,10 @@ Future<Void> StorageWiggler::resetStats() {
 	auto newMetrics = StorageWiggleMetrics();
 	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
 	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
+	metrics = newMetrics;
 	return runRYWTransaction(teamCollection->dbContext(),
-	                         [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		                         return updateStorageWiggleMetrics(tr, metrics, teamCollection->isPrimary());
+	                         [this, &newMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		                         return updateStorageWiggleMetrics(tr, newMetrics, teamCollection->isPrimary());
 	                         });
 }
 
@@ -203,6 +204,7 @@ Future<Void> StorageWiggler::restoreStats() {
 	                      });
 	return map(readFuture, assignFunc);
 }
+
 Future<Void> StorageWiggler::startWiggle() {
 	metrics.last_wiggle_start = StorageMetadataType::currentTime();
 	if (shouldStartNewRound()) {
