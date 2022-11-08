@@ -359,7 +359,7 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
 	TraceEvent("QuietDatabaseGotMaxStorageServerQueueSize")
 	    .detail("Stage", "MaxComputed")
 	    .detail("Max", maxQueueSize)
-	    .detail("MaxQueueServer", format("%016" PRIx64, maxQueueServer.first()));
+	    .detail("MaxQueueServer", maxQueueServer);
 	return maxQueueSize;
 }
 
@@ -380,14 +380,14 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 			when(wait(timeout)) {
 				TraceEvent("QuietDatabaseFailure")
 				    .detail("Reason", "Could not fetch StorageMetrics")
-				    .detail("Storage", format("%016" PRIx64, storage.first()));
+				    .detail("Storage", storage);
 				throw timed_out();
 			}
 		}
 		if (retries > 30) {
 			TraceEvent("QuietDatabaseFailure")
 			    .detail("Reason", "Could not fetch StorageMetrics x30")
-			    .detail("Storage", format("%016" PRIx64, storage.first()))
+			    .detail("Storage", storage)
 			    .detail("Version", version);
 			throw timed_out();
 		}
