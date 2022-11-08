@@ -9105,7 +9105,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
 	ASSERT(metaData.ssID == data->thisServerID && !metaData.ranges.empty());
 	const CheckpointRequest req(metaData.version,
-	                            metaData.ranges.front(),
+	                            metaData.ranges,
 	                            static_cast<CheckpointFormat>(metaData.format),
 	                            metaData.checkpointID,
 	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());

@@ -2197,7 +2197,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	TraceEvent("RocksDBServeCheckpointBegin", id)
 	    .detail("MinVersion", a.request.version)
-	    .detail("Range", a.request.range.toString())
+	    .detail("Ranges", describe(a.request.ranges))
 	    .detail("Format", static_cast<int>(a.request.format))
 	    .detail("CheckpointDir", a.request.checkpointDir);
 
@@ -2228,7 +2228,8 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	    .detail("PersistVersion", version);
 
 	// TODO: set the range as the actual shard range.
-	CheckpointMetaData res(version, a.request.range, a.request.format, a.request.checkpointID);
+	CheckpointMetaData res(version, a.request.format, a.request.checkpointID);
+	res.ranges = a.request.ranges;
 	const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
 	if (a.request.format == RocksDBColumnFamily) {
@@ -2511,7 +2512,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	state std::string checkpointDir = cwd + "checkpoint";
 
 	CheckpointRequest request(
-	    latestVersion, allKeys, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
+	    latestVersion, { allKeys }, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	std::vector<CheckpointMetaData> checkpoints;
@@ -2551,7 +2552,8 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	platform::eraseDirectoryRecursive("checkpoint");
 	std::string checkpointDir = cwd + "checkpoint";
 
-	CheckpointRequest request(latestVersion, allKeys, RocksDB, deterministicRandom()->randomUniqueID(), checkpointDir);
+	CheckpointRequest request(
+	    latestVersion, { allKeys }, RocksDB, deterministicRandom()->randomUniqueID(), checkpointDir);
 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	state ICheckpointReader* cpReader = newCheckpointReader(metaData, deterministicRandom()->randomUniqueID());
