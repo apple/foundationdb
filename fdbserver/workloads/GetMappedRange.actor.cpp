@@ -51,9 +51,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	// TODO: Currently this workload doesn't play well with MachineAttrition, but it probably should
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert("Attrition");
-	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> start(Database const& cx) override {
 		// This workload is generated different from typical ApiWorkload. So don't use ApiWorkload::_start.
