@@ -307,7 +307,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	// map from machine networkAddress to datacenter ID
 	std::map<NetworkAddress, std::string> dcIds;
 	std::map<NetworkAddress, LocalityData> locality;
-	std::map<std::string, bool> notExcludedMap;
+	std::map<std::string, bool> excludedMap;
 	std::map<std::string, int32_t> workerContribMap;
 	std::map<std::string, JsonBuilderObject> machineJsonMap;
 
@@ -377,7 +377,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				statusObj["network"] = networkObj;
 
 				if (configuration.present()) {
-					notExcludedMap[machineId] =
+					excludedMap[machineId] =
 					    true; // Will be set to false below if this or any later process is not excluded
 				}
 
@@ -385,18 +385,21 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				machineJsonMap[machineId] = statusObj;
 			}
 
-			// FIXME: this will not catch if the secondary address of the process was excluded
 			NetworkAddressList tempList;
 			tempList.address = it->first;
-			bool excludedServer = false;
-			bool excludedLocality = false;
-			if (configuration.present() && configuration.get().isExcludedServer(tempList))
-				excludedServer = true;
+			bool excludedServer = true;
+			bool excludedLocality = true;
+			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
+				excludedServer = false;
 			if (locality.count(it->first) && configuration.present() &&
-			    configuration.get().isMachineExcluded(locality[it->first]))
-				excludedLocality = true;
+			    !configuration.get().isMachineExcluded(locality[it->first]))
+				excludedLocality = false;
 
-			notExcludedMap[machineId] = excludedServer || excludedLocality;
+			// If any server is not excluded, set the overall exclusion status
+			// of the machine to false.
+			if (!excludedServer && !excludedLocality) {
+				excludedMap[machineId] = false;
+			}
 			workerContribMap[machineId]++;
 		} catch (Error&) {
 			++failed;
@@ -407,7 +410,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	for (auto& mapPair : machineJsonMap) {
 		auto& machineId = mapPair.first;
 		auto& jsonItem = machineJsonMap[machineId];
-		jsonItem["excluded"] = notExcludedMap[machineId];
+		jsonItem["excluded"] = excludedMap[machineId];
 		jsonItem["contributing_workers"] = workerContribMap[machineId];
 		machineMap[machineId] = jsonItem;
 	}

@@ -647,6 +647,91 @@ struct BusiestWriteTagContext {
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
 
+// A SSPhysicalShard represents a physical shard, it contains a list of keyranges.
+class SSPhysicalShard {
+public:
+	SSPhysicalShard(const int64_t id) : id(id) {}
+
+	void addRange(Reference<ShardInfo> shard);
+
+	// Remove the shard if a shard to the same pointer (ShardInfo*) exists.
+	void removeRange(Reference<ShardInfo> shard);
+
+	// Clear all shards overlapping with `range`.
+	void removeRange(KeyRangeRef range);
+
+	bool supportCheckpoint() const;
+
+	bool hasRange(Reference<ShardInfo> shard) const;
+
+private:
+	const int64_t id;
+	std::vector<Reference<ShardInfo>> ranges;
+};
+
+void SSPhysicalShard::addRange(Reference<ShardInfo> shard) {
+	TraceEvent(SevVerbose, "SSPhysicalShardAddShard")
+	    .detail("ShardID", format("%016llx", this->id))
+	    .detail("Assigned", !shard->notAssigned())
+	    .detail("Range", shard->keys);
+	ASSERT(!shard->notAssigned());
+
+	removeRange(shard->keys);
+
+	ranges.push_back(shard);
+}
+
+void SSPhysicalShard::removeRange(Reference<ShardInfo> shard) {
+	TraceEvent(SevVerbose, "SSPhysicalShardRemoveShard")
+	    .detail("ShardID", format("%016llx", this->id))
+	    .detail("Assigned", !shard->notAssigned())
+	    .detail("Range", shard->keys);
+
+	for (int i = 0; i < this->ranges.size(); ++i) {
+		const auto& r = this->ranges[i];
+		if (r.getPtr() == shard.getPtr()) {
+			this->ranges[i] = this->ranges.back();
+			this->ranges.pop_back();
+			return;
+		}
+	}
+}
+
+void SSPhysicalShard::removeRange(KeyRangeRef range) {
+	TraceEvent(SevDebug, "SSPhysicalShardRemoveRange")
+	    .detail("ShardID", format("%016llx", this->id))
+	    .detail("Range", range);
+	for (int i = 0; i < this->ranges.size();) {
+		const auto& r = this->ranges[i];
+		if (r->keys.intersects(range)) {
+			this->ranges[i] = this->ranges.back();
+			this->ranges.pop_back();
+		} else {
+			++i;
+		}
+	}
+}
+
+bool SSPhysicalShard::supportCheckpoint() const {
+	for (const auto& r : this->ranges) {
+		ASSERT(r->desiredShardId == this->id);
+		if (r->shardId != this->id) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool SSPhysicalShard::hasRange(Reference<ShardInfo> shard) const {
+	for (int i = 0; i < this->ranges.size(); ++i) {
+		if (this->ranges[i].getPtr() == shard.getPtr()) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -735,6 +820,9 @@ public:
 	Reference<Histogram> storageUpdatesDurableLatencyHistogram;
 	Reference<Histogram> storageCommitLatencyHistogram;
 	Reference<Histogram> ssDurableVersionUpdateLatencyHistogram;
+	// Histograms of requests sent to KVS.
+	Reference<Histogram> readRangeBytesReturnedHistogram;
+	Reference<Histogram> readRangeBytesLimitHistogram;
 
 	// watch map operations
 	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key) const;
@@ -928,6 +1016,7 @@ public:
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
+	std::unordered_map<int64_t, SSPhysicalShard> physicalShards;
 	uint64_t shardChangeCounter; // max( shards->changecounter )
 
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
@@ -1296,6 +1385,12 @@ public:
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
 	                                                                   Histogram::Unit::microseconds)),
+	    readRangeBytesReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                            SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM,
+	                                                            Histogram::Unit::countLinear)),
+	    readRangeBytesLimitHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                         SS_READ_RANGE_BYTES_LIMIT_HISTOGRAM,
+	                                                         Histogram::Unit::countLinear)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
 	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
@@ -1348,6 +1443,25 @@ public:
 	}
 
 	//~StorageServer() { fclose(log); }
+	void addRangeToPhysicalShard(Reference<ShardInfo> newRange) {
+		if (!shardAware || newRange->notAssigned()) {
+			return;
+		}
+
+		auto [it, ignored] =
+		    physicalShards.insert(std::make_pair(newRange->desiredShardId, SSPhysicalShard(newRange->desiredShardId)));
+		it->second.addRange(newRange);
+	}
+
+	void removeRangeFromPhysicalShard(Reference<ShardInfo> range) {
+		if (!range.isValid() || !shardAware || range->notAssigned()) {
+			return;
+		}
+
+		auto it = physicalShards.find(range->desiredShardId);
+		ASSERT(it != physicalShards.end());
+		it->second.removeRange(range);
+	}
 
 	// Puts the given shard into shards.  The caller is responsible for adding shards
 	//   for all ranges in shards.getAffectedRangesAfterInsertion(newShard->keys)), because these
@@ -1359,7 +1473,25 @@ public:
 		/*auto affected = shards.getAffectedRangesAfterInsertion( newShard->keys, Reference<ShardInfo>() );
 		for(auto i = affected.begin(); i != affected.end(); ++i)
 		    shards.insert( *i, Reference<ShardInfo>() );*/
-		shards.insert(newShard->keys, Reference<ShardInfo>(newShard));
+
+		if (shardAware && newShard->notAssigned()) {
+			auto sh = shards.intersectingRanges(newShard->keys);
+			for (auto it = sh.begin(); it != sh.end(); ++it) {
+				if (it->value().isValid() && !it->value()->notAssigned()) {
+					TraceEvent(SevVerbose, "StorageServerAddShardClear")
+					    .detail("NewShardRange", newShard->keys)
+					    .detail("Range", it->value()->keys)
+					    .detail("ShardID", format("%016llx", it->value()->desiredShardId))
+					    .detail("NewShardID", format("%016llx", newShard->desiredShardId))
+					    .detail("NewShardActualID", format("%016llx", newShard->shardId));
+					removeRangeFromPhysicalShard(it->value());
+				}
+			}
+		}
+
+		Reference<ShardInfo> rShard(newShard);
+		shards.insert(newShard->keys, rShard);
+		addRangeToPhysicalShard(rShard);
 	}
 	void addMutation(Version version,
 	                 bool fromFetch,
@@ -1646,6 +1778,8 @@ void validate(StorageServer* data, bool force = false) {
 			for (auto s = data->shards.ranges().begin(); s != data->shards.ranges().end(); ++s) {
 				TraceEvent(SevVerbose, "ValidateShard", data->thisServerID)
 				    .detail("Range", s->range())
+				    .detail("ShardID", format("%016llx", s->value()->shardId))
+				    .detail("DesiredShardID", format("%016llx", s->value()->desiredShardId))
 				    .detail("ShardRange", s->value()->keys)
 				    .detail("ShardState", s->value()->debugDescribeState())
 				    .log();
@@ -1653,6 +1787,11 @@ void validate(StorageServer* data, bool force = false) {
 				ASSERT(!s->value()->keys.empty());
 				if (data->shardAware) {
 					s->value()->validate();
+					if (!s->value()->notAssigned()) {
+						auto it = data->physicalShards.find(s->value()->desiredShardId);
+						ASSERT(it != data->physicalShards.end());
+						ASSERT(it->second.hasRange(s->value()));
+					}
 				}
 			}
 
@@ -3460,6 +3599,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options));
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
+			data->readRangeBytesReturnedHistogram->sample(atStorageVersion.logicalSize());
+			data->readRangeBytesLimitHistogram->sample(*pLimitBytes);
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version) {
@@ -3555,6 +3696,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options));
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
+			data->readRangeBytesReturnedHistogram->sample(atStorageVersion.logicalSize());
+			data->readRangeBytesLimitHistogram->sample(*pLimitBytes);
 
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version)
@@ -7003,9 +7146,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					if (data->shardAware) {
 						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
 						rightShard.range = KeyRangeRef(nfk, keys.end);
-						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
+						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard);
+						leftShard->populateShard(rightShard);
+						shard->server->addShard(leftShard);
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
-						data->shards[keys.begin]->populateShard(rightShard);
 					} else {
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
 						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
@@ -7666,7 +7810,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 
 	validate(data);
 
-	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID);
+	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID)
+	    .detail("DataMoveID", dataMoveId);
 
 	const uint64_t desiredId = dataMoveId.first();
 	const Version cVer = version + 1;
@@ -7810,7 +7955,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						// TODO(psm): Replace this with moveInShard->cancel().
 						ASSERT(false);
 					} else {
-						TraceEvent(SevVerbose, "CSKMoveInToSameShard", data->thisServerID)
+						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
 						    .detailf("TargetShard", "%016llx", desiredId)
 						    .detail("MoveRange", keys)
@@ -10718,7 +10863,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 
 	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with
 	// self still valid
-	self.shards.insert(allKeys, Reference<ShardInfo>());
+	self.addShard(ShardInfo::newNotAssigned(allKeys));
 
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise
 	// just close it.
