@@ -23,6 +23,7 @@
 #include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include "flow/network.h"
 #include <string>
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
@@ -97,8 +98,11 @@ void Counter::flush(MetricBatch& batch) {
 		break;
 	}
 	case MetricsDataModel::OTEL: {
+		NetworkAddress addr = g_network->getLocalAddress();
 		batch.counters.emplace_back(name, val);
 		batch.counters.back().point.startTime = last_event;
+		batch.counters.back().point.addAttribute("ip", addr.ip.toString());
+		batch.counters.back().point.addAttribute("port", std::to_string(addr.port));
 		break;
 	}
 	default:
@@ -247,9 +251,13 @@ void LatencySample::flush(MetricBatch& batch) {
 	}
 
 	case MetricsDataModel::OTEL: {
+		NetworkAddress addr = g_network->getLocalAddress();
 		const ContinuousSample<double> emitSample = (sample.getPopulationSize() == 0) ? prev : sample;
 		batch.hists.push_back(
 		    OTELHistogram(name, emitSample.getSamples(), emitSample.min(), emitSample.max(), emitSample.sum()));
+		batch.hists.back().point.startTime = sampleTrace;
+		batch.hists.back().point.addAttribute("ip", addr.ip.toString());
+		batch.hists.back().point.addAttribute("port", std::to_string(addr.port));
 		batch.hists.back().point.startTime = sampleTrace;
 		sampleEmit = now();
 		break;
