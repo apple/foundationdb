@@ -2401,6 +2401,9 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					    .detail("ReadVersion", tr.getReadVersion().get());
 
 					if (destId != dataMoveId) {
+						for (const auto& uid : dest) {
+ 							physicalShardMap[uid].push_back(Shard(rangeIntersectKeys, destId));
+ 						}
 						TraceEvent(SevVerbose, "CleanUpDataMoveSkipShard", dataMoveId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("ShardRange", rangeIntersectKeys)
