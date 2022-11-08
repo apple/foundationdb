@@ -569,6 +569,8 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	// back, we can avoid notifying other SS of change feeds that don't durably exist
 	Version metadataCreateVersion = invalidVersion;
 
+	FlowLock fetchLock = FlowLock(1);
+
 	bool removing = false;
 	bool destroyed = false;
 
@@ -5659,6 +5661,15 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              Version emptyVersion,
                                              Version beginVersion,
                                              Version endVersion) {
+	state FlowLock::Releaser feedFetchReleaser;
+
+	// avoid fetching the same version range of the same change feed multiple times.
+	choose {
+		when(wait(changeFeedInfo->fetchLock.take())) {
+			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
+		}
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
+	}
 
 	state Version startVersion = beginVersion;
 	startVersion = std::max(startVersion, emptyVersion + 1);
