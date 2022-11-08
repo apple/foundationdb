@@ -1520,11 +1520,14 @@ Future<Version> waitForVersion(StorageServer* data, Version commitVersion, Versi
 	if (readVersion < data->oldestVersion.get() || readVersion <= 0) {
 		return transaction_too_old();
 	} else {
+		// It is correct to read any version between [commitVersion, readVersion],
+		// because version vector guarantees no mutations between them.
 		if (commitVersion < data->oldestVersion.get()) {
 			if (data->version.get() < readVersion) {
 				// Majority of the case, try using higher version to avoid
 				// transaction_too_old error when oldestVersion advances.
-				return data->version.get(); // majority of cases
+				// BTW, any version in the range [oldestVersion, data->version.get()] is valid in this case.
+				return data->version.get();
 			} else {
 				ASSERT(readVersion >= data->oldestVersion.get());
 				return readVersion;
@@ -3115,6 +3118,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			if (data->storageVersion() > version) {
 				DisabledTraceEvent("SS_TTO", data->thisServerID)
 				    .detail("StorageVersion", data->storageVersion())
+				    .detail("Oldest", data->oldestVersion.get())
 				    .detail("Version", version)
 				    .detail("Range", range);
 				throw transaction_too_old();
