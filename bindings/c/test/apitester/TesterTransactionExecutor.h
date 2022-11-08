@@ -58,6 +58,11 @@ public:
 	// Mark the transaction as completed without committing it (for read transactions)
 	virtual void done() = 0;
 
+	// Make the transaction self-conflicting if a timeout is set
+	// It is necessary for avoiding in-flight transactions when retrying write transactions
+	// on timeouts
+	virtual void makeSelfConflicting() = 0;
+
 	// Plumbing for blob granule base path
 	virtual std::string getBGBasePath() = 0;
 

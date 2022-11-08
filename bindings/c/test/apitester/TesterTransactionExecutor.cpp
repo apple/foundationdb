@@ -158,6 +158,8 @@ public:
 		contAfterDone(fdb::Error::success());
 	}
 
+	void makeSelfConflicting() override {}
+
 	std::string getBGBasePath() override { return bgBasePath; }
 
 	virtual void onError(fdb::Error err) override {
