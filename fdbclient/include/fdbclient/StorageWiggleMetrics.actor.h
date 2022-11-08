@@ -129,6 +129,9 @@ ACTOR template <class TrType>
 Future<Void> resetStorageWiggleMetrics(TrType tr,
                                        PrimaryRegion primary,
                                        Optional<StorageWiggleMetrics> metrics = Optional<StorageWiggleMetrics>()) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
 	if (!metrics.present()) {
 		wait(store(metrics, loadStorageWiggleMetrics(tr, primary)));
 	}

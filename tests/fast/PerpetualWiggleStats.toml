@@ -1,7 +1,6 @@
 [configuration]
 config = 'triple perpetual_storage_wiggle=0'
 perpetualStorageWiggleSpeed = 0
-storageTeamSize = 3
 
 [[test]]
 testTitle = 'PerpetualWiggleStats'
