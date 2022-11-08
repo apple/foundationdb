@@ -58,6 +58,14 @@ void GrvProxyTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& latencyBand
 	}
 }
 
+void GrvProxyTagThrottler::TagQueue::endReleaseWindow(int64_t numStarted, double elapsed) {
+	if (rateInfo.present()) {
+		CODE_PROBE(requests.empty(), "Tag queue ending release window with empty request queue");
+		CODE_PROBE(!requests.empty(), "Tag queue ending release window with requests still queued");
+		rateInfo.get().endReleaseWindow(numStarted, requests.empty(), elapsed);
+	}
+}
+
 GrvProxyTagThrottler::GrvProxyTagThrottler(double maxThrottleDuration)
   : maxThrottleDuration(maxThrottleDuration),
     latencyBandsMap("GrvProxyTagThrottler",
@@ -202,16 +210,14 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 		}
 	}
 
-	// End release windows for queues with valid rateInfo
+	// End release windows for all tag queues
 	{
 		TransactionTagMap<uint32_t> transactionsReleasedMap;
 		for (const auto& [tag, count] : transactionsReleased) {
 			transactionsReleasedMap[tag] = count;
 		}
 		for (auto& [tag, queue] : queues) {
-			if (queue.rateInfo.present()) {
-				queue.rateInfo.get().endReleaseWindow(transactionsReleasedMap[tag], false, elapsed);
-			}
+			queue.endReleaseWindow(transactionsReleasedMap[tag], elapsed);
 		}
 	}
 	// If the capacity is increased, that means the vector has been illegally resized, potentially
@@ -436,5 +442,27 @@ TEST_CASE("/GrvProxyTagThrottler/Fifo") {
 	state GrvProxyTagThrottler throttler(5.0);
 	state Future<Void> server = mockServer(&throttler);
 	wait(mockFifoClient(&throttler));
+	return Void();
+}
+
+// Tests that while throughput is low, the tag throttler
+// does not accumulate too much budget.
+TEST_CASE("/GrvProxyTagThrottler/LimitedIdleBudget") {
+	state GrvProxyTagThrottler throttler(5.0);
+	state TagSet tagSet;
+	state TransactionTagMap<uint32_t> counters;
+	{
+		TransactionTagMap<double> rates;
+		rates["sampleTag"_sr] = 10.0;
+		throttler.updateRates(rates);
+	}
+	tagSet.addTag("sampleTag"_sr);
+
+	state Future<Void> server = mockServer(&throttler);
+	wait(delay(60.0));
+	state Future<Void> client = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
+	wait(timeout(client && server, 60.0, Void()));
+	TraceEvent("TagQuotaTest_LimitedIdleBudget").detail("Counter", counters["sampleTag"_sr]);
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
 	return Void();
 }
