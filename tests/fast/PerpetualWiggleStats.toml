@@ -1,10 +1,6 @@
-[configuration]
-config = 'triple perpetual_storage_wiggle=0'
-perpetualStorageWiggleSpeed = 0
-
 [[test]]
 testTitle = 'PerpetualWiggleStats'
 useDB = true
 
 [[test.workload]]
-testName = 'PerpetualWiggleStats'
+testName = 'PerpetualWiggleStatsWorkload'
