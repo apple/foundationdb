@@ -359,9 +359,9 @@ public:
 		return txnProcessor->waitForDataDistributionEnabled(context->ddEnabledState.get());
 	}
 
-	// Initialize the required internal states of DataDistributor. It's necessary before DataDistributor start working.
-	// Doesn't include initialization of optional components, like TenantCache, DDQueue, Tracker, TeamCollection. The
-	// components should call its own ::init methods.
+	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
+	// DataDistributor start working. Doesn't include initialization of optional components, like TenantCache, DDQueue,
+	// Tracker, TeamCollection. The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
@@ -447,9 +447,9 @@ public:
 				const DDShardInfo& iShard = self->initData->shards[i];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, self->initData->shards[i + 1].key);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
-				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
+				teams.emplace_back(iShard.primarySrc, /*primary=*/true);
 				if (self->configuration.usableRegions > 1) {
-					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
+					teams.emplace_back(iShard.remoteSrc, /*primary=*/false);
 				}
 				self->physicalShardCollection->initPhysicalShardCollection(keys, teams, iShard.srcId.first(), 0);
 			}
@@ -506,7 +506,7 @@ public:
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
 			if (meta.ranges.empty()) {
-				TraceEvent(SevWarnAlways, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				TraceEvent(SevWarn, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
 				continue;
 			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
@@ -544,9 +544,9 @@ public:
 	}
 
 	// Resume inflight relocations from the previous DD
-	// TODO: The initialDataDistribution is unused once resumeRelocations and
-	// DataDistributionTracker::trackInitialShards are done. In the future, we can release the object to save memory
-	// usage if it turns out to be a problem.
+	// TODO: The initialDataDistribution is unused once resumeRelocations,
+	// DataDistributionTracker::trackInitialShards, and DDTeamCollection::init are done. In the future, we can release
+	// the object to save memory usage if it turns out to be a problem.
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
 		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
@@ -635,12 +635,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
-			int storageTeamSize = self->configuration.storageTeamSize;
+			int replicaSize = self->configuration.storageTeamSize;
 
 			std::vector<Future<Void>> actors; // the container of ACTORs
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
-				storageTeamSize = 2 * self->configuration.storageTeamSize;
+				replicaSize = 2 * self->configuration.storageTeamSize;
 
 				zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 				anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(true);
@@ -682,7 +682,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                          getAverageShardBytes,
 			                                                          getUnhealthyRelocationCount.getFuture(),
 			                                                          self->ddId,
-			                                                          storageTeamSize,
+			                                                          replicaSize,
 			                                                          self->configuration.storageTeamSize,
 			                                                          self->context->ddEnabledState.get()),
 			                                    "DDQueue",

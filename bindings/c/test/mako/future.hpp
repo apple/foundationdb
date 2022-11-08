@@ -31,21 +31,28 @@ extern thread_local mako::Logger logr;
 
 namespace mako {
 
-enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
+enum class FutureRC { OK, RETRY, ABORT };
+
+template <class FutureType>
+force_inline bool waitFuture(FutureType& f, std::string_view step) {
+	assert(f);
+	auto err = f.blockUntilReady();
+	if (err) {
+		assert(!err.retryable());
+		logr.error("'{}' found at blockUntilReady during step '{}'", err.what(), step);
+		return false;
+	} else {
+		return true;
+	}
+}
 
 template <class FutureType>
 force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	if (auto err = f.error()) {
-		if (err.is(1020 /*not_committed*/)) {
-			return FutureRC::CONFLICT;
-		} else if (err.retryable()) {
-			logr.warn("Retryable error '{}' found at on_error(), step: {}", err.what(), step);
-			return FutureRC::RETRY;
-		} else {
-			logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
-			tx.reset();
-			return FutureRC::ABORT;
-		}
+		assert(!(err.retryable()));
+		logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
+		tx.reset();
+		return FutureRC::ABORT;
 	} else {
 		return FutureRC::RETRY;
 	}
@@ -54,8 +61,7 @@ force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std:
 template <class FutureType>
 force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	assert(f);
-	if (auto err = f.blockUntilReady()) {
-		logr.error("'{}' found while waiting for on_error() future, step: {}", err.what(), step);
+	if (!waitFuture(f, step)) {
 		return FutureRC::ABORT;
 	}
 	return handleForOnError(tx, f, step);
@@ -65,15 +71,13 @@ force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& 
 template <class FutureType>
 force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	assert(f);
-	auto err = fdb::Error{};
-	if ((err = f.blockUntilReady())) {
-		const auto retry = err.retryable();
-		logr.error("{} error '{}' found during step: {}", (retry ? "Retryable" : "Unretryable"), err.what(), step);
-		return retry ? FutureRC::RETRY : FutureRC::ABORT;
+	if (!waitFuture(f, step)) {
+		return FutureRC::ABORT;
 	}
-	err = f.error();
-	if (!err)
+	auto err = f.error();
+	if (!err) {
 		return FutureRC::OK;
+	}
 	if (err.retryable()) {
 		logr.warn("step {} returned '{}'", step, err.what());
 	} else {

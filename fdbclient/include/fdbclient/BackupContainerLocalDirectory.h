@@ -46,6 +46,8 @@ public:
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
 
+	Future<Void> writeEntireFile(const std::string& path, const std::string& contents) final;
+
 	Future<Void> deleteFile(const std::string& path) final;
 
 	Future<FilesAndSizesT> listFiles(const std::string& path, std::function<bool(std::string const&)>) final;

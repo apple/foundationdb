@@ -198,7 +198,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( DEFAULT_AUTO_LOGS,                         3 );
 	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
 	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
-	init( DELETE_NATIVE_LIB_AFTER_LOADING,        true ); // if false, don't delete libfdb_c in tmp directory on client connect.
 
 	init( GLOBAL_CONFIG_REFRESH_BACKOFF,           0.5 );
 	init( GLOBAL_CONFIG_REFRESH_MAX_BACKOFF,      60.0 );
@@ -220,6 +219,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( BLOBSTORE_CONCURRENT_WRITES_PER_FILE,      5 );
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
+	init( BLOBSTORE_ENABLE_READ_CACHE,            true );
 	init( BLOBSTORE_READ_BLOCK_SIZE,       1024 * 1024 );
 	init( BLOBSTORE_READ_AHEAD_BLOCKS,               0 );
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
