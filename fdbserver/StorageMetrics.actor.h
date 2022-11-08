@@ -95,23 +95,7 @@ struct StorageMetricSample {
 	}
 };
 
-TEST_CASE("/fdbserver/StorageMetricSample/simple") {
-	StorageMetricSample s(1000);
-	s.sample.insert(LiteralStringRef("Apple"), 1000);
-	s.sample.insert(LiteralStringRef("Banana"), 2000);
-	s.sample.insert(LiteralStringRef("Cat"), 1000);
-	s.sample.insert(LiteralStringRef("Cathode"), 1000);
-	s.sample.insert(LiteralStringRef("Dog"), 1000);
 
-	ASSERT(s.getEstimate(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D"))) == 5000);
-	ASSERT(s.getEstimate(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("E"))) == 6000);
-	ASSERT(s.getEstimate(KeyRangeRef(LiteralStringRef("B"), LiteralStringRef("C"))) == 2000);
-
-	// ASSERT(s.splitEstimate(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 3500) ==
-	// LiteralStringRef("Cat"));
-
-	return Void();
-}
 
 struct TransientStorageMetricSample : StorageMetricSample {
 	Deque<std::pair<double, std::pair<Key, int64_t>>> queue;
@@ -617,6 +601,23 @@ private:
 	}
 };
 
+TEST_CASE("/fdbserver/StorageMetricSample/simple") {
+	StorageMetricSample s(1000);
+	s.sample.insert(LiteralStringRef("Apple"), 1000);
+	s.sample.insert(LiteralStringRef("Banana"), 2000);
+	s.sample.insert(LiteralStringRef("Cat"), 1000);
+	s.sample.insert(LiteralStringRef("Cathode"), 1000);
+	s.sample.insert(LiteralStringRef("Dog"), 1000);
+
+	ASSERT(s.getEstimate(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D"))) == 5000);
+	ASSERT(s.getEstimate(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("E"))) == 6000);
+	ASSERT(s.getEstimate(KeyRangeRef(LiteralStringRef("B"), LiteralStringRef("C"))) == 2000);
+
+	// ASSERT(s.splitEstimate(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 3500) ==
+	// LiteralStringRef("Cat"));
+
+	return Void();
+}
 
 TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
 
