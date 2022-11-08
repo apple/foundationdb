@@ -617,6 +617,7 @@ private:
 	}
 };
 
+
 TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
 
 	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
