@@ -207,7 +207,7 @@ class ClientConfigTests:
         test = ClientConfigTest(test_env, "Multiple external clients: API version unsupported by one")
         test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV_PREV_RELEASE_VERSION])
         test.disable_local_client = True
-        test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
+        test.api_version = api_version_from_str(CURRENT_VERSION)
         test.expected_error = 2204  # API function missing
         test.exec()
 
@@ -215,7 +215,7 @@ class ClientConfigTests:
         test = ClientConfigTest(test_env, "Multiple external clients;  API version unsupported by one; Ignore failures")
         test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV_PREV_RELEASE_VERSION])
         test.disable_local_client = True
-        test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
+        test.api_version = api_version_from_str(CURRENT_VERSION)
         test.ignore_external_client_failures = True
         test.exec()
 

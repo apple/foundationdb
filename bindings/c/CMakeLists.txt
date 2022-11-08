@@ -298,7 +298,7 @@ if(NOT WIN32)
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "7.2.0" "7.3.0" "7.2.0"
+      --upgrade-path "7.3.0" "7.4.0" "7.3.0"
       --process-number 3
       )
     set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
@@ -307,7 +307,7 @@ if(NOT WIN32)
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
-      --upgrade-path "7.2.0" "7.3.0" "7.2.0"
+      --upgrade-path "7.3.0" "7.4.0" "7.3.0"
       --blob-granules-enabled
       --process-number 3
       )
@@ -323,7 +323,7 @@ if(NOT WIN32)
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-        --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0"
+        --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.3.0"
         --process-number 1
         )
 
@@ -331,7 +331,7 @@ if(NOT WIN32)
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-        --upgrade-path "7.0.0" "7.1.9" "7.2.0"
+        --upgrade-path "7.0.0" "7.1.9" "7.3.0"
         --process-number 1
         )
 
@@ -339,7 +339,7 @@ if(NOT WIN32)
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0" "7.1.9"
+        --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.3.0" "7.1.9"
         --process-number 3
         )
 
@@ -347,7 +347,7 @@ if(NOT WIN32)
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.0.0" "7.1.9" "7.2.0" "7.1.9"
+        --upgrade-path "7.0.0" "7.1.9" "7.3.0" "7.1.9"
         --process-number 3
         )
 
@@ -355,7 +355,7 @@ if(NOT WIN32)
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.1.9" "7.2.0" "7.1.9"
+        --upgrade-path "7.1.9" "7.3.0" "7.1.9"
         --process-number 3
         )
 
@@ -363,7 +363,7 @@ if(NOT WIN32)
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.2.0" "wiggle"
+        --upgrade-path "7.3.0" "wiggle"
         --disable-log-dump
         --process-number 3
         --redundancy double
@@ -373,7 +373,7 @@ if(NOT WIN32)
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.1.9" "wiggle" "7.2.0"
+        --upgrade-path "7.1.9" "wiggle" "7.3.0"
         --disable-log-dump
         --process-number 3
         --redundancy double
