@@ -203,7 +203,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( DEFAULT_AUTO_LOGS,                         3 );
 	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
 	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
-	init( UNLINKONLOAD_FDBCLIB,                   true ); // if false, don't delete libfdb_c in tmp directory on client connect.
 
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 
