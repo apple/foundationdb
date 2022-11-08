@@ -56,7 +56,7 @@ struct CheckpointMetaData {
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
 
-	Optional<UID> dataMoveId;
+	UID dataMoveId;
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
@@ -85,10 +85,8 @@ struct CheckpointMetaData {
 		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +
 		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
 		                  " [Server]: " + ssID.toString() + " [ID]: " + checkpointID.toString() +
-		                  " [State]: " + std::to_string(static_cast<int>(state));
-		if (dataMoveId.present()) {
-			res += " [DataMove ID]: " + dataMoveId.get().toString();
-		}
+		                  " [State]: " + std::to_string(static_cast<int>(state)) +
+		                  " [DataMove ID]: " + dataMoveId.toString();
 		return res;
 	}
 
