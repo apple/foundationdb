@@ -2705,6 +2705,10 @@ void MultiVersionApi::setupNetwork() {
 			disableLocalClient();
 		}
 
+		if (!apiVersion.hasFailOnExternalClientErrors()) {
+			ignoreExternalClientFailures = true;
+		}
+
 		for (auto i : externalClientDescriptions) {
 			std::string path = i.second.libPath;
 			std::string filename = basename(path);
