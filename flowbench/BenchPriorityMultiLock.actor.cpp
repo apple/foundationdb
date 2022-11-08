@@ -25,26 +25,28 @@
 #include "flow/PriorityMultiLock.actor.h"
 #include <deque>
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "fmt/printf.h"
 
 ACTOR static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
-	state std::vector<int> priorities;
+	// Arg1 is the number of active priorities to use
+	// Arg2 is the number of inactive priorities to use
+	state int active = benchState->range(0);
+	state int inactive = benchState->range(1);
 
 	// Set up priority list with limits 10, 20, 30, ...
-	while (priorities.size() < benchState->range(0)) {
+	state std::vector<int> priorities;
+	while (priorities.size() < active + inactive) {
 		priorities.push_back(10 * (priorities.size() + 1));
 	}
 
 	state int concurrency = priorities.size() * 10;
 	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
-	state std::vector<int> counts;
-	counts.resize(priorities.size(), 0);
 
-	// Clog the lock buy taking concurrency locks
+	// Clog the lock buy taking n=concurrency locks
 	state std::deque<Future<PriorityMultiLock::Lock>> lockFutures;
 	for (int j = 0; j < concurrency; ++j) {
-		lockFutures.push_back(pml->lock(j % priorities.size()));
+		lockFutures.push_back(pml->lock(j % active));
 	}
-
 	// Wait for all of the initial locks to be taken
 	// This will work regardless of their priorities as there are only n = concurrency of them
 	wait(waitForAll(std::vector<Future<PriorityMultiLock::Lock>>(lockFutures.begin(), lockFutures.end())));
@@ -64,7 +66,7 @@ ACTOR static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
 		PriorityMultiLock::Lock lock = wait(f);
 
 		// Rotate to another priority
-		if (++p == priorities.size()) {
+		if (++p == active) {
 			p = 0;
 		}
 
@@ -84,4 +86,4 @@ static void bench_priorityMultiLock(benchmark::State& benchState) {
 	onMainThread([&benchState]() { return benchPriorityMultiLock(&benchState); }).blockUntilReady();
 }
 
-BENCHMARK(bench_priorityMultiLock)->DenseRange(1, 8)->ReportAggregatesOnly(true);
+BENCHMARK(bench_priorityMultiLock)->Args({ 5, 0 })->Ranges({ { 1, 64 }, { 0, 128 } })->ReportAggregatesOnly(true);
