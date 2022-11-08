@@ -392,7 +392,7 @@ private:
 			auto view = tenantPrefixIndex->atLatest();
 			auto itr = view.find(prefix);
 			if (itr != view.end()) {
-				return *itr;
+				return itr->get();
 			}
 		}
 		TraceEvent(SevWarn, "TenantAwareEncryptionKeyProvider_TenantNotFoundForDomain").detail("DomainId", domainId);

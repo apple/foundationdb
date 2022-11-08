@@ -61,7 +61,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = deterministicRandom()->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
 	init( GRV_ERROR_RETRY_DELAY,                   5.0 ); if( randomize && BUGGIFY ) GRV_ERROR_RETRY_DELAY = 0.01 + 5 * deterministicRandom()->random01();
-	init( UNKNOWN_TENANT_RETRY_DELAY,              0.0 ); if( randomize && BUGGIFY ) UNKNOWN_TENANT_RETRY_DELAY = deterministicRandom()->random01();
+	init( UNKNOWN_TENANT_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) UNKNOWN_TENANT_RETRY_DELAY = 0.01 + deterministicRandom()->random01();
 	init( REPLY_BYTE_LIMIT,                      80000 );
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = deterministicRandom()->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
@@ -198,7 +198,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( DEFAULT_AUTO_LOGS,                         3 );
 	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
 	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
-	init( DELETE_NATIVE_LIB_AFTER_LOADING,        true ); // if false, don't delete libfdb_c in tmp directory on client connect.
 
 	init( GLOBAL_CONFIG_REFRESH_BACKOFF,           0.5 );
 	init( GLOBAL_CONFIG_REFRESH_MAX_BACKOFF,      60.0 );
@@ -220,6 +219,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( BLOBSTORE_CONCURRENT_WRITES_PER_FILE,      5 );
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
+	init( BLOBSTORE_ENABLE_READ_CACHE,            true );
 	init( BLOBSTORE_READ_BLOCK_SIZE,       1024 * 1024 );
 	init( BLOBSTORE_READ_AHEAD_BLOCKS,               0 );
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
@@ -272,7 +272,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 	init( WRITE_COST_BYTE_FACTOR,                 16384 ); if( randomize && BUGGIFY ) WRITE_COST_BYTE_FACTOR = 4096;
 	init( READ_COST_BYTE_FACTOR,                  16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
-	init( PROXY_MAX_TAG_THROTTLE_DURATION,          5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE_DURATION = 0.5;
+	init( GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO,            5.0 );
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );

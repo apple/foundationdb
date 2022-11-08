@@ -27,10 +27,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 720)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 730)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 720
+#elif FDB_API_VERSION > 730
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -514,12 +514,14 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_transaction_get_committed_version(F
                                                                                int64_t* out_version);
 
 /*
- * This function intentionally returns an FDBFuture instead of an integer
- * directly, so that calling this API can see the effect of previous
+ * These functions intentionally return an FDBFuture instead of an integer
+ * directly, so that calling the API can see the effect of previous
  * mutations on the transaction. Specifically, mutations are applied
  * asynchronously by the main thread. In order to see them, this call has to
  * be serviced by the main thread too.
  */
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp(FDBTransaction* tr);

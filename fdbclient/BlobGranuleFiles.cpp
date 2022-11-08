@@ -232,10 +232,10 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 		    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
 		throw encrypt_header_metadata_mismatch();
 	}
-	// Validate encryption header 'cipherHeader' details sanity
-	if (!(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
-	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
-	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
+	// Validate encryption header 'cipherText' details sanity
+	if (!(header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() &&
+	      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() &&
+	      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt())) {
 		TraceEvent(SevError, "EncryptionHeader_CipherTextMismatch")
 		    .detail("TextDomainId", eKeys.textCipherKey->getDomainId())
 		    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
@@ -650,12 +650,12 @@ struct IndexedBlobGranuleFile {
 		IndexBlobGranuleFileChunkRef chunkRef =
 		    IndexBlobGranuleFileChunkRef::fromBytes(cipherKeysCtx, childData, childArena);
 
-		ChildType child;
-		ObjectReader dataReader(chunkRef.chunkBytes.get().begin(), IncludeVersion());
-		dataReader.deserialize(FileIdentifierFor<ChildType>::value, child, childArena);
-
 		// TODO implement some sort of decrypted+decompressed+deserialized cache, if this object gets reused?
-		return Standalone<ChildType>(child, childArena);
+
+		BinaryReader br(chunkRef.chunkBytes.get(), IncludeVersion());
+		Standalone<ChildType> child;
+		br >> child;
+		return child;
 	}
 
 	template <class Ar>
@@ -751,7 +751,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 
 		if (currentChunkBytesEstimate >= targetChunkBytes || i == snapshot.size() - 1) {
 			Value serialized =
-			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
@@ -1020,7 +1020,7 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
 
 		if (currentChunkBytesEstimate >= chunkSize || i == boundaries.size() - 1) {
 			Value serialized =
-			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);

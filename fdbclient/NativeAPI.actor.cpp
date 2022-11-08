@@ -3456,6 +3456,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
+			trState->totalCost +=
+			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0));
 
 			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
@@ -4285,6 +4287,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       RangeResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
+	trState->totalCost += getReadOperationCost(bytes);
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
 
@@ -4353,6 +4356,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
 	state Span span("NAPI:getRange"_loc, trState->spanContext);
+	state Optional<UID> getRangeID = Optional<UID>();
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
@@ -4437,11 +4441,14 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.spanContext = span.context;
+			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				getRangeID = nondeterministicRandom()->randomUniqueID();
+				g_traceBatch.addAttach(
+				    "TransactionAttachID", trState->readOptions.get().debugID.get().first(), getRangeID.get().first());
+			}
 			try {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Before");
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
@@ -4481,9 +4488,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					throw;
 				}
 
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
+					                      getRangeID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
 					/*TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
@@ -4597,11 +4604,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				}
 
 			} catch (Error& e) {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Error");
-					TraceEvent("TransactionDebugError", trState->readOptions.get().debugID.get()).error(e);
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Error");
+					TraceEvent("TransactionDebugError", getRangeID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
@@ -5767,6 +5772,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange
 	auto r = singleKeyRange(key, req.arena);
 	auto v = ValueRef(req.arena, value);
 	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
+	trState->totalCost += getWriteOperationCost(key.expectedSize() + value.expectedSize());
 
 	if (addConflictRange) {
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5796,6 +5802,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	auto v = ValueRef(req.arena, operand);
 
 	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
+	trState->totalCost += getWriteOperationCost(key.expectedSize());
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5827,7 +5834,10 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 		return;
 
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
-
+	// NOTE: The throttling cost of each clear is assumed to be one page.
+	// This makes compuation fast, but can be inaccurate and may
+	// underestimate the cost of large clears.
+	trState->totalCost += CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6240,14 +6250,14 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 	state int i = 0;
 
 	for (; i < transaction->mutations.size(); ++i) {
-		auto* it = &transaction->mutations[i];
+		auto const& mutation = transaction->mutations[i];
 
-		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
+		if (mutation.type == MutationRef::Type::SetValue || mutation.isAtomicOp()) {
 			trCommitCosts.opsCount++;
-			trCommitCosts.writeCosts += getWriteOperationCost(it->expectedSize());
-		} else if (it->type == MutationRef::Type::ClearRange) {
+			trCommitCosts.writeCosts += getWriteOperationCost(mutation.expectedSize());
+		} else if (mutation.type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
-			keyRange = KeyRangeRef(it->param1, it->param2);
+			keyRange = KeyRangeRef(mutation.param1, mutation.param2);
 			if (trState->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(trState->cx->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY, trState));
 				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));
@@ -6376,8 +6386,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
-			wait(store(req.transaction.read_snapshot, readVersion) &&
-			     store(req.commitCostEstimation, estimateCommitCosts(trState, &req.transaction)));
+			state Future<Optional<ClientTrCommitCostEstimation>> commitCostFuture =
+			    estimateCommitCosts(trState, &req.transaction);
+			// We need to wait for the read version first so that we can be notified if the database is locked
+			wait(store(req.transaction.read_snapshot, readVersion));
+			wait(store(req.commitCostEstimation, commitCostFuture));
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
@@ -7548,12 +7561,11 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
                                                             Optional<Reference<TransactionState>> trState);
 
 ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
+                                                 TenantInfo tenantInfo,
                                                  KeyRange keys,
                                                  Reference<LocationInfo> locationInfo,
                                                  TenantMapEntry tenantEntry,
                                                  Optional<Reference<TransactionState>> trState) {
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	try {
 		WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
@@ -7562,12 +7574,16 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
 		return m;
 	} catch (Error& e) {
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+		if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+			cx->invalidateCache(tenantEntry.prefix, keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+		           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+			wait(trState.get()->handleUnknownTenant());
+		} else {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
 		}
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-		cx->invalidateCache(tenantEntry.prefix, keys);
 
 		StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
 		return m;
@@ -7598,7 +7614,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
 		fx[i] = doGetStorageMetrics(
-		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
+		    cx, tenantInfo, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -7753,27 +7769,18 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
                                                                       StorageMetrics min,
                                                                       StorageMetrics max,
                                                                       StorageMetrics permittedError) {
-	try {
-		Future<StorageMetrics> fx;
-		if (locations.size() > 1) {
-			fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
-		} else {
-			WaitMetricsRequest req(tenantInfo, keys, min, max);
-			fx = loadBalance(locations[0].locations->locations(),
-			                 &StorageServerInterface::waitMetrics,
-			                 req,
-			                 TaskPriority::DataDistribution);
-		}
-		StorageMetrics x = wait(fx);
-		return x;
-	} catch (Error& e) {
-		TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-			throw;
-		}
+	Future<StorageMetrics> fx;
+	if (locations.size() > 1) {
+		fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
+	} else {
+		WaitMetricsRequest req(tenantInfo, keys, min, max);
+		fx = loadBalance(locations[0].locations->locations(),
+		                 &StorageServerInterface::waitMetrics,
+		                 req,
+		                 TaskPriority::DataDistribution);
 	}
-	return Optional<StorageMetrics>();
+	StorageMetrics x = wait(fx);
+	return x;
 }
 
 ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
@@ -7786,9 +7793,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     int expectedShardCount,
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	loop {
+		state TenantInfo tenantInfo =
+		    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
 		                              tenantInfo,
@@ -7818,13 +7825,25 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			continue;
 		}
 
-		Optional<StorageMetrics> res =
-		    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
-		if (res.present()) {
-			return std::make_pair(res, -1);
+		try {
+			Optional<StorageMetrics> res =
+			    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+			if (res.present()) {
+				return std::make_pair(res, -1);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+			           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+				wait(trState.get()->handleUnknownTenant());
+			} else {
+				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+				throw;
+			}
 		}
-		cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 
@@ -7992,6 +8011,21 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self,
 		self->trState->trySetTenantId(tme.id);
 	}
 	return tme;
+}
+
+// Tenant's are supposed to be unique and therefore can be loaded once.
+// There is an assumption that a tenant exists as long as operations are happening against said tenant.
+ACTOR Future<TenantMapEntry> blobLoadTenantMapEntry(Database* db, Key rangeStartKey, Optional<TenantName> tenantName) {
+	state Transaction tr(*db);
+
+	loop {
+		try {
+			TenantMapEntry tme = wait(blobGranuleGetTenantEntry(&tr, rangeStartKey, tenantName));
+			return tme;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
@@ -8465,7 +8499,6 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 	state Version readVersionOut = invalidVersion;
 	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
 	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
-	state bool loadedTenantEntry = false;
 
 	if (version.present()) {
 		if (version.get() == latestVersion) {
@@ -8485,15 +8518,15 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 		}
 	}
 
+	if (tenantName.present()) {
+		TenantMapEntry tme = wait(blobLoadTenantMapEntry(&db, range.begin, tenantName));
+		range = range.withPrefix(tme.prefix);
+		curRegion = KeyRangeRef(range.begin, range.begin);
+	}
+
 	loop {
 		if (curRegion.begin >= range.end) {
 			return readVersionOut;
-		}
-		if (tenantName.present() && !loadedTenantEntry) {
-			TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenantName));
-			loadedTenantEntry = true;
-			range = range.withPrefix(tenantEntry.prefix);
-			curRegion = KeyRangeRef(range.begin, range.begin);
 		}
 		loop {
 			try {
@@ -10618,70 +10651,28 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, 
 	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
 	state Key beginKey = range.begin;
 
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
 	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult results = wait(
-			    krmGetRangesUnaligned(tr, blobRangeKeys.begin, KeyRangeRef(beginKey, range.end), 2 * batchLimit + 2));
+		state RangeResult results =
+		    wait(krmGetRangesUnaligned(tr, blobRangeKeys.begin, KeyRangeRef(beginKey, range.end), 2 * batchLimit + 2));
 
-			blobRanges.arena().dependsOn(results.arena());
-			for (int i = 0; i < results.size() - 1; i++) {
-				if (results[i].value == blobRangeActive) {
-					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
-				}
-				if (blobRanges.size() == batchLimit) {
-					return blobRanges;
-				}
+		blobRanges.arena().dependsOn(results.arena());
+		for (int i = 0; i < results.size() - 1; i++) {
+			if (results[i].value == blobRangeActive) {
+				blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
 			}
-
-			if (!results.more) {
+			if (blobRanges.size() == batchLimit) {
 				return blobRanges;
 			}
-			beginKey = results.back().key;
-		} catch (Error& e) {
-			wait(tr->onError(e));
 		}
-	}
-}
 
-ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobbifiedRanges(Transaction* tr,
-                                                                     KeyRange range,
-                                                                     int rangeLimit,
-                                                                     Optional<TenantName> tenantName) {
-	state TenantMapEntry tme;
-
-	loop {
-		try {
-			if (tenantName.present()) {
-				wait(store(tme, blobGranuleGetTenantEntry(tr, range.begin, tenantName)));
-				range = range.withPrefix(tme.prefix);
-			}
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
+		if (!results.more) {
+			return blobRanges;
 		}
+		beginKey = results.back().key;
 	}
-
-	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
-	if (!tenantName.present()) {
-		return blobRanges;
-	}
-
-	// Strip tenant prefix out.
-	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
-	for (auto& blobRange : blobRanges) {
-		// Filter out blob ranges that span tenants for some reason.
-		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
-			TraceEvent("ListBlobbifiedRangeSpansTenants")
-			    .suppressFor(/*seconds=*/5)
-			    .detail("Tenant", tenantName.get())
-			    .detail("Range", blobRange);
-			continue;
-		}
-		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
-	}
-	return tenantBlobRanges;
 }
 
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
@@ -10693,7 +10684,6 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state Transaction tr(cx);
 	state Key purgeKey;
 	state KeyRange purgeRange = range;
-	state bool loadedTenantPrefix = false;
 
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	if (purgeVersion == latestVersion) {
@@ -10713,23 +10703,22 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 		throw unsupported_operation();
 	}
 
+	if (tenant.present()) {
+		TenantMapEntry tme = wait(blobLoadTenantMapEntry(&cx, range.begin, tenant));
+		purgeRange = purgeRange.withPrefix(tme.prefix);
+	}
+
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			if (tenant.present() && !loadedTenantPrefix) {
-				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenant));
-				loadedTenantPrefix = true;
-				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
-			}
-
 			// must be aligned to blob range(s)
 			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedBegin =
-			    getBlobbifiedRanges(&tr, KeyRangeRef(purgeRange.begin, purgeRange.begin), 2, {});
+			    getBlobRanges(&tr, KeyRangeRef(purgeRange.begin, purgeRange.begin), 2);
 			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedEnd =
-			    getBlobbifiedRanges(&tr, KeyRangeRef(purgeRange.end, purgeRange.end), 2, {});
+			    getBlobRanges(&tr, KeyRangeRef(purgeRange.end, purgeRange.end), 2);
 			wait(success(blobbifiedBegin) && success(blobbifiedEnd));
 			if ((!blobbifiedBegin.get().empty() && blobbifiedBegin.get().front().begin < purgeRange.begin) ||
 			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().back().end > purgeRange.end)) {
@@ -10815,20 +10804,17 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
                                      Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	state bool loadedTenantEntry = false;
+
+	if (tenantName.present()) {
+		TenantMapEntry tme = wait(blobLoadTenantMapEntry(&db, range.begin, tenantName));
+		range = range.withPrefix(tme.prefix);
+	}
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			if (tenantName.present() && !loadedTenantEntry) {
-				TenantMapEntry tenantEntry =
-				    wait(blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName));
-				loadedTenantEntry = true;
-				range = range.withPrefix(tenantEntry.prefix);
-			}
 
 			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(&tr->getTransaction(), range, 1));
 
@@ -10881,10 +10867,41 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Refer
 
 	state Database db(cx);
 	state Transaction tr(db);
+	state TenantMapEntry tme;
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
 
-	Standalone<VectorRef<KeyRangeRef>> blobbifiedRanges = wait(getBlobbifiedRanges(&tr, range, rangeLimit, tenantName));
+	if (tenantName.present()) {
+		wait(store(tme, blobLoadTenantMapEntry(&db, range.begin, tenantName)));
+		range = range.withPrefix(tme.prefix);
+	}
 
-	return blobbifiedRanges;
+	loop {
+		try {
+			wait(store(blobRanges, getBlobRanges(&tr, range, rangeLimit)));
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	if (!tenantName.present()) {
+		return blobRanges;
+	}
+
+	// Strip tenant prefix out.
+	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
+	for (auto& blobRange : blobRanges) {
+		// Filter out blob ranges that span tenants for some reason.
+		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
+			TraceEvent("ListBlobbifiedRangeSpansTenants")
+			    .suppressFor(/*seconds=*/5)
+			    .detail("Tenant", tenantName.get())
+			    .detail("Range", blobRange);
+			continue;
+		}
+		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
+	}
+	return tenantBlobRanges;
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range,

@@ -263,6 +263,14 @@ public:
 		return Void();
 	}
 
+	// Return max epoch from all manifest files
+	ACTOR static Future<int64_t> lastBlobEpoc(Reference<BlobManifestLoader> self) {
+		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead(MANIFEST_FOLDER);
+		std::vector<BlobManifestFile> files = wait(BlobManifestFile::list(container));
+		ASSERT(!files.empty());
+		return files.front().epoch;
+	}
+
 private:
 	// Read data from a manifest file
 	ACTOR static Future<Value> readFromFile(Reference<BlobManifestLoader> self) {
@@ -437,4 +445,11 @@ ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db,
 	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
 	BlobGranuleRestoreVersionVector result = wait(BlobManifestLoader::listGranules(loader));
 	return result;
+}
+
+// API to get max blob manager epoc from manifest files
+ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn) {
+	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
+	int64_t epoc = wait(BlobManifestLoader::lastBlobEpoc(loader));
+	return epoc;
 }

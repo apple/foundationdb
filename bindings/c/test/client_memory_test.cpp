@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #include <foundationdb/fdb_c.h>
 
 #include "unit/fdb_api.hpp"
