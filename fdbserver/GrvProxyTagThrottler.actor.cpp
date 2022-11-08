@@ -102,7 +102,7 @@ void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
 		// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
 		// unexpected behaviour, because only one tag is used for throttling.
 		TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
-		    .suppressFor(1.0)
+		    .suppressFor(60.0)
 		    .detail("NumTags", req.tags.size())
 		    .detail("UsingTag", printable(tag));
 	}

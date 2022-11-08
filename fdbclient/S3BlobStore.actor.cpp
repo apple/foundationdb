@@ -41,7 +41,7 @@
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
 #include "rapidxml/rapidxml.hpp"
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 #include "fdbclient/FDBAWSCredentialsProvider.h"
 #endif
 
@@ -618,7 +618,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 // If the credentials expire, the connection will eventually fail and be discarded from the pool, and then a new
 // connection will be constructed, which will call this again to get updated credentials
 static S3BlobStoreEndpoint::Credentials getSecretSdk() {
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 	double elapsed = -timer_monotonic();
 	Aws::Auth::AWSCredentials awsCreds = FDBAWSCredentialsProvider::getAwsCredentials();
 	elapsed += timer_monotonic();
