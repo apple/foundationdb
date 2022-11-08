@@ -32,26 +32,39 @@
 
 // just compare the int part and smoothed duration is enough for the test.
 bool storageWiggleStatsEqual(StorageWiggleMetrics const& a, StorageWiggleMetrics const& b) {
-	return a.finished_wiggle == b.finished_wiggle && a.finished_round == b.finished_round &&
-	       std::abs(a.smoothed_wiggle_duration.getTotal() - b.smoothed_wiggle_duration.getTotal()) < 0.0001 &&
-	       std::abs(a.smoothed_round_duration.getTotal() - b.smoothed_round_duration.getTotal()) < 0.0001;
+
+	bool res = a.finished_wiggle == b.finished_wiggle && a.finished_round == b.finished_round &&
+	           std::abs(a.smoothed_wiggle_duration.getTotal() - b.smoothed_wiggle_duration.getTotal()) < 0.0001 &&
+	           std::abs(a.smoothed_round_duration.getTotal() - b.smoothed_round_duration.getTotal()) < 0.0001;
+	if (!res) {
+		std::cout << a.finished_wiggle << " | " << b.finished_wiggle << "\n";
+		std::cout << a.finished_round << " | " << b.finished_round << "\n";
+		std::cout << a.smoothed_wiggle_duration.getTotal() << " | " << b.smoothed_wiggle_duration.getTotal() << "\n";
+		std::cout << a.smoothed_round_duration.getTotal() << " | " << b.smoothed_round_duration.getTotal() << "\n";
+	}
+	return res;
 }
+
+Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
+	printf("Issuing configuration change: %s\n", config.c_str());
+	return ManagementAPI::changeConfig(cx.getReference(), config, force);
+}
+
 // a wrapper for test protected method
 struct DDTeamCollectionTester : public DDTeamCollection {
 	ACTOR static Future<Void> testRestoreAndResetStats(DDTeamCollectionTester* self, StorageWiggleMetrics metrics) {
 		state Future<Void> wiggleFuture = self->monitorPerpetualStorageWiggle();
+		std::cout << "testRestoreAndResetStats ...\n";
 		wait(delay(5.0)); // wait for restore txn finish
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
-		wait(
-		    success(ManagementAPI::changeConfig(self->dbContext().getReference(), "perpetual_storage_wiggle=0", true)));
-		// stats in-memory and FDB is reset
-		wait(delay(5.0)); // wait for reset txn finish
-		metrics.reset();
-		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
+		wait(success(IssueConfigurationChange(
+		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
+
 		// restore from FDB
-		self->storageWiggler->metrics = StorageWiggleMetrics();
-		wait(self->storageWiggler->restoreStats());
+		metrics.reset();
+		wiggleFuture = self->monitorPerpetualStorageWiggle();
+		wait(delay(5.0));
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		return Void();
 	}
@@ -59,18 +72,18 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 	ACTOR static Future<Void> switchPerpetualWiggleWhenDDIsDead(DDTeamCollectionTester* self,
 	                                                            StorageWiggleMetrics metrics) {
 		state Future<Void> wiggleFuture = self->monitorPerpetualStorageWiggle();
+		std::cout << "switchPerpetualWiggleWhenDDIsDead ...\n";
 		wait(delay(5.0)); // wait for restore txn finish
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		wiggleFuture.cancel(); // mock dead DD
 		// disable PW
-		wait(
-		    success(ManagementAPI::changeConfig(self->dbContext().getReference(), "perpetual_storage_wiggle=0", true)));
+		wait(success(IssueConfigurationChange(
+		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
 		// enable PW
-		wait(
-		    success(ManagementAPI::changeConfig(self->dbContext().getReference(), "perpetual_storage_wiggle=1", true)));
+		wait(success(IssueConfigurationChange(
+		    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
 		// restart
 		wiggleFuture = self->monitorPerpetualStorageWiggle();
-
 		wait(delay(5.0)); // wait for reset txn finish
 		metrics.reset();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
@@ -79,13 +92,19 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 
 	// reset stats shouldn't be overwritten when PW is disabled
 	ACTOR static Future<Void> finishWiggleAfterPWDisabled(DDTeamCollectionTester* self, StorageWiggleMetrics metrics) {
+		state Future<Void> wiggleFuture = self->monitorPerpetualStorageWiggle();
+		std::cout << "finishWiggleAfterPWDisabled ...\n";
+		wait(delay(5.0)); // wait for restore txn finish
+		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
-		wait(
-		    success(ManagementAPI::changeConfig(self->dbContext().getReference(), "perpetual_storage_wiggle=0", true)));
+		wait(success(IssueConfigurationChange(
+		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
 		wait(self->storageWiggler->finishWiggle());
 
-		// restart
-		state Future<Void> wiggleFuture = self->monitorPerpetualStorageWiggle();
+		// restart perpetual wiggle
+		wait(success(IssueConfigurationChange(
+		    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
+		wiggleFuture = self->monitorPerpetualStorageWiggle();
 		wait(delay(5.0)); // wait for reset txn finish
 		metrics.reset();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
