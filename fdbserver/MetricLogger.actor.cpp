@@ -415,6 +415,9 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 // }
 
 ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
+	if (model == MetricsDataModel::NONE) {
+		return Void{};
+	}
 	state uint32_t port = (model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
 	TraceEvent(SevInfo, "MetricsUDPServerStarted").detail("Address", "127.0.0.1").detail("Port", port);
 	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(port));
