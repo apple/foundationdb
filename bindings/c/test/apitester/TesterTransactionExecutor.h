@@ -58,9 +58,8 @@ public:
 	// Mark the transaction as completed without committing it (for read transactions)
 	virtual void done() = 0;
 
-	// Make the transaction self-conflicting if a timeout is set
-	// It is necessary for avoiding in-flight transactions when retrying write transactions
-	// on timeouts
+	// Make the transaction self-conflicting if it needs to be restarted on timeouts.
+	// Must be called for all write transactions that may need to be restarted on timeouts
 	virtual void makeSelfConflicting() = 0;
 
 	// Plumbing for blob granule base path
