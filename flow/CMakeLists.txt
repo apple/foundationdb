@@ -112,6 +112,7 @@ add_library(flow_swift STATIC
     clock_support.swift
     stream_support.swift
     error_support.swift
+    task_priority_support.swift
     SwiftBridging.swift
     SwiftFileB.swift)
 
