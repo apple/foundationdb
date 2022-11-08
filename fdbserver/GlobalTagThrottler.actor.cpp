@@ -641,7 +641,7 @@ class MockStorageServer {
 		Smoother smoother;
 
 	public:
-		Cost() : smoother(60.0) {}
+		Cost() : smoother(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
 		Cost& operator+=(double delta) {
 			smoother.addDelta(delta);
 			return *this;
