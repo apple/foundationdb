@@ -377,6 +377,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
+	FDBFuture* (*transactionGetTotalCost)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
 	FDBFuture* (*transactionWatch)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
 	FDBFuture* (*transactionOnError)(FDBTransaction* tr, fdb_error_t error);
@@ -505,6 +506,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override { return SpanContext(); };
+	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -732,6 +734,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -1024,6 +1027,7 @@ public:
 		ThreadFuture<Void> protocolVersionMonitor;
 
 		Future<Void> sharedStateUpdater;
+		bool isConfigDB;
 
 		// Versions older than 6.1 do not benefit from having their database connections closed. Additionally,
 		// there are various issues that result in negative behavior in some cases if the connections are closed.
@@ -1147,6 +1151,7 @@ private:
 	bool disableBypass;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
+	bool retainClientLibCopies;
 	ApiVersion apiVersion;
 
 	int nextThread = 0;

@@ -57,6 +57,7 @@ public:
 	std::string tlsCertFile;
 	std::string tlsKeyFile;
 	std::string tlsCaFile;
+	bool retainClientLibCopies = false;
 };
 
 } // namespace FdbApiTester

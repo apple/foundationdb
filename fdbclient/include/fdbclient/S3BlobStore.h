@@ -58,8 +58,8 @@ public:
 		    requests_per_second, list_requests_per_second, write_requests_per_second, read_requests_per_second,
 		    delete_requests_per_second, multipart_max_part_size, multipart_min_part_size, concurrent_requests,
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
-		    read_block_size, read_ahead_blocks, read_cache_blocks_per_file, max_send_bytes_per_second,
-		    max_recv_bytes_per_second, sdk_auth;
+		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
+		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth;
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
@@ -86,6 +86,7 @@ public:
 				"concurrent_lists (or cl)              Max concurrent list operations that can be in progress at once.",
 				"concurrent_reads_per_file (or crps)   Max concurrent reads in progress for any one file.",
 				"concurrent_writes_per_file (or cwps)  Max concurrent uploads in progress for any one file.",
+				"enable_read_cache (or erc)            Whether read block caching is enabled.",
 				"read_block_size (or rbs)              Block size in bytes to be used for reads.",
 				"read_ahead_blocks (or rab)            Number of blocks to read ahead of requested offset.",
 				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",

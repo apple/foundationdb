@@ -110,6 +110,7 @@ public:
 	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
+	double POP_FROM_LOG_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -306,16 +307,18 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
-	int ROCKSDB_READER_THREAD_PRIORITY;
-	int ROCKSDB_WRITER_THREAD_PRIORITY;
+	bool ROCKSDB_SET_READ_TIMEOUT;
 	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int ROCKSDB_READ_RANGE_ROW_LIMIT;
+	int ROCKSDB_READER_THREAD_PRIORITY;
+	int ROCKSDB_WRITER_THREAD_PRIORITY;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
 	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
+	bool ROCKSDB_MUTE_LOGS;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
@@ -333,6 +336,8 @@ public:
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 	double ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME;
 	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
+	bool ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS;
+	int ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
@@ -349,6 +354,8 @@ public:
 	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
 	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
 	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
+	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
+	int ROCKSDB_STATS_LEVEL;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
@@ -628,14 +635,16 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
-	// Cost multiplier for writes (because write operations are more expensive than reads)
-	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
 	// until some existing tags expire
 	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
 	// Global tag throttler forgets about throughput from a tag once no new transactions from that
 	// tag have been received for this duration (in seconds):
 	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
+	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
+	double PROXY_MAX_TAG_THROTTLE_DURATION;
+	// Interval at which latency bands are logged for each tag on grv proxy
+	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -717,7 +726,6 @@ public:
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
-	int CHANGE_FEED_DISK_READS_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -740,7 +748,6 @@ public:
 	int64_t MIN_TAG_READ_PAGES_RATE;
 	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
-	int64_t READ_COST_BYTE_FACTOR;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
 	bool REPORT_DD_METRICS;
 	double DD_METRICS_REPORT_INTERVAL;
@@ -757,6 +764,9 @@ public:
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 	int STORAGE_FEED_QUERY_HARD_LIMIT;
+	int STORAGE_SERVER_READ_CONCURRENCY;
+	std::string STORAGESERVER_READ_RANKS;
+	std::string STORAGESERVER_READ_PRIORITIES;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -886,7 +896,6 @@ public:
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
-	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	bool REDWOOD_KVSTORE_RANGE_PREFETCH; // Whether to use range read prefetching
 	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
@@ -905,6 +914,8 @@ public:
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 	bool REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; // Whether to split pages by tenant if encryption is enabled
+
+	std::string REDWOOD_PRIORITY_LAUNCHS;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -950,10 +961,14 @@ public:
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
 	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
+	bool BG_ENABLE_READ_DRIVEN_COMPACTION;
+	int BG_RDC_BYTES_FACTOR;
+	int BG_RDC_READ_FACTOR;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
+	int BLOB_WORKER_RDC_PARALLELISM;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
@@ -972,10 +987,10 @@ public:
 	bool BLOB_MANIFEST_BACKUP;
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	bool BLOB_FULL_RESTORE_MODE;
+	double BLOB_MIGRATOR_CHECK_INTERVAL;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
-	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 
 	// HTTP KMS Connector
 	std::string REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE;
@@ -988,6 +1003,9 @@ public:
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
 	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
+
+	// Idempotency ids
+	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

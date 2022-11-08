@@ -1449,8 +1449,7 @@ void TagPartitionedLogSystem::pop(Version upTo, Tag tag, Version durableKnownCom
 				}
 				if (prev == 0) {
 					// pop tag from log upto version defined in outstandingPops[].first
-					popActors.add(
-					    popFromLog(this, log, tag, /*delayBeforePop*/ 1.0, /*popLogRouter=*/false)); //< FIXME: knob
+					popActors.add(popFromLog(this, log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
 				}
 			}
 		}
@@ -1635,7 +1634,6 @@ Future<Void> TagPartitionedLogSystem::endEpoch() {
 Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
     RecruitFromConfigurationReply const& recr,
     Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
-    UID clusterId,
     DatabaseConfiguration const& config,
     LogEpoch recoveryCount,
     Version recoveryTransactionVersion,
@@ -1646,7 +1644,6 @@ Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	return newEpoch(Reference<TagPartitionedLogSystem>::addRef(this),
 	                recr,
 	                fRemoteWorkers,
-	                clusterId,
 	                config,
 	                recoveryCount,
 	                recoveryTransactionVersion,
@@ -2546,7 +2543,6 @@ std::vector<Tag> TagPartitionedLogSystem::getLocalTags(int8_t locality, const st
 ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSystem* self,
                                                            Reference<TagPartitionedLogSystem> oldLogSystem,
                                                            Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-                                                           UID clusterId,
                                                            DatabaseConfiguration configuration,
                                                            LogEpoch recoveryCount,
                                                            Version recoveryTransactionVersion,
@@ -2690,7 +2686,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		req.startVersion = logSet->startVersion;
 		req.logRouterTags = 0;
 		req.txsTags = self->txsTags;
-		req.clusterId = clusterId;
 		req.recoveryTransactionVersion = recoveryTransactionVersion;
 	}
 
@@ -2742,7 +2737,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
     Reference<TagPartitionedLogSystem> oldLogSystem,
     RecruitFromConfigurationReply recr,
     Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-    UID clusterId,
     DatabaseConfiguration configuration,
     LogEpoch recoveryCount,
     Version recoveryTransactionVersion,
@@ -2965,7 +2959,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		req.startVersion = logSystem->tLogs[0]->startVersion;
 		req.logRouterTags = logSystem->logRouterTags;
 		req.txsTags = logSystem->txsTags;
-		req.clusterId = clusterId;
 		req.recoveryTransactionVersion = recoveryTransactionVersion;
 	}
 
@@ -3035,7 +3028,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			req.startVersion = oldLogSystem->knownCommittedVersion + 1;
 			req.logRouterTags = logSystem->logRouterTags;
 			req.txsTags = logSystem->txsTags;
-			req.clusterId = clusterId;
 			req.recoveryTransactionVersion = recoveryTransactionVersion;
 		}
 
@@ -3094,7 +3086,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(),
 		                                                                    oldLogSystem,
 		                                                                    fRemoteWorkers,
-		                                                                    clusterId,
 		                                                                    configuration,
 		                                                                    recoveryCount,
 		                                                                    recoveryTransactionVersion,

@@ -626,6 +626,14 @@ ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	});
 }
 
+ThreadFuture<int64_t> ThreadSafeTransaction::getTotalCost() {
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<int64_t> {
+		tr->checkDeferredError();
+		return tr->getTotalCost();
+	});
+}
+
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> {
@@ -735,10 +743,10 @@ void ThreadSafeApi::runNetwork() {
 	Optional<Error> runErr;
 	try {
 		::runNetwork();
-	} catch (Error& e) {
+	} catch (const Error& e) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
 		runErr = e;
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		runErr = unknown_error();
 		TraceEvent(SevError, "RunNetworkError").error(unknown_error()).detail("RootException", e.what());
 	} catch (...) {
@@ -749,9 +757,9 @@ void ThreadSafeApi::runNetwork() {
 	for (auto& hook : threadCompletionHooks) {
 		try {
 			hook.first(hook.second);
-		} catch (Error& e) {
+		} catch (const Error& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
-		} catch (std::exception& e) {
+		} catch (const std::exception& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error()).detail("RootException", e.what());
 		} catch (...) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
@@ -759,12 +767,10 @@ void ThreadSafeApi::runNetwork() {
 	}
 
 	if (runErr.present()) {
-		closeTraceFile();
 		throw runErr.get();
 	}
 
 	TraceEvent("RunNetworkTerminating");
-	closeTraceFile();
 }
 
 void ThreadSafeApi::stopNetwork() {

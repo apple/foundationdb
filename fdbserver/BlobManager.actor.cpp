@@ -2776,6 +2776,7 @@ ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 			if (bmData->iAmReplaced.canBeSet()) {
 				bmData->iAmReplaced.send(Void());
 			}
+			throw;
 		}
 	}
 
@@ -2896,6 +2897,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
 					}
+					throw blob_manager_replaced();
 				}
 
 				BoundaryEvaluation newEval(rep.continueEpoch,
@@ -3496,6 +3498,30 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 	return Void();
 }
 
+// Update blob manager epoc for restore. The blob manager should have larger epoch after restore
+// so that it could generate new manifest files with larger epoch number. Blob manifest files
+// with largest epoch number is treated as the newest.
+ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		try {
+			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			state int64_t oldEpochValue = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) : 1;
+			if (oldEpochValue < epoch) {
+				tr->set(blobManagerEpochKey, blobManagerEpochValueFor(epoch));
+				wait(tr->commit());
+				TraceEvent("BlobManagerEpoc").detail("Epoch", epoch);
+				bmData->epoch = epoch;
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
@@ -3511,8 +3537,12 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bmData->startRecruiting.trigger();
 
 	bmData->initBStore();
-	if (isFullRestoreMode())
+	if (isFullRestoreMode()) {
 		wait(loadManifest(bmData->db, bmData->bstore));
+
+		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
+		wait(updateEpoch(bmData, epoc + 1));
+	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
@@ -3537,7 +3567,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	}
 
 	// skip the rest of the algorithm for the first blob manager
-	if (bmData->epoch == 1 && !isFullRestoreMode()) {
+	if (bmData->epoch == 1) {
 		bmData->doneRecovering.send(Void());
 		return Void();
 	}
@@ -4236,7 +4266,13 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       Version purgeVersion,
                                       KeyRange granuleRange,
                                       Optional<UID> mergeChildID,
-                                      bool force) {
+                                      bool force,
+                                      Future<Void> parentFuture) {
+	// wait for parent to finish first to avoid ordering/orphaning issues
+	wait(parentFuture);
+	// yield to avoid a long callstack and to allow this to get cancelled
+	wait(delay(0));
+
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0} Fully deleting granule [{1} - {2}): {3} @ {4}{5}\n",
 		           self->epoch,
@@ -4294,6 +4330,11 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	// deleting files before corresponding metadata reduces the # of orphaned files.
 	wait(waitForAll(deletions));
 
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
+
 	// delete metadata in FDB (history entry and file keys)
 	if (BM_PURGE_DEBUG) {
 		fmt::print(
@@ -4327,6 +4368,11 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
 	}
 
 	if (BM_PURGE_DEBUG) {
@@ -4499,7 +4545,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	state std::queue<std::tuple<KeyRange, Version, Version, Optional<UID>>> historyEntryQueue;
 
 	// stacks of <granuleId, historyKey> and <granuleId> (and mergeChildID) to track which granules to delete
-	state std::vector<std::tuple<UID, Key, KeyRange, Optional<UID>>> toFullyDelete;
+	state std::vector<std::tuple<UID, Key, KeyRange, Optional<UID>, Version>> toFullyDelete;
 	state std::vector<std::pair<UID, KeyRange>> toPartiallyDelete;
 
 	// track which granules we have already added to traversal
@@ -4735,7 +4781,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				fmt::print(
 				    "BM {0}   Granule {1} will be FULLY deleted\n", self->epoch, currHistoryNode.granuleID.toString());
 			}
-			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange, mergeChildID });
+			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange, mergeChildID, startVersion });
 		} else if (startVersion < purgeVersion) {
 			if (BM_PURGE_DEBUG) {
 				fmt::print("BM {0}   Granule {1} will be partially deleted\n",
@@ -4808,36 +4854,65 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("DeletingFullyCount", toFullyDelete.size())
 	    .detail("DeletingPartiallyCount", toPartiallyDelete.size());
 
-	state std::vector<Future<Void>> partialDeletions;
 	state int i;
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to fully delete\n", self->epoch, toFullyDelete.size());
 	}
 	// Go backwards through set of granules to guarantee deleting oldest first. This avoids orphaning granules in the
 	// deletion process
-	// FIXME: could track explicit parent dependencies and parallelize so long as a parent and child aren't running in
-	// parallel, but that's non-trivial
-	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
-		state UID granuleId;
-		Key historyKey;
-		KeyRange keyRange;
-		Optional<UID> mergeChildId;
-		std::tie(granuleId, historyKey, keyRange, mergeChildId) = toFullyDelete[i];
-		// FIXME: consider batching into a single txn (need to take care of txn size limit)
-		if (BM_PURGE_DEBUG) {
-			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
+	if (!toFullyDelete.empty()) {
+		state std::vector<Future<Void>> fullDeletions;
+		KeyRangeMap<std::pair<Version, Future<Void>>> parentDelete;
+		parentDelete.insert(normalKeys, { 0, Future<Void>(Void()) });
+
+		std::vector<std::pair<Version, int>> deleteOrder;
+		deleteOrder.reserve(toFullyDelete.size());
+		for (int i = 0; i < toFullyDelete.size(); i++) {
+			deleteOrder.push_back({ std::get<4>(toFullyDelete[i]), i });
 		}
-		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force));
-		if (BUGGIFY && self->maybeInjectTargetedRestart()) {
-			wait(delay(0)); // should be cancelled
-			ASSERT(false);
+		std::sort(deleteOrder.begin(), deleteOrder.end());
+
+		for (i = 0; i < deleteOrder.size(); i++) {
+			state UID granuleId;
+			Key historyKey;
+			KeyRange keyRange;
+			Optional<UID> mergeChildId;
+			Version startVersion;
+			std::tie(granuleId, historyKey, keyRange, mergeChildId, startVersion) =
+			    toFullyDelete[deleteOrder[i].second];
+			// FIXME: consider batching into a single txn (need to take care of txn size limit)
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
+			}
+			std::vector<Future<Void>> parents;
+			auto parentRanges = parentDelete.intersectingRanges(keyRange);
+			for (auto& it : parentRanges) {
+				if (startVersion <= it.cvalue().first) {
+					fmt::print("ERROR: [{0} - {1}) @ {2} <= [{3} - {4}) @ {5}\n",
+					           keyRange.begin.printable(),
+					           keyRange.end.printable(),
+					           startVersion,
+					           it.begin().printable(),
+					           it.end().printable(),
+					           it.cvalue().first);
+				}
+				ASSERT(startVersion > it.cvalue().first);
+				parents.push_back(it.cvalue().second);
+			}
+			Future<Void> deleteFuture = fullyDeleteGranule(
+			    self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force, waitForAll(parents));
+			fullDeletions.push_back(deleteFuture);
+			parentDelete.insert(keyRange, { startVersion, deleteFuture });
 		}
+
+		wait(waitForAll(fullDeletions));
 	}
 
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to partially delete\n", self->epoch, toPartiallyDelete.size());
 	}
 
+	state std::vector<Future<Void>> partialDeletions;
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
 		KeyRange keyRange;
@@ -4849,6 +4924,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 
 	wait(waitForAll(partialDeletions));
+
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
 
 	if (force) {
 		tr.reset();
@@ -4873,6 +4953,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				wait(tr.onError(e));
 			}
 		}
+	}
+
+	if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
 	}
 
 	// Now that all the necessary granules and their files have been deleted, we can
@@ -5299,6 +5384,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 					fmt::print("BM {} exiting because it is replaced\n", self->epoch);
 				}
 				TraceEvent("BlobManagerReplaced", bmInterf.id()).detail("Epoch", epoch);
+				wait(delay(0.0));
 				break;
 			}
 			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {

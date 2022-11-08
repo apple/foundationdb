@@ -1,5 +1,5 @@
 /*
- * IdempotencyId.h
+ * IdempotencyId.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_IDEMPOTENCYID_H
-#define FDBCLIENT_IDEMPOTENCYID_H
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_IDEMPOTENCY_ID_ACTOR_G_H)
+#define FDBCLIENT_IDEMPOTENCY_ID_ACTOR_G_H
+#include "fdbclient/IdempotencyId.actor.g.h"
+#elif !defined(FDBCLIENT_IDEMPOTENCY_ID_ACTOR_H)
+#define FDBCLIENT_IDEMPOTENCY_ID_ACTOR_H
 
 #pragma once
 
@@ -28,10 +33,22 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // this has to be the last include
 
 struct CommitResult {
 	Version commitVersion;
 	uint16_t batchIndex;
+};
+
+// The type of the value stored at the key |idempotencyIdsExpiredVersion|
+struct IdempotencyIdsExpiredVersion {
+	static constexpr auto file_identifier = 3746945;
+	Version expired = 0;
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		serializer(ar, expired);
+	}
 };
 
 // See design/idempotency_ids.md for more information. Designed so that the common case of a random 16 byte id does not
@@ -163,4 +180,10 @@ private:
 // Check if id is present in kv, and if so return the commit version and batchIndex
 Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id);
 
+// Make a range containing only the idempotency key associated with version and highOrderBatchIndex
+KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex);
+
+void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
+
+#include "flow/unactorcompiler.h"
 #endif

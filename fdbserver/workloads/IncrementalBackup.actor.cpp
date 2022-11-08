@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
@@ -150,6 +151,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 		if (self->submitOnly) {
 			TraceEvent("IBackupSubmitAttempt").log();
+			state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 			try {
 				wait(self->backupAgent.submitBackup(cx,
 				                                    self->backupDir,
@@ -158,7 +160,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
+				                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
+				                                        configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));
@@ -227,19 +230,56 @@ struct IncrementalBackupWorkload : TestWorkload {
 			    .detail("Size", containers.size())
 			    .detail("First", containers.front());
 			state Key backupURL = Key(containers.front());
+
+			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
+			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
+			for (auto r : backupRanges) {
+				if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
+					restoreRange.push_back_deep(restoreRange.arena(), r);
+				} else {
+					KeyRangeRef normalKeyRange = r & normalKeys;
+					KeyRangeRef systemKeyRange = r & systemKeys;
+					if (!normalKeyRange.empty()) {
+						restoreRange.push_back_deep(restoreRange.arena(), normalKeyRange);
+					}
+					if (!systemKeyRange.empty()) {
+						systemRestoreRange.push_back_deep(systemRestoreRange.arena(), systemKeyRange);
+					}
+				}
+			}
+			if (!systemRestoreRange.empty()) {
+				TraceEvent("IBackupSystemRestoreAttempt").detail("BeginVersion", beginVersion);
+				wait(success(self->backupAgent.restore(cx,
+				                                       cx,
+				                                       "system_restore"_sr,
+				                                       backupURL,
+				                                       {},
+				                                       systemRestoreRange,
+				                                       WaitForComplete::True,
+				                                       invalidVersion,
+				                                       Verbose::True,
+				                                       Key(),
+				                                       Key(),
+				                                       LockDB::True,
+				                                       UnlockDB::True,
+				                                       OnlyApplyMutationLogs::True,
+				                                       InconsistentSnapshotOnly::False,
+				                                       beginVersion)));
+			}
 			TraceEvent("IBackupRestoreAttempt").detail("BeginVersion", beginVersion);
 			wait(success(self->backupAgent.restore(cx,
 			                                       cx,
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
 			                                       {},
-			                                       backupRanges,
+			                                       restoreRange,
 			                                       WaitForComplete::True,
 			                                       invalidVersion,
 			                                       Verbose::True,
 			                                       Key(),
 			                                       Key(),
 			                                       LockDB::True,
+			                                       UnlockDB::True,
 			                                       OnlyApplyMutationLogs::True,
 			                                       InconsistentSnapshotOnly::False,
 			                                       beginVersion)));

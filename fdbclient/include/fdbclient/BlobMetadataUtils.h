@@ -91,4 +91,8 @@ struct BlobMetadataDetailsRef {
 	}
 };
 
+Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::string& baseUrl,
+                                                                BlobMetadataDomainId domainId,
+                                                                BlobMetadataDomainName domainName);
+
 #endif

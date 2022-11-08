@@ -607,7 +607,7 @@ public:
 Key getTagQuotaKey(TransactionTagRef);
 
 template <class Tr>
-void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, double reservedQuota, double totalQuota) {
+void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota, int64_t totalQuota) {
 	TagQuotaValue tagQuotaValue;
 	tagQuotaValue.reservedQuota = reservedQuota;
 	tagQuotaValue.totalQuota = totalQuota;

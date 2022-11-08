@@ -516,7 +516,6 @@ public:
 	ACTOR static Future<Void> buildTeams(DDTeamCollection* self) {
 		state int desiredTeams;
 		state int serverCount = 0;
-		state int uniqueMachines = 0;
 		state std::set<Optional<Standalone<StringRef>>> machines;
 
 		// wait to see whether restartTeamBuilder is triggered
@@ -538,15 +537,15 @@ public:
 			}
 		}
 
-		uniqueMachines = machines.size();
+		int uniqueMachines = machines.size();
 		TraceEvent("BuildTeams", self->distributorId)
 		    .detail("ServerCount", self->server_info.size())
 		    .detail("UniqueMachines", uniqueMachines)
 		    .detail("Primary", self->primary)
 		    .detail("StorageTeamSize", self->configuration.storageTeamSize);
 
-		// If there are too few machines to even build teams or there are too few represented datacenters, build no new
-		// teams
+		// If there are too few machines to even build teams or there are too few represented datacenters, can't build
+		// any team.
 		if (uniqueMachines >= self->configuration.storageTeamSize) {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * serverCount;
 			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * serverCount;
@@ -1014,7 +1013,7 @@ public:
 	    const DDEnabledState* ddEnabledState,
 	    bool isTss) {
 		state Future<Void> failureTracker;
-		state ServerStatus status(false, false, false, server->getLastKnownInterface().locality);
+		state ServerStatus status(server->getLastKnownInterface().locality);
 		state bool lastIsUnhealthy = false;
 		state Future<Void> metricsTracker = server->serverMetricsPolling();
 
@@ -1518,8 +1517,6 @@ public:
 	                                                      ServerStatus* status,
 	                                                      Version addedVersion) {
 		state StorageServerInterface interf = server->getLastKnownInterface();
-		state int targetTeamNumPerServer =
-		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 		loop {
 			state bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
 			if (self->healthyZone.get().present()) {
@@ -1837,6 +1834,7 @@ public:
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Future<RangeResult> fresultsExclude = tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> fresultsFailed = tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> flocalitiesExclude =
@@ -2284,15 +2282,12 @@ public:
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			UID clusterId = wait(self->getClusterId());
-
 			state InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
-			isr.clusterId = clusterId;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -2478,6 +2473,7 @@ public:
 				hasHealthyTeam = (self->healthyTeamCount != 0);
 				RecruitStorageRequest rsr;
 				std::set<AddressExclusion> exclusions;
+				// Exclude existing servers running SS from being recruited again.
 				for (auto s = self->server_and_tss_info.begin(); s != self->server_and_tss_info.end(); ++s) {
 					auto serverStatus = self->server_status.get(s->second->getLastKnownInterface().id());
 					if (serverStatus.excludeOnRecruit()) {
@@ -2538,6 +2534,8 @@ public:
 
 				choose {
 					when(RecruitStorageReply candidateWorker = wait(fCandidateWorker)) {
+						// Note that this call may be blocked in CC when there are no more storage process matching
+						// the criteria in RecruitStorageRequest.
 						AddressExclusion candidateSSAddr(candidateWorker.worker.stableAddress().ip,
 						                                 candidateWorker.worker.stableAddress().port);
 						int numExistingSS = numSSPerAddr[candidateSSAddr];
@@ -3273,18 +3271,16 @@ bool DDTeamCollection::isMachineTeamHealthy(std::vector<Standalone<StringRef>> c
 }
 
 bool DDTeamCollection::isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam) const {
-	int healthyNum = 0;
-
 	// A healthy machine team should have the desired number of machines
 	if (machineTeam.size() != configuration.storageTeamSize)
 		return false;
 
 	for (auto const& machine : machineTeam.getMachines()) {
-		if (isMachineHealthy(machine)) {
-			healthyNum++;
+		if (!isMachineHealthy(machine)) {
+			return false;
 		}
 	}
-	return (healthyNum == machineTeam.getMachines().size());
+	return true;
 }
 
 bool DDTeamCollection::isMachineHealthy(Reference<TCMachineInfo> const& machine) const {
@@ -3468,10 +3464,6 @@ Future<Void> DDTeamCollection::serverGetTeamRequests(TeamCollectionInterface tci
 
 Future<Void> DDTeamCollection::monitorHealthyTeams() {
 	return DDTeamCollectionImpl::monitorHealthyTeams(this);
-}
-
-Future<UID> DDTeamCollection::getClusterId() {
-	return db->getClusterId();
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {
@@ -4086,8 +4078,6 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 
 		std::vector<UID*> team;
 		std::vector<LocalityEntry> forcedAttributes;
-
-		// Step 4: Reuse Policy's selectReplicas() to create team for the representative process.
 		std::vector<UID*> bestTeam;
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
@@ -4115,6 +4105,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			// that have the least-utilized server
 			team.clear();
 			ASSERT_WE_THINK(forcedAttributes.size() == 1);
+			// Step 4: Reuse Policy's selectReplicas() to create team for the representative process.
 			auto success = machineLocalityMap.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
 			// NOTE: selectReplicas() should always return success when storageTeamSize = 1
 			ASSERT_WE_THINK(configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success));
@@ -4482,13 +4473,12 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 	}
 
 	while (addedTeams < teamsToBuild || notEnoughTeamsForAServer()) {
-		// Step 1: Create 1 best machine team
 		std::vector<UID> bestServerTeam;
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 		bool earlyQuitBuild = false;
 		for (int i = 0; i < maxAttempts && i < 100; ++i) {
-			// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
+			// Step 1: Choose 1 least used server and then choose 1 least used machine team from the server
 			Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
 			if (!chosenServer.isValid()) {
 				TraceEvent(SevWarn, "NoValidServer").detail("Primary", primary);
@@ -4510,12 +4500,14 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			}
 
 			// From here, chosenMachineTeam must have a healthy server team
-			// Step 3: Randomly pick 1 server from each machine in the chosen machine team to form a server team
+			// Step 2: Randomly pick 1 server from each machine in the chosen machine team to form a server team
 			std::vector<UID> serverTeam;
 			int chosenServerCount = 0;
 			for (auto& machine : chosenMachineTeam->getMachines()) {
 				UID serverID;
 				if (machine == chosenServer->machine) {
+					// If the machine is from `chosenServer`, use `chosenServer` from this machine, since it is a least
+					// utilized server on this machine.
 					serverID = chosenServer->getId();
 					++chosenServerCount;
 				} else {
