@@ -94,6 +94,13 @@ struct StorageWiggleMetrics {
 		result["finished_wiggle"] = finished_wiggle;
 		return result;
 	}
+
+	void reset() {
+		StorageWiggleMetrics newMetrics;
+		newMetrics.smoothed_round_duration.reset(smoothed_round_duration.getTotal());
+		newMetrics.smoothed_wiggle_duration.reset(smoothed_wiggle_duration.getTotal());
+		*this = std::move(newMetrics);
+	}
 };
 
 // read from DB
@@ -143,7 +150,7 @@ Future<Void> resetStorageWiggleMetrics(TrType tr,
 		newMetrics.smoothed_wiggle_duration = oldStepDuration;
 		newMetrics.smoothed_round_duration = oldRoundDuration;
 		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
-		        ObjectWriter::toValue(metrics, IncludeVersion()));
+		        ObjectWriter::toValue(newMetrics, IncludeVersion()));
 	}
 	return Void();
 }

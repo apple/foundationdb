@@ -179,10 +179,7 @@ Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
 }
 
 Future<Void> StorageWiggler::resetStats() {
-	auto newMetrics = StorageWiggleMetrics();
-	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
-	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
-	metrics = newMetrics;
+	metrics.reset();
 	return runRYWTransaction(
 	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 		    return resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
@@ -210,8 +207,8 @@ Future<Void> StorageWiggler::startWiggle() {
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return runRYWTransaction(teamCollection->dbContext(),
-	                         [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+	return runRYWTransaction(
+	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
 	    });
 }
@@ -228,8 +225,8 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return runRYWTransaction(teamCollection->dbContext(),
-	                         [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+	return runRYWTransaction(
+	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
 	    });
 }
