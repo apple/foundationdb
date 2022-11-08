@@ -14,16 +14,14 @@ testTitle = 'TenantCreation'
     name = 'AnotherAuthzSecurityTenant'
 
 [[test]]
-testTitle = 'LeakTLogInterface'
+testTitle = 'AuthzSecurityCheck'
 clearAfterTest = false
 
     [[test.workload]]
     testName = 'LeakTLogInterface'
     tenant = 'AuthzSecurityTenant'
     key = 'TLogInterface'
-
-[[test]]
-testTitle = 'AuthzSecurityCheck'
+    testDuration = 10.0
 
     [[test.workload]]
     testName = 'AuthzSecurity'

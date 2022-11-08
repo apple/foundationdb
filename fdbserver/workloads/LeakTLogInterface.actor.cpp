@@ -35,7 +35,7 @@ struct LeakTLogInterfaceWorkload : TestWorkload {
 	LeakTLogInterfaceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 		fieldName = getOption(options, "key"_sr, "TLogInterface"_sr);
-		testDuration = getOption(options, "testDuration"_sr, 3.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return persistSerializedTLogInterface(this, cx); }
