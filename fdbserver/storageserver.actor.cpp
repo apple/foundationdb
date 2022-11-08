@@ -250,7 +250,8 @@ struct AddingShard : NonCopyable {
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
 	ShardInfo(KeyRange keys, std::unique_ptr<AddingShard>&& adding, StorageServer* readWrite)
-	  : adding(std::move(adding)), readWrite(readWrite), keys(keys), version(0) {}
+	  : adding(std::move(adding)), readWrite(readWrite), keys(keys), shardId(UID()), desiredShardId(UID()), version(0) {
+	}
 
 public:
 	// A shard has 3 mutual exclusive states: adding, readWrite and notAssigned.
