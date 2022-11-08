@@ -49,9 +49,7 @@ struct LowLatencyWorkload : TestWorkload {
 		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert("Attrition");
-	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {

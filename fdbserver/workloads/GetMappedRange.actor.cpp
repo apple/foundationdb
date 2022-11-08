@@ -61,9 +61,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	// TODO: Currently this workload doesn't play well with MachineAttrition, but it probably should
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert("Attrition");
-	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	ACTOR Future<Void> performSetup(Database cx, GetMappedRangeWorkload* self) {
 		std::vector<TransactionType> types;
