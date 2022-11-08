@@ -447,6 +447,14 @@ TEST_CASE("/GrvProxyTagThrottler/Fifo") {
 
 // Tests that while throughput is low, the tag throttler
 // does not accumulate too much budget.
+//
+// A server is setup to server 10 transactions per second,
+// then runs idly for 60 seconds. Then a client starts
+// and attempts 20 transactions per second for 60 seconds.
+// The server throttles the client to only achieve
+// 10 transactions per second during this 60 second window.
+// If the throttler is allowed to accumulate budget indefinitely
+// during the idle 60 seconds, this test will fail.
 TEST_CASE("/GrvProxyTagThrottler/LimitedIdleBudget") {
 	state GrvProxyTagThrottler throttler(5.0);
 	state TagSet tagSet;
