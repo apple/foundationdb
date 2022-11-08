@@ -2780,6 +2780,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version emptyVersion = feedInfo->emptyVersion;
 	state Version durableValidationVersion = std::min(data->durableVersion.get(), feedInfo->durableFetchVersion.get());
 	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
+	state bool doFilterMutations = !req.range.contains(feedInfo->range);
+	state bool doValidation = EXPENSIVE_VALIDATION;
 
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsDetails", data->thisServerID)
@@ -2806,7 +2808,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			if (it->version >= req.end || it->version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
-			auto m = filterMutations(memoryReply.arena, *it, req.range, inverted);
+			MutationsAndVersionRef m = *it;
+			if (doFilterMutations) {
+				m = filterMutations(memoryReply.arena, *it, req.range, inverted);
+			}
 			if (m.mutations.size()) {
 				memoryReply.arena.dependsOn(it->arena());
 				memoryReply.mutations.push_back(memoryReply.arena, m);
@@ -2850,7 +2855,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
-		// TODO eventually: only do verify in simulation?
 		int memoryVerifyIdx = 0;
 
 		Version lastVersion = req.begin - 1;
@@ -2863,7 +2867,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
 
 			// gap validation
-			while (memoryVerifyIdx < memoryReply.mutations.size() &&
+			while (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
 			       version > memoryReply.mutations[memoryVerifyIdx].version) {
 				if (req.canReadPopped) {
 					// There are weird cases where SS fetching mixed with SS durability and popping can mean there are
@@ -2902,19 +2906,21 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				}
 			}
 
-			auto m = filterMutations(
-			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
+			MutationsAndVersionRef m = MutationsAndVersionRef(mutations, version, knownCommittedVersion);
+			if (doFilterMutations) {
+				m = filterMutations(reply.arena, m, req.range, inverted);
+			}
 			if (m.mutations.size()) {
 				reply.arena.dependsOn(mutations.arena());
 				reply.mutations.push_back(reply.arena, m);
 
-				if (memoryVerifyIdx < memoryReply.mutations.size() &&
+				if (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
 				    version == memoryReply.mutations[memoryVerifyIdx].version) {
 					// We could do validation of mutations here too, but it's complicated because clears can get split
 					// and stuff
 					memoryVerifyIdx++;
 				}
-			} else if (memoryVerifyIdx < memoryReply.mutations.size() &&
+			} else if (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
 			           version == memoryReply.mutations[memoryVerifyIdx].version) {
 				if (version > durableValidationVersion) {
 					// Another validation case - feed was popped, data was fetched, fetched data was persisted but pop
@@ -5826,14 +5832,21 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 			}
 		}
 	} else if (m.type == MutationRef::ClearRange) {
-		auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+		KeyRangeRef mutationClearRange(m.param1, m.param2);
+		// FIXME: this might double-insert clears if the same feed appears in multiple sub-ranges
+		auto ranges = self->keyChangeFeed.intersectingRanges(mutationClearRange);
 		for (auto& r : ranges) {
 			for (auto& it : r.value()) {
 				if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion.get()));
 					}
-					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+
+					// clamp feed mutation to change feed range
+					KeyRangeRef clearIntersect = mutationClearRange & it->range;
+					it->mutations.back().mutations.push_back_deep(
+					    it->mutations.back().arena(),
+					    MutationRef(MutationRef::Type::ClearRange, clearIntersect.begin, clearIntersect.end));
 					self->currentChangeFeeds.insert(it->id);
 					self->addFeedBytesAtVersion(m.totalSize(), version);
 
