@@ -1066,7 +1066,7 @@ private:
 		};
 		uint64_t seq; // seq is the index of the virtually infinite disk queue file. Its unit is bytes.
 		uint64_t popped;
-		int payloadSize;
+		int32_t payloadSize;
 	};
 	// The on disk format depends on the size of PageHeader.
 	static_assert(sizeof(PageHeader) == 36, "PageHeader must be 36 bytes");

@@ -38,6 +38,7 @@ from tmp_cluster import TempCluster
 from local_cluster import TLSConfig
 # fmt: on
 
+
 TESTER_STATS_INTERVAL_SEC = 5
 
 
@@ -97,6 +98,9 @@ def run_tester(args, cluster, test_file):
     if args.external_client_library is not None:
         external_client_library = Path(args.external_client_library).resolve()
         cmd += ["--external-client-library", external_client_library]
+
+    if args.retain_client_lib_copies:
+        cmd += ["--retain-client-lib-copies"]
 
     if cluster.blob_granules_enabled:
         cmd += [
@@ -209,6 +213,12 @@ def parse_args(argv):
     parser.add_argument("--build-dir", "-b", type=str, required=True, help="FDB build directory")
     parser.add_argument("--api-tester-bin", type=str, help="Path to the fdb_c_api_tester executable.", required=True)
     parser.add_argument("--external-client-library", type=str, help="Path to the external client library.")
+    parser.add_argument(
+        "--retain-client-lib-copies",
+        action="store_true",
+        default=False,
+        help="Retain temporary external client library copies.",
+    )
     parser.add_argument(
         "--cluster-file",
         type=str,

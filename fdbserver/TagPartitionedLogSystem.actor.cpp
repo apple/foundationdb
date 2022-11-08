@@ -1449,8 +1449,7 @@ void TagPartitionedLogSystem::pop(Version upTo, Tag tag, Version durableKnownCom
 				}
 				if (prev == 0) {
 					// pop tag from log upto version defined in outstandingPops[].first
-					popActors.add(
-					    popFromLog(this, log, tag, /*delayBeforePop*/ 1.0, /*popLogRouter=*/false)); //< FIXME: knob
+					popActors.add(popFromLog(this, log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
 				}
 			}
 		}

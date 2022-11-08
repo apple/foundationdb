@@ -41,7 +41,7 @@
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
 #include "rapidxml/rapidxml.hpp"
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 #include "fdbclient/FDBAWSCredentialsProvider.h"
 #endif
 
@@ -88,6 +88,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	concurrent_lists = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_LISTS;
 	concurrent_reads_per_file = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_READS_PER_FILE;
 	concurrent_writes_per_file = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_WRITES_PER_FILE;
+	enable_read_cache = CLIENT_KNOBS->BLOBSTORE_ENABLE_READ_CACHE;
 	read_block_size = CLIENT_KNOBS->BLOBSTORE_READ_BLOCK_SIZE;
 	read_ahead_blocks = CLIENT_KNOBS->BLOBSTORE_READ_AHEAD_BLOCKS;
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
@@ -125,6 +126,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(concurrent_lists, cl);
 	TRY_PARAM(concurrent_reads_per_file, crpf);
 	TRY_PARAM(concurrent_writes_per_file, cwpf);
+	TRY_PARAM(enable_read_cache, erc);
 	TRY_PARAM(read_block_size, rbs);
 	TRY_PARAM(read_ahead_blocks, rab);
 	TRY_PARAM(read_cache_blocks_per_file, rcb);
@@ -162,6 +164,7 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(concurrent_lists, cl);
 	_CHECK_PARAM(concurrent_reads_per_file, crpf);
 	_CHECK_PARAM(concurrent_writes_per_file, cwpf);
+	_CHECK_PARAM(enable_read_cache, erc);
 	_CHECK_PARAM(read_block_size, rbs);
 	_CHECK_PARAM(read_ahead_blocks, rab);
 	_CHECK_PARAM(read_cache_blocks_per_file, rcb);
@@ -615,7 +618,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 // If the credentials expire, the connection will eventually fail and be discarded from the pool, and then a new
 // connection will be constructed, which will call this again to get updated credentials
 static S3BlobStoreEndpoint::Credentials getSecretSdk() {
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 	double elapsed = -timer_monotonic();
 	Aws::Auth::AWSCredentials awsCreds = FDBAWSCredentialsProvider::getAwsCredentials();
 	elapsed += timer_monotonic();

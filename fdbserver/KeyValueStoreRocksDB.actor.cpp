@@ -397,13 +397,23 @@ struct Counters {
 };
 
 struct ReadIterator {
-	CF& cf;
 	uint64_t index; // incrementing counter to uniquely identify read iterator.
 	bool inUse;
 	std::shared_ptr<rocksdb::Iterator> iter;
 	double creationTime;
+	KeyRange keyRange;
+	std::shared_ptr<rocksdb::Slice> beginSlice, endSlice;
 	ReadIterator(CF& cf, uint64_t index, DB& db, rocksdb::ReadOptions& options)
-	  : cf(cf), index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
+	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
+	ReadIterator(CF& cf, uint64_t index, DB& db, rocksdb::ReadOptions options, KeyRange keyRange)
+	  : index(index), inUse(true), creationTime(now()), keyRange(keyRange) {
+		beginSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.begin)));
+		options.iterate_lower_bound = beginSlice.get();
+		endSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.end)));
+		options.iterate_upper_bound = endSlice.get();
+
+		iter = std::shared_ptr<rocksdb::Iterator>(db->NewIterator(options, cf));
+	}
 };
 
 /*
@@ -426,42 +436,84 @@ public:
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 		TraceEvent("ReadIteratorPool", id)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
+		    .detail("KnobRocksDBReadRangeReuseBoundedIterators",
+		            SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS)
+		    .detail("KnobRocksDBReadRangeBoundedIteratorsMaxLimit",
+		            SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT)
 		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS &&
+		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
+			TraceEvent(SevWarn, "ReadIteratorKnobsMismatch");
+		}
 	}
 
 	// Called on every db commit.
 	void update() {
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
+		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			iteratorsMap.clear();
 		}
 	}
 
 	// Called on every read operation.
-	ReadIterator getIterator() {
+	ReadIterator getIterator(KeyRange keyRange) {
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
-			std::lock_guard<std::mutex> lock(mutex);
+			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
 				if (!it->second.inUse) {
 					it->second.inUse = true;
 					iteratorsReuseCount++;
-					return it->second;
+					ReadIterator iter = it->second;
+					mutex.unlock();
+					return iter;
 				}
 			}
 			index++;
-			ReadIterator iter(cf, index, db, readRangeOptions);
-			iteratorsMap.insert({ index, iter });
+			uint64_t readIteratorIndex = index;
+			mutex.unlock();
+
+			ReadIterator iter(cf, readIteratorIndex, db, readRangeOptions);
+			mutex.lock();
+			iteratorsMap.insert({ readIteratorIndex, iter });
+			mutex.unlock();
+			return iter;
+		} else if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
+			// TODO: Based on the datasize in the keyrange, decide whether to store the iterator for reuse.
+			mutex.lock();
+			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
+				if (!it->second.inUse && it->second.keyRange.contains(keyRange)) {
+					it->second.inUse = true;
+					iteratorsReuseCount++;
+					ReadIterator iter = it->second;
+					mutex.unlock();
+					return iter;
+				}
+			}
+			index++;
+			uint64_t readIteratorIndex = index;
+			mutex.unlock();
+
+			ReadIterator iter(cf, readIteratorIndex, db, readRangeOptions, keyRange);
+			if (iteratorsMap.size() < SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT) {
+				// Not storing more than ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT of iterators
+				// to avoid 'out of memory' issues.
+				mutex.lock();
+				iteratorsMap.insert({ readIteratorIndex, iter });
+				mutex.unlock();
+			}
 			return iter;
 		} else {
 			index++;
-			ReadIterator iter(cf, index, db, readRangeOptions);
+			ReadIterator iter(cf, index, db, readRangeOptions, keyRange);
 			return iter;
 		}
 	}
 
 	// Called on every read operation, after the keys are collected.
 	void returnIterator(ReadIterator& iter) {
-		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
+		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
 			std::lock_guard<std::mutex> lock(mutex);
 			it = iteratorsMap.find(iter.index);
 			// iterator found: put the iterator back to the pool(inUse=false).
@@ -768,7 +820,7 @@ uint64_t PerfContextMetrics::getRocksdbPerfcontextMetric(int metric) {
 }
 
 ACTOR Future<Void> refreshReadIteratorPool(std::shared_ptr<ReadIteratorPool> readIterPool) {
-	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS || SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
 		loop {
 			wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
 			readIterPool->refreshIterators();
@@ -1384,7 +1436,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
-			if (readBeginTime - a.startTime > readValueTimeout) {
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValueTimeout) {
 				TraceEvent(SevWarn, "KVSTimeout", id)
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
@@ -1395,10 +1447,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::PinnableSlice value;
 			auto& options = sharedState->getReadOptions();
-			uint64_t deadlineMircos =
-			    db->GetEnv()->NowMicros() + (readValueTimeout - (readBeginTime - a.startTime)) * 1000000;
-			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+				uint64_t deadlineMircos =
+				    db->GetEnv()->NowMicros() + (readValueTimeout - (readBeginTime - a.startTime)) * 1000000;
+				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			}
 
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			auto s = db->Get(options, cf, toSlice(a.key), &value);
@@ -1469,7 +1523,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			if (readBeginTime - a.startTime > readValuePrefixTimeout) {
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValuePrefixTimeout) {
 				TraceEvent(SevWarn, "KVSTimeout", id)
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
@@ -1480,10 +1534,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::PinnableSlice value;
 			auto& options = sharedState->getReadOptions();
-			uint64_t deadlineMircos =
-			    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (readBeginTime - a.startTime)) * 1000000;
-			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+				uint64_t deadlineMircos =
+				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (readBeginTime - a.startTime)) * 1000000;
+				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			}
 
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			auto s = db->Get(options, cf, toSlice(a.key), &value);
@@ -1542,7 +1598,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM.toString(), readBeginTime - a.startTime));
 			}
-			if (readBeginTime - a.startTime > readRangeTimeout) {
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readRangeTimeout) {
 				TraceEvent(SevWarn, "KVSTimeout", id)
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
@@ -1559,7 +1615,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::Status s;
 			if (a.rowLimit >= 0) {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				ReadIterator readIter = readIterPool->getIterator();
+				ReadIterator readIter = readIterPool->getIterator(a.keys);
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                         timer_monotonic() - iterCreationBeginTime));
@@ -1574,7 +1630,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
 					}
-					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+					if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && timer_monotonic() - a.startTime > readRangeTimeout) {
 						TraceEvent(SevWarn, "KVSTimeout", id)
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
@@ -1588,7 +1644,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				readIterPool->returnIterator(readIter);
 			} else {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				ReadIterator readIter = readIterPool->getIterator();
+				ReadIterator readIter = readIterPool->getIterator(a.keys);
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                         timer_monotonic() - iterCreationBeginTime));
@@ -1606,7 +1662,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
 						break;
 					}
-					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+					if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && timer_monotonic() - a.startTime > readRangeTimeout) {
 						TraceEvent(SevWarn, "KVSTimeout", id)
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
