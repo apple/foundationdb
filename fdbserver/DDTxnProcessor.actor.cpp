@@ -897,7 +897,9 @@ void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
 	mgs->shardMapping->defineShard(params.keys);
-	mgs->shardMapping->moveShard(params.keys, destTeams);
+	auto teamPair = mgs->shardMapping->getTeamsFor(params.keys.begin);
+	auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
+	mgs->shardMapping->rawMoveShard(params.keys, srcTeams, destTeams);
 
 	auto randomRangeSize =
 	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
