@@ -53,9 +53,7 @@ ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
 		choose {
 			when(wait(monitor->onStateEqual(endpoint, FailureStatus(false)))) {
 			} // SOMEDAY: Use onStateChanged() for efficiency
-			when(wait(delay(waitDelay))) {
-				return Void();
-			}
+			when(wait(delay(waitDelay))) { return Void(); }
 		}
 	}
 }
