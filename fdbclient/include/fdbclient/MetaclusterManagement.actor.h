@@ -467,10 +467,6 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 				metaclusterUid = deterministicRandom()->randomUniqueID();
 			}
 
-			// checkpoint1
-			TraceEvent("BreakpointRegistration1")
-			    .detail("ClusterName", name)
-			    .detail("MetaclusterId", metaclusterUid.get());
 			MetaclusterMetadata::metaclusterRegistration().set(
 			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get()));
 
@@ -510,8 +506,6 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 			ManagementClusterMetadata::tenantMetadata().tombstoneCleanupData.clear(tr);
 
 			wait(managementClusterCheckEmpty(tr));
-			// checkpoint2
-			TraceEvent("BreakpointRegistration2");
 			MetaclusterMetadata::metaclusterRegistration().clear(tr);
 
 			firstTry = false;
@@ -551,20 +545,10 @@ void updateClusterMetadata(Transaction tr,
                            Optional<ClusterConnectionString> const& updatedConnectionString,
                            Optional<DataClusterEntry> const& updatedEntry,
                            Optional<UID> debugId = Optional<UID>()) {
-	TraceEvent("BreakpointUpdateMetadataEnter", debugId.present() ? debugId.get() : UID())
-	    .detail("ClusterName", name)
-	    .detail("UpdatedEntryPresent", updatedEntry.present())
-	    .detail("UpdatedConnectionString", updatedConnectionString.present());
 	if (updatedEntry.present()) {
-		TraceEvent("BreakpointUpdateMetadata", debugId.present() ? debugId.get() : UID())
-		    .detail("ClusterName", name)
-		    .detail("PreviousClusterState", DataClusterEntry::clusterStateToString(previousMetadata.entry.clusterState))
-		    .detail("UpdatedClusterState", DataClusterEntry::clusterStateToString(updatedEntry.get().clusterState));
 		if (previousMetadata.entry.clusterState == DataClusterState::REMOVING) {
 			throw cluster_removed();
 		}
-		TraceEvent("BreakpointDataClusterUpdate3", debugId.present() ? debugId.get() : UID())
-		    .detail("ClusterName", name);
 		ManagementClusterMetadata::dataClusters().set(tr, name, updatedEntry.get());
 		updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get());
 	}
@@ -618,7 +602,6 @@ struct RegisterClusterImpl {
 					    !existingRegistration.get().matches(self->ctx.metaclusterRegistration.get())) {
 						throw cluster_already_registered();
 					} else {
-						// We already successfully registered the cluster with these details, so there's nothing to do
 						self->clusterEntry.id = existingRegistration.get().id;
 						return Void();
 					}
@@ -639,19 +622,12 @@ struct RegisterClusterImpl {
 				}
 
 				self->clusterEntry.id = deterministicRandom()->randomUniqueID();
-				// checkpoint3
-				TraceEvent("BreakpointRegistration3", self->ctx.debugId)
-				    .detail("ClusterName", self->clusterName)
-				    .detail("MetaclusterId", self->clusterEntry.id);
 				MetaclusterMetadata::metaclusterRegistration().set(
 				    tr,
 				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
 				                                                                      self->clusterEntry.id));
 
-				TraceEvent("BreakpointTest1", self->ctx.debugId).detail("ClusterName", self->clusterName);
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
-				ASSERT(false);
-				TraceEvent("BreakpointTest2", self->ctx.debugId).detail("ClusterName", self->clusterName);
 				TraceEvent("ConfiguredDataCluster", self->ctx.debugId)
 				    .detail("ClusterName", self->clusterName)
 				    .detail("ClusterID", self->clusterEntry.id)
@@ -675,7 +651,8 @@ struct RegisterClusterImpl {
 		dataTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		state Optional<MetaclusterRegistrationEntry> currentMetaclusterRegistration =
 		    wait(MetaclusterMetadata::metaclusterRegistration().get(dataTr));
-		if (!currentMetaclusterRegistration.present()) {
+		if (!currentMetaclusterRegistration.present() ||
+		    currentMetaclusterRegistration.get().id != self->clusterEntry.id) {
 			throw cluster_removed();
 		}
 		if (dataClusterMetadata.present() && !dataClusterMetadata.get().matchesConfiguration(
@@ -688,7 +665,6 @@ struct RegisterClusterImpl {
 				ManagementClusterMetadata::clusterCapacityIndex.insert(
 				    tr, Tuple::makeTuple(self->clusterEntry.allocated.numTenantGroups, self->clusterName));
 			}
-			TraceEvent("BreakpointDataClusterUpdate2", self->ctx.debugId).detail("ClusterName", self->clusterName);
 			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, self->clusterEntry);
 			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
 		}
@@ -723,9 +699,7 @@ Future<Void> registerCluster(Reference<DB> db,
                              DataClusterEntry entry) {
 	state RegisterClusterImpl<DB> impl(db, name, connectionString, entry);
 
-	TraceEvent("BreakpointOpRegisterBefore", impl.ctx.debugId).detail("ClusterName", name);
 	wait(impl.run());
-	TraceEvent("BreakpointOpRegisterEnd", impl.ctx.debugId).detail("ClusterName", name);
 	return Void();
 }
 
@@ -756,12 +730,9 @@ struct RemoveClusterImpl {
 
 	// Returns false if the cluster is no longer present, or true if it is present and the removal should proceed.
 	ACTOR static Future<bool> markClusterRemoving(RemoveClusterImpl* self, Reference<typename DB::TransactionT> tr) {
-		TraceEvent("Breakpoint0", self->ctx.debugId).detail("ClusterName", self->ctx.clusterName.get());
 		if (!self->forceRemove && self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups > 0) {
-			TraceEvent("Breakpoint0.1", self->ctx.debugId).detail("ClusterName", self->ctx.clusterName.get());
 			throw cluster_not_empty();
 		} else if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::REMOVING) {
-			TraceEvent("Breakpoint0.2", self->ctx.debugId).detail("ClusterName", self->ctx.clusterName.get());
 			// Mark the cluster in a removing state while we finish the remaining removal steps. This prevents new
 			// tenants from being assigned to it.
 			DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
@@ -799,11 +770,6 @@ struct RemoveClusterImpl {
 	// Delete metacluster metadata from the data cluster
 	ACTOR static Future<Void> updateDataCluster(RemoveClusterImpl* self, Reference<ITransaction> tr) {
 		// Delete metacluster related metadata
-		// checkpoint4
-		TraceEvent("BreakpointRegistration4", self->ctx.debugId)
-		    .detail("Name", self->ctx.clusterName.get())
-		    .detail("State",
-		            DataClusterEntry::clusterStateToString(self->ctx.dataClusterMetadata.get().entry.clusterState));
 		MetaclusterMetadata::metaclusterRegistration().clear(tr);
 		TenantMetadata::tenantTombstones().clear(tr);
 		TenantMetadata::tombstoneCleanupData().clear(tr);
@@ -832,11 +798,6 @@ struct RemoveClusterImpl {
 	ACTOR static Future<bool> purgeTenants(RemoveClusterImpl* self,
 	                                       Reference<typename DB::TransactionT> tr,
 	                                       std::pair<Tuple, Tuple> clusterTupleRange) {
-		TraceEvent("BreakpointPurge", self->ctx.debugId)
-		    .detail("Name", self->ctx.clusterName.get())
-		    .detail("State",
-		            DataClusterEntry::clusterStateToString(self->ctx.dataClusterMetadata.get().entry.clusterState));
-		// ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING);
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::REMOVING) {
 			return true;
 		}
@@ -875,7 +836,6 @@ struct RemoveClusterImpl {
 	ACTOR static Future<bool> purgeTenantGroupsAndDataCluster(RemoveClusterImpl* self,
 	                                                          Reference<typename DB::TransactionT> tr,
 	                                                          std::pair<Tuple, Tuple> clusterTupleRange) {
-		// ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING);
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::REMOVING) {
 			return true;
 		}
@@ -906,8 +866,6 @@ struct RemoveClusterImpl {
 
 		// Erase the data cluster record from the management cluster if processing our last batch
 		if (!tenantGroupEntries.more) {
-			TraceEvent("BreakpointDataClusterUpdate1", self->ctx.debugId)
-			    .detail("ClusterName", self->ctx.clusterName.get());
 			ManagementClusterMetadata::dataClusters().erase(tr, self->ctx.clusterName.get());
 			ManagementClusterMetadata::dataClusterConnectionRecords.erase(tr, self->ctx.clusterName.get());
 			ManagementClusterMetadata::clusterTenantCount.erase(tr, self->ctx.clusterName.get());
@@ -944,7 +902,7 @@ struct RemoveClusterImpl {
 			}
 		}
 
-		TraceEvent("RemovedDataCluster").detail("Name", self->ctx.clusterName.get());
+		TraceEvent("RemovedDataCluster", self->ctx.debugId).detail("Name", self->ctx.clusterName.get());
 		return Void();
 	}
 
@@ -995,9 +953,7 @@ struct RemoveClusterImpl {
 ACTOR template <class DB>
 Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove) {
 	state RemoveClusterImpl<DB> impl(db, name, forceRemove);
-	TraceEvent("BreakpointOpRemoveBefore", impl.ctx.debugId).detail("ClusterName", name);
 	wait(impl.run());
-	TraceEvent("BreakpointOpRemoveAfter", impl.ctx.debugId).detail("ClusterName", name);
 	return Void();
 }
 

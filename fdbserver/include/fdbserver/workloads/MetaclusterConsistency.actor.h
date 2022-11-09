@@ -109,7 +109,6 @@ private:
 				     store(self->managementMetadata.systemTenantSubspaceKeys,
 				           safeThreadFutureToFuture(systemTenantSubspaceKeysFuture)));
 
-				TraceEvent("BreakpointLoadMetadata", self->debugId);
 				break;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(managementTr->onError(e)));
@@ -280,11 +279,6 @@ private:
 		state std::map<TenantName, TenantMapEntry> dataClusterTenantMap(dataClusterTenantList.begin(),
 		                                                                dataClusterTenantList.end());
 
-		TraceEvent("BreakpointConsistency", self->debugId)
-		    .detail("Name", clusterName)
-		    .detail("EntryId", clusterMetadata.entry.id)
-		    .detail("OtherEntryId", dataClusterRegistration.get().id)
-		    .detail("TenantState", DataClusterEntry::clusterStateToString(clusterMetadata.entry.clusterState));
 		ASSERT(dataClusterRegistration.present());
 		ASSERT(dataClusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA);
 		ASSERT(dataClusterRegistration.get().matches(self->managementMetadata.metaclusterRegistration.get()));
