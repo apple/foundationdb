@@ -20,7 +20,6 @@
 
 #pragma once
 #include "fdbclient/FDBOptions.g.h"
-#include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_METACLUSTER_MANAGEMENT_ACTOR_G_H)
@@ -628,6 +627,7 @@ struct RegisterClusterImpl {
 				                                                                      self->clusterEntry.id));
 
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+
 				TraceEvent("ConfiguredDataCluster")
 				    .detail("ClusterName", self->clusterName)
 				    .detail("ClusterID", self->clusterEntry.id)
@@ -698,7 +698,6 @@ Future<Void> registerCluster(Reference<DB> db,
                              ClusterConnectionString connectionString,
                              DataClusterEntry entry) {
 	state RegisterClusterImpl<DB> impl(db, name, connectionString, entry);
-
 	wait(impl.run());
 	return Void();
 }
