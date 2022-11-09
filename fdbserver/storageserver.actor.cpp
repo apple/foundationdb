@@ -1796,8 +1796,18 @@ Future<Version> waitForVersion(StorageServer* data,
 	if (readVersion < data->oldestVersion.get() || readVersion <= 0) {
 		return transaction_too_old();
 	} else {
+		// It is correct to read any version between [commitVersion, readVersion],
+		// because version vector guarantees no mutations between them.
 		if (commitVersion < data->oldestVersion.get()) {
-			return data->oldestVersion.get();
+			if (data->version.get() < readVersion) {
+				// Majority of the case, try using higher version to avoid
+				// transaction_too_old error when oldestVersion advances.
+				// BTW, any version in the range [oldestVersion, data->version.get()] is valid in this case.
+				return data->version.get();
+			} else {
+				ASSERT(readVersion >= data->oldestVersion.get());
+				return readVersion;
+			}
 		} else if (commitVersion <= data->version.get()) {
 			return commitVersion;
 		}
@@ -2180,8 +2190,8 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
 		for (; it != self->checkpoints.end(); ++it) {
 			const CheckpointMetaData& md = it->second;
-			if (md.version == req.version && md.format == req.format && md.range.contains(req.range) &&
-			    md.getState() == CheckpointMetaData::Complete) {
+			if (md.version == req.version && md.format == req.format && !md.ranges.empty() &&
+			    md.ranges.front().contains(req.range) && md.getState() == CheckpointMetaData::Complete) {
 				req.reply.send(md);
 				TraceEvent(SevDebug, "ServeGetCheckpointEnd", self->thisServerID).detail("Checkpoint", md.toString());
 				break;
@@ -3443,7 +3453,11 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version) {
-				// TraceEvent(SevDebug, "ReadRangeThrow", data->thisServerID).detail("Version", version).detail("StorageVersion", data->storageVersion());
+				DisabledTraceEvent("SS_TTO", data->thisServerID)
+				    .detail("StorageVersion", data->storageVersion())
+				    .detail("Oldest", data->oldestVersion.get())
+				    .detail("Version", version)
+				    .detail("Range", range);
 				throw transaction_too_old();
 			}
 
@@ -3537,8 +3551,14 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= -limit);
-			if (data->storageVersion() > version)
+			if (data->storageVersion() > version) {
+				DisabledTraceEvent("SS_TTO", data->thisServerID)
+				    .detail("StorageVersion", data->storageVersion())
+				    .detail("Oldest", data->oldestVersion.get())
+				    .detail("Version", version)
+				    .detail("Range", range);
 				throw transaction_too_old();
+			}
 
 			int prevSize = result.data.size();
 			merge(result.arena,
@@ -3773,6 +3793,14 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		DisabledTraceEvent("VVV", data->thisServerID)
+		    .detail("Version", version)
+		    .detail("ReqVersion", req.version)
+		    .detail("Oldest", data->oldestVersion.get())
+		    .detail("VV", req.ssLatestCommitVersions.toString())
+		    .detail("DebugID",
+		            req.options.present() && req.options.get().debugID.present() ? req.options.get().debugID.get()
+		                                                                         : UID());
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
@@ -8903,9 +8931,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 }
 
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
-	ASSERT(metaData.ssID == data->thisServerID);
+	ASSERT(metaData.ssID == data->thisServerID && !metaData.ranges.empty());
 	const CheckpointRequest req(metaData.version,
-	                            metaData.range,
+	                            metaData.ranges.front(),
 	                            static_cast<CheckpointFormat>(metaData.format),
 	                            metaData.checkpointID,
 	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
@@ -9400,7 +9428,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	// When a shard is moved out, delete all related checkpoints created for data move.
 	if (!available) {
 		for (auto& [id, checkpoint] : self->checkpoints) {
-			if (checkpoint.range.intersects(keys)) {
+			if (!checkpoint.ranges.empty() && checkpoint.ranges.front().intersects(keys)) {
 				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 				checkpoint.setState(CheckpointMetaData::Deleting);
 				self->addMutationToMutationLog(
