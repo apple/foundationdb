@@ -2281,7 +2281,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						// popped up to V+1 is ok. Or in other words, if the last delta @ V, we only missed data
 						// at V+1 onward if popVersion >= V+2
 						if (metadata->bufferedDeltaVersion < metadata->activeCFData.get()->popVersion - 1) {
-							CODE_PROBE(true, "Blob Worker detected popped");
+							CODE_PROBE(true, "Blob Worker detected popped", probe::decoration::rare);
 							TraceEvent("BlobWorkerChangeFeedPopped", bwData->id)
 							    .detail("Granule", metadata->keyRange)
 							    .detail("GranuleID", startState.granuleID)
@@ -3985,7 +3985,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 
 			ForcedPurgeState purgeState = wait(fForcedPurgeState);
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Worker trying to open force purged granule");
+				CODE_PROBE(true, "Worker trying to open force purged granule", probe::decoration::rare);
 				if (BW_DEBUG) {
 					fmt::print("Granule [{0} - {1}) is force purged on BW {2}, abandoning\n",
 					           req.keyRange.begin.printable(),

@@ -4769,7 +4769,8 @@ static Future<Void> tssStreamComparison(Request request,
 					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get());
 
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-					           "Tracing Full TSS Mismatch in stream comparison");
+					           "Tracing Full TSS Mismatch in stream comparison",
+					           probe::decoration::rare);
 					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
 					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB");
 
@@ -4811,7 +4812,7 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 
 		if (tssData.present()) {
-			CODE_PROBE(true, "duplicating stream to TSS");
+			CODE_PROBE(true, "duplicating stream to TSS", probe::decoration::rare);
 			resetReply(req);
 			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream duplication
 			RequestStream<Request> tssRequestStream(tssData.get().endpoint);
@@ -9399,7 +9400,8 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 		mismatchEvent.detail("TSSVersion", tssVersion);
 
 		CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-		           "Tracing Full TSS Feed Mismatch in stream comparison");
+		           "Tracing Full TSS Feed Mismatch in stream comparison",
+		           probe::decoration::rare);
 		CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
 		           "Tracing Partial TSS Feed Mismatch in stream comparison and storing the rest in FDB");
 

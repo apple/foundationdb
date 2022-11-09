@@ -439,7 +439,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		// if this granule is not an active granule, it can't be merged
 		auto gIt = workerAssignments.rangeContaining(range.begin);
 		if (gIt->begin() != range.begin || gIt->end() != range.end) {
-			CODE_PROBE(true, "non-active granule reported merge eligible, ignoring");
+			CODE_PROBE(true, "non-active granule reported merge eligible, ignoring", probe::decoration::rare);
 			if (BM_DEBUG) {
 				fmt::print(
 				    "BM {0} Ignoring Merge Candidate [{1} - {2}): range mismatch with active granule [{3} - {4})\n",
@@ -1033,7 +1033,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 		if (assignment.assign.get().type == AssignRequestType::Continue) {
 			ASSERT(assignment.worker.present());
 			if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
-				CODE_PROBE(true, "BM assignment out of date");
+				CODE_PROBE(true, "BM assignment out of date", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
 					           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
@@ -1600,10 +1600,10 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				if (retried && prevOwnerEpoch == bmData->epoch && prevGranuleID == granuleID &&
 				    prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
 					// owner didn't change, last iteration of this transaction just succeeded but threw an error.
-					CODE_PROBE(true, "split too big adjustment succeeded after retry");
+					CODE_PROBE(true, "split too big adjustment succeeded after retry", probe::decoration::rare);
 					break;
 				}
-				CODE_PROBE(true, "split too big was since moved to another worker");
+				CODE_PROBE(true, "split too big was since moved to another worker", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: moved to another worker\n",
 					           bmData->epoch,
@@ -1837,7 +1837,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			wait(checkManagerLock(tr, bmData));
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), granuleRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Split stopped because of force purge");
+				CODE_PROBE(true, "Split stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleSplitCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", granuleRange);
@@ -2633,7 +2633,9 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 		    currentBytes + metrics.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
 		    currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2) {
 			ASSERT(currentBytes <= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
-			CODE_PROBE(currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2, "merge early because of key size");
+			CODE_PROBE(currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2,
+			           "merge early because of key size",
+			           probe::decoration::rare);
 			attemptStartMerge(bmData, currentCandidates);
 			currentCandidates.clear();
 			currentBytes = 0;
@@ -3252,7 +3254,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 		if (oldEpoch > newEpoch || (oldEpoch == newEpoch && oldSeqno > newSeqno)) {
 			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
 			if (old.range() != newRange) {
-				CODE_PROBE(true, "BM Recovery: BWs disagree on range boundaries");
+				CODE_PROBE(true, "BM Recovery: BWs disagree on range boundaries", probe::decoration::rare);
 				anyConflicts = true;
 			}
 		} else {
@@ -3286,7 +3288,8 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 					std::get<0>(old.value()) = UID();
 				}
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
-					CODE_PROBE(true, "BM Recovery: Two workers claim ownership of same granule");
+					CODE_PROBE(
+					    true, "BM Recovery: Two workers claim ownership of same granule", probe::decoration::rare);
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
 				}
 			}
