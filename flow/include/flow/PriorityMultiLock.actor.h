@@ -29,14 +29,17 @@
 #define PRIORITYMULTILOCK_ACTOR_H
 
 #include "flow/flow.h"
+#include <boost/intrusive/list.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define PRIORITYMULTILOCK_DEBUG 0
 
 #if PRIORITYMULTILOCK_DEBUG || !defined(NO_INTELLISENSE)
 #define pml_debug_printf(...)                                                                                          \
-	if (now() > 0)                                                                                                     \
-	printf(__VA_ARGS__)
+	if (now() > 0) {                                                                                                   \
+		printf("pml line=%04d ", __LINE__);                                                                            \
+		printf(__VA_ARGS__);                                                                                           \
+	}
 #else
 #define pml_debug_printf(...)
 #endif
@@ -89,6 +92,7 @@ public:
 
 		priorities.resize(weightsByPriority.size());
 		for (int i = 0; i < priorities.size(); ++i) {
+			priorities[i].priority = i;
 			priorities[i].weight = weightsByPriority[i];
 		}
 
@@ -105,7 +109,8 @@ public:
 
 		// If this priority currently has no waiters
 		if (q.empty()) {
-			// Add this priority's weight to the total for priorities with pending work
+			// Add this priority's weight to the total for priorities with pending work.  This must be done
+			// so that currenctCapacity() below will assign capacaity to this priority.
 			totalPendingWeights += p.weight;
 
 			// If there are slots available and the priority has capacity then don't make the caller wait
@@ -117,28 +122,33 @@ public:
 				Lock lock;
 				addRunner(lock, userTag, &p);
 
-				pml_debug_printf("lock nowait line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
+				pml_debug_printf("lock nowait priority %d  %s\n", priority, toString().c_str());
 				return lock;
 			}
+
+			// If we didn't return above then add the priority to the waitingPriorities list
+			waitingPriorities.push_back(p);
 		}
 
 		Waiter& w = q.emplace_back(flowDelayPriority, userTag);
 		++waiting;
 
-		pml_debug_printf("lock wait line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
+		pml_debug_printf("lock wait priority %d  %s\n", priority, toString().c_str());
 		return w.lockPromise.getFuture();
 	}
 
 	void kill() {
+		pml_debug_printf("kill %s\n", toString(false).c_str());
 		brokenOnDestruct.reset();
 		// handleRelease will not free up any execution slots when it ends via cancel
 		fRunner.cancel();
 		available = 0;
 		runners.clear();
+		waitingPriorities.clear();
 		priorities.clear();
 	}
 
-	std::string toString() const {
+	std::string toString(bool leakCheck = true) const {
 		int runnersDone = 0;
 		for (int i = 0; i < runners.size(); ++i) {
 			if (runners[i].taskFuture.isReady()) {
@@ -157,13 +167,13 @@ public:
 		                       runnersDone,
 		                       totalPendingWeights);
 
-		for (int i = 0; i < priorities.size(); ++i) {
-			s += format("p%d:{%s} ", i, priorities[i].toString(this).c_str());
+		for (auto& p : priorities) {
+			s += format("{%s} ", p.toString(this).c_str());
 		}
 
 		s += "}";
 
-		if (concurrency - available != runners.size() - runnersDone) {
+		if (leakCheck && (concurrency - available != runners.size() - runnersDone)) {
 			pml_debug_printf("%s\n", s.c_str());
 			ASSERT_EQ(concurrency - available, runners.size() - runnersDone);
 		}
@@ -212,8 +222,8 @@ private:
 
 	typedef Deque<Waiter> Queue;
 
-	struct Priority {
-		Priority() : runners(0), weight(0) {}
+	struct Priority : boost::intrusive::list_base_hook<> {
+		Priority() : runners(0), weight(0), priority(-1) {}
 
 		// Queue of waiters at this priority
 		Queue queue;
@@ -221,9 +231,12 @@ private:
 		int runners;
 		// Configured weight for this priority
 		int weight;
+		// Priority number for convenience, matches *this's index in PML priorities vector
+		int priority;
 
 		std::string toString(const PriorityMultiLock* pml) const {
-			return format("weight=%d run=%d wait=%d cap=%d",
+			return format("priority=%d weight=%d run=%d wait=%d cap=%d",
+			              priority,
 			              weight,
 			              runners,
 			              queue.size(),
@@ -232,6 +245,11 @@ private:
 	};
 
 	std::vector<Priority> priorities;
+	typedef boost::intrusive::list<Priority, boost::intrusive::constant_time_size<false>> WaitingPrioritiesList;
+
+	// List of all priorities with 1 or more waiters.  This list exists so that the scheduling loop
+	// does not have to iterage over the priorities vector checking priorities without waiters.
+	WaitingPrioritiesList waitingPriorities;
 
 	// Current or recent (ended) runners
 	Deque<Runner> runners;
@@ -257,10 +275,8 @@ private:
 			}
 		}
 
-		pml_debug_printf("lock release line %d priority %d  %s\n",
-		                 __LINE__,
-		                 (int)(priority - &self->priorities.front()),
-		                 self->toString().c_str());
+		pml_debug_printf(
+		    "lock release priority %d  %s\n", (int)(priority - &self->priorities.front()), self->toString().c_str());
 
 		pml_debug_printf("%f handleRelease self=%p id=%u releasing\n", now(), self, id);
 		++self->available;
@@ -291,11 +307,10 @@ private:
 		state Future<Void> error = self->brokenOnDestruct.getFuture();
 
 		// Priority to try to run tasks from next
-		state int priority = 0;
+		state WaitingPrioritiesList::iterator p = self->waitingPriorities.end();
 
 		loop {
-			pml_debug_printf(
-			    "runner loop start line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+			pml_debug_printf("runner loop start  priority=%d  %s\n", p->priority, self->toString().c_str());
 
 			// Cleanup finished runner futures at the front of the runner queue.
 			while (!self->runners.empty() && self->runners.front().taskFuture.isReady()) {
@@ -303,51 +318,41 @@ private:
 			}
 
 			// Wait for a runner to release its lock
-			pml_debug_printf(
-			    "runner loop waitTrigger line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+			pml_debug_printf("runner loop waitTrigger  priority=%d  %s\n", p->priority, self->toString().c_str());
 			wait(self->wakeRunner.onTrigger());
-			pml_debug_printf(
-			    "%f runner loop wake line %d  priority=%d  %s\n", now(), __LINE__, priority, self->toString().c_str());
+			pml_debug_printf("%f runner loop wake  priority=%d  %s\n", now(), p->priority, self->toString().c_str());
 
 			// While there are available slots and there are waiters, launch tasks
 			while (self->available > 0 && self->waiting > 0) {
-				pml_debug_printf(
-				    "  launch loop start line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
-
-				Priority* pPriority;
+				pml_debug_printf("  launch loop start  priority=%d  %s\n", p->priority, self->toString().c_str());
 
 				// Find the next priority with waiters and capacity.  There must be at least one.
 				loop {
-					// Rotate to next priority
-					if (++priority == self->priorities.size()) {
-						priority = 0;
+					if (p == self->waitingPriorities.end()) {
+						p = self->waitingPriorities.begin();
 					}
 
-					pPriority = &self->priorities[priority];
+					pml_debug_printf("    launch loop scan  priority=%d  %s\n", p->priority, self->toString().c_str());
 
-					pml_debug_printf("    launch loop scan line %d  priority=%d  %s\n",
-					                 __LINE__,
-					                 priority,
-					                 self->toString().c_str());
-
-					if (!pPriority->queue.empty() && pPriority->runners < self->currentCapacity(pPriority->weight)) {
+					if (!p->queue.empty() && p->runners < self->currentCapacity(p->weight)) {
 						break;
 					}
+					++p;
 				}
 
-				Queue& queue = pPriority->queue;
-
+				Queue& queue = p->queue;
 				Waiter w = queue.front();
 				queue.pop_front();
 
-				// If this priority is now empty, subtract its weight from the total pending weights
+				// If this priority is now empty, subtract its weight from the total pending weights an remove it
+				// from the waitingPriorities list
+				Priority* pPriority = &*p;
 				if (queue.empty()) {
+					p = self->waitingPriorities.erase(p);
 					self->totalPendingWeights -= pPriority->weight;
 
-					pml_debug_printf("      emptied priority line %d  priority=%d  %s\n",
-					                 __LINE__,
-					                 priority,
-					                 self->toString().c_str());
+					pml_debug_printf(
+					    "      emptied priority  priority=%d  %s\n", pPriority->priority, self->toString().c_str());
 				}
 
 				--self->waiting;
@@ -365,10 +370,9 @@ private:
 					self->addRunner(lock, w.userTag, pPriority);
 				}
 
-				pml_debug_printf("    launched line %d alreadyDone=%d priority=%d  %s\n",
-				                 __LINE__,
+				pml_debug_printf("    launched alreadyDone=%d priority=%d  %s\n",
 				                 !lock.promise.canBeSet(),
-				                 priority,
+				                 pPriority->priority,
 				                 self->toString().c_str());
 
 				// If the task returned the lock immediately and did not wait, then delay to let the Flow run loop
