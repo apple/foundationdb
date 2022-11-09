@@ -98,6 +98,9 @@ public:
 	// Open a file for write by fileName
 	virtual Future<Reference<IBackupFile>> writeFile(const std::string& fileName) = 0;
 
+	// write entire file
+	virtual Future<Void> writeEntireFile(const std::string& fileName, const std::string& contents) = 0;
+
 	// Delete a file
 	virtual Future<Void> deleteFile(const std::string& fileName) = 0;
 
@@ -165,6 +168,8 @@ protected:
 	bool usesEncryption() const;
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
 	Future<Void> encryptionSetupComplete() const;
+
+	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
 
 private:
 	struct VersionProperty {
