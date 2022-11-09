@@ -551,6 +551,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
+	AsyncVar<bool> stopWiggleSignal;
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
 	// min-heap
@@ -561,7 +562,10 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection){};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true){};
+	// wiggle related actors will quit when this signal is set to true
+	void setStopSignal(bool value) { stopWiggleSignal.set(value); }
+	bool isStopped() const { return stopWiggleSignal.get(); }
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue

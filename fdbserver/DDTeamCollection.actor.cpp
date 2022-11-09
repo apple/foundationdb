@@ -2123,10 +2123,10 @@ public:
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
 	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
 		state int speed = 0;
-		state AsyncVar<bool> stopWiggleSignal(true);
 		state PromiseStream<Void> finishStorageWiggleSignal;
 		state SignalableActorCollection collection;
 		self->pauseWiggle = makeReference<AsyncVar<bool>>(true);
+		ASSERT(self->storageWiggler->isStopped());
 
 		loop {
 			state ReadYourWritesTransaction tr(self->dbContext());
@@ -2142,16 +2142,17 @@ public:
 					wait(tr.commit());
 
 					ASSERT(speed == 1 || speed == 0);
-					if (speed == 1 && stopWiggleSignal.get()) { // avoid duplicated start
-						stopWiggleSignal.set(false);
+					if (speed == 1 && self->storageWiggler->isStopped()) { // avoid duplicated start
+						self->storageWiggler->setStopSignal(false);
 						wait(self->storageWiggler->restoreStats());
-						collection.add(self->perpetualStorageWiggleIterator(stopWiggleSignal,
+						collection.add(self->perpetualStorageWiggleIterator(self->storageWiggler->stopWiggleSignal,
 						                                                    finishStorageWiggleSignal.getFuture()));
-						collection.add(self->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
+						collection.add(self->perpetualStorageWiggler(self->storageWiggler->stopWiggleSignal,
+						                                             finishStorageWiggleSignal));
 						TraceEvent("PerpetualStorageWiggleOpen", self->distributorId).detail("Primary", self->primary);
 					} else if (speed == 0) {
-						if (!stopWiggleSignal.get()) {
-							stopWiggleSignal.set(true);
+						if (!self->storageWiggler->isStopped()) {
+							self->storageWiggler->setStopSignal(true);
 							wait(collection.signalAndReset());
 							self->pauseWiggle->set(true);
 						}
