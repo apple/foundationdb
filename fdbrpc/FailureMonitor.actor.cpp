@@ -53,7 +53,9 @@ ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor,
 		choose {
 			when(wait(monitor->onStateEqual(endpoint, FailureStatus(false)))) {
 			} // SOMEDAY: Use onStateChanged() for efficiency
-			when(wait(delay(waitDelay))) { return Void(); }
+			when(wait(delay(waitDelay))) {
+				return Void();
+			}
 		}
 	}
 }
@@ -152,7 +154,6 @@ void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
 }
 
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoint) {
-	static int numWeirdTokens = 0;
 	// If the endpoint or address is already failed, return right away
 	auto i = addressStatus.find(endpoint.getPrimaryAddress());
 	if (i == addressStatus.end() || i->second.isFailed() || failedEndpoints.count(endpoint)) {
