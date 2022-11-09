@@ -351,7 +351,7 @@ private:
 		    /* failOnError = */ false);
 	}
 
-	void randomOperation(TTaskFct cont) {
+	void randomOperation(TTaskFct cont) override {
 		std::optional<int> tenantId = randomTenant();
 
 		OpType txType = (stores[tenantId].size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
