@@ -53,8 +53,6 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 	}
 
-	std::string description() const override { return "MetaclusterManagementConcurrency"; }
-
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert("MachineAttritionWorkload");
 	}
