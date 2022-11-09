@@ -326,10 +326,9 @@ private:
 			std::swap(begin, end);
 		}
 
-		auto verifyVersion = std::make_shared<int64_t>(false);
-
 		debugOp("Verify", begin, end, tenantId, "starting");
 
+		auto verifyVersion = std::make_shared<int64_t>(-1);
 		execOperation(
 		    [begin, end, verifyVersion](auto ctx) {
 			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
