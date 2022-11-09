@@ -1568,10 +1568,11 @@ ACTOR Future<Void> writeEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore,
                                         std::string object,
                                         std::string content) {
 	state UnsentPacketQueue packets;
-	PacketWriter pw(packets.getWriteBuffer(content.size()), nullptr, Unversioned());
-	pw.serializeBytes(content);
 	if (content.size() > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
+
+	PacketWriter pw(packets.getWriteBuffer(content.size()), nullptr, Unversioned());
+	pw.serializeBytes(content);
 
 	// Yield because we may have just had to copy several MB's into packet buffer chain and next we have to calculate an
 	// MD5 sum of it.
