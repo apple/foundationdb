@@ -1436,11 +1436,13 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					double prob = mul * cost / totalCosts;
 
 					if (deterministicRandom()->random01() < prob) {
-						for (const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
+						const auto& storageServers = pProxyCommitData->keyInfo[m.param1].src_info;
+						for (const auto& ssInfo : storageServers) {
 							auto id = ssInfo->interf.id();
 							// scale cost
 							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, cost);
+							pProxyCommitData->updateSSTagCost(
+							    id, trs[self->transactionNum].tagSet.get(), m, cost / storageServers.size());
 						}
 					}
 				}
