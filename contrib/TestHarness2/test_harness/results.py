@@ -69,7 +69,9 @@ class EnsembleResults:
         out.attributes['MissedNonRareProbes'] = str(self.global_statistics.total_missed_nonrare_probes)
 
         for cov, count in self.coverage:
-            severity = 10 if count > self.ratio else 40
+            severity = 10
+            if count <= self.ratio:
+                severity = 30 if cov.rare else 40
             if severity == 40:
                 errors += 1
             if (severity == 40 and errors <= config.max_errors) or config.details:
