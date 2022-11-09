@@ -39,6 +39,11 @@ func int64ToBytes(i int64) []byte {
 	return buf
 }
 
+// Retain temporary external client library copies that are created for enabling multi-threading.
+func (o NetworkOptions) SetRetainClientLibraryCopies() error {
+	return o.setOpt(67, nil)
+}
+
 // Deprecated
 //
 // Parameter: IP:PORT
