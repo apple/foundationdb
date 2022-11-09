@@ -75,6 +75,7 @@ class EnsembleResults:
                 child.attributes['Line'] = str(cov.line)
                 child.attributes['Comment'] = '' if cov.comment is None else cov.comment
                 child.attributes['HitCount'] = str(count)
+                child.attributes['Rare'] = str(cov.rare)
                 out.append(child)
 
         if config.details:
