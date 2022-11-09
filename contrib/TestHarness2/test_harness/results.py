@@ -19,6 +19,7 @@ class GlobalStatistics:
         self.total_cpu_time: int = 0
         self.total_test_runs: int = 0
         self.total_missed_probes: int = 0
+        self.total_missed_nonrare_probes: int = 0
 
 
 class EnsembleResults:
@@ -40,6 +41,8 @@ class EnsembleResults:
             self.coverage.append((cov, count))
             if count <= self.ratio:
                 self.global_statistics.total_missed_probes += 1
+                if not cov.rare:
+                    self.global_statistics.total_missed_nonrare_probes += 1
             if self.min_coverage_hit is None or self.min_coverage_hit > count:
                 self.min_coverage_hit = count
         self.coverage.sort(key=lambda x: (x[1], x[0].file, x[0].line))
@@ -63,6 +66,7 @@ class EnsembleResults:
         out.attributes['MinProbeHit'] = str(self.min_coverage_hit)
         out.attributes['TotalProbes'] = str(len(self.coverage))
         out.attributes['MissedProbes'] = str(self.global_statistics.total_missed_probes)
+        out.attributes['MissedNonRareProbes'] = str(self.global_statistics.total_missed_nonrare_probes)
 
         for cov, count in self.coverage:
             severity = 10 if count > self.ratio else 40
