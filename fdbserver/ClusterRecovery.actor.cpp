@@ -18,12 +18,14 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Metacluster.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/EncryptionOpsUtils.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
@@ -462,18 +464,34 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	}
 }
 
+namespace {
+EncryptionAtRestMode getEncryptionAtRest() {
+	// TODO: Use db-config encryption config to determine cluster encryption status
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+		return EncryptionAtRestMode(EncryptionAtRestMode::Mode::AES_256_CTR);
+	} else {
+		return EncryptionAtRestMode();
+	}
+}
+} // namespace
+
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                      Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
+	state EncryptionAtRestMode encryptionAtRestMode = getEncryptionAtRest();
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
 		state DBCoreState newState;
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
+
+		// Update Coordinators EncryptionAtRest status during the very first recovery of the cluster (empty database)
+		newState.encryptionAtRestMode = encryptionAtRestMode;
+
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
 
 		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == configuration.tLogWriteAntiQuorum &&
@@ -487,6 +505,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    .detail("FinalUpdate", finalUpdate)
 		    .detail("NewState.tlogs", newState.tLogs.size())
 		    .detail("NewState.OldTLogs", newState.oldTLogData.size())
+		    .detail("NewState.EncryptionAtRestMode", newState.encryptionAtRestMode.toString())
 		    .detail("Expected.tlogs",
 		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()));
 		wait(self->cstate.write(newState, finalUpdate));
@@ -971,7 +990,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		    .detail("Status", RecoveryStatus::names[status])
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		return Never();
-	} else
+	} else {
 		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 		           self->dbgid)
 		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
@@ -981,6 +1000,12 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("RequiredResolvers", 1)
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
+
+		// The cluster's EncryptionAtRest status is now readable.
+		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
+			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest());
+		}
+	}
 
 	// FIXME: we only need log routers for the same locality as the master
 	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
@@ -1480,6 +1505,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
 	wait(self->cstate.read());
+
+	// Unless the cluster database is 'empty', the cluster's EncryptionAtRest status is readable once cstate is
+	// recovered
+	if (!self->cstate.myDBState.tLogs.empty() && self->controllerData->encryptionAtRestMode.canBeSet()) {
+		self->controllerData->encryptionAtRestMode.send(self->cstate.myDBState.encryptionAtRestMode);
+	}
 
 	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion()) {
 		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();

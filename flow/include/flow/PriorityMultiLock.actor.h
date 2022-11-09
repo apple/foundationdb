@@ -42,21 +42,21 @@
 #endif
 
 // A multi user lock with a concurrent holder limit where waiters request a lock with a priority
-// id and are granted locks based on a total concurrency and relative importants of the priority
-// ids defined.
+// id and are granted locks based on a total concurrency and relative weights of the current active
+// priorities.  Priority id's must start at 0 and are sequential integers.
 //
 // Scheduling logic
 // Let
-// 	 launchLimits[n] = configured amount from the launchLimit vector for priority n
+// 	 weights[n] = configured weight for priority n
 //   waiters[n] = the number of waiters for priority n
 //   runnerCounts[n] = number of runners at priority n
 //
-//   totalActiveLaunchLimits = sum of limits for all priorities with waiters[n] > 0
-//   When waiters[n] becomes == 0, totalActiveLaunchLimits -= launchLimits[n]
-//   When waiters[n] becomes  > 0, totalActiveLaunchLimits += launchLimits[n]
+//   totalPendingWeights = sum of weights for all priorities with waiters[n] > 0
+//   When waiters[n] becomes == 0, totalPendingWeights -= weights[n]
+//   When waiters[n] becomes  > 0, totalPendingWeights += weights[n]
 //
 //   The total capacity of a priority to be considered when launching tasks is
-//     ceil(launchLimits[n] / totalLimits * concurrency)
+//     ceil(weights[n] / totalPendingWeights * concurrency)
 //
 // For improved memory locality the properties mentioned above are stored as priorities[n].<property>
 // in the actual implementation.
@@ -80,15 +80,15 @@ public:
 		Promise<Void> promise;
 	};
 
-	PriorityMultiLock(int concurrency, std::string launchLimits)
-	  : PriorityMultiLock(concurrency, parseStringToVector<int>(launchLimits, ',')) {}
+	PriorityMultiLock(int concurrency, std::string weights)
+	  : PriorityMultiLock(concurrency, parseStringToVector<int>(weights, ',')) {}
 
-	PriorityMultiLock(int concurrency, std::vector<int> launchLimitsByPriority)
-	  : concurrency(concurrency), available(concurrency), waiting(0), totalActiveLaunchLimits(0), releaseDebugID(0) {
+	PriorityMultiLock(int concurrency, std::vector<int> weightsByPriority)
+	  : concurrency(concurrency), available(concurrency), waiting(0), totalPendingWeights(0), releaseDebugID(0) {
 
-		priorities.resize(launchLimitsByPriority.size());
+		priorities.resize(weightsByPriority.size());
 		for (int i = 0; i < priorities.size(); ++i) {
-			priorities[i].launchLimit = launchLimitsByPriority[i];
+			priorities[i].weight = weightsByPriority[i];
 		}
 
 		fRunner = runner(this);
@@ -99,17 +99,16 @@ public:
 	Future<Lock> lock(int priority = 0) {
 		Priority& p = priorities[priority];
 		Queue& q = p.queue;
-		Waiter w;
 
 		// If this priority currently has no waiters
 		if (q.empty()) {
-			// Add this priority's launch limit to totalLimits
-			totalActiveLaunchLimits += p.launchLimit;
+			// Add this priority's weight to the total for priorities with pending work
+			totalPendingWeights += p.weight;
 
 			// If there are slots available and the priority has capacity then don't make the caller wait
-			if (available > 0 && p.runners < currentCapacity(p.launchLimit)) {
-				// Remove this priority's launch limit from the total since it will remain empty
-				totalActiveLaunchLimits -= p.launchLimit;
+			if (available > 0 && p.runners < currentCapacity(p.weight)) {
+				// Remove this priority's weight from the total since it will remain empty
+				totalPendingWeights -= p.weight;
 
 				// Return a Lock to the caller
 				Lock lock;
@@ -119,6 +118,8 @@ public:
 				return lock;
 			}
 		}
+
+		Waiter w;
 		q.push_back(w);
 		++waiting;
 
@@ -144,7 +145,7 @@ public:
 		}
 
 		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d "
-		                       "runnersDone=%d activeLimits=%d ",
+		                       "runnersDone=%d pendingWeights=%d ",
 		                       this,
 		                       concurrency,
 		                       available,
@@ -152,7 +153,7 @@ public:
 		                       waiting,
 		                       runners.size(),
 		                       runnersDone,
-		                       totalActiveLaunchLimits);
+		                       totalPendingWeights);
 
 		for (int i = 0; i < priorities.size(); ++i) {
 			s += format("p%d:{%s} ", i, priorities[i].toString(this).c_str());
@@ -196,27 +197,27 @@ private:
 	int available;
 	// Total waiters across all priorities
 	int waiting;
-	// Sum of launch limits for all priorities with 1 or more waiters
-	int totalActiveLaunchLimits;
+	// Sum of weights for all priorities with 1 or more waiters
+	int totalPendingWeights;
 
 	typedef Deque<Waiter> Queue;
 
 	struct Priority {
-		Priority() : runners(0), launchLimit(0) {}
+		Priority() : runners(0), weight(0) {}
 
 		// Queue of waiters at this priority
 		Queue queue;
 		// Number of runners at this priority
 		int runners;
-		// Configured launch limit for this priority
-		int launchLimit;
+		// Configured weight for this priority
+		int weight;
 
 		std::string toString(const PriorityMultiLock* pml) const {
-			return format("limit=%d run=%d wait=%d cap=%d",
-			              launchLimit,
+			return format("weight=%d run=%d wait=%d cap=%d",
+			              weight,
 			              runners,
 			              queue.size(),
-			              queue.empty() ? 0 : pml->currentCapacity(launchLimit));
+			              queue.empty() ? 0 : pml->currentCapacity(weight));
 		}
 	};
 
@@ -270,10 +271,10 @@ private:
 
 	// Current maximum running tasks for the specified priority, which must have waiters
 	// or the result is undefined
-	int currentCapacity(int launchLimit) const {
+	int currentCapacity(int weight) const {
 		// The total concurrency allowed for this priority at present is the total concurrency times
-		// priority's launch limit divided by the total launch limits for all priorities with waiters.
-		return ceil((float)launchLimit / totalActiveLaunchLimits * concurrency);
+		// priority's weight divided by the total weights for all priorities with waiters.
+		return ceil((float)weight / totalPendingWeights * concurrency);
 	}
 
 	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
@@ -329,8 +330,7 @@ private:
 					                 priority,
 					                 self->toString().c_str());
 
-					if (!pPriority->queue.empty() &&
-					    pPriority->runners < self->currentCapacity(pPriority->launchLimit)) {
+					if (!pPriority->queue.empty() && pPriority->runners < self->currentCapacity(pPriority->weight)) {
 						break;
 					}
 				}
@@ -340,9 +340,9 @@ private:
 				Waiter w = queue.front();
 				queue.pop_front();
 
-				// If this priority is now empty, subtract its launch limit from totalLimits
+				// If this priority is now empty, subtract its weight from the total pending weights
 				if (queue.empty()) {
-					self->totalActiveLaunchLimits -= pPriority->launchLimit;
+					self->totalPendingWeights -= pPriority->weight;
 
 					pml_debug_printf("      emptied priority line %d  priority=%d  %s\n",
 					                 __LINE__,
