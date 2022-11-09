@@ -61,7 +61,7 @@ class MappedRangeResultDirectBufferIterator extends DirectBufferIterator impleme
 			rangeResult.add(new KeyValue(k, v));
 		}
 		current += 1;
-		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult, boundaryAndExist);
+		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult);
 	}
 
 	private byte[] getString() {
