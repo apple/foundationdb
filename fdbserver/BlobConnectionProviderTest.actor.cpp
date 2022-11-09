@@ -86,9 +86,14 @@ ACTOR Future<Void> createObject(ConnectionProviderTestSettings* settings, Provid
 	state std::string fullPath;
 	std::tie(bstore, fullPath) = provider->provider->createForWrite(objName);
 
-	state Reference<IBackupFile> file = wait(bstore->writeFile(fullPath));
-	wait(file->append(data.begin(), data.size()));
-	wait(file->finish());
+	if (deterministicRandom()->coinflip()) {
+		state Reference<IBackupFile> file = wait(bstore->writeFile(fullPath));
+		wait(file->append(data.begin(), data.size()));
+		wait(file->finish());
+	} else {
+		std::string contents = data.toString();
+		wait(bstore->writeEntireFile(fullPath, contents));
+	}
 
 	// after write, put in the readable list
 	provider->data.push_back({ fullPath, data });

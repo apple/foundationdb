@@ -369,6 +369,11 @@ Future<Reference<IBackupFile>> BackupContainerAzureBlobStore::writeFile(const st
 	return BackupContainerAzureBlobStoreImpl::writeFile(this, fileName);
 }
 
+Future<Void> BackupContainerAzureBlobStore::writeEntireFile(const std::string& fileName,
+                                                            const std::string& fileConents) {
+	return writeEntireFileFallback(fileName, fileContents);
+}
+
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerAzureBlobStore::listFiles(
     const std::string& path,
     std::function<bool(std::string const&)> folderPathFilter) {
