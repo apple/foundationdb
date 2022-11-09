@@ -2162,14 +2162,14 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 	}
 }
 
-void DatabaseContext::addWatchCounter() {
+void DatabaseContext::increaseWatchCounter() {
 	if (outstandingWatches >= maxOutstandingWatches)
 		throw too_many_watches();
 
 	++outstandingWatches;
 }
 
-void DatabaseContext::removeWatchCounter() {
+void DatabaseContext::decreaseWatchCounter() {
 	--outstandingWatches;
 	ASSERT(outstandingWatches >= 0);
 }
@@ -3915,6 +3915,10 @@ public:
 	  : cx(cx_), tenantID(tenantID_), key(key_), version(ver) {}
 
 	WatchRefCountUpdater& operator=(WatchRefCountUpdater&& other) {
+		if (cx.getReference()) {
+			cx->decreaseWatchRefCount(tenantID, key,version);
+		}
+
 		// Since this class is only used by watchValueMap, and it is used *AFTER* a wait statement, this class is first
 		// initialized by default constructor, then, after the wait, this function is called to assign the actual
 		// database, key, etc., to re-initialize this object. At this stage, the reference count can be increased. And
@@ -5493,11 +5497,11 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 			}
 		}
 	} catch (Error& e) {
-		cx->removeWatchCounter();
+		cx->decreaseWatchCounter();
 		throw;
 	}
 
-	cx->removeWatchCounter();
+	cx->decreaseWatchCounter();
 	return Void();
 }
 
@@ -5508,7 +5512,7 @@ Future<Version> Transaction::getRawReadVersion() {
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
 
-	trState->cx->addWatchCounter();
+	trState->cx->increaseWatchCounter();
 	watches.push_back(watch);
 	return ::watch(
 	    watch,
