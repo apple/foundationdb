@@ -67,17 +67,37 @@ struct Traceable<ICounter*> : std::true_type {
 	}
 };
 
-struct CounterCollection {
-	CounterCollection(std::string name, std::string id = std::string()) : name(name), id(id) {}
-	std::vector<struct ICounter*> counters, counters_to_remove;
-	~CounterCollection() {
-		for (auto c : counters_to_remove)
-			c->remove();
-	}
+class CounterCollection {
+	friend class CounterCollectionImpl;
+
 	std::string name;
 	std::string id;
+	std::vector<struct ICounter*> counters, countersToRemove;
+
+public:
+	CounterCollection(std::string const& name, std::string const& id = std::string()) : name(name), id(id) {}
+	~CounterCollection() {
+		for (auto c : countersToRemove)
+			c->remove();
+	}
+
+	void addCounter(ICounter* counter) { counters.push_back(counter); }
+
+	// Call remove method on this counter in ~CounterCollection
+	void markForRemoval(ICounter* counter) { countersToRemove.push_back(counter); }
+
+	std::string const& getName() const { return name; }
+
+	std::string const& getId() const { return id; }
 
 	void logToTraceEvent(TraceEvent& te) const;
+
+	Future<Void> traceCounters(
+	    std::string const& traceEventName,
+	    UID traceEventID,
+	    double interval,
+	    std::string const& trackLatestName = std::string(),
+	    std::function<void(TraceEvent&)> const& decorator = [](auto& te) {});
 };
 
 struct Counter final : ICounter, NonCopyable {
@@ -131,8 +151,8 @@ struct Traceable<Counter> : std::true_type {
 template <class F>
 struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
 	SpecialCounter(CounterCollection& collection, std::string const& name, F&& f) : name(name), f(f) {
-		collection.counters.push_back(this);
-		collection.counters_to_remove.push_back(this);
+		collection.addCounter(this);
+		collection.markForRemoval(this);
 	}
 	void remove() override { delete this; }
 
@@ -162,55 +182,12 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 	new SpecialCounter<F>(collection, name, std::move(f));
 }
 
-Future<Void> traceCounters(
-    std::string const& traceEventName,
-    UID const& traceEventID,
-    double const& interval,
-    CounterCollection* const& counters,
-    std::string const& trackLatestName = std::string(),
-    std::function<void(TraceEvent&)> const& decorator = [](TraceEvent& te) {});
+FDB_DECLARE_BOOLEAN_PARAM(Filtered);
 
 class LatencyBands {
-public:
-	LatencyBands(std::string name, UID id, double loggingInterval)
-	  : name(name), id(id), loggingInterval(loggingInterval) {}
-
-	void addThreshold(double value) {
-		if (value > 0 && bands.count(value) == 0) {
-			if (bands.size() == 0) {
-				ASSERT(!cc && !filteredCount);
-				cc = std::make_unique<CounterCollection>(name, id.toString());
-				logger = traceCounters(name, id, loggingInterval, cc.get(), id.toString() + "/" + name);
-				filteredCount = std::make_unique<Counter>("Filtered", *cc);
-				insertBand(std::numeric_limits<double>::infinity());
-			}
-
-			insertBand(value);
-		}
-	}
-
-	void addMeasurement(double measurement, bool filtered = false) {
-		if (filtered && filteredCount) {
-			++(*filteredCount);
-		} else if (bands.size() > 0) {
-			auto itr = bands.upper_bound(measurement);
-			ASSERT(itr != bands.end());
-			++(*itr->second);
-		}
-	}
-
-	void clearBands() {
-		logger = Void();
-		bands.clear();
-		filteredCount.reset();
-		cc.reset();
-	}
-
-	~LatencyBands() { clearBands(); }
-
-private:
 	std::map<double, std::unique_ptr<Counter>> bands;
 	std::unique_ptr<Counter> filteredCount;
+	std::function<void(TraceEvent&)> decorator;
 
 	std::string name;
 	UID id;
@@ -219,9 +196,22 @@ private:
 	std::unique_ptr<CounterCollection> cc;
 	Future<Void> logger;
 
-	void insertBand(double value) {
-		bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
-	}
+	void insertBand(double value);
+
+public:
+	LatencyBands(
+	    std::string const& name,
+	    UID id,
+	    double loggingInterval,
+	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
+
+	LatencyBands(LatencyBands&&) = default;
+	LatencyBands& operator=(LatencyBands&&) = default;
+
+	void addThreshold(double value);
+	void addMeasurement(double measurement, int count = 1, Filtered = Filtered::False);
+	void clearBands();
+	~LatencyBands();
 };
 
 class LatencySample {

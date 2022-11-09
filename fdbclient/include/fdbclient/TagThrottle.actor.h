@@ -597,8 +597,8 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 
 class TagQuotaValue {
 public:
-	double reservedQuota{ 0.0 };
-	double totalQuota{ 0.0 };
+	int64_t reservedQuota{ 0 };
+	int64_t totalQuota{ 0 };
 	bool isValid() const;
 	Value toValue() const;
 	static TagQuotaValue fromValue(ValueRef);
@@ -607,7 +607,7 @@ public:
 Key getTagQuotaKey(TransactionTagRef);
 
 template <class Tr>
-void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, double reservedQuota, double totalQuota) {
+void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota, int64_t totalQuota) {
 	TagQuotaValue tagQuotaValue;
 	tagQuotaValue.reservedQuota = reservedQuota;
 	tagQuotaValue.totalQuota = totalQuota;

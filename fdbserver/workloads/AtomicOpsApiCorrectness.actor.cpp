@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicOpsApiCorrectness";
 	bool testFailed = false;
 	uint32_t opType;
 
@@ -42,8 +43,6 @@ public:
 	AtomicOpsApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		opType = getOption(options, "opType"_sr, -1);
 	}
-
-	std::string description() const override { return "AtomicOpsApiCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -640,4 +639,4 @@ public:
 	}
 };
 
-WorkloadFactory<AtomicOpsApiCorrectnessWorkload> AtomicOpsApiCorrectnessWorkloadFactory("AtomicOpsApiCorrectness");
+WorkloadFactory<AtomicOpsApiCorrectnessWorkload> AtomicOpsApiCorrectnessWorkloadFactory;

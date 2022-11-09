@@ -27,10 +27,9 @@
 
 // Stress test the slow task profiler or flow profiler
 struct SlowTaskWorkload : TestWorkload {
+	static constexpr auto NAME = "SlowTaskWorkload";
 
 	SlowTaskWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
-
-	std::string description() const override { return "SlowTaskWorkload"; }
 
 	Future<Void> start(Database const& cx) override {
 		setupRunLoopProfiler();
@@ -79,4 +78,4 @@ struct SlowTaskWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SlowTaskWorkload> SlowTaskWorkloadFactory("SlowTaskWorkload");
+WorkloadFactory<SlowTaskWorkload> SlowTaskWorkloadFactory;

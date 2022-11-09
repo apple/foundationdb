@@ -96,6 +96,13 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
 
@@ -198,6 +205,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	ThreadFuture<uint64_t> getProtocolVersion();

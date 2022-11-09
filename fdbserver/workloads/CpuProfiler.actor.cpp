@@ -26,6 +26,7 @@
 
 // A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
 struct CpuProfilerWorkload : TestWorkload {
+	static constexpr auto NAME = "CpuProfiler";
 	bool success;
 
 	// How long to run the workload before starting the profiler
@@ -47,8 +48,6 @@ struct CpuProfilerWorkload : TestWorkload {
 		roles = getOption(options, "roles"_sr, std::vector<std::string>());
 		success = true;
 	}
-
-	std::string description() const override { return "CpuProfiler"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -134,4 +133,4 @@ struct CpuProfilerWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<CpuProfilerWorkload> CpuProfilerWorkloadFactory("CpuProfiler");
+WorkloadFactory<CpuProfilerWorkload> CpuProfilerWorkloadFactory;

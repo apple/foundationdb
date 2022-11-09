@@ -22,6 +22,8 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include <utility>
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
@@ -51,6 +53,7 @@ struct WorkerInfo : NonCopyable {
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
 	Future<Void> haltBlobManager;
+	Future<Void> haltBlobMigrator;
 	Future<Void> haltEncryptKeyProxy;
 	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
@@ -184,6 +187,14 @@ public:
 			serverInfo->set(newInfo);
 		}
 
+		void setBlobMigrator(const BlobMigratorInterface& interf) {
+			auto newInfo = serverInfo->get();
+			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
+			newInfo.blobMigrator = interf;
+			serverInfo->set(newInfo);
+		}
+
 		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
 			auto newInfo = serverInfo->get();
 			auto newClientInfo = clientInfo->get();
@@ -217,6 +228,8 @@ public:
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			} else if (t == ProcessClass::BlobManagerClass) {
 				newInfo.blobManager = Optional<BlobManagerInterface>();
+			} else if (t == ProcessClass::BlobMigratorClass) {
+				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
@@ -317,6 +330,8 @@ public:
 		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().blobManager.present() &&
 		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().blobMigrator.present() &&
+		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().encryptKeyProxy.present() &&
 		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
@@ -3326,6 +3341,7 @@ public:
 	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
 	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
 	UID id;
+	Reference<AsyncVar<Optional<UID>>> clusterId;
 	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
 	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
@@ -3360,6 +3376,8 @@ public:
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitBlobManager;
 	Optional<UID> recruitingBlobManagerID;
+	AsyncVar<bool> recruitBlobMigrator;
+	Optional<UID> recruitingBlobMigratorID;
 	AsyncVar<bool> recruitEncryptKeyProxy;
 	Optional<UID> recruitingEncryptKeyProxyID;
 	AsyncVar<bool> recruitConsistencyScan;
@@ -3382,6 +3400,12 @@ public:
 	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
 	std::queue<double> recentHealthTriggeredRecoveryTime;
 
+	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
+	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
+	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
+	// encryption status.
+	Promise<EncryptionAtRestMode> encryptionAtRestMode;
+
 	CounterCollection clusterControllerMetrics;
 
 	Counter openDatabaseRequests;
@@ -3395,13 +3419,15 @@ public:
 
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
-	                      ServerCoordinators const& coordinators)
+	                      ServerCoordinators const& coordinators,
+	                      Reference<AsyncVar<Optional<UID>>> clusterId)
 	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
-	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
-	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitEncryptKeyProxy(false),
+	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
+	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
+	    datacenterVersionDifference(0), versionDifferenceUpdated(false), remoteDCMonitorStarted(false),
+	    remoteTransactionSystemDegraded(false), recruitDistributor(false), recruitRatekeeper(false),
+	    recruitBlobManager(false), recruitBlobMigrator(false), recruitEncryptKeyProxy(false),
 	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),

@@ -35,6 +35,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SkewedReadWriteWorkload : ReadWriteCommon {
+	static constexpr auto NAME = "SkewedReadWrite";
 	// server based hot traffic setting
 	int skewRound = 0; // skewDuration = ceil(testDuration / skewRound)
 	double hotServerFraction = 0, hotServerShardFraction = 1.0; // set > 0 to issue hot key based on shard map
@@ -59,7 +60,6 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		ASSERT((hotServerReadFrac >= hotServerFraction || hotServerWriteFrac >= hotServerFraction) && skewRound > 0);
 	}
 
-	std::string description() const override { return descriptionString.toString(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	void debugPrintServerShards() const {
@@ -366,7 +366,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	}
 };
 
-WorkloadFactory<SkewedReadWriteWorkload> SkewedReadWriteWorkloadFactory("SkewedReadWrite");
+WorkloadFactory<SkewedReadWriteWorkload> SkewedReadWriteWorkloadFactory;
 
 TEST_CASE("/KVWorkload/methods/ParseKeyForIndex") {
 	WorkloadContext wcx;
@@ -374,7 +374,7 @@ TEST_CASE("/KVWorkload/methods/ParseKeyForIndex") {
 	wcx.clientCount = 1;
 	wcx.sharedRandomNumber = 1;
 
-	auto wk = SkewedReadWriteWorkload(wcx);
+	auto wk = TestWorkloadImpl<SkewedReadWriteWorkload>(wcx);
 	for (int i = 0; i < 1000; ++i) {
 		auto idx = deterministicRandom()->randomInt64(0, wk.nodeCount);
 		Key k = wk.keyForIndex(idx);

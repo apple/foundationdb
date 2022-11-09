@@ -46,12 +46,17 @@ ACTOR Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process,
                                       TaskPriority taskID);
 
 ACTOR template <class T>
-Future<T> sendErrorOnShutdown(Future<T> in) {
-	choose {
-		when(wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()))) {
-			throw io_error().asInjectedFault();
+Future<T> sendErrorOnShutdown(Future<T> in, bool assertOnCancel = false) {
+	try {
+		choose {
+			when(wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()))) {
+				throw io_error().asInjectedFault();
+			}
+			when(T rep = wait(in)) { return rep; }
 		}
-		when(T rep = wait(in)) { return rep; }
+	} catch (Error& e) {
+		ASSERT(e.code() != error_code_actor_cancelled || !assertOnCancel);
+		throw;
 	}
 }
 
@@ -59,9 +64,12 @@ class AsyncFileDetachable final : public IAsyncFile, public ReferenceCounted<Asy
 private:
 	Reference<IAsyncFile> file;
 	Future<Void> shutdown;
+	bool assertOnReadWriteCancel;
 
 public:
-	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file) { shutdown = doShutdown(this); }
+	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file), assertOnReadWriteCancel(true) {
+		shutdown = doShutdown(this);
+	}
 
 	ACTOR Future<Void> doShutdown(AsyncFileDetachable* self) {
 		wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()));
@@ -84,13 +92,13 @@ public:
 	Future<int> read(void* data, int length, int64_t offset) override {
 		if (!file.getPtr() || g_simulator->getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
-		return sendErrorOnShutdown(file->read(data, length, offset));
+		return sendErrorOnShutdown(file->read(data, length, offset), assertOnReadWriteCancel);
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		if (!file.getPtr() || g_simulator->getCurrentProcess()->shutdownSignal.getFuture().isReady())
 			return io_error().asInjectedFault();
-		return sendErrorOnShutdown(file->write(data, length, offset));
+		return sendErrorOnShutdown(file->write(data, length, offset), assertOnReadWriteCancel);
 	}
 
 	Future<Void> truncate(int64_t size) override {

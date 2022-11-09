@@ -28,6 +28,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct StatusWorkload : TestWorkload {
+	static constexpr auto NAME = "Status";
+
 	double testDuration, requestsPerSecond;
 	bool enableLatencyBands;
 
@@ -52,7 +54,6 @@ struct StatusWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "StatusWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (enableLatencyBands) {
 			latencyBandActor = configureLatencyBands(this, cx);
@@ -203,7 +204,7 @@ struct StatusWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StatusWorkload> StatusWorkloadFactory("Status");
+WorkloadFactory<StatusWorkload> StatusWorkloadFactory;
 
 TEST_CASE("/fdbserver/status/schema/basic") {
 	json_spirit::mValue schema =

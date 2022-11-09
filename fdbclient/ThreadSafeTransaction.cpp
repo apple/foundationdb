@@ -246,6 +246,47 @@ ThreadFuture<Void> ThreadSafeTenant::waitPurgeGranulesComplete(const KeyRef& pur
 	});
 }
 
+ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->blobbifyRange(range, tenantName);
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->unblobbifyRange(range, tenantName);
+	});
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTenant::listBlobbifiedRanges(const KeyRangeRef& keyRange,
+                                                                                        int rangeLimit) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+		db->checkDeferredError();
+		return db->listBlobbifiedRanges(range, rangeLimit, tenantName);
+	});
+}
+
+ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<Version> {
+		db->checkDeferredError();
+		return db->verifyBlobRange(range, version, tenantName);
+	});
+}
+
 ThreadSafeTenant::~ThreadSafeTenant() {}
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
@@ -585,6 +626,14 @@ ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	});
 }
 
+ThreadFuture<int64_t> ThreadSafeTransaction::getTotalCost() {
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<int64_t> {
+		tr->checkDeferredError();
+		return tr->getTotalCost();
+	});
+}
+
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> {
@@ -694,10 +743,10 @@ void ThreadSafeApi::runNetwork() {
 	Optional<Error> runErr;
 	try {
 		::runNetwork();
-	} catch (Error& e) {
+	} catch (const Error& e) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
 		runErr = e;
-	} catch (std::exception& e) {
+	} catch (const std::exception& e) {
 		runErr = unknown_error();
 		TraceEvent(SevError, "RunNetworkError").error(unknown_error()).detail("RootException", e.what());
 	} catch (...) {
@@ -708,9 +757,9 @@ void ThreadSafeApi::runNetwork() {
 	for (auto& hook : threadCompletionHooks) {
 		try {
 			hook.first(hook.second);
-		} catch (Error& e) {
+		} catch (const Error& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
-		} catch (std::exception& e) {
+		} catch (const std::exception& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error()).detail("RootException", e.what());
 		} catch (...) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
@@ -718,12 +767,10 @@ void ThreadSafeApi::runNetwork() {
 	}
 
 	if (runErr.present()) {
-		closeTraceFile();
 		throw runErr.get();
 	}
 
 	TraceEvent("RunNetworkTerminating");
-	closeTraceFile();
 }
 
 void ThreadSafeApi::stopNetwork() {

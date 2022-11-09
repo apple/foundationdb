@@ -23,11 +23,13 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -45,6 +47,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantManagementWorkload : TestWorkload {
+	static constexpr auto NAME = "TenantManagement";
+
 	struct TenantData {
 		int64_t id;
 		Optional<TenantGroupName> tenantGroup;
@@ -133,8 +137,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 		useMetacluster = getOption(options, "useMetacluster"_sr, defaultUseMetacluster);
 	}
-
-	std::string description() const override { return "TenantManagement"; }
 
 	struct TestParameters {
 		constexpr static FileIdentifier file_identifier = 1527576;
@@ -240,6 +242,56 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		return Void();
+	}
+
+	ACTOR template <class DB>
+	static Future<Versionstamp> getLastTenantModification(Reference<DB> db, OperationType type) {
+		state Reference<typename DB::TransactionT> tr = db->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				if (type == OperationType::METACLUSTER) {
+					Versionstamp vs =
+					    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().lastTenantModification.getD(
+					        tr, Snapshot::False, Versionstamp()));
+					return vs;
+				}
+				Versionstamp vs =
+				    wait(TenantMetadata::lastTenantModification().getD(tr, Snapshot::False, Versionstamp()));
+				return vs;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	ACTOR template <class DB>
+	static Future<Version> getLatestReadVersion(Reference<DB> db, OperationType type) {
+		state Reference<typename DB::TransactionT> tr = db->createTransaction();
+		loop {
+			try {
+				Version readVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+				return readVersion;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	static Future<Versionstamp> getLastTenantModification(TenantManagementWorkload* self, OperationType type) {
+		if (type == OperationType::METACLUSTER) {
+			return getLastTenantModification(self->mvDb, type);
+		} else {
+			return getLastTenantModification(self->dataDb.getReference(), type);
+		}
+	}
+
+	static Future<Version> getLatestReadVersion(TenantManagementWorkload* self, OperationType type) {
+		if (type == OperationType::METACLUSTER) {
+			return getLatestReadVersion(self->mvDb, type);
+		} else {
+			return getLatestReadVersion(self->dataDb.getReference(), type);
+		}
 	}
 
 	TenantName chooseTenantName(bool allowSystemTenant) {
@@ -373,6 +425,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state int64_t minTenantCount = std::numeric_limits<int64_t>::max();
 		state int64_t finalTenantCount = 0;
 
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				// First, attempt to create the tenants
@@ -464,6 +517,9 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(entry.get().id > self->maxId);
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
+
+					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 
 					if (self->useMetacluster) {
 						// In a metacluster, we should also see that the tenant was created on the data cluster
@@ -609,23 +665,6 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	// Returns GRV and eats GRV errors
-	ACTOR static Future<Version> getReadVersion(Reference<ReadYourWritesTransaction> tr) {
-		loop {
-			try {
-				Version version = wait(tr->getReadVersion());
-				return version;
-			} catch (Error& e) {
-				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_batch_transaction_throttled) {
-					wait(tr->onError(e));
-				} else {
-					throw;
-				}
-			}
-		}
-	}
-
 	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
@@ -709,13 +748,15 @@ struct TenantManagementWorkload : TestWorkload {
 			return Void();
 		}
 
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				// Attempt to delete the tenant(s)
 				state bool retried = false;
 				loop {
 					try {
-						state Version beforeVersion = wait(self->getReadVersion(tr));
+						state Version beforeVersion =
+						    wait(getLatestReadVersion(self, OperationType::MANAGEMENT_DATABASE));
 						Optional<Void> result =
 						    wait(timeout(deleteTenantImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
@@ -723,8 +764,8 @@ struct TenantManagementWorkload : TestWorkload {
 						if (result.present()) {
 							if (anyExists) {
 								if (self->oldestDeletionVersion == 0 && !tenants.empty()) {
-									tr->reset();
-									Version afterVersion = wait(self->getReadVersion(tr));
+									Version afterVersion =
+									    wait(self->getLatestReadVersion(self, OperationType::MANAGEMENT_DATABASE));
 									self->oldestDeletionVersion = afterVersion;
 								}
 								self->newestDeletionVersion = beforeVersion;
@@ -800,6 +841,11 @@ struct TenantManagementWorkload : TestWorkload {
 
 				// Deletion should not succeed if any tenant in the range wasn't empty
 				ASSERT(isEmpty);
+
+				if (tenants.size() > 0) {
+					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
+				}
 
 				// Update our local state to remove the deleted tenants
 				for (auto tenant : tenants) {
@@ -1221,11 +1267,14 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 		}
 
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				wait(renameTenantImpl(
 				    tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
 				wait(verifyTenantRenames(self, tenantRenames));
+				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+				ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 				// Check that using the wrong rename API fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 				return Void();
@@ -1361,6 +1410,7 @@ struct TenantManagementWorkload : TestWorkload {
 			configuration["invalid_option"_sr] = ""_sr;
 		}
 
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
 				wait(configureTenantImpl(tr, tenant, configuration, operationType, specialKeysUseInvalidTuple, self));
@@ -1369,6 +1419,8 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!hasInvalidOption);
 				ASSERT(!hasSystemTenantGroup);
 				ASSERT(!specialKeysUseInvalidTuple);
+				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+				ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 
 				auto itr = self->createdTenants.find(tenant);
 				if (itr->second.tenantGroup.present()) {
@@ -1783,4 +1835,4 @@ struct TenantManagementWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TenantManagementWorkload> TenantManagementWorkload("TenantManagement");
+WorkloadFactory<TenantManagementWorkload> TenantManagementWorkload;

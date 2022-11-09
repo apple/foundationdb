@@ -63,7 +63,7 @@ public:
 		m_buffer = Standalone<VectorRef<uint8_t>>(old.slice(size, old.size()));
 
 		// Write the old buffer to the underlying file and update the write offset
-		Future<Void> r = holdWhile(old, m_file->write(old.begin(), size, m_writeOffset));
+		Future<Void> r = uncancellable(holdWhile(old, m_file->write(old.begin(), size, m_writeOffset)));
 		m_writeOffset += size;
 
 		return r;
@@ -277,6 +277,10 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });
+}
+
+Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& path, const std::string& contents) {
+	return writeEntireFileFallback(path, contents);
 }
 
 Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) {

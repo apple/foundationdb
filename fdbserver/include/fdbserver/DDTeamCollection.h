@@ -146,6 +146,7 @@ public:
 	LocalityData locality;
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
+	ServerStatus(LocalityData const& locality) : ServerStatus(false, false, false, locality) {}
 	ServerStatus(bool isFailed, bool isUndesired, bool isWiggling, LocalityData const& locality)
 	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
 	    initialized(true), locality(locality) {}
@@ -467,8 +468,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	                               DDEnabledState const& ddEnabledState,
 	                               bool recruitTss,
 	                               Reference<TSSPairState> tssState);
-
-	Future<UID> getClusterId();
 
 	// return the next ServerID in storageWiggler
 	Future<UID> getNextWigglingServerID();

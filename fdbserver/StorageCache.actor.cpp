@@ -248,9 +248,9 @@ public:
 	    lastTLogVersion(0), lastVersionWithData(0), peekVersion(0), compactionInProgress(Void()),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), debug_inApplyUpdate(false),
 	    debug_lastValidateTime(0), versionLag(0), behind(false), counters(this) {
-		version.initMetric("StorageCacheData.Version"_sr, counters.cc.id);
-		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.id);
-		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.id);
+		version.initMetric("StorageCacheData.Version"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.getId());
+		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -1188,7 +1188,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
-	state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
+	state ReadOptions options = ReadOptions(ReadType::FETCH, CacheResult::False);
 
 	if (*isTooOld)
 		throw transaction_too_old();
@@ -2224,11 +2224,10 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 	self.ck = cacheKeysPrefixFor(id).withPrefix(systemKeys.begin); // FFFF/02cacheKeys/[this server]/
 
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
-	actors.add(traceCounters("CacheMetrics",
-	                         self.thisServerID,
-	                         SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                         &self.counters.cc,
-	                         self.thisServerID.toString() + "/CacheMetrics"));
+	actors.add(self.counters.cc.traceCounters("CacheMetrics",
+	                                          self.thisServerID,
+	                                          SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                          self.thisServerID.toString() + "/CacheMetrics"));
 
 	// fetch already cached ranges from the database and apply them before proceeding
 	wait(storageCacheStartUpWarmup(&self));

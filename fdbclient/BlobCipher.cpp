@@ -76,6 +76,10 @@ BlobCipherMetrics::BlobCipherMetrics()
                                UID(),
                                FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
                                FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+    getBlobMetadataLatency("GetBlobMetadataLatency",
+                           UID(),
+                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
     counterSets({ CounterSet(cc, "TLog"),
                   CounterSet(cc, "KVMemory"),
                   CounterSet(cc, "KVRedwood"),
@@ -83,7 +87,27 @@ BlobCipherMetrics::BlobCipherMetrics()
                   CounterSet(cc, "Backup"),
                   CounterSet(cc, "Test") }) {
 	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
-	traceFuture = traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL, &cc);
+	traceFuture = cc.traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL);
+}
+
+std::string toString(BlobCipherMetrics::UsageType type) {
+	switch (type) {
+	case BlobCipherMetrics::UsageType::TLOG:
+		return "TLog";
+	case BlobCipherMetrics::UsageType::KV_MEMORY:
+		return "KVMemory";
+	case BlobCipherMetrics::UsageType::KV_REDWOOD:
+		return "KVRedwood";
+	case BlobCipherMetrics::UsageType::BLOB_GRANULE:
+		return "BlobGranule";
+	case BlobCipherMetrics::UsageType::BACKUP:
+		return "Backup";
+	case BlobCipherMetrics::UsageType::TEST:
+		return "Test";
+	default:
+		ASSERT(false);
+		return "";
+	}
 }
 
 // BlobCipherKey class methods
@@ -636,34 +660,17 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	} else {
 
 		// Populate header authToken details
-		if (header->flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE) {
-			ASSERT_GE(allocSize, (bytes + finalBytes));
-			ASSERT_GE(encryptBuf->getLogicalSize(), (bytes + finalBytes));
+		ASSERT_EQ(header->flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		ASSERT_GE(allocSize, (bytes + finalBytes));
+		ASSERT_GE(encryptBuf->getLogicalSize(), (bytes + finalBytes));
 
-			computeAuthToken({ { ciphertext, bytes + finalBytes },
-			                   { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
-			                 headerCipherKey->rawCipher(),
-			                 AES_256_KEY_LENGTH,
-			                 &header->singleAuthToken.authToken[0],
-			                 (EncryptAuthTokenAlgo)header->flags.authTokenAlgo,
-			                 AUTH_TOKEN_MAX_SIZE);
-		} else {
-			ASSERT_EQ(header->flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
-
-			// TOOD: Use HMAC_SHA encyrption authentication scheme as AES_CMAC needs minimum 16 bytes cipher key
-			computeAuthToken({ { ciphertext, bytes + finalBytes } },
-			                 reinterpret_cast<const uint8_t*>(&header->cipherTextDetails.salt),
-			                 sizeof(EncryptCipherRandomSalt),
-			                 &header->multiAuthTokens.cipherTextAuthToken[0],
-			                 EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
-			                 AUTH_TOKEN_MAX_SIZE);
-			computeAuthToken({ { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
-			                 headerCipherKey->rawCipher(),
-			                 AES_256_KEY_LENGTH,
-			                 &header->multiAuthTokens.headerAuthToken[0],
-			                 (EncryptAuthTokenAlgo)header->flags.authTokenAlgo,
-			                 AUTH_TOKEN_MAX_SIZE);
-		}
+		computeAuthToken({ { ciphertext, bytes + finalBytes },
+		                   { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
+		                 headerCipherKey->rawCipher(),
+		                 AES_256_KEY_LENGTH,
+		                 &header->singleAuthToken.authToken[0],
+		                 (EncryptAuthTokenAlgo)header->flags.authTokenAlgo,
+		                 AUTH_TOKEN_MAX_SIZE);
 	}
 
 	encryptBuf->setLogicalSize(plaintextLen);
@@ -708,44 +715,6 @@ DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> 
 	}
 }
 
-void DecryptBlobCipherAes256Ctr::verifyHeaderAuthToken(const BlobCipherEncryptHeader& header, Arena& arena) {
-	if (header.flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI) {
-		// NoneAuthToken mode; no authToken is generated; nothing to do
-		// SingleAuthToken mode; verification will happen as part of decryption.
-		return;
-	}
-
-	ASSERT_EQ(header.flags.authTokenMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
-	ASSERT(isEncryptHeaderAuthTokenAlgoValid((EncryptAuthTokenAlgo)header.flags.authTokenAlgo));
-
-	BlobCipherEncryptHeader headerCopy;
-	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-	       reinterpret_cast<const uint8_t*>(&header),
-	       sizeof(BlobCipherEncryptHeader));
-	memset(reinterpret_cast<uint8_t*>(&headerCopy.multiAuthTokens.headerAuthToken), 0, AUTH_TOKEN_MAX_SIZE);
-	uint8_t computedHeaderAuthToken[AUTH_TOKEN_MAX_SIZE]{};
-	computeAuthToken({ { reinterpret_cast<const uint8_t*>(&headerCopy), sizeof(BlobCipherEncryptHeader) } },
-	                 headerCipherKey->rawCipher(),
-	                 AES_256_KEY_LENGTH,
-	                 &computedHeaderAuthToken[0],
-	                 (EncryptAuthTokenAlgo)header.flags.authTokenAlgo,
-	                 AUTH_TOKEN_MAX_SIZE);
-
-	int authTokenSize = getEncryptHeaderAuthTokenSize(header.flags.authTokenAlgo);
-	ASSERT_LE(authTokenSize, AUTH_TOKEN_MAX_SIZE);
-	if (memcmp(&header.multiAuthTokens.headerAuthToken[0], &computedHeaderAuthToken[0], authTokenSize) != 0) {
-		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
-		    .detail("HeaderVersion", header.flags.headerVersion)
-		    .detail("HeaderMode", header.flags.encryptMode)
-		    .detail("MultiAuthHeaderAuthToken",
-		            StringRef(arena, &header.multiAuthTokens.headerAuthToken[0], AUTH_TOKEN_MAX_SIZE).toString())
-		    .detail("ComputedHeaderAuthToken", StringRef(computedHeaderAuthToken, AUTH_TOKEN_MAX_SIZE));
-		throw encrypt_header_authtoken_mismatch();
-	}
-
-	headerAuthTokenValidationDone = true;
-}
-
 void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciphertext,
                                                              const int ciphertextLen,
                                                              const BlobCipherEncryptHeader& header,
@@ -759,7 +728,7 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
 	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
 	       reinterpret_cast<const uint8_t*>(&header),
 	       sizeof(BlobCipherEncryptHeader));
-	memset(reinterpret_cast<uint8_t*>(&headerCopy.singleAuthToken), 0, 2 * AUTH_TOKEN_MAX_SIZE);
+	memset(reinterpret_cast<uint8_t*>(&headerCopy.singleAuthToken), 0, AUTH_TOKEN_MAX_SIZE);
 	uint8_t computed[AUTH_TOKEN_MAX_SIZE];
 	computeAuthToken({ { ciphertext, ciphertextLen },
 	                   { reinterpret_cast<const uint8_t*>(&headerCopy), sizeof(BlobCipherEncryptHeader) } },
@@ -782,43 +751,12 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
 	}
 }
 
-void DecryptBlobCipherAes256Ctr::verifyHeaderMultiAuthToken(const uint8_t* ciphertext,
-                                                            const int ciphertextLen,
-                                                            const BlobCipherEncryptHeader& header,
-                                                            Arena& arena) {
-	if (!headerAuthTokenValidationDone) {
-		verifyHeaderAuthToken(header, arena);
-	}
-	uint8_t computedCipherTextAuthToken[AUTH_TOKEN_MAX_SIZE];
-	// TOOD: Use HMAC_SHA encyrption authentication scheme as AES_CMAC needs minimum 16 bytes cipher key
-	computeAuthToken({ { ciphertext, ciphertextLen } },
-	                 reinterpret_cast<const uint8_t*>(&header.cipherTextDetails.salt),
-	                 sizeof(EncryptCipherRandomSalt),
-	                 &computedCipherTextAuthToken[0],
-	                 EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
-	                 AUTH_TOKEN_MAX_SIZE);
-	if (memcmp(&header.multiAuthTokens.cipherTextAuthToken[0], &computedCipherTextAuthToken[0], AUTH_TOKEN_MAX_SIZE) !=
-	    0) {
-		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
-		    .detail("HeaderVersion", header.flags.headerVersion)
-		    .detail("HeaderMode", header.flags.encryptMode)
-		    .detail("MultiAuthCipherTextAuthToken",
-		            StringRef(arena, &header.multiAuthTokens.cipherTextAuthToken[0], AUTH_TOKEN_MAX_SIZE).toString())
-		    .detail("ComputedCipherTextAuthToken", StringRef(computedCipherTextAuthToken, AUTH_TOKEN_MAX_SIZE));
-		throw encrypt_header_authtoken_mismatch();
-	}
-}
-
 void DecryptBlobCipherAes256Ctr::verifyAuthTokens(const uint8_t* ciphertext,
                                                   const int ciphertextLen,
                                                   const BlobCipherEncryptHeader& header,
                                                   Arena& arena) {
-	if (header.flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE) {
-		verifyHeaderSingleAuthToken(ciphertext, ciphertextLen, header, arena);
-	} else {
-		ASSERT_EQ(header.flags.authTokenMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
-		verifyHeaderMultiAuthToken(ciphertext, ciphertextLen, header, arena);
-	}
+	ASSERT_EQ(header.flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+	verifyHeaderSingleAuthToken(ciphertext, ciphertextLen, header, arena);
 
 	authTokensValidationDone = true;
 }
@@ -1502,266 +1440,6 @@ TEST_CASE("flow/BlobCipher") {
 		}
 
 		TraceEvent("SingleAuthModeAesCmacDone");
-	}
-
-	// validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_MULTI
-	// HMAC_SHA authToken algorithm
-	{
-		TraceEvent("MultiAuthModeHmacShaStart").log();
-
-		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
-		                                     headerCipherKey,
-		                                     iv,
-		                                     AES_256_IV_LENGTH,
-		                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI,
-		                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
-		                                     BlobCipherMetrics::TEST);
-		BlobCipherEncryptHeader header;
-		Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-
-		ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
-		ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
-		ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
-		ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
-		ASSERT_EQ(header.flags.authTokenMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
-		ASSERT_EQ(header.flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
-
-		TraceEvent("BlobCipherTestEncryptDone")
-		    .detail("HeaderVersion", header.flags.headerVersion)
-		    .detail("HeaderEncryptMode", header.flags.encryptMode)
-		    .detail("HeaderEncryptAuthTokenMode", header.flags.authTokenMode)
-		    .detail("HeaderEncryptAuthTokenAlgo", header.flags.authTokenAlgo)
-		    .detail("DomainId", header.cipherTextDetails.encryptDomainId)
-		    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-		    .detail("HeaderAuthToken",
-		            StringRef(arena, &header.singleAuthToken.authToken[0], AUTH_TOKEN_HMAC_SHA_SIZE).toString());
-
-		Reference<BlobCipherKey> tCipherKey = cipherKeyCache->getCipherKey(header.cipherTextDetails.encryptDomainId,
-		                                                                   header.cipherTextDetails.baseCipherId,
-		                                                                   header.cipherTextDetails.salt);
-		Reference<BlobCipherKey> hCipherKey = cipherKeyCache->getCipherKey(header.cipherHeaderDetails.encryptDomainId,
-		                                                                   header.cipherHeaderDetails.baseCipherId,
-		                                                                   header.cipherHeaderDetails.salt);
-
-		ASSERT(tCipherKey->isEqual(cipherKey));
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
-
-		ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
-		ASSERT_EQ(memcmp(decrypted->begin(), &orgData[0], bufLen), 0);
-
-		TraceEvent("BlobCipherTestDecryptDone").log();
-
-		// induce encryption header corruption - headerVersion corrupted
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		headerCopy.flags.headerVersion += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-				throw;
-			}
-		}
-
-		// induce encryption header corruption - encryptionMode corrupted
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		headerCopy.flags.encryptMode += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-				throw;
-			}
-		}
-
-		// induce encryption header corruption - cipherText authToken mismatch
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		int hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_HMAC_SHA_SIZE - 1);
-		headerCopy.multiAuthTokens.cipherTextAuthToken[hIdx] += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-				throw;
-			}
-		}
-
-		// induce encryption header corruption - header authToken mismatch
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_HMAC_SHA_SIZE - 1);
-		headerCopy.multiAuthTokens.headerAuthToken[hIdx] += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-				throw;
-			}
-		}
-
-		try {
-			encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-			uint8_t temp[bufLen];
-			memcpy(encrypted->begin(), &temp[0], bufLen);
-			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
-			temp[tIdx] += 1;
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-				throw;
-			}
-		}
-
-		TraceEvent("MultiAuthModeHmacShaDone");
-	}
-	// AES_CMAC authToken algorithm
-	{
-		TraceEvent("MultiAuthModeAesCmacStart");
-
-		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
-		                                     headerCipherKey,
-		                                     iv,
-		                                     AES_256_IV_LENGTH,
-		                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI,
-		                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
-		                                     BlobCipherMetrics::TEST);
-		BlobCipherEncryptHeader header;
-		Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-
-		ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
-		ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
-		ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
-		ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
-		ASSERT_EQ(header.flags.authTokenMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
-		ASSERT_EQ(header.flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
-
-		TraceEvent("BlobCipherTestEncryptDone")
-		    .detail("HeaderVersion", header.flags.headerVersion)
-		    .detail("HeaderEncryptMode", header.flags.encryptMode)
-		    .detail("HeaderEncryptAuthTokenMode", header.flags.authTokenMode)
-		    .detail("HeaderEncryptAuthTokenAlgo", header.flags.authTokenAlgo)
-		    .detail("DomainId", header.cipherTextDetails.encryptDomainId)
-		    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-		    .detail("HeaderAuthToken",
-		            StringRef(arena, &header.singleAuthToken.authToken[0], AUTH_TOKEN_AES_CMAC_SIZE).toString());
-
-		Reference<BlobCipherKey> tCipherKey = cipherKeyCache->getCipherKey(header.cipherTextDetails.encryptDomainId,
-		                                                                   header.cipherTextDetails.baseCipherId,
-		                                                                   header.cipherTextDetails.salt);
-		Reference<BlobCipherKey> hCipherKey = cipherKeyCache->getCipherKey(header.cipherHeaderDetails.encryptDomainId,
-		                                                                   header.cipherHeaderDetails.baseCipherId,
-		                                                                   header.cipherHeaderDetails.salt);
-
-		ASSERT(tCipherKey->isEqual(cipherKey));
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
-
-		ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
-		ASSERT_EQ(memcmp(decrypted->begin(), &orgData[0], bufLen), 0);
-
-		TraceEvent("BlobCipherTestDecryptDone").log();
-
-		// induce encryption header corruption - headerVersion corrupted
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		headerCopy.flags.headerVersion += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-				throw;
-			}
-		}
-
-		// induce encryption header corruption - encryptionMode corrupted
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		headerCopy.flags.encryptMode += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-				throw;
-			}
-		}
-
-		// induce encryption header corruption - cipherText authToken mismatch
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		int hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_AES_CMAC_SIZE - 1);
-		headerCopy.multiAuthTokens.cipherTextAuthToken[hIdx] += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-				throw;
-			}
-		}
-
-		// induce encryption header corruption - header authToken mismatch
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-		       reinterpret_cast<const uint8_t*>(&header),
-		       sizeof(BlobCipherEncryptHeader));
-		hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_AES_CMAC_SIZE - 1);
-		headerCopy.multiAuthTokens.headerAuthToken[hIdx] += 1;
-		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-			ASSERT(false); // error expected
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-				throw;
-			}
-		}
-
-		try {
-			encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-			uint8_t temp[bufLen];
-			memcpy(encrypted->begin(), &temp[0], bufLen);
-			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
-			temp[tIdx] += 1;
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
-		} catch (Error& e) {
-			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-				throw;
-			}
-		}
-
-		TraceEvent("MultiAuthModeAesCmacDone");
 	}
 
 	// Validate dropping encryptDomainId cached keys

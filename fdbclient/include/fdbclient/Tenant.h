@@ -181,6 +181,7 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
+	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
@@ -188,7 +189,8 @@ struct TenantMetadataSpecification {
 	    tenantCount(subspace.withSuffix("count"_sr)), tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
-	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()) {}
+	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()),
+	    lastTenantModification(subspace.withSuffix("lastModification"_sr)) {}
 };
 
 struct TenantMetadata {
@@ -203,11 +205,37 @@ struct TenantMetadata {
 	static inline auto& tombstoneCleanupData() { return instance().tombstoneCleanupData; }
 	static inline auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
 	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
+	static inline auto& lastTenantModification() { return instance().lastTenantModification; }
 
 	static Key tenantMapPrivatePrefix();
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
-class TenantPrefixIndex : public VersionedMap<Key, TenantName>, public ReferenceCounted<TenantPrefixIndex> {};
+
+// A set of tenant names that is generally expected to have one item in it. The set can have more than one item in it
+// during certain periods when the set is being updated (e.g. while restoring a backup), but it is expected to have
+// one item at the end. It is not possible to use the set while it contains more than one item.
+struct TenantNameUniqueSet {
+	std::unordered_set<TenantName> tenantNames;
+
+	// Returns the single tenant name stored in the set
+	// It is an error to call this function if the set holds more than one name
+	TenantName get() const {
+		ASSERT(tenantNames.size() == 1);
+		return *tenantNames.begin();
+	}
+
+	void insert(TenantName const& name) { tenantNames.insert(name); }
+
+	// Removes a tenant name from the set. Returns true if the set is now empty.
+	bool remove(TenantName const& name) {
+		auto itr = tenantNames.find(name);
+		ASSERT(itr != tenantNames.end());
+		tenantNames.erase(itr);
+		return tenantNames.empty();
+	}
+};
+
+class TenantPrefixIndex : public VersionedMap<Key, TenantNameUniqueSet>, public ReferenceCounted<TenantPrefixIndex> {};
 
 #endif

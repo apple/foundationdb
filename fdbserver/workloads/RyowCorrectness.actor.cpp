@@ -54,6 +54,7 @@ struct Operation {
 
 // A workload which executes random sequences of operations on RYOW transactions and confirms the results
 struct RyowCorrectnessWorkload : ApiWorkload {
+	static constexpr auto NAME = "RyowCorrectness";
 
 	// How long the test should run
 	int duration;
@@ -65,8 +66,6 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		duration = getOption(options, "duration"_sr, 60);
 		opsPerTransaction = getOption(options, "opsPerTransaction"_sr, 50);
 	}
-
-	std::string description() const override { return "RyowCorrectness"; }
 
 	ACTOR Future<Void> performSetup(Database cx, RyowCorrectnessWorkload* self) {
 		std::vector<TransactionType> types;
@@ -358,4 +357,4 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<RyowCorrectnessWorkload> RyowCorrectnessWorkloadFactory("RyowCorrectness");
+WorkloadFactory<RyowCorrectnessWorkload> RyowCorrectnessWorkloadFactory;

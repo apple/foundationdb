@@ -462,7 +462,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(
 	}
 
 	// FIXME: if one tenant gets an error, don't kill whole process
-	// TODO: add latency metrics
+	state double startTime = now();
 	loop {
 		Future<EKPGetLatestBlobMetadataReply> requestFuture;
 		if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
@@ -483,13 +483,23 @@ ACTOR Future<Void> loadBlobMetadataForTenants(
 					}
 					auto dataEntry = self->tenantData.rangeContaining(info->second.prefix);
 					ASSERT(dataEntry.begin() == info->second.prefix);
-					dataEntry.cvalue()->setBStore(BlobConnectionProvider::newBlobConnectionProvider(metadata));
+					dataEntry.cvalue()->updateBStore(metadata);
 				}
+				double elapsed = now() - startTime;
+				BlobCipherMetrics::getInstance()->getBlobMetadataLatency.addMeasurement(elapsed);
 				return Void();
 			}
 			when(wait(self->dbInfo->onChange())) {}
 		}
 	}
+}
+
+Future<Void> loadBlobMetadataForTenant(BGTenantMap* self,
+                                       BlobMetadataDomainId domainId,
+                                       BlobMetadataDomainName domainName) {
+	std::vector<std::pair<BlobMetadataDomainId, BlobMetadataDomainName>> toLoad;
+	toLoad.push_back({ domainId, domainName });
+	return loadBlobMetadataForTenants(self, toLoad);
 }
 
 // list of tenants that may or may not already exist
@@ -526,11 +536,41 @@ Optional<TenantMapEntry> BGTenantMap::getTenantById(int64_t id) {
 	}
 }
 
-// TODO: handle case where tenant isn't loaded yet
-Reference<GranuleTenantData> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
-	auto tenant = tenantData.rangeContaining(keyRange.begin);
-	ASSERT(tenant.begin() <= keyRange.begin);
-	ASSERT(tenant.end() >= keyRange.end);
+// FIXME: batch requests for refresh?
+// FIXME: don't double fetch if multiple accesses to refreshing/expired metadata
+// FIXME: log warning if after refresh, data is still expired!
+ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* self, KeyRange keyRange) {
+	state int loopCount = 0;
+	loop {
+		loopCount++;
+		auto tenant = self->tenantData.rangeContaining(keyRange.begin);
+		ASSERT(tenant.begin() <= keyRange.begin);
+		ASSERT(tenant.end() >= keyRange.end);
 
-	return tenant.cvalue();
+		if (!tenant.cvalue().isValid() || !tenant.cvalue()->bstore.isValid()) {
+			return tenant.cvalue();
+		} else if (tenant.cvalue()->bstore->isExpired()) {
+			CODE_PROBE(true, "re-fetching expired blob metadata");
+			// fetch again
+			Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id, tenant->cvalue()->name);
+			wait(reload);
+			if (loopCount > 1) {
+				TraceEvent(SevWarn, "BlobMetadataStillExpired").suppressFor(5.0).detail("LoopCount", loopCount);
+				wait(delay(0.001));
+			}
+		} else {
+			// handle refresh in background if tenant needs refres
+			if (tenant.cvalue()->bstore->needsRefresh()) {
+				Future<Void> reload =
+				    loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id, tenant->cvalue()->name);
+				self->addActor.send(reload);
+			}
+			return tenant.cvalue();
+		}
+	}
+}
+
+// TODO: handle case where tenant isn't loaded yet
+Future<Reference<GranuleTenantData>> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
+	return getDataForGranuleActor(this, keyRange);
 }

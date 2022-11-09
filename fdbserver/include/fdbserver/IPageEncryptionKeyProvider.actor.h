@@ -26,6 +26,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 
 #include "fdbserver/EncryptionOpsUtils.h"
@@ -39,6 +40,7 @@
 #include "flow/xxhash.h"
 
 #include <functional>
+#include <limits>
 #include <tuple>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -154,12 +156,14 @@ public:
 		const EncodingHeader* h = reinterpret_cast<const EncodingHeader*>(encodingHeader);
 		EncryptionKey s;
 		s.xorKey = h->xorKey;
+		s.xorWith = xorWith;
 		return s;
 	}
 
 	Future<EncryptionKey> getLatestDefaultEncryptionKey() override {
 		EncryptionKey s;
-		s.xorKey = xorWith;
+		s.xorKey = static_cast<uint8_t>(deterministicRandom()->randomInt(0, std::numeric_limits<uint8_t>::max() + 1));
+		s.xorWith = xorWith;
 		return s;
 	}
 
@@ -294,7 +298,7 @@ public:
 	EncodingType expectedEncodingType() const override { return EncodingType::AESEncryptionV1; }
 
 	bool enableEncryption() const override {
-		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION, db->get().client);
+		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION);
 	}
 
 	bool enableEncryptionDomain() const override { return SERVER_KNOBS->REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; }
@@ -336,7 +340,7 @@ public:
 
 	std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key, Optional<int64_t> possibleDomainId) override {
 		// System key.
-		if (key.startsWith("\xff\xff"_sr)) {
+		if (key.startsWith(systemKeys.begin)) {
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, 2 };
 		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
@@ -389,7 +393,7 @@ private:
 			auto view = tenantPrefixIndex->atLatest();
 			auto itr = view.find(prefix);
 			if (itr != view.end()) {
-				return *itr;
+				return itr->get();
 			}
 		}
 		TraceEvent(SevWarn, "TenantAwareEncryptionKeyProvider_TenantNotFoundForDomain").detail("DomainId", domainId);

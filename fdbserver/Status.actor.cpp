@@ -307,7 +307,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	// map from machine networkAddress to datacenter ID
 	std::map<NetworkAddress, std::string> dcIds;
 	std::map<NetworkAddress, LocalityData> locality;
-	std::map<std::string, bool> notExcludedMap;
+	std::map<std::string, bool> excludedMap;
 	std::map<std::string, int32_t> workerContribMap;
 	std::map<std::string, JsonBuilderObject> machineJsonMap;
 
@@ -377,7 +377,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				statusObj["network"] = networkObj;
 
 				if (configuration.present()) {
-					notExcludedMap[machineId] =
+					excludedMap[machineId] =
 					    true; // Will be set to false below if this or any later process is not excluded
 				}
 
@@ -385,18 +385,21 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				machineJsonMap[machineId] = statusObj;
 			}
 
-			// FIXME: this will not catch if the secondary address of the process was excluded
 			NetworkAddressList tempList;
 			tempList.address = it->first;
-			bool excludedServer = false;
-			bool excludedLocality = false;
-			if (configuration.present() && configuration.get().isExcludedServer(tempList))
-				excludedServer = true;
+			bool excludedServer = true;
+			bool excludedLocality = true;
+			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
+				excludedServer = false;
 			if (locality.count(it->first) && configuration.present() &&
-			    configuration.get().isMachineExcluded(locality[it->first]))
-				excludedLocality = true;
+			    !configuration.get().isMachineExcluded(locality[it->first]))
+				excludedLocality = false;
 
-			notExcludedMap[machineId] = excludedServer || excludedLocality;
+			// If any server is not excluded, set the overall exclusion status
+			// of the machine to false.
+			if (!excludedServer && !excludedLocality) {
+				excludedMap[machineId] = false;
+			}
 			workerContribMap[machineId]++;
 		} catch (Error&) {
 			++failed;
@@ -407,7 +410,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	for (auto& mapPair : machineJsonMap) {
 		auto& machineId = mapPair.first;
 		auto& jsonItem = machineJsonMap[machineId];
-		jsonItem["excluded"] = notExcludedMap[machineId];
+		jsonItem["excluded"] = excludedMap[machineId];
 		jsonItem["contributing_workers"] = workerContribMap[machineId];
 		machineMap[machineId] = jsonItem;
 	}
@@ -781,6 +784,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				// Map the address of the worker to the error message object
 				tracefileOpenErrorMap[traceFileErrorsItr->first.toString()] = msgObj;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				incomplete_reasons->insert("file_open_error details could not be retrieved");
 			}
 		}
@@ -826,6 +832,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobManager.present()) {
 		roles.addRole("blob_manager", db->get().blobManager.get());
+	}
+
+	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobMigrator.present()) {
+		roles.addRole("blob_migrator", db->get().blobMigrator.get());
 	}
 
 	if (db->get().consistencyScan.present()) {
@@ -1091,6 +1101,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			}
 
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			// Something strange occurred, process list is incomplete but what was built so far, if anything, will be
 			// returned.
 			incomplete_reasons->insert("Cannot retrieve all process status information.");
@@ -1406,6 +1419,9 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 
 		wait(waitForAll(probes));
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
 	}
 
@@ -1445,6 +1461,9 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
 	}
 	return Void();
@@ -1536,6 +1555,9 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve log ranges (%s).", e.what()));
 	}
 	return Void();
@@ -1709,7 +1731,10 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 		}
 		int count = coordinators.clientLeaderServers.size();
 		statusObj["coordinators_count"] = count;
-	} catch (Error&) {
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
 	}
 	return statusObj;
@@ -2731,6 +2756,9 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "LayerStatusError").error(e);
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve layer status (%s).", e.what()));
 		json.create("_error") = format("Unable to retrieve layer status (%s).", e.what());
 		json.create("_valid") = false;
@@ -2912,7 +2940,7 @@ ACTOR Future<Optional<Value>> consistencyScanInfoFetcher(Database cx) {
 	}
 
 	TraceEvent("ConsistencyScanInfoFetcher").log();
-	return val.get();
+	return val;
 }
 
 // constructs the cluster section of the json status output
@@ -3431,23 +3459,19 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// Fetch Consistency Scan Information
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		state Optional<Value> val;
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				wait(store(val, ConsistencyScanInfo::getInfo(tr)));
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
+		try {
+			Optional<Value> val = wait(timeoutError(consistencyScanInfoFetcher(cx), 2.0));
+			if (val.present()) {
+				ConsistencyScanInfo consistencyScanInfo =
+				    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
+				TraceEvent("StatusConsistencyScanGotVal").log();
+				statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
 			}
-		}
-		if (val.present()) {
-			ConsistencyScanInfo consistencyScanInfo =
-			    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
-			TraceEvent("StatusConsistencyScanGotVal").log();
-			statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			messages.push_back(JsonString::makeMessage("fetch_consistency_scan_info_timeout",
+			                                           "Fetching consistency scan information timed out."));
 		}
 
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.

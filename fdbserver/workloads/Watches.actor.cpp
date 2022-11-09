@@ -28,6 +28,8 @@
 const int sampleSize = 10000;
 
 struct WatchesWorkload : TestWorkload {
+	static constexpr auto NAME = "Watches";
+
 	int nodes, keyBytes, extraPerNode;
 	double testDuration;
 	std::vector<Future<Void>> clients;
@@ -46,8 +48,6 @@ struct WatchesWorkload : TestWorkload {
 		DeterministicRandom tempRand(1);
 		tempRand.randomShuffle(nodeOrder);
 	}
-
-	std::string description() const override { return "Watches"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -263,4 +263,4 @@ struct WatchesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<WatchesWorkload> WatchesWorkloadFactory("Watches");
+WorkloadFactory<WatchesWorkload> WatchesWorkloadFactory;

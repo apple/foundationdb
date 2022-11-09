@@ -336,12 +336,13 @@ struct KeyRangeRef {
 	bool isCovered(std::vector<KeyRangeRef>& ranges) {
 		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		KeyRangeRef clone(begin, end);
+
 		for (auto r : ranges) {
-			if (begin < r.begin)
+			if (clone.begin < r.begin)
 				return false; // uncovered gap between clone.begin and r.begin
-			if (end <= r.end)
+			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (end > r.begin)
+			if (clone.end > r.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
@@ -545,35 +546,36 @@ struct hash<KeyRange> {
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
-inline Key keyAfter(const KeyRef& key) {
-	if (key == "\xff\xff"_sr)
-		return key;
-
-	Standalone<StringRef> r;
-	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
-	if (key.size() > 0) {
-		memcpy(s, key.begin(), key.size());
-	}
-	s[key.size()] = 0;
-	((StringRef&)r) = StringRef(s, key.size() + 1);
-	return r;
-}
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == "\xff\xff"_sr)
-		return key;
+	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
+	static const auto allKeysEnd = "\xff\xff"_sr;
+	if (key == allKeysEnd) {
+		return allKeysEnd;
+	}
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRef(t, key.size() + 1);
 }
-inline KeyRange singleKeyRange(const KeyRef& a) {
-	return KeyRangeRef(a, keyAfter(a));
+inline Key keyAfter(const KeyRef& key) {
+	Key result;
+	result.contents() = keyAfter(key, result.arena());
+	return result;
 }
 inline KeyRangeRef singleKeyRange(KeyRef const& key, Arena& arena) {
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRangeRef(KeyRef(t, key.size()), KeyRef(t, key.size() + 1));
+}
+inline KeyRange singleKeyRange(const KeyRef& a) {
+	KeyRange result;
+	result.contents() = singleKeyRange(a, result.arena());
+	return result;
 }
 inline KeyRange prefixRange(KeyRef prefix) {
 	Standalone<KeyRangeRef> range;
@@ -588,6 +590,8 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // the shortest key exceeds that limit, then the end key is returned.
 // The returned reference is valid as long as keys is valid.
 KeyRef keyBetween(const KeyRangeRef& keys);
+
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
 
 struct KeySelectorRef {
 private:
@@ -1402,6 +1406,25 @@ struct TenantMode {
 		serializer(ar, mode);
 	}
 
+	// This does not go back-and-forth cleanly with toString
+	// The '_experimental' suffix, if present, needs to be removed in order to be parsed.
+	static TenantMode fromString(std::string mode) {
+		if (mode.find("_experimental") != std::string::npos) {
+			mode.replace(mode.find("_experimental"), std::string::npos, "");
+		}
+		if (mode == "disabled") {
+			return TenantMode::DISABLED;
+		} else if (mode == "optional") {
+			return TenantMode::OPTIONAL_TENANT;
+		} else if (mode == "required") {
+			return TenantMode::REQUIRED;
+		} else {
+			TraceEvent(SevError, "UnknownTenantMode").detail("TenantMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	std::string toString() const {
 		switch (mode) {
 		case DISABLED:
@@ -1472,7 +1495,7 @@ struct EncryptionAtRestMode {
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
 
-	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
 		}
@@ -1484,6 +1507,14 @@ struct EncryptionAtRestMode {
 		}
 
 		return static_cast<Mode>(num);
+	}
+
+	static EncryptionAtRestMode fromValue(Optional<Value> val) {
+		if (!val.present()) {
+			return EncryptionAtRestMode();
+		}
+
+		return EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(val.get().contents()));
 	}
 
 	uint32_t mode;
@@ -1613,13 +1644,7 @@ struct StorageWiggleValue {
 	}
 };
 
-enum class ReadType {
-	EAGER,
-	FETCH,
-	LOW,
-	NORMAL,
-	HIGH,
-};
+enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
 
 FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
 
@@ -1635,13 +1660,13 @@ struct ReadOptions {
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
-
-	ReadOptions(Optional<UID> debugID,
+	ReadOptions(Optional<UID> debugID = Optional<UID>(),
 	            ReadType type = ReadType::NORMAL,
-	            CacheResult cache = CacheResult::False,
+	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
 	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1686,10 +1711,20 @@ struct Versionstamp {
 		serializer(ar, beVersion, beBatch);
 
 		if constexpr (Ar::isDeserializing) {
-			version = bigEndian64(version);
+			version = bigEndian64(beVersion);
 			batchNumber = bigEndian16(beBatch);
 		}
 	}
 };
+
+template <class Ar>
+inline void save(Ar& ar, const Versionstamp& value) {
+	return const_cast<Versionstamp&>(value).serialize(ar);
+}
+
+template <class Ar>
+inline void load(Ar& ar, Versionstamp& value) {
+	value.serialize(ar);
+}
 
 #endif

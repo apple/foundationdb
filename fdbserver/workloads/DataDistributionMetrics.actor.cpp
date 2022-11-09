@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last include
 
 struct DataDistributionMetricsWorkload : KVWorkload {
+	static constexpr auto NAME = "DataDistributionMetrics";
 
 	int numShards, readPerTx, writePerTx;
 	int64_t avgBytes, transactionTimeLimit;
@@ -199,7 +200,6 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return "DataDistributionMetrics"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -216,4 +216,4 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<DataDistributionMetricsWorkload> DataDistributionMetricsWorkloadFactory("DataDistributionMetrics");
+WorkloadFactory<DataDistributionMetricsWorkload> DataDistributionMetricsWorkloadFactory;

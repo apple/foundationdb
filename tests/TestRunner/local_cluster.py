@@ -213,8 +213,12 @@ logdir = {logdir}
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
-                    custom_config='\n'.join(["{} = {}".format(key, value) for key, value in self.custom_config.items()]),
-                    use_future_protocol_version="use-future-protocol-version = true" if self.use_future_protocol_version else "",
+                    custom_config="\n".join(
+                        ["{} = {}".format(key, value) for key, value in self.custom_config.items()]
+                    ),
+                    use_future_protocol_version="use-future-protocol-version = true"
+                    if self.use_future_protocol_version
+                    else "",
                 )
             )
             # By default, the cluster only has one process
@@ -271,6 +275,7 @@ logdir = {logdir}
         assert self.running, "Server is not running"
         if self.process.poll() is None:
             self.process.terminate()
+            self.process.communicate(timeout=10)
         self.running = False
 
     def ensure_ports_released(self, timeout_sec=5):
@@ -534,3 +539,29 @@ logdir = {logdir}
         self.save_config()
         self.wait_for_server_update()
         print("Old servers successfully removed from the cluster. Time: {}s".format(time.time() - start_time))
+
+    # Check the cluster log for errors
+    def check_cluster_logs(self, error_limit=100):
+        sev40s = subprocess.getoutput("grep -r 'Severity=\"40\"' {}".format(self.log.as_posix())).rstrip().splitlines()
+
+        err_cnt = 0
+        for line in sev40s:
+            # When running ASAN we expect to see this message. Boost coroutine should be using the
+            # correct asan annotations so that it shouldn't produce any false positives.
+            if line.endswith(
+                "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false "
+                "positives in some cases!"
+            ):
+                continue
+            if err_cnt < error_limit:
+                print(line)
+            err_cnt += 1
+
+        if err_cnt > 0:
+            print(
+                ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails",
+                err_cnt,
+            )
+        else:
+            print("No errors found in logs")
+        return err_cnt == 0

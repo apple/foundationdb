@@ -22,7 +22,7 @@
 #define MAKO_HPP
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #endif
 
 #include <array>
@@ -30,6 +30,7 @@
 #include <cassert>
 #include <chrono>
 #include <list>
+#include <map>
 #include <vector>
 #include <string_view>
 #include <fdb_api.hpp>
@@ -79,7 +80,11 @@ enum ArgKind {
 	ARG_JSON_REPORT,
 	ARG_BG_FILE_PATH, // if blob granule files are stored locally, mako will read and materialize them if this is set
 	ARG_EXPORT_PATH,
-	ARG_DISTRIBUTED_TRACER_CLIENT
+	ARG_DISTRIBUTED_TRACER_CLIENT,
+	ARG_TLS_CERTIFICATE_FILE,
+	ARG_TLS_KEY_FILE,
+	ARG_TLS_CA_FILE,
+	ARG_AUTHORIZATION_TOKEN_FILE,
 };
 
 constexpr const int OP_COUNT = 0;
@@ -131,6 +136,9 @@ constexpr const int MAX_REPORT_FILES = 200;
 
 /* benchmark parameters */
 struct Arguments {
+	Arguments();
+	int validate();
+
 	int api_version;
 	int json;
 	int num_processes;
@@ -138,6 +146,7 @@ struct Arguments {
 	int async_xacts;
 	int mode;
 	int rows; /* is 2 billion enough? */
+	double load_factor;
 	int row_digits;
 	int seconds;
 	int iteration;
@@ -179,6 +188,10 @@ struct Arguments {
 	char report_files[MAX_REPORT_FILES][PATH_MAX];
 	int num_report_files;
 	int distributed_tracer_client;
+	std::optional<std::string> tls_certificate_file;
+	std::optional<std::string> tls_key_file;
+	std::optional<std::string> tls_ca_file;
+	std::map<std::string, std::string> authorization_tokens; // maps tenant name to token string
 };
 
 } // namespace mako

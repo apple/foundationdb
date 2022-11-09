@@ -25,6 +25,8 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_DEFINE_BOOLEAN_PARAM(SkipDDModeCheck);
+
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
@@ -32,6 +34,9 @@ class DDTxnProcessorImpl {
 		state Transaction tr(cx);
 		state ServerWorkerInfos res;
 		loop {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
 				wait(store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr)));
 				res.readVersion = tr.getReadVersion().get();
@@ -52,8 +57,9 @@ class DDTxnProcessorImpl {
 			servers.clear();
 			completeSources.clear();
 
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
 				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -106,6 +112,63 @@ class DDTxnProcessorImpl {
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
+	ACTOR static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
+	    Database cx,
+	    KeyRangeRef range) {
+		state std::vector<IDDTxnProcessor::DDRangeLocations> res;
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+		loop {
+			res.clear();
+			try {
+				state RangeResult shards = wait(krmGetRanges(&tr,
+				                                             keyServersPrefix,
+				                                             range,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				ASSERT(!shards.empty());
+
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				state int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
+					state std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (int j = 0; j < src.size(); ++j) {
+						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
+					}
+					std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
+					for (int j = 0; j < serverListValues.size(); ++j) {
+						if (!serverListValues[j].present()) {
+							TraceEvent(SevWarnAlways, "GetSourceServerInterfacesMissing")
+							    .detail("StorageServer", src[j])
+							    .detail("Range", KeyRangeRef(shards[i].key, shards[i + 1].key));
+							continue;
+						}
+						StorageServerInterface ssi = decodeServerListValue(serverListValues[j].get());
+						current.servers[ssi.locality.describeDcId()].push_back(ssi);
+					}
+					res.push_back(current);
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError").errorUnsuppressed(e).detail("Range", range);
+				wait(tr.onError(e));
+			}
+		}
+
+		return res;
+	}
+
 	// set the system key space
 	ACTOR static Future<Void> updateReplicaKeys(Database cx,
 	                                            std::vector<Optional<Key>> primaryDcId,
@@ -144,6 +207,9 @@ class DDTxnProcessorImpl {
 	ACTOR static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
 		state Transaction tr(cx);
 		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 			try {
 				Optional<Value> val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
 				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
@@ -163,28 +229,14 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<UID> getClusterId(Database cx) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-				ASSERT(clusterId.present());
-				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
 	    UID distributorId,
 	    MoveKeysLock moveKeysLock,
 	    std::vector<Optional<Key>> remoteDcIds,
-	    const DDEnabledState* ddEnabledState) {
+	    const DDEnabledState* ddEnabledState,
+	    SkipDDModeCheck skipDDModeCheck) {
 		state Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
 		state Key beginKey = allKeys.begin;
 
@@ -197,6 +249,7 @@ class DDTxnProcessorImpl {
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
 		state int numDataMoves = 0;
 
+		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
 		loop {
@@ -210,6 +263,7 @@ class DDTxnProcessorImpl {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> val = wait(tr.get(healthyZoneKey));
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
@@ -223,13 +277,12 @@ class DDTxnProcessorImpl {
 				}
 
 				result->mode = 1;
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
 				}
-				if (!result->mode || !ddEnabledState->isDDEnabled()) {
+				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isDDEnabled()) {
 					// DD can be disabled persistently (result->mode = 0) or transiently (isDDEnabled() = 0)
 					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
 					return result;
@@ -256,9 +309,11 @@ class DDTxnProcessorImpl {
 
 				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
+				// For each data move, find out the src or dst servers are in primary or remote DC.
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
+					ASSERT(!meta.ranges.empty());
 					for (const UID& id : meta.src) {
 						auto& dc = server_dc[id];
 						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
@@ -280,11 +335,11 @@ class DDTxnProcessorImpl {
 					std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
 					std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
 
-					auto ranges = result->dataMoveMap.intersectingRanges(meta.range);
+					auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
-					result->dataMoveMap.insert(meta.range, std::move(dataMove));
+					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
 					++numDataMoves;
 				}
 
@@ -292,10 +347,10 @@ class DDTxnProcessorImpl {
 
 				break;
 			} catch (Error& e) {
+				TraceEvent("GetInitialTeamsRetry", distributorId).error(e);
 				wait(tr.onError(e));
 
 				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("GetInitialTeamsRetry", distributorId).log();
 			}
 		}
 
@@ -306,6 +361,8 @@ class DDTxnProcessorImpl {
 			loop {
 				succeeded = false;
 				try {
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -422,6 +479,10 @@ class DDTxnProcessorImpl {
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
 
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isDDEnabled()) {
@@ -451,6 +512,10 @@ class DDTxnProcessorImpl {
 	ACTOR static Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
 		state Transaction tr(cx);
 		loop {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isDDEnabled())
@@ -493,6 +558,9 @@ class DDTxnProcessorImpl {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
 			state Transaction tr(cx);
 			loop {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				try {
 					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
 					break;
@@ -507,8 +575,10 @@ class DDTxnProcessorImpl {
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 				Optional<Value> res = wait(tr.get(rebalanceDDIgnoreKey));
 				return res;
 			} catch (Error& e) {
@@ -537,6 +607,11 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
+Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(
+    const KeyRangeRef range) {
+	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
+}
+
 Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {
 	return DDTxnProcessorImpl::getServerListAndProcessClasses(cx);
 }
@@ -559,8 +634,10 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
     const UID& distributorId,
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState) {
-	return DDTxnProcessorImpl::getInitialDataDistribution(cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState);
+    const DDEnabledState* ddEnabledState,
+    SkipDDModeCheck skipDDModeCheck) {
+	return DDTxnProcessorImpl::getInitialDataDistribution(
+	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, skipDDModeCheck);
 }
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
@@ -608,10 +685,6 @@ Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(const Optional<Key>& dcId,
 	return DDTxnProcessorImpl::tryUpdateReplicasKeyForDc(cx, dcId, storageTeamSize);
 }
 
-Future<UID> DDTxnProcessor::getClusterId() const {
-	return DDTxnProcessorImpl::getClusterId(cx);
-}
-
 Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
 	return DDTxnProcessorImpl::waitDDTeamInfoPrintSignal(cx);
 }
@@ -619,6 +692,33 @@ Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
 Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 	return ::getWorkers(cx);
 }
+
+Future<Void> DDTxnProcessor::rawStartMovement(MoveKeysParams& params,
+                                              std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawStartMovement(cx, params, tssMapping);
+}
+
+Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                               const std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawFinishMovement(cx, params, tssMapping);
+}
+
+struct DDMockTxnProcessorImpl {
+	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
+		state std::map<UID, StorageServerInterface> tssMapping;
+		self->rawStartMovement(params, tssMapping);
+		ASSERT(tssMapping.empty());
+
+		if (BUGGIFY_WITH_PROB(0.5)) {
+			wait(delayJittered(5.0));
+		}
+
+		self->rawFinishMovement(params, tssMapping);
+		if (!params.dataMovementComplete.isSet())
+			params.dataMovementComplete.send(Void());
+		return Void();
+	}
+};
 
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 	ServerWorkerInfos res;
@@ -669,7 +769,7 @@ std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 		KeyRangeRef curRange = it->range();
 		DDShardInfo info(curRange.begin);
 
-		auto teams = mgs->shardMapping->getTeamsFor(curRange);
+		auto teams = mgs->shardMapping->getTeamsForFirstShard(curRange);
 		if (!teams.first.empty() && !teams.second.empty()) {
 			CODE_PROBE(true, "Mock InitialDataDistribution In-Flight shard");
 			info.hasDest = true;
@@ -696,7 +796,8 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
     const UID& distributorId,
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState) {
+    const DDEnabledState* ddEnabledState,
+    SkipDDModeCheck skipDDModeCheck) {
 
 	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
 	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();
@@ -721,7 +822,7 @@ Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
                                                      const Optional<UID>& tssPairID,
                                                      const MoveKeysLock& lock,
                                                      const DDEnabledState* ddEnabledState) const {
-	ASSERT(mgs->allShardRemovedFromServer(serverID));
+	ASSERT(mgs->allShardsRemovedFromServer(serverID));
 	mgs->allServers.erase(serverID);
 	return Void();
 }
@@ -756,9 +857,10 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::Normal);
 }
 
-// FIXME: finish moveKeys implementation
 Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
-	UNREACHABLE();
+	// Not support location metadata yet
+	ASSERT(!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	return DDMockTxnProcessorImpl::moveKeys(this, params);
 }
 
 // FIXME: finish implementation
@@ -766,16 +868,14 @@ Future<HealthMetrics> DDMockTxnProcessor::getHealthMetrics(bool detailed) const 
 	return Future<HealthMetrics>();
 }
 
-// FIXME: finish implementation
 Future<Standalone<VectorRef<KeyRef>>> DDMockTxnProcessor::splitStorageMetrics(
     const KeyRange& keys,
     const StorageMetrics& limit,
     const StorageMetrics& estimated,
     const Optional<int>& minSplitBytes) const {
-	return Future<Standalone<VectorRef<KeyRef>>>();
+	return mgs->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
 }
 
-// FIXME: finish implementation
 Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorageMetrics(
     const KeyRange& keys,
     const StorageMetrics& min,
@@ -783,10 +883,55 @@ Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorage
     const StorageMetrics& permittedError,
     int shardLimit,
     int expectedShardCount) const {
-	return Future<std::pair<Optional<StorageMetrics>, int>>();
+	return mgs->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
 }
 
 // FIXME: finish implementation
 Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 	return Future<std::vector<ProcessData>>();
+}
+
+void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
+	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
+	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
+	ASSERT(params.startMoveKeysParallelismLock->take().isReady());
+
+	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
+	destTeams.emplace_back(params.destinationTeam, true);
+	mgs->shardMapping->moveShard(params.keys, destTeams);
+
+	for (auto& id : params.destinationTeam) {
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+	}
+}
+
+void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                           const std::map<UID, StorageServerInterface>& tssMapping) {
+	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
+	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
+	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
+	ASSERT(params.finishMoveKeysParallelismLock->take().isReady());
+
+	// get source and dest teams
+	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(params.keys);
+
+	ASSERT_EQ(destTeams.size(), 0);
+	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {
+		TraceEvent(SevError, "MockRawFinishMovementError")
+		    .detail("Reason", "InconsistentDestinations")
+		    .detail("ShardMappingDest", describe(destTeams.front().servers))
+		    .detail("ParamDest", describe(params.destinationTeam));
+		ASSERT(false); // This shouldn't happen because the overlapped key range movement won't be executed in parallel
+	}
+
+	for (auto& id : params.destinationTeam) {
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+	}
+
+	ASSERT_EQ(srcTeams.size(), 0);
+	for (auto& id : srcTeams.front().servers) {
+		mgs->allServers.at(id).removeShard(params.keys);
+	}
+	mgs->shardMapping->finishMove(params.keys);
 }

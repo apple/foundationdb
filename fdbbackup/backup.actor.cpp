@@ -47,6 +47,7 @@
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
 #include "flow/Platform.h"
@@ -131,6 +132,7 @@ enum {
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
 	OPT_USE_PARTITIONED_LOG,
+	OPT_ENCRYPT_FILES,
 
 	// Backup and Restore constants
 	OPT_PROXY,
@@ -155,6 +157,11 @@ enum {
 	OPT_RESTORE_CLUSTERFILE_ORIG,
 	OPT_RESTORE_BEGIN_VERSION,
 	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
+	// The two restore options below allow callers of fdbrestore to divide a normal restore into one which restores just
+	// the system keyspace and another that restores just the user key space. This is unlike the backup command where
+	// all keys (both system and user) will be backed up together
+	OPT_RESTORE_USER_DATA,
+	OPT_RESTORE_SYSTEM_DATA,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -269,6 +276,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -696,6 +704,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
+	{ OPT_RESTORE_USER_DATA, "--user-data", SO_NONE },
+	{ OPT_RESTORE_SYSTEM_DATA, "--system-metadata", SO_NONE },
 	{ OPT_RESTORE_VERSION, "--version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -1104,6 +1114,11 @@ static void printBackupUsage(bool devhelp) {
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
+	printf("  --encrypt-files 0/1"
+	       "                 If passed, this argument will allow the user to override the database encryption state to "
+	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
+	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
+	       "Generally, these two options should not be used together.\n");
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -1187,6 +1202,13 @@ static void printRestoreUsage(bool devhelp) {
 	printf("                 The cluster file for the original database from which the backup was created.  The "
 	       "original database\n");
 	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
+	printf("  --user-data\n"
+	       "                  Restore only the user keyspace. This option should NOT be used alongside "
+	       "--system-metadata (below) and CANNOT be used alongside other specified key ranges.\n");
+	printf(
+	    "  --system-metadata\n"
+	    "                 Restore only the relevant system keyspace. This option "
+	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
 	if (devhelp) {
 #ifdef _WIN32
@@ -2350,6 +2372,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
 			                                                   LockDB::True,
+			                                                   UnlockDB::True,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
@@ -3367,8 +3390,10 @@ int main(int argc, char* argv[]) {
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
-		// TODO (Nim): Set this value when we add optional encrypt_files CLI argument to backup agent start
+		bool restoreSystemKeys = false;
+		bool restoreUserKeys = false;
 		bool encryptionEnabled = true;
+		bool encryptSnapshotFilesPresent = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3542,6 +3567,25 @@ int main(int argc, char* argv[]) {
 			case OPT_BASEURL:
 				baseUrl = args->OptionArg();
 				break;
+			case OPT_ENCRYPT_FILES: {
+				const char* a = args->OptionArg();
+				int encryptFiles;
+				if (!sscanf(a, "%d", &encryptFiles)) {
+					fprintf(stderr, "ERROR: Could not parse encrypt-files `%s'\n", a);
+					return FDB_EXIT_ERROR;
+				}
+				if (encryptFiles != 0 && encryptFiles != 1) {
+					fprintf(stderr, "ERROR: encrypt-files must be either 0 or 1\n");
+					return FDB_EXIT_ERROR;
+				}
+				encryptSnapshotFilesPresent = true;
+				if (encryptFiles == 0) {
+					encryptionEnabled = false;
+				} else {
+					encryptionEnabled = true;
+				}
+				break;
+			}
 			case OPT_RESTORE_CLUSTERFILE_DEST:
 				restoreClusterFileDest = args->OptionArg();
 				break;
@@ -3691,6 +3735,14 @@ int main(int argc, char* argv[]) {
 				restoreVersion = ver;
 				break;
 			}
+			case OPT_RESTORE_USER_DATA: {
+				restoreUserKeys = true;
+				break;
+			}
+			case OPT_RESTORE_SYSTEM_DATA: {
+				restoreSystemKeys = true;
+				break;
+			}
 			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
 				inconsistentSnapshotOnly.set(true);
 				break;
@@ -3767,6 +3819,10 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+		if (encryptionKeyFile.present() && encryptSnapshotFilesPresent) {
+			fprintf(stderr, "WARNING: Use of --encrypt-files and --encryption-key-file together is discouraged\n");
+		}
+
 		// Process the extra arguments
 		for (int argLoop = 0; argLoop < args->FileCount(); argLoop++) {
 			switch (programExe) {
@@ -3836,6 +3892,11 @@ int main(int argc, char* argv[]) {
 			default:
 				return FDB_EXIT_ERROR;
 			}
+		}
+
+		if (restoreSystemKeys && restoreUserKeys) {
+			fprintf(stderr, "ERROR: Please only specify one of --user-data or --system-metadata, not both\n");
+			return FDB_EXIT_ERROR;
 		}
 
 		if (trace) {
@@ -3938,8 +3999,28 @@ int main(int argc, char* argv[]) {
 
 		// The fastrestore tool does not yet support multiple ranges and is incompatible with tenants
 		// or other features that back up data in the system keys
-		if (backupKeys.empty() && programExe != ProgramExe::FASTRESTORE_TOOL) {
+		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty() &&
+		    programExe != ProgramExe::FASTRESTORE_TOOL) {
 			addDefaultBackupRanges(backupKeys);
+		}
+
+		if ((restoreSystemKeys || restoreUserKeys) && programExe == ProgramExe::FASTRESTORE_TOOL) {
+			fprintf(stderr, "ERROR: Options: --user-data and --system-metadata are not supported with fastrestore\n");
+			return FDB_EXIT_ERROR;
+		}
+
+		if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
+			fprintf(stderr,
+			        "ERROR: Cannot specify additional ranges when using --user-data or --system-metadata "
+			        "options\n");
+			return FDB_EXIT_ERROR;
+		}
+		if (restoreUserKeys) {
+			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
+		} else if (restoreSystemKeys) {
+			for (const auto& r : getSystemBackupRanges()) {
+				backupKeys.push_back_deep(backupKeys.arena(), r);
+			}
 		}
 
 		switch (programExe) {

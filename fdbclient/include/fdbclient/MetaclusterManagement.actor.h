@@ -504,6 +504,7 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 			ManagementClusterMetadata::tenantMetadata().lastTenantId.clear(tr);
 			ManagementClusterMetadata::tenantMetadata().tenantTombstones.clear(tr);
 			ManagementClusterMetadata::tenantMetadata().tombstoneCleanupData.clear(tr);
+			ManagementClusterMetadata::tenantMetadata().lastTenantModification.clear(tr);
 
 			wait(managementClusterCheckEmpty(tr));
 			MetaclusterMetadata::metaclusterRegistration().clear(tr);
@@ -814,6 +815,7 @@ struct RemoveClusterImpl {
 			ASSERT(entry.getString(0) == self->ctx.clusterName.get());
 			ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, entry.getString(1));
 			ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(tr, entry.getInt(2));
+			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		}
 
 		// Erase all of the tenants processed in this transaction from the cluster tenant index
@@ -1281,6 +1283,7 @@ struct CreateTenantImpl {
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, self->tenantEntry);
 		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.set(tr, self->tenantEntry.id, self->tenantName);
+		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
@@ -1336,6 +1339,7 @@ struct CreateTenantImpl {
 			TenantMapEntry updatedEntry = managementEntry.get();
 			updatedEntry.tenantState = TenantState::READY;
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, updatedEntry);
+			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		}
 
 		return Void();
@@ -1465,6 +1469,7 @@ struct DeleteTenantImpl {
 			}
 			updatedEntry.tenantState = TenantState::REMOVING;
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, updatedEntry);
+			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 			// If this has a rename pair, also mark the other entry for deletion
 			if (self->pairName.present()) {
 				state Optional<TenantMapEntry> pairEntry = wait(tryGetTenantTransaction(tr, self->pairName.get()));
@@ -1476,6 +1481,8 @@ struct DeleteTenantImpl {
 				CODE_PROBE(true, "marking pair tenant in removing state");
 				updatedPairEntry.tenantState = TenantState::REMOVING;
 				ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->pairName.get(), updatedPairEntry);
+				ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(
+				    tr, Versionstamp(), 0);
 			}
 		}
 
@@ -1504,6 +1511,7 @@ struct DeleteTenantImpl {
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantName);
 		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(tr, tenantEntry.get().id);
+		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		// This is idempotent because this function is only called if the tenant is in the map
 		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
@@ -1708,6 +1716,7 @@ struct ConfigureTenantImpl {
 
 		++self->updatedEntry.configurationSequenceNum;
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, self->updatedEntry);
+		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		return Void();
 	}
@@ -1743,6 +1752,7 @@ struct ConfigureTenantImpl {
 
 		tenantEntry.get().tenantState = TenantState::READY;
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, tenantEntry.get());
+		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		return Void();
 	}
 
@@ -1789,6 +1799,7 @@ struct RenameTenantImpl {
 	                                                            TenantMapEntry tenantEntry) {
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, self->oldName);
+		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		// Remove old tenant from tenant count
 		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
@@ -1876,6 +1887,7 @@ struct RenameTenantImpl {
 
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->oldName, updatedOldEntry);
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->newName, updatedNewEntry);
+		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		// Add temporary tenant to tenantCount to prevent exceeding capacity during a rename
 		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
@@ -1938,6 +1950,7 @@ struct RenameTenantImpl {
 			updatedNewEntry.renamePair.reset();
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->newName, updatedNewEntry);
 			ManagementClusterMetadata::tenantMetadata().tenantIdIndex.set(tr, self->tenantId, self->newName);
+			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		}
 
 		// We will remove the old entry from the management cluster

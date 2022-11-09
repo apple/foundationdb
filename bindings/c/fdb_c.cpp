@@ -21,7 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -585,6 +585,58 @@ extern "C" DLLEXPORT FDBFuture* fdb_tenant_wait_purge_granules_complete(FDBTenan
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* tenant,
+                                                          uint8_t const* begin_key_name,
+                                                          int begin_key_name_length,
+                                                          uint8_t const* end_key_name,
+                                                          int end_key_name_length) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->blobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                    StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
+                                                            uint8_t const* begin_key_name,
+                                                            int begin_key_name_length,
+                                                            uint8_t const* end_key_name,
+                                                            int end_key_name_length) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->unblobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                      StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_list_blobbified_ranges(FDBTenant* tenant,
+                                                                  uint8_t const* begin_key_name,
+                                                                  int begin_key_name_length,
+                                                                  uint8_t const* end_key_name,
+                                                                  int end_key_name_length,
+                                                                  int rangeLimit) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->listBlobbifiedRanges(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                           StringRef(end_key_name, end_key_name_length)),
+	                                               rangeLimit)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* tenant,
+                                                                                uint8_t const* begin_key_name,
+                                                                                int begin_key_name_length,
+                                                                                uint8_t const* end_key_name,
+                                                                                int end_key_name_length,
+                                                                                int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                      StringRef(end_key_name, end_key_name_length)),
+	                                          rv)
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
 	try {
 		TENANT(tenant)->delref();
@@ -851,6 +903,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_commit(FDBTransaction* tr) {
 
 extern "C" DLLEXPORT fdb_error_t fdb_transaction_get_committed_version(FDBTransaction* tr, int64_t* out_version) {
 	CATCH_AND_RETURN(*out_version = TXN(tr)->getCommittedVersion(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr) {
+	return (FDBFuture*)TXN(tr)->getTotalCost().extractPtr();
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {

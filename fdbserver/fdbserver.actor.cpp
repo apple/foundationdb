@@ -117,7 +117,7 @@ enum {
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -218,6 +218,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",        SO_REQ_SEP },
 	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
 	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT,   "--kms-conn-get-blob-metadata-endpoint",   SO_REQ_SEP },
 	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -1692,7 +1693,7 @@ private:
 				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
 			case OPT_KMS_CONN_DISCOVERY_URL_FILE: {
-				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
+				knobs.emplace_back("rest_kms_connector_discover_kms_url_file", args.OptionArg());
 				break;
 			}
 			case OPT_KMS_CONNECTOR_TYPE: {
@@ -1705,6 +1706,10 @@ private:
 			}
 			case OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT: {
 				knobs.emplace_back("rest_kms_connector_get_encryption_keys_endpoint", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT: {
+				knobs.emplace_back("rest_kms_connector_get_blob_metadata_endpoint", args.OptionArg());
 				break;
 			}
 			case OPT_NEW_CLUSTER_KEY: {
@@ -2144,7 +2149,7 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
+			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests", "fdbblob" };
 
 			for (const auto& dir : directories) {
 				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
