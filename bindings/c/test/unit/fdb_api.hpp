@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #include <foundationdb/fdb_c.h>
 
 #include <string>
@@ -275,6 +275,9 @@ public:
 
 	// Returns a future which will be set to the approximate transaction size so far.
 	Int64Future get_approximate_size();
+
+	// Returns a future which will be set tot the transaction's total cost so far.
+	Int64Future get_total_cost();
 
 	// Returns a future which will be set to the versionstamp which was used by
 	// any versionstamp operations in the transaction.

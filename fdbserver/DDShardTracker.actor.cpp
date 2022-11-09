@@ -272,9 +272,6 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state double lastLowBandwidthStartTime =
 	    shardMetrics->get().present() ? shardMetrics->get().get().lastLowBandwidthStartTime : now();
 	state int shardCount = shardMetrics->get().present() ? shardMetrics->get().get().shardCount : 1;
-	state ReadBandwidthStatus readBandwidthStatus = shardMetrics->get().present()
-	                                                    ? getReadBandwidthStatus(shardMetrics->get().get().metrics)
-	                                                    : ReadBandwidthStatusNormal;
 	state bool initWithNewMetrics = whenDDInit;
 	wait(delay(0, TaskPriority::DataDistribution));
 
@@ -1485,7 +1482,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 	try {
 		wait(trackInitialShards(&self, initData));
-		initData.clear(); // we can release initData after initialization
+		initData.clear(); // Release reference count.
 
 		state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
 		if (self.ddTenantCache.present()) {

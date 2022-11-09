@@ -297,7 +297,14 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
 	    resnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_PARALLELISM)),
 	    deltaWritesLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM)),
-	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotLock, deltaWritesLock),
+	    stats(id,
+	          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+	          initialSnapshotLock,
+	          resnapshotLock,
+	          deltaWritesLock,
+	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	          SERVER_KNOBS->FILE_LATENCY_SAMPLE_SIZE,
+	          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {}
 
 	bool managerEpochOk(int64_t epoch) {
@@ -764,6 +771,28 @@ ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Tra
 	}
 }
 
+// tries to use writeEntireFile if possible, but if too big falls back to multi-part upload
+ACTOR Future<Void> writeFile(Reference<BackupContainerFileSystem> writeBStore, std::string fname, Value serialized) {
+	if (!SERVER_KNOBS->BG_WRITE_MULTIPART) {
+		try {
+			state std::string fileContents = serialized.toString();
+			wait(writeBStore->writeEntireFile(fname, fileContents));
+			return Void();
+		} catch (Error& e) {
+			// error_code_file_too_large means it was too big to do with single write
+			if (e.code() != error_code_file_too_large) {
+				throw e;
+			}
+		}
+	}
+
+	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+	wait(objectFile->append(serialized.begin(), serialized.size()));
+	wait(objectFile->finish());
+
+	return Void();
+}
+
 // writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
 // the data in it may not yet be committed, and even though previous delta files with lower versioned data may still be
 // in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
@@ -814,14 +843,16 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
 	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
-	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+
+	state double writeStartTimer = g_network->timer();
+
+	wait(writeFile(writeBStore, fname, serialized));
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.deltaFilesWritten;
 	bwData->stats.deltaBytesWritten += serializedSize;
-
-	wait(objectFile->append(serialized.begin(), serializedSize));
-	wait(objectFile->finish());
+	double duration = g_network->timer() - writeStartTimer;
+	bwData->stats.deltaBlobWriteLatencySample.addMeasurement(duration);
 
 	// free serialized since it is persisted in blob
 	serialized = Value();
@@ -1025,14 +1056,16 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
 	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
-	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
+
+	state double writeStartTimer = g_network->timer();
+
+	wait(writeFile(writeBStore, fname, serialized));
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.snapshotFilesWritten;
 	bwData->stats.snapshotBytesWritten += serializedSize;
-
-	wait(objectFile->append(serialized.begin(), serializedSize));
-	wait(objectFile->finish());
+	double duration = g_network->timer() - writeStartTimer;
+	bwData->stats.snapshotBlobWriteLatencySample.addMeasurement(duration);
 
 	// free serialized since it is persisted in blob
 	serialized = Value();
@@ -1225,6 +1258,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	state Arena filenameArena;
 	state std::vector<Future<RangeResult>> chunksToRead;
 	state int64_t compactBytesRead = 0;
+	state double resnapshotStartTimer = g_network->timer();
+
 	for (auto& f : fileSet) {
 		ASSERT(!f.snapshotFiles.empty());
 		ASSERT(!f.deltaFiles.empty());
@@ -1324,6 +1359,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 		BlobFileIndex f = wait(snapshotWriter);
 		DEBUG_KEY_RANGE("BlobWorkerBlobSnapshot", version, metadata->keyRange, bwData->id);
+		double duration = g_network->timer() - resnapshotStartTimer;
+		bwData->stats.reSnapshotLatencySample.addMeasurement(duration);
 		return f;
 	} catch (Error& e) {
 		if (BW_DEBUG) {
@@ -3549,7 +3586,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				continue;
 			}
 			state Reference<GranuleMetadata> metadata = m;
-			state Version granuleBeginVersion = req.beginVersion;
+			// state Version granuleBeginVersion = req.beginVersion;
 			// skip waiting for CF ready for recovery mode
 			if (!isFullRestoreMode()) {
 				choose {
@@ -3846,6 +3883,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		if (didCollapse) {
 			++bwData->stats.readRequestsCollapsed;
 		}
+
+		double duration = g_network->timer() - req.requestTime();
+		bwData->stats.readLatencySample.addMeasurement(duration);
+
 		ASSERT(!req.reply.isSet());
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
@@ -4470,9 +4511,10 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		return Void();
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
-			if (!bwData->shuttingDown) {
+			if (!bwData->shuttingDown && !isSelfReassign) {
 				// the cancelled was because the granule open was cancelled, not because the whole blob
 				// worker was.
+				ASSERT(!req.reply.isSet());
 				req.reply.sendError(granule_assignment_conflict());
 			}
 			throw e;

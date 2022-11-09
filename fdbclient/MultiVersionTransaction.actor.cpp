@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/Trace.h"
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -412,6 +413,20 @@ Version DLTransaction::getCommittedVersion() {
 	int64_t version;
 	throwIfError(api->transactionGetCommittedVersion(tr, &version));
 	return version;
+}
+
+ThreadFuture<int64_t> DLTransaction::getTotalCost() {
+	if (!api->transactionGetTotalCost) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->transactionGetTotalCost(tr);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		int64_t size = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
+		ASSERT(!error);
+		return size;
+	});
 }
 
 ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
@@ -950,6 +965,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_committed_version",
 	                   headerVersion >= 0);
+	loadClientFunction(&api->transactionGetTotalCost,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_total_cost",
+	                   headerVersion >= ApiVersion::withGetTotalCost().version());
 	loadClientFunction(&api->transactionGetApproximateSize,
 	                   lib,
 	                   fdbCPath,
@@ -1484,6 +1504,12 @@ ThreadFuture<SpanContext> MultiVersionTransaction::getSpanContext() {
 	}
 
 	return SpanContext();
+}
+
+ThreadFuture<int64_t> MultiVersionTransaction::getTotalCost() {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getTotalCost() : makeTimeout<int64_t>();
+	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
@@ -2623,6 +2649,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::TRACE_SHARE_AMONG_CLIENT_THREADS) {
 		validateOption(value, false, true);
 		traceShareBaseNameAmongThreads = true;
+	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
+		validateOption(value, false, true);
+		retainClientLibCopies = true;
 	} else {
 		forwardOption = true;
 	}
@@ -2668,7 +2697,7 @@ void MultiVersionApi::setupNetwork() {
 				externalClients[filename] = {};
 				auto libCopies = copyExternalLibraryPerThread(path);
 				for (int idx = 0; idx < libCopies.size(); ++idx) {
-					bool unlinkOnLoad = libCopies[idx].second && CLIENT_KNOBS->DELETE_NATIVE_LIB_AFTER_LOADING;
+					bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
 					externalClients[filename].push_back(Reference<ClientInfo>(
 					    new ClientInfo(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
 					                   path,
@@ -2787,11 +2816,19 @@ void MultiVersionApi::runNetwork() {
 		});
 	}
 
-	localClient->api->runNetwork();
+	try {
+		localClient->api->runNetwork();
+	} catch (const Error& e) {
+		closeTraceFile();
+		throw e;
+	}
 
 	for (auto h : handles) {
 		waitThread(h);
 	}
+
+	TraceEvent("MultiVersionRunNetworkTerminating");
+	closeTraceFile();
 }
 
 void MultiVersionApi::stopNetwork() {
@@ -3073,8 +3110,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    disableBypass(false), bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0),
-    tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
+    disableBypass(false), bypassMultiClientApi(false), externalClient(false), retainClientLibCopies(false),
+    apiVersion(0), threadCount(0), tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 

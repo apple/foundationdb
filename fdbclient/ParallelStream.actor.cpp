@@ -42,7 +42,7 @@ ACTOR static Future<Void> produce(ParallelStream<ParallelStreamTest::TestValue>:
 }
 
 ACTOR static Future<Void> consume(FutureStream<ParallelStreamTest::TestValue> stream, int expected) {
-	state int next;
+	state int next = 0;
 	try {
 		loop {
 			ParallelStreamTest::TestValue value = waitNext(stream);

@@ -7,8 +7,7 @@ import subprocess
 import sys
 import os
 
-sys.path[:0] = [os.path.join(os.path.dirname(
-    __file__), '..', '..', '..', 'tests', 'TestRunner')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tests', 'TestRunner')]
 
 # fmt: off
 from binary_download import FdbBinaryDownloader, CURRENT_VERSION
