@@ -131,16 +131,16 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty());
 	if (ranges.begin().range().contains(range)) {
-		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
+		CODE_PROBE(true, "Implicitly split single shard to 3 pieces", probe::decoration::rare);
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
 		return;
 	}
 	if (ranges.begin().begin() < range.begin) {
-		CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
+		CODE_PROBE(true, "Implicitly split begin range to 2 pieces", probe::decoration::rare);
 		twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
 	}
 	if (ranges.end().end() > range.end) {
-		CODE_PROBE(true, "Implicitly split end range to 2 pieces");
+		CODE_PROBE(true, "Implicitly split end range to 2 pieces", probe::decoration::rare);
 		twoWayShardSplitting(ranges.end().range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
 	}
 	ranges = serverKeys.containedRanges(range);
@@ -156,7 +156,7 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 		if (isStatusTransitionValid(oldStatus, status)) {
 			it.value() = ShardInfo{ status, newSize };
 		} else if (oldStatus == MockShardStatus::COMPLETED && status == MockShardStatus::INFLIGHT) {
-			CODE_PROBE(true, "Shard already on server");
+			CODE_PROBE(true, "Shard already on server", probe::decoration::rare);
 		} else {
 			TraceEvent(SevError, "MockShardStatusTransitionError")
 			    .detail("From", oldStatus)
@@ -382,7 +382,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 		ASSERT_EQ(srcTeam.size(), 1);
 		rep.results.emplace_back(it->range(), extractStorageServerInterfaces(srcTeam.front().servers));
 	}
-	CODE_PROBE(it != ranges.end(), "getKeyRangeLocations is limited", probe::decoration::rare);
+	CODE_PROBE(it != ranges.end(), "getKeyRangeLocations is limited");
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
