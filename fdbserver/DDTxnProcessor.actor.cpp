@@ -889,17 +889,29 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 }
 
 void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
-	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
-	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
-	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
-	ASSERT(params.startMoveKeysParallelismLock->take().isReady());
+	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
+	// will always finish without coroutine switch.
+	ASSERT(params.startMoveKeysParallelismLock->activePermits() == 0);
 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
-	mgs->shardMapping->defineShard(params.keys);
-	auto teamPair = mgs->shardMapping->getTeamsFor(params.keys.begin);
-	auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
-	mgs->shardMapping->rawMoveShard(params.keys, srcTeams, destTeams);
+	// invariant: the splitting and merge operation won't happen at the same moveKeys action. For example, if [a,c) [c,
+	// e) exists, the params.keys won't be [b, d).
+	auto intersectRanges = mgs->shardMapping->intersectingRanges(params.keys);
+	// 1. splitting or just move a range. The new boundary need to be defined in startMovement
+	if (intersectRanges.begin().range().contains(params.keys)) {
+		mgs->shardMapping->defineShard(params.keys);
+	}
+	// 2. merge ops will coalesce the boundary in finishMovement;
+	intersectRanges = mgs->shardMapping->intersectingRanges(params.keys);
+	ASSERT(params.keys.begin == intersectRanges.begin().begin());
+	ASSERT(params.keys.end == intersectRanges.end().begin());
+
+	for (auto it = intersectRanges.begin(); it != intersectRanges.end(); ++it) {
+		auto teamPair = mgs->shardMapping->getTeamsFor(it->begin());
+		auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
+		mgs->shardMapping->rawMoveShard(it->range(), srcTeams, destTeams);
+	}
 
 	auto randomRangeSize =
 	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
@@ -912,15 +924,14 @@ void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, 
 
 void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
                                            const std::map<UID, StorageServerInterface>& tssMapping) {
-	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
-	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
-	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
-	ASSERT(params.finishMoveKeysParallelismLock->take().isReady());
+	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
+	// will always finish without coroutine switch.
+	ASSERT(params.finishMoveKeysParallelismLock->activePermits() == 0);
 
 	// get source and dest teams
 	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(params.keys);
 
-	ASSERT_EQ(destTeams.size(), 0);
+	ASSERT_EQ(destTeams.size(), 1); // Will the multi-region or dynamic replica make destTeam.size() > 1?
 	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {
 		TraceEvent(SevError, "MockRawFinishMovementError")
 		    .detail("Reason", "InconsistentDestinations")
@@ -941,4 +952,5 @@ void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 		}
 	}
 	mgs->shardMapping->finishMove(params.keys);
+	mgs->shardMapping->defineShard(params.keys); // coalesce for merge
 }

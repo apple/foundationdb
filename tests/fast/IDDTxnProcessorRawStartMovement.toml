@@ -11,4 +11,4 @@ testTitle = 'IDDTxnProcessorApiCorrectness'
     [[test.workload]]
     testName = 'IDDTxnProcessorApiCorrectness'
     testDuration = 50.0
-    testStartOnly = true
+    testStartOnly = true # only test startMovement implementation
