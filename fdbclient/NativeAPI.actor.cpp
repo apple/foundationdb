@@ -8886,6 +8886,8 @@ static Future<Void> createCheckpointImpl(T tr, const std::vector<KeyRange>& rang
 	if (format == DataMoveRocksCF) {
 			std::vector<UID> src;
 			std::vector<UID> dest;
+			UID srcId;
+			UID destId;
 			decodeKeyServersValue(UIDtoTagMap, keyServers[0].value, src, dest);
 
 			// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
