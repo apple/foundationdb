@@ -45,7 +45,8 @@ enum TesterOptionId {
 	OPT_TRACE_FORMAT,
 	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
-	OPT_TEST_FILE
+	OPT_TEST_FILE,
+	OPT_RETAIN_CLIENT_LIB_COPIES
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -61,6 +62,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
 	  { OPT_TEST_FILE, "--test-file", SO_REQ_SEP },
+	  { OPT_RETAIN_CLIENT_LIB_COPIES, "--retain-client-lib-copies", SO_NONE },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -144,6 +146,10 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		options.testFile = args.OptionArg();
 		options.testSpec = readTomlTestSpec(options.testFile);
 		break;
+
+	case OPT_RETAIN_CLIENT_LIB_COPIES:
+		options.retainClientLibCopies = true;
+		break;
 	}
 	return true;
 }
@@ -203,6 +209,10 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir));
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat));
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup));
+	}
+
+	if (options.retainClientLibCopies) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_RETAIN_CLIENT_LIBRARY_COPIES));
 	}
 
 	for (auto knob : options.knobs) {
