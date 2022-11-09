@@ -1113,9 +1113,11 @@ public:
 	std::vector<int> readPriorityRanks;
 
 	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
-		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
-		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
-		return ssLock.lock(readPriorityRanks[readType]);
+		// TODO:  Fix perf regression in 100% cache read case where taking this lock adds too much overhead
+		return PriorityMultiLock::Lock();
+		// int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
+		// readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
+		// return ssLock.lock(readPriorityRanks[readType]);
 	}
 
 	FlowLock serveAuditStorageParallelismLock;
@@ -9105,7 +9107,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
 	ASSERT(metaData.ssID == data->thisServerID && !metaData.ranges.empty());
 	const CheckpointRequest req(metaData.version,
-	                            metaData.ranges.front(),
+	                            metaData.ranges,
 	                            static_cast<CheckpointFormat>(metaData.format),
 	                            metaData.checkpointID,
 	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
