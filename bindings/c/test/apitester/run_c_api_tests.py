@@ -54,6 +54,9 @@ def run_tester(args, test_file):
     if args.external_client_library is not None:
         cmd += ["--external-client-library", args.external_client_library]
 
+    if args.retain_client_lib_copies:
+        cmd += ["--retain-client-lib-copies"]
+
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
@@ -111,7 +114,12 @@ def parse_args(argv):
                         help='The timeout in seconds for running each individual test. (default 300)')
     parser.add_argument('--logging-level', type=str, default='INFO',
                         choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
-
+    parser.add_argument(
+                        "--retain-client-lib-copies",
+                        action="store_true",
+                        default=False,
+                        help="Retain temporary external client library copies.",
+    )
     return parser.parse_args(argv)
 
 

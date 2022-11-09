@@ -39,6 +39,11 @@ func int64ToBytes(i int64) []byte {
 	return buf
 }
 
+// Retain temporary external client library copies that are created for enabling multi-threading.
+func (o NetworkOptions) SetRetainClientLibraryCopies() error {
+	return o.setOpt(67, nil)
+}
+
 // Deprecated
 //
 // Parameter: IP:PORT
@@ -617,12 +622,12 @@ const (
 	StreamingModeWantAll StreamingMode = -1
 
 	// The default. The client doesn't know how much of the range it is likely
-	// to used and wants different performance concerns to be balanced. Only a
-	// small portion of data is transferred to the client initially (in order to
-	// minimize costs if the client doesn't read the entire range), and as the
-	// caller iterates over more items in the range larger batches will be
-	// transferred in order to minimize latency. After enough iterations, the
-	// iterator mode will eventually reach the same byte limit as “WANT_ALL“
+	// to used and wants different performance concerns to be balanced.
+	// Only a small portion of data is transferred to the client initially (in
+	// order to minimize costs if the client doesn't read the entire range), and
+	// as the caller iterates over more items in the range larger batches will
+	// be transferred in order to minimize latency. After enough iterations,
+	// the iterator mode will eventually reach the same byte limit as “WANT_ALL“
 	StreamingModeIterator StreamingMode = 0
 
 	// Infrequently used. The client has passed a specific row limit and wants
@@ -632,8 +637,8 @@ const (
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
-	// Infrequently used. Transfer data in batches small enough to not be much
-	// more expensive than reading individual rows, to minimize cost if
+	// Infrequently used. Transfer data in batches small enough to not be
+	// much more expensive than reading individual rows, to minimize cost if
 	// iteration stops early.
 	StreamingModeSmall StreamingMode = 2
 
@@ -641,16 +646,16 @@ const (
 	// large.
 	StreamingModeMedium StreamingMode = 3
 
-	// Infrequently used. Transfer data in batches large enough to be, in a
-	// high-concurrency environment, nearly as efficient as possible. If the
-	// client stops iteration early, some disk and network bandwidth may be
-	// wasted. The batch size may still be too small to allow a single client to
-	// get high throughput from the database, so if that is what you need
+	// Infrequently used. Transfer data in batches large enough to be,
+	// in a high-concurrency environment, nearly as efficient as possible.
+	// If the client stops iteration early, some disk and network bandwidth may
+	// be wasted. The batch size may still be too small to allow a single client
+	// to get high throughput from the database, so if that is what you need
 	// consider the SERIAL StreamingMode.
 	StreamingModeLarge StreamingMode = 4
 
-	// Transfer data in batches large enough that an individual client can get
-	// reasonable read bandwidth from the database. If the client stops
+	// Transfer data in batches large enough that an individual client can
+	// get reasonable read bandwidth from the database. If the client stops
 	// iteration early, considerable disk and network bandwidth may be wasted.
 	StreamingModeSerial StreamingMode = 5
 )

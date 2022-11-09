@@ -894,6 +894,8 @@ private:
 	volatile bool networkSetup;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
+	bool retainClientLibCopies;
+
 	int apiVersion;
 
 	int nextThread = 0;
