@@ -95,8 +95,6 @@ struct StorageMetricSample {
 	}
 };
 
-
-
 struct TransientStorageMetricSample : StorageMetricSample {
 	Deque<std::pair<double, std::pair<Key, int64_t>>> queue;
 
