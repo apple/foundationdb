@@ -41,6 +41,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
+	static constexpr auto NAME = "MetaclusterManagementConcurrency";
 
 	Reference<IDatabase> managementDb;
 	std::map<ClusterName, Database> dataDbs;
@@ -285,5 +286,4 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<MetaclusterManagementConcurrencyWorkload> MetaclusterManagementConcurrencyWorkloadFactory(
-    "MetaclusterManagementConcurrency");
+WorkloadFactory<MetaclusterManagementConcurrencyWorkload> MetaclusterManagementConcurrencyWorkloadFactory;
