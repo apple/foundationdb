@@ -25,7 +25,6 @@
 // version.
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/BooleanParam.h"
-#include "flow/IRandom.h"
 #if defined(NO_INTELLISENSE) && !defined(WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H)
 #define WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H
 #include "fdbserver/workloads/MetaclusterConsistency.actor.g.h"
@@ -42,7 +41,6 @@ FDB_DECLARE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
 template <class DB>
 class MetaclusterConsistencyCheck {
 private:
-	UID debugId = nondeterministicRandom()->randomUniqueID();
 	Reference<DB> managementDb;
 	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 

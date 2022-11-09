@@ -190,7 +190,6 @@ Future<Reference<IDatabase>> getAndOpenDatabase(Transaction managementTr, Cluste
 
 template <class DB>
 struct MetaclusterOperationContext {
-	UID debugId = nondeterministicRandom()->randomUniqueID();
 	Reference<DB> managementDb;
 	Reference<IDatabase> dataClusterDb;
 
@@ -544,8 +543,7 @@ void updateClusterMetadata(Transaction tr,
                            ClusterNameRef name,
                            DataClusterMetadata const& previousMetadata,
                            Optional<ClusterConnectionString> const& updatedConnectionString,
-                           Optional<DataClusterEntry> const& updatedEntry,
-                           Optional<UID> debugId = Optional<UID>()) {
+                           Optional<DataClusterEntry> const& updatedEntry) {
 	if (updatedEntry.present()) {
 		if (previousMetadata.entry.clusterState == DataClusterState::REMOVING) {
 			throw cluster_removed();
@@ -603,6 +601,7 @@ struct RegisterClusterImpl {
 					    !existingRegistration.get().matches(self->ctx.metaclusterRegistration.get())) {
 						throw cluster_already_registered();
 					} else {
+						// We already successfully registered the cluster with these details, so there's nothing to do
 						self->clusterEntry.id = existingRegistration.get().id;
 						return Void();
 					}
@@ -629,7 +628,7 @@ struct RegisterClusterImpl {
 				                                                                      self->clusterEntry.id));
 
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
-				TraceEvent("ConfiguredDataCluster", self->ctx.debugId)
+				TraceEvent("ConfiguredDataCluster")
 				    .detail("ClusterName", self->clusterName)
 				    .detail("ClusterID", self->clusterEntry.id)
 				    .detail("Capacity", self->clusterEntry.capacity)
@@ -670,7 +669,7 @@ struct RegisterClusterImpl {
 			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
 		}
 
-		TraceEvent("RegisteredDataCluster", self->ctx.debugId)
+		TraceEvent("RegisteredDataCluster")
 		    .detail("ClusterName", self->clusterName)
 		    .detail("ClusterID", self->clusterEntry.id)
 		    .detail("Capacity", self->clusterEntry.capacity)
@@ -744,8 +743,7 @@ struct RemoveClusterImpl {
 			                      self->ctx.clusterName.get(),
 			                      self->ctx.dataClusterMetadata.get(),
 			                      Optional<ClusterConnectionString>(),
-			                      updatedEntry,
-			                      self->ctx.debugId);
+			                      updatedEntry);
 		}
 
 		ManagementClusterMetadata::clusterCapacityIndex.erase(
@@ -759,7 +757,7 @@ struct RemoveClusterImpl {
 			self->lastTenantId = lastId;
 		}
 
-		TraceEvent("MarkedDataClusterRemoving", self->ctx.debugId)
+		TraceEvent("MarkedDataClusterRemoving")
 		    .detail("Name", self->ctx.clusterName.get())
 		    .detail("State",
 		            DataClusterEntry::clusterStateToString(self->ctx.dataClusterMetadata.get().entry.clusterState))
@@ -786,7 +784,7 @@ struct RemoveClusterImpl {
 			}
 		}
 
-		TraceEvent("ReconfiguredDataCluster", self->ctx.debugId)
+		TraceEvent("ReconfiguredDataCluster")
 		    .detail("Name", self->ctx.clusterName.get())
 		    .detail("State",
 		            DataClusterEntry::clusterStateToString(self->ctx.dataClusterMetadata.get().entry.clusterState))
@@ -904,7 +902,7 @@ struct RemoveClusterImpl {
 			}
 		}
 
-		TraceEvent("RemovedDataCluster", self->ctx.debugId).detail("Name", self->ctx.clusterName.get());
+		TraceEvent("RemovedDataCluster").detail("Name", self->ctx.clusterName.get());
 		return Void();
 	}
 
