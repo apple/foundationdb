@@ -80,20 +80,14 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 
 		// Check that writes are rejected when the tenant is over quota.
-		state ErrorOr<Void> txn1 = wait(tryWrite(self, cx));
-		TraceEvent(SevDebug, "TxnShouldBeRejected")
-		    .detail("Tenant", self->tenant)
-		    .detail("Error", txn1.isError() ? txn1.getError().name() : "none");
-		ASSERT(txn1.isError() && txn1.getError().code() == error_code_storage_quota_exceeded);
+		state bool rejected = wait(tryWrite(self, cx, /*expectOk=*/false));
+		ASSERT(rejected);
 
 		// Increase the quota. Check that writes are now able to commit.
 		quota = size * 2;
 		wait(setStorageQuotaHelper(cx, self->tenant, quota));
-		state ErrorOr<Void> txn2 = wait(tryWrite(self, cx));
-		TraceEvent(SevDebug, "TxnShouldCommit")
-		    .detail("Tenant", self->tenant)
-		    .detail("Error", txn2.isError() ? txn2.getError().name() : "none");
-		ASSERT(!txn2.isError());
+		state bool committed = wait(tryWrite(self, cx, /*expectOk=*/true));
+		ASSERT(committed);
 
 		return Void();
 	}
@@ -147,45 +141,37 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<ErrorOr<Void>> tryWrite(StorageQuotaWorkload* self, Database cx) {
-		state ErrorOr<Void> previousError;
+	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self, Database cx, bool expectOk) {
 		state int i;
-
+		// Retry the transaction a few times if needed; this allows us wait for a while for all
+		// the storage usage and quota related monitors to fetch and propagate the latest information
+		// about the tenants that are over storage quota.
 		for (i = 0; i < 10; i++) {
 			state Transaction tr(cx, self->tenant);
-			state ErrorOr<Void> error;
 			loop {
 				try {
 					Standalone<KeyValueRef> kv =
 					    (*self)(deterministicRandom()->randomInt(0, std::numeric_limits<int>::max()));
 					tr.set(kv.key, kv.value);
 					wait(tr.commit());
-					error = Void();
+					if (expectOk) {
+						return true;
+					}
 					break;
 				} catch (Error& e) {
-					TraceEvent(SevDebug, "TryWriteError").error(e).detail("Tenant", tr.getTenant().get());
-					error = e;
 					if (e.code() == error_code_storage_quota_exceeded) {
+						if (!expectOk) {
+							return true;
+						}
 						break;
+					} else {
+						wait(tr.onError(e));
 					}
-					wait(tr.onError(e));
 				}
 			}
-			// We want to wait for a while for all the storage usage and quota related monitors
-			// fetch and propagate the latest information about tenants that are over storage quota.
-			// To allow this, retry the transaction if this attempt and the previous attempt both
-			// successfully commited, or both were rejected due to the same error.
-			if (i == 0) {
-				previousError = error;
-			} else if ((!previousError.isError() && !error.isError()) ||
-			           (previousError.isError() && error.isError() &&
-			            previousError.getError().code() == error.getError().code())) {
-				wait(delay(5.0));
-			} else {
-				return error;
-			}
+			wait(delay(5.0));
 		}
-		return previousError;
+		return false;
 	}
 };
 
