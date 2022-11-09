@@ -198,6 +198,10 @@ Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::
 	return Future<Reference<IBackupFile>>(makeReference<BackupContainerS3BlobStoreImpl::BackupFile>(path, f));
 }
 
+Future<Void> BackupContainerS3BlobStore::writeEntireFile(const std::string& path, const std::string& fileContents) {
+	return m_bstore->writeEntireFile(m_bucket, dataPath(path), fileContents);
+}
+
 Future<Void> BackupContainerS3BlobStore::deleteFile(const std::string& path) {
 	return m_bstore->deleteObject(m_bucket, dataPath(path));
 }

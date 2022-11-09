@@ -2024,7 +2024,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
-			if (readBeginTime - a.startTime > readValueTimeout) {
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValueTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
@@ -2037,10 +2037,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto options = getReadOptions();
 
 			auto db = a.shard->db;
-			uint64_t deadlineMircos =
-			    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
-			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+				uint64_t deadlineMircos =
+				    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			}
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			auto s = db->Get(options, a.shard->cf, toSlice(a.key), &value);
 
@@ -2102,7 +2104,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			if (readBeginTime - a.startTime > readValuePrefixTimeout) {
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValuePrefixTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
@@ -2114,10 +2116,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			auto options = getReadOptions();
 			auto db = a.shard->db;
-			uint64_t deadlineMircos =
-			    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
-			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+				uint64_t deadlineMircos =
+				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			}
 
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			auto s = db->Get(options, a.shard->cf, toSlice(a.key), &value);
@@ -2183,7 +2187,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
-			if (readBeginTime - a.startTime > readRangeTimeout) {
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readRangeTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
@@ -2230,7 +2234,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 
-				if (timer_monotonic() - a.startTime > readRangeTimeout) {
+				if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && timer_monotonic() - a.startTime > readRangeTimeout) {
 					TraceEvent(SevInfo, "ShardedRocksDBTimeout")
 					    .detail("Action", "ReadRange")
 					    .detail("ShardsRead", numShards)
