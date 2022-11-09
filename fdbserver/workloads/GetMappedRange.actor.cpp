@@ -163,7 +163,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
 			auto& getRange = std::get<GetRangeReqAndResultRef>(it->reqAndResult);
 			auto& rangeResult = getRange.result;
-			ASSERT(it->boundaryAndExist == (isBoundary && !rangeResult.empty()));
 			//					std::cout << "rangeResult.size()=" << rangeResult.size() << std::endl;
 			// In the future, we may be able to do the continuation more efficiently by combining partial results
 			// together and then validate.
