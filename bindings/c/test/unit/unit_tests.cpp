@@ -1109,8 +1109,6 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 			} else {
 				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = mkv.range_results.empty();
-			CHECK(mkv.boundaryAndExist == (boundary && !empty));
 			CHECK(EMPTY.compare(mkv.value) == 0);
 			CHECK(mkv.range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
@@ -1167,8 +1165,6 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 			} else {
 				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = mkv.range_results.empty();
-			CHECK(mkv.boundaryAndExist == (boundary && !empty));
 			CHECK(EMPTY.compare(mkv.value) == 0);
 		}
 		break;

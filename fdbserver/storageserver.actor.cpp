@@ -3612,7 +3612,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		}
 	}
 
-	// all but the last item are less than pLimitBytes
+	// all but the last item are less than *pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
 	result.version = version;
@@ -4642,7 +4642,6 @@ ACTOR Future<int> mapKeyValues(StorageServer* data,
                                // To provide span context, tags, debug ID to underlying lookups.
                                GetMappedKeyValuesRequest* pOriginalReq,
                                GetMappedKeyValuesReply* result,
-                               Optional<Key> tenantPrefix,
                                int matchIndex,
                                int* remainingLimitBytes) {
 	state bool firstBatch = result->data.empty();
@@ -4699,16 +4698,12 @@ ACTOR Future<int> mapKeyValues(StorageServer* data,
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			int size = sizeof(KeyValueRef) + input.data[i + offset].expectedSize() + getMappedKeyValueSize(kvms[i]);
 			// allow at least 1 entry to be returned
-			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes < size &&
-			    !(firstBatch && i + offset == 0)) {
-				// clear the remainingLimitBytes to quit from the outer loop
-				*remainingLimitBytes = 0;
-				break;
-			}
 			*remainingLimitBytes -= size;
 			++cnt;
 			result->data.push_back(result->arena, kvms[i]);
-
+			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes <= 0) {
+				break;
+			}
 			// fill index KV for open boundary
 			if (firstBatch && i + offset == 0) {
 				result->data[0].key = input.data[0].key;
@@ -4717,7 +4712,6 @@ ACTOR Future<int> mapKeyValues(StorageServer* data,
 		}
 	}
 
-	result->more = input.more || cnt < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.End");
@@ -4977,11 +4971,11 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			state bool moreBatch = true;
 			state KeyRef lastIndexKey;
 			state ValueRef lastIndexValue;
+			ASSERT(remainingLimitBytes > 0);
 			while (remainingLimitRows > 0 && remainingLimitBytes > 0 && moreBatch) {
 				// do it in a batch way:
 				// 		each batch scans up to PREFETCH_INDEX_PAGE_SIZE indexes
 				// 		fetch the record for each index entry
-
 				// readRange changes the value of its pLimitBytes parameter, while we only want it to be changed later
 				int tmpLimitBytes = req.limitBytes;
 				pageSize = std::min(SERVER_KNOBS->PREFETCH_INDEX_PAGE_SIZE, remainingLimitRows);
@@ -5001,13 +4995,12 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 				// these fields always return as the value of the last batch result
 				result.version = getKeyValuesReply.version;
-				result.cached = getKeyValuesReply.cached;
 				result.arena.dependsOn(getKeyValuesReply.arena);
 				moreBatch = getKeyValuesReply.more;
 				try {
 					// Map the scanned range to another list of keys and look up.
-					int filled = wait(mapKeyValues(
-					    data, getKeyValuesReply, &req, &result, tenantPrefix, req.matchIndex, &remainingLimitBytes));
+					int filled = wait(
+					    mapKeyValues(data, getKeyValuesReply, &req, &result, req.matchIndex, &remainingLimitBytes));
 					if (filled > 0) {
 						lastIndexKey = getKeyValuesReply.data[filled - 1].key;
 						lastIndexValue = getKeyValuesReply.data[filled - 1].value;
@@ -5017,7 +5010,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 					TraceEvent("MapError").error(e);
 					throw;
 				}
-
 				begin = keyAfter(lastIndexKey);
 				if (tenantPrefix.present()) {
 					begin = begin.withPrefix(tenantPrefix.get(), getKeyValuesReply.arena);
@@ -5026,6 +5018,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				wait(store(readLock, data->getReadLock(req.options)));
 			}
 
+			result.more = remainingLimitRows == 0 || remainingLimitBytes <= 0;
 			// fill index KV for close boundary
 			result.data.back().key = lastIndexKey;
 			result.data.back().value = lastIndexValue;
