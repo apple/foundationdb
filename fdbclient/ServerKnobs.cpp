@@ -802,7 +802,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CHECKPOINT_TRANSFER_BLOCK_BYTES,                      40e6 );
 	init( QUICK_GET_VALUE_FALLBACK,                             true );
 	init( QUICK_GET_KEY_VALUES_FALLBACK,                        true );
-	init( MAX_PARALLEL_QUICK_GET_VALUE,                           50 ); if ( randomize && BUGGIFY ) MAX_PARALLEL_QUICK_GET_VALUE = deterministicRandom()->randomInt(1, 100);
+	init( STRICTLY_ENFORCE_BYTE_LIMIT, 							false); // If set to false, prefetch response might exceeed byteLimit as records are fetched in batch
+	// tentatively use the limit of secondary queries so that 1 primary query serves one batch
+	// we can increase this to gain better performance after proper benchmarking
+	init( PREFETCH_INDEX_PAGE_SIZE,                               20 ); if ( randomize && BUGGIFY ) PREFETCH_INDEX_PAGE_SIZE = deterministicRandom()->randomInt(50, 100);
+	// start from a smaller value
+	init( MAX_PARALLEL_QUICK_GET_VALUE,                           10 ); if ( randomize && BUGGIFY ) MAX_PARALLEL_QUICK_GET_VALUE = deterministicRandom()->randomInt(1, 100);
 	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 	init( STORAGE_FEED_QUERY_HARD_LIMIT,                      100000 );
