@@ -3493,9 +3493,14 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			      tenantPrefix);
 			limit -= result.data.size() - prevSize;
 
+			TraceEvent("Hfu5DataSizeBefore")
+			    .detail("Size", result.data.size() - prevSize)
+			    .detail("Bytes", *pLimitBytes)
+			    .detail("Limit", limit);
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++) {
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 			}
+			TraceEvent("Hfu5DataSizeAfter").detail("Bytes", *pLimitBytes);
 
 			if (limit <= 0 || *pLimitBytes <= 0) {
 				break;
@@ -3612,7 +3617,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		}
 	}
 
-	// all but the last item are less than *pLimitBytes
+	// all but the last item are less than pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
 	result.version = version;
@@ -4602,7 +4607,6 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
                                Arena* pArena,
                                int matchIndex,
                                bool isRangeQuery,
-                               bool isBoundary,
                                KeyValueRef* it,
                                MappedKeyValueRef* kvm,
                                Key mappedKey) {
@@ -4610,44 +4614,52 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
 		// Use the mappedKey as the prefix of the range query.
 		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
 		if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
-		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
+		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) || matchIndex == MATCH_INDEX_ALL) {
 			kvm->key = it->key;
 			kvm->value = it->value;
 		}
 
-		kvm->boundaryAndExist = isBoundary && !getRange.result.empty();
 		kvm->reqAndResult = getRange;
 	} else {
 		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
 		kvm->reqAndResult = getValue;
-		kvm->boundaryAndExist = isBoundary && getValue.result.present();
 	}
 	return Void();
 }
 
-ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
-                                                   GetKeyValuesReply input,
-                                                   StringRef mapper,
-                                                   // To provide span context, tags, debug ID to underlying lookups.
-                                                   GetMappedKeyValuesRequest* pOriginalReq,
-                                                   Optional<Key> tenantPrefix,
-                                                   int matchIndex) {
-	state GetMappedKeyValuesReply result;
-	result.version = input.version;
-	result.more = input.more;
-	result.cached = input.cached;
-	result.arena.dependsOn(input.arena);
+int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
+	auto& reqAndResult = mappedKeyValue.reqAndResult;
+	int bytes = 0;
+	if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
+		auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+		bytes = getValue.expectedSize();
+	} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
+		auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+		bytes = getRange.result.expectedSize();
+	} else {
+		throw internal_error();
+	}
+	return bytes;
+}
 
-	result.data.reserve(result.arena, input.data.size());
+ACTOR Future<int> mapKeyValues(StorageServer* data,
+                               GetKeyValuesReply input,
+                               // To provide span context, tags, debug ID to underlying lookups.
+                               GetMappedKeyValuesRequest* pOriginalReq,
+                               GetMappedKeyValuesReply* result,
+                               Optional<Key> tenantPrefix,
+                               int matchIndex,
+                               int* remainingLimitBytes) {
+	state bool firstBatch = result->data.empty();
+	result->data.reserve(result->arena, result->data.size() + input.data.size());
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.Start");
 	state Tuple mappedKeyFormatTuple;
-
 	try {
-		mappedKeyFormatTuple = Tuple::unpack(mapper);
+		mappedKeyFormatTuple = Tuple::unpack(pOriginalReq->mapper);
 	} catch (Error& e) {
-		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper);
+		TraceEvent("MapperNotTuple").error(e).detail("Mapper", pOriginalReq->mapper);
 		throw mapper_not_tuple();
 	}
 	state std::vector<Optional<Tuple>> vt;
@@ -4659,43 +4671,31 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state std::vector<MappedKeyValueRef> kvms(k);
 	state std::vector<Future<Void>> subqueries;
 	state int offset = 0;
+	state int cnt = 0;
+	state int indexSize = 0;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
-	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+
+	TraceEvent("Hfu5RemainingSize").detail("Bytes", *remainingLimitBytes);
+	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
 			MappedKeyValueRef* kvm = &kvms[i];
-			bool isBoundary = (i + offset) == 0 || (i + offset) == sz - 1;
-			// need to keep the boundary, so that caller can use it as a continuation.
-			if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
-				kvm->key = it->key;
-				kvm->value = it->value;
-			} else {
-				// Clear key value to the default.
-				kvm->key = ""_sr;
-				kvm->value = ""_sr;
-			}
+			// Clear key value to the default.
+			kvm->key = ""_sr;
+			kvm->value = ""_sr;
 
 			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
-			result.arena.dependsOn(mappedKey.arena());
+			result->arena.dependsOn(mappedKey.arena());
 
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
-
-			subqueries.push_back(mapSubquery(data,
-			                                 input.version,
-			                                 pOriginalReq,
-			                                 &result.arena,
-			                                 matchIndex,
-			                                 isRangeQuery,
-			                                 isBoundary,
-			                                 it,
-			                                 kvm,
-			                                 mappedKey));
+			subqueries.push_back(mapSubquery(
+			    data, input.version, pOriginalReq, &result->arena, matchIndex, isRangeQuery, it, kvm, mappedKey));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -4704,14 +4704,37 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			                      "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
-			result.data.push_back(result.arena, kvms[i]);
+			int size = sizeof(KeyValueRef) + input.data[i + offset].expectedSize() + getMappedKeyValueSize(kvms[i]);
+			// allow at least 1 entry to be returned
+			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes < size &&
+			    !(firstBatch && i + offset == 0)) {
+				// clear the remainingLimitBytes to quit from the outer loop
+				*remainingLimitBytes = 0;
+				break;
+			}
+			*remainingLimitBytes -= size;
+			++cnt;
+			TraceEvent("Hfu5RoundRemainingSize")
+			    .detail("Bytes", *remainingLimitBytes)
+			    .detail("Key", printable(input.data[i + offset].key))
+			    .detail("KVMSize", getMappedKeyValueSize(kvms[i]))
+			    .detail("Each", input.data[i + offset].expectedSize());
+			result->data.push_back(result->arena, kvms[i]);
+
+			// fill index KV for open boundary
+			if (firstBatch && i + offset == 0) {
+				result->data[0].key = input.data[0].key;
+				result->data[0].value = input.data[0].value;
+			}
 		}
 	}
+	TraceEvent("Hfu5Cnt").detail("Bytes", *remainingLimitBytes).detail("Sz", sz).detail("Cnt", cnt);
+
+	result->more = input.more || cnt < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
-		g_traceBatch.addEvent("TransactionDebug",
-		                      pOriginalReq->options.get().debugID.get().first(),
-		                      "storageserver.mapKeyValues.AfterAll");
-	return result;
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.End");
+	return cnt;
 }
 
 bool rangeIntersectsAnyTenant(TenantPrefixIndex& prefixIndex, KeyRangeRef range, Version ver) {
@@ -4960,32 +4983,73 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
 			req.reply.send(none);
 		} else {
+			state GetMappedKeyValuesReply result;
+			TraceEvent("Hfu5GetBytes").detail("Bytes", req.limitBytes);
 			state int remainingLimitBytes = req.limitBytes;
+			state int remainingLimitRows = req.limit;
+			state int pageSize;
+			state bool moreBatch = true;
+			state KeyRef lastIndexKey;
+			state ValueRef lastIndexValue;
+			while (remainingLimitRows > 0 && remainingLimitBytes > 0 && moreBatch) {
+				// do it in a batch way:
+				// 		each batch scans up to PREFETCH_INDEX_PAGE_SIZE indexes
+				// 		fetch the record for each index entry
 
-			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
-			                                                     version,
-			                                                     KeyRangeRef(begin, end),
-			                                                     req.limit,
-			                                                     &remainingLimitBytes,
-			                                                     span.context,
-			                                                     req.options,
-			                                                     tenantPrefix));
+				// readRange changes the value of its pLimitBytes parameter, while we only want it to be changed later
+				int tmpLimitBytes = req.limitBytes;
+				pageSize = std::min(SERVER_KNOBS->PREFETCH_INDEX_PAGE_SIZE, remainingLimitRows);
+				TraceEvent("Hfu5IndexFetchBefore")
+				    .detail("PageSize", pageSize)
+				    .detail("Bytes", remainingLimitBytes)
+				    .detail("Limit", remainingLimitRows);
+				state GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
+				                                                           version,
+				                                                           KeyRangeRef(begin, end),
+				                                                           pageSize,
+				                                                           &tmpLimitBytes,
+				                                                           span.context,
+				                                                           req.options,
+				                                                           tenantPrefix));
 
-			// Unlock read lock before the subqueries because each
-			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
-			// read options which will each acquire the ssLock.
-			readLock.release();
+				// Unlock read lock before the subqueries because each
+				// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
+				// read options which will each acquire the ssLock.
+				readLock.release();
 
-			state GetMappedKeyValuesReply r;
-			try {
-				// Map the scanned range to another list of keys and look up.
-				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix, req.matchIndex));
-				r = _r;
-			} catch (Error& e) {
-				TraceEvent("MapError").error(e);
-				throw;
+				// these fields always return as the value of the last batch result
+				result.version = getKeyValuesReply.version;
+				result.cached = getKeyValuesReply.cached;
+				result.arena.dependsOn(getKeyValuesReply.arena);
+				moreBatch = getKeyValuesReply.more;
+				try {
+					// Map the scanned range to another list of keys and look up.
+					int filled = wait(mapKeyValues(
+					    data, getKeyValuesReply, &req, &result, tenantPrefix, req.matchIndex, &remainingLimitBytes));
+					if (filled > 0) {
+						lastIndexKey = getKeyValuesReply.data[filled - 1].key;
+						lastIndexValue = getKeyValuesReply.data[filled - 1].value;
+					}
+					remainingLimitRows -= pageSize;
+				} catch (Error& e) {
+					TraceEvent("MapError").error(e);
+					throw;
+				}
+
+				begin = keyAfter(lastIndexKey);
+				TraceEvent("Hfu5IndexFetchAfter")
+				    .detail("Size", getKeyValuesReply.data.size())
+				    .detail("Bytes", remainingLimitBytes)
+				    .detail("Key", printable(lastIndexKey))
+				    .detail("NewBegin", printable(begin))
+				    .detail("Limit", remainingLimitRows);
+				// lock again
+				wait(store(readLock, data->getReadLock(req.options)));
 			}
+
+			// fill index KV for close boundary
+			result.data.back().key = lastIndexKey;
+			result.data.back().value = lastIndexValue;
 
 			if (req.options.present() && req.options.get().debugID.present())
 				g_traceBatch.addEvent("TransactionDebug",
@@ -5003,24 +5067,24 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 			// For performance concerns, the cost of a range read is billed to the start key and end key of the range.
 			int64_t totalByteSize = 0;
-			for (int i = 0; i < r.data.size(); i++) {
-				totalByteSize += r.data[i].expectedSize();
+			for (int i = 0; i < result.data.size(); i++) {
+				totalByteSize += result.data[i].expectedSize();
 			}
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
-				data->metrics.notifyBytesReadPerKSecond(addPrefix(r.data[0].key, tenantPrefix, req.arena),
+				data->metrics.notifyBytesReadPerKSecond(addPrefix(result.data[0].key, tenantPrefix, req.arena),
 				                                        bytesReadPerKSecond);
 				data->metrics.notifyBytesReadPerKSecond(
-				    addPrefix(r.data[r.data.size() - 1].key, tenantPrefix, req.arena), bytesReadPerKSecond);
+				    addPrefix(result.data[result.data.size() - 1].key, tenantPrefix, req.arena), bytesReadPerKSecond);
 			}
 
-			r.penalty = data->getPenalty();
-			req.reply.send(r);
+			result.penalty = data->getPenalty();
+			req.reply.send(result);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
 			data->counters.bytesQueried += resultSize;
-			data->counters.rowsQueried += r.data.size();
-			if (r.data.size() == 0) {
+			data->counters.rowsQueried += result.data.size();
+			if (result.data.size() == 0) {
 				++data->counters.emptyQueries;
 			}
 		}
