@@ -328,10 +328,10 @@ public:
 
 	// Increases the counter of the number of watches in this DatabaseContext by 1. If the number of watches is too
 	// many, throws too_many_watches.
-	void addWatchCounter();
+	void increaseWatchCounter();
 
 	// Decrease the counter of the number of watches in this DatabaseContext by 1
-	void removeWatchCounter();
+	void decreaseWatchCounter();
 
 	// watch map operations
 
