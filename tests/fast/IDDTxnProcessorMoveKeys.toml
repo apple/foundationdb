@@ -6,9 +6,8 @@ disableTss = true # There's no TSS in MGS this prevent the DD operate TSS mappin
 max_added_sources_multiplier = 0 # set to 0 because it's impossible to make sure SS and mock SS will finish fetch keys at the same time.
 
 [[test]]
-testTitle = 'IDDTxnProcessorRawStartMovement'
+testTitle = 'IDDTxnProcessorMoveKeys'
 
     [[test.workload]]
     testName = 'IDDTxnProcessorApiCorrectness'
     testDuration = 50.0
-    testStartOnly = true # only test startMovement implementation

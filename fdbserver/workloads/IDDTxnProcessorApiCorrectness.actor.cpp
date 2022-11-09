@@ -80,12 +80,12 @@ void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<Init
 class DDMockTxnProcessorTester : public DDMockTxnProcessor {
 public:
 	explicit DDMockTxnProcessorTester(std::shared_ptr<MockGlobalState> mgs = nullptr) : DDMockTxnProcessor(mgs) {}
-	void testRawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
-		rawStartMovement(params, tssMapping);
+	Future<Void> testRawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+		return rawStartMovement(params, tssMapping);
 	}
 
-	void testRawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping) {
-		rawFinishMovement(params, tssMapping);
+	Future<Void> testRawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping) {
+		return rawFinishMovement(params, tssMapping);
 	}
 };
 
@@ -94,12 +94,12 @@ public:
 	explicit DDTxnProcessorTester(Database cx) : DDTxnProcessor(cx) {}
 
 	Future<Void> testRawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
-		return this->rawStartMovement(params, tssMapping);
+		return rawStartMovement(params, tssMapping);
 	}
 
 	Future<Void> testRawFinishMovement(MoveKeysParams& params,
 	                                   const std::map<UID, StorageServerInterface>& tssMapping) {
-		return this->rawFinishMovement(params, tssMapping);
+		return rawFinishMovement(params, tssMapping);
 	}
 };
 
@@ -279,7 +279,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			wait(store(params.lock, self->real->takeMoveKeysLock(UID())));
 			try {
 				// test start
-				self->mock->testRawStartMovement(params, emptyTssMapping);
+				wait(self->mock->testRawStartMovement(params, emptyTssMapping));
 				wait(self->real->testRawStartMovement(params, emptyTssMapping));
 
 				// test finish or started but cancelled movement
@@ -288,7 +288,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 					break;
 				}
 
-				self->mock->testRawFinishMovement(params, emptyTssMapping);
+				wait(self->mock->testRawFinishMovement(params, emptyTssMapping));
 				wait(self->real->testRawFinishMovement(params, emptyTssMapping));
 				break;
 			} catch (Error& e) {

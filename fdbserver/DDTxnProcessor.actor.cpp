@@ -705,12 +705,12 @@ struct DDMockTxnProcessorImpl {
 		std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
 		std::sort(params.healthyDestinations.begin(), params.healthyDestinations.end());
 
-		self->rawStartMovement(params, tssMapping);
+		wait(self->rawStartMovement(params, tssMapping));
 		ASSERT(tssMapping.empty());
 
 		wait(checkFetchingState(self, params.destinationTeam, params.keys));
 
-		self->rawFinishMovement(params, tssMapping);
+		wait(self->rawFinishMovement(params, tssMapping));
 		if (!params.dataMovementComplete.isSet())
 			params.dataMovementComplete.send(Void());
 		return Void();
@@ -888,10 +888,14 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 	return Future<std::vector<ProcessData>>();
 }
 
-void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
+                                    MoveKeysParams params,
+                                    std::map<UID, StorageServerInterface> tssMapping) {
 	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
 	// will always finish without coroutine switch.
 	ASSERT(params.startMoveKeysParallelismLock->activePermits() == 0);
+	wait(params.startMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
+	state FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
@@ -920,13 +924,22 @@ void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, 
 		server.setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
 		server.signalFetchKeys(params.keys, randomRangeSize);
 	}
+	return Void();
 }
 
-void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
-                                           const std::map<UID, StorageServerInterface>& tssMapping) {
+Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
+                                                  std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawStartMovement(mgs, params, tssMapping);
+}
+
+ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
+                                     MoveKeysParams params,
+                                     std::map<UID, StorageServerInterface> tssMapping) {
 	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
 	// will always finish without coroutine switch.
 	ASSERT(params.finishMoveKeysParallelismLock->activePermits() == 0);
+	wait(params.finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
+	state FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
 
 	// get source and dest teams
 	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(params.keys);
@@ -953,4 +966,10 @@ void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 	}
 	mgs->shardMapping->finishMove(params.keys);
 	mgs->shardMapping->defineShard(params.keys); // coalesce for merge
+	return Void();
+}
+
+Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawFinishMovement(mgs, params, tssMapping);
 }
