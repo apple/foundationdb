@@ -634,7 +634,7 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0; // total storage
-	int64_t writeBytesPerKSecond = 0; // network bandwidth (average over 10s) == write bandwidth through any IO devices
+	int64_t writeBytesPerKSecond = 0; // bytes write to SQ
 
 	// FIXME: currently, iosPerKSecond is not used in DataDistribution calculations.
 	int64_t iosPerKSecond = 0;
@@ -1179,5 +1179,14 @@ struct StorageQueuingMetricsRequest {
 		serializer(ar, reply);
 	}
 };
+
+// Memory size for storing mutation in the mutation log and the versioned map.
+inline int mvccStorageBytes(int mutationBytes) {
+	// Why * 2:
+	// - 1 insertion into version map costs 2 nodes in avg;
+	// - The mutation will be stored in both mutation log and versioned map;
+	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
+	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
+}
 
 #endif

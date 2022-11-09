@@ -401,7 +401,8 @@ void MockStorageServer::clearRangeTotalBytes(KeyRangeRef const& range, int64_t b
 void MockStorageServer::notifyWriteMetrics(KeyRef const& key, int64_t size) {
 	// update write bandwidth and iops as mock the cost of writing a mutation
 	StorageMetrics s;
-	s.writeBytesPerKSecond = size + MutationRef::OVERHEAD_BYTES;
+	// FIXME: remove the / 2 and double the related knobs.
+	s.writeBytesPerKSecond = mvccStorageBytes(size) / 2;
 	s.iosPerKSecond = 1;
 	metrics.notify(key, s);
 }
@@ -1000,7 +1001,6 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 			// If sampled
 			ASSERT_EQ(res.first.get().bytes, testSize);
 			ASSERT_GT(res.first.get().writeBytesPerKSecond, 0);
-			ASSERT_GT(res.first.get().iosPerKSecond, 0);
 		}
 	}
 	return Void();

@@ -534,12 +534,8 @@ const int VERSION_OVERHEAD =
                                                                               // createNewVersion(version+1) ], 64b
                                                                               // overhead for map
 
-// Memory size for storing mutation in the mutation log and the versioned map.
 static int mvccStorageBytes(MutationRef const& m) {
-	// Why * 2:
-	// - 1 insertion into version map costs 2 nodes in avg;
-	// - The mutation will be stored in both mutation log and versioned map;
-	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 + m.totalSize() * 2;
+	return mvccStorageBytes(m.param1.size() + m.param2.size());
 }
 
 struct FetchInjectionInfo {
@@ -5616,7 +5612,8 @@ void applyMutation(StorageServer* self,
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
-	metrics.writeBytesPerKSecond = m.totalSize(); // comparable to counter.mutationBytes
+	// FIXME: remove the / 2 and double the related knobs.
+	metrics.writeBytesPerKSecond = mvccStorageBytes(m) / 2; // comparable to counter.bytesInput / 2
 	metrics.iosPerKSecond = 1;
 	self->metrics.notify(m.param1, metrics);
 
