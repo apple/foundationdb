@@ -82,7 +82,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);
 		// Create checkpoint.
 		state Transaction tr(cx);
-		state CheckpointFormat format = deterministicRandom()->coinflip() ? RocksDBColumnFamily : RocksDB;
+		state CheckpointFormat format = deterministicRandom()->coinflip() ? DataMoveRocksCF : RocksDB;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);

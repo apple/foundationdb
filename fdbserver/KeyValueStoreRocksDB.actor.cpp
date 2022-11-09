@@ -313,7 +313,7 @@ const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = "RocksDBReadPrefixGet"_sr;
 
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
-	if (checkpoint.getFormat() != RocksDBColumnFamily) {
+	if (checkpoint.getFormat() != DataMoveRocksCF) {
 		return metaData;
 	}
 
@@ -375,7 +375,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		liveFileMetaData.level = fileMetaData.level;
 		rocksCF.sstFiles.push_back(liveFileMetaData);
 	}
-	checkpoint->setFormat(RocksDBColumnFamily);
+	checkpoint->setFormat(DataMoveRocksCF);
 	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
 }
 
@@ -2142,7 +2142,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	// Delete a checkpoint.
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) override {
-		if (checkpoint.format == RocksDBColumnFamily) {
+		if (checkpoint.format == DataMoveRocksCF) {
 			RocksDBColumnFamilyCheckpoint rocksCF;
 			ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
 			reader.deserialize(rocksCF);
@@ -2232,7 +2232,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	res.ranges = a.request.ranges;
 	const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
-	if (a.request.format == RocksDBColumnFamily) {
+	if (a.request.format == DataMoveRocksCF) {
 		rocksdb::ExportImportFilesMetaData* pMetadata;
 		platform::eraseDirectoryRecursive(checkpointDir);
 		s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
@@ -2293,7 +2293,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 	}
 
 	rocksdb::Status status;
-	if (format == RocksDBColumnFamily) {
+	if (format == DataMoveRocksCF) {
 		ASSERT_EQ(a.checkpoints.size(), 1);
 		TraceEvent("RocksDBServeRestoreCF", id)
 		    .detail("Path", a.path)
@@ -2512,7 +2512,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	state std::string checkpointDir = cwd + "checkpoint";
 
 	CheckpointRequest request(
-	    latestVersion, { allKeys }, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
+	    latestVersion, { allKeys }, DataMoveRocksCF, deterministicRandom()->randomUniqueID(), checkpointDir);
 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	std::vector<CheckpointMetaData> checkpoints;

@@ -461,7 +461,7 @@ private:
 };
 
 Future<Void> RocksDBCFCheckpointReader::init(StringRef token) {
-	ASSERT_EQ(this->checkpoint_.getFormat(), RocksDBColumnFamily);
+	ASSERT_EQ(this->checkpoint_.getFormat(), DataMoveRocksCF);
 	const std::string name = token.toString();
 	this->offset_ = 0;
 	this->path_.clear();
@@ -757,7 +757,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
 
-	if (metaData->format == RocksDBColumnFamily) {
+	if (metaData->format == DataMoveRocksCF) {
 		state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
 		TraceEvent(SevDebug, "RocksDBCheckpointMetaData").detail("RocksCF", rocksCF.toString());
 
@@ -782,7 +782,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	state CheckpointFormat format = checkpoint.getFormat();
 	state std::unordered_set<std::string> dirs;
-	if (format == RocksDBColumnFamily) {
+	if (format == DataMoveRocksCF) {
 		RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 		TraceEvent(SevInfo, "DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
 		    .detail("CheckpointID", checkpoint.checkpointID)
@@ -832,7 +832,7 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 	int64_t totalBytes = 0;
 	for (const auto& checkpoint : checkpoints) {
 		const CheckpointFormat format = checkpoint.getFormat();
-		if (format == RocksDBColumnFamily) {
+		if (format == DataMoveRocksCF) {
 			// TODO: Returns the checkpoint size of a RocksDB Column Family.
 		} else if (format == RocksDB) {
 			auto rcp = getRocksCheckpoint(checkpoint);
@@ -847,7 +847,7 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	const CheckpointFormat format = checkpoint.getFormat();
-	if (format == RocksDBColumnFamily) {
+	if (format == DataMoveRocksCF) {
 		return new RocksDBCFCheckpointReader(checkpoint, logID);
 	} else if (format == RocksDB) {
 		return new RocksDBCheckpointReader(checkpoint, logID);

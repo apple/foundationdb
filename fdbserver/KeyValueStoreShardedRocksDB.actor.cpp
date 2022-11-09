@@ -4,19 +4,20 @@
 #include "fdbclient/SystemData.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include <rocksdb/c.h>
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/listener.h>
 #include <rocksdb/metadata.h>
 #include <rocksdb/options.h>
+#include <rocksdb/perf_context.h>
+#include <rocksdb/rate_limiter.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/utilities/checkpoint.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
-#include <rocksdb/rate_limiter.h>
-#include <rocksdb/perf_context.h>
-#include <rocksdb/c.h>
 #include <rocksdb/version.h>
 #if defined __has_include
 #if __has_include(<liburing.h>)
@@ -37,6 +38,7 @@
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
@@ -52,6 +54,7 @@ const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
 // TODO: move constants to a header file.
+const KeyRef persistVersion = "\xff\xffVersion"_sr;
 const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = "RocksDBStorage"_sr;
 const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = "RocksDBCommitLatency"_sr;
 const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = "RocksDBCommitAction"_sr;
@@ -154,6 +157,74 @@ struct ShardedRocksDBState {
 };
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
+
+rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
+	rocksdb::ExportImportFilesMetaData metaData;
+	if (checkpoint.getFormat() != DataMoveRocksCF) {
+		return metaData;
+	}
+
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+	metaData.db_comparator_name = rocksCF.dbComparatorName;
+
+	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
+		rocksdb::LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.file_number = fileMetaData.file_number;
+		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+		liveFileMetaData.largestkey = fileMetaData.largestkey;
+		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+		liveFileMetaData.num_entries = fileMetaData.num_entries;
+		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+		liveFileMetaData.level = fileMetaData.level;
+		metaData.files.push_back(liveFileMetaData);
+	}
+
+	return metaData;
+}
+
+void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData& metaData) {
+	RocksDBColumnFamilyCheckpoint rocksCF;
+	rocksCF.dbComparatorName = metaData.db_comparator_name;
+	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData.files) {
+		LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.file_number = fileMetaData.file_number;
+		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+		liveFileMetaData.largestkey = fileMetaData.largestkey;
+		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+		liveFileMetaData.num_entries = fileMetaData.num_entries;
+		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+		liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
+		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+		liveFileMetaData.level = fileMetaData.level;
+		rocksCF.sstFiles.push_back(liveFileMetaData);
+	}
+	checkpoint->setFormat(DataMoveRocksCF);
+	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+}
 
 const rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -796,6 +867,38 @@ public:
 		DataShard* shard = dataShardMap[key];
 		ASSERT(shard == nullptr || shard->range.contains(key));
 		return shard;
+	}
+
+	PhysicalShard* getMetaDataShard() {
+		auto it = physicalShards.find(METADATA_SHARD_ID);
+		ASSERT(it != physicalShards.end());
+		return it->second.get();
+	}
+
+	PhysicalShard* getPhysicalShardForAllRanges(std::vector<KeyRange> ranges) {
+		PhysicalShard* result = nullptr;
+		for (const auto& range : ranges) {
+			auto rangeIterator = this->dataShardMap.intersectingRanges(range);
+			for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
+				if (it.value() == nullptr || it.value()->physicalShard == nullptr) {
+					TraceEvent(SevWarn, "ShardedRocksDBRangeNotOnShard", logId).detail("Range", range);
+					return nullptr;
+				} else {
+					PhysicalShard* ps = it.value()->physicalShard;
+					if (result == nullptr) {
+						result = ps;
+					} else if (ps != result) {
+						TraceEvent(SevWarn, "ShardedRocksDBRangeOnMultipleShards", logId)
+						    .detail("Ranges", describe(ranges))
+						    .detail("PhysicalShard", result->id)
+						    .detail("SecondPhysicalShard", ps->id);
+						return nullptr;
+					}
+				}
+			}
+		}
+
+		return result;
 	}
 
 	std::vector<DataShard*> getDataShardsByRange(KeyRangeRef range) {
@@ -1968,6 +2071,102 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			TraceEvent(SevInfo, "ShardedRocksDB").detail("Method", "Close");
 			a.done.send(Void());
 		}
+
+		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
+			CheckpointAction(ShardManager* shardManager, const CheckpointRequest& request)
+			  : shardManager(shardManager), request(request) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			ShardManager* shardManager;
+			const CheckpointRequest request;
+			ThreadReturnPromise<CheckpointMetaData> reply;
+		};
+
+		void action(CheckpointAction& a) {
+			TraceEvent(SevInfo, "ShardedRocksDBServeCheckpointBegin", logId)
+			    .detail("Version", a.request.version)
+			    .detail("Ranges", describe(a.request.ranges))
+			    .detail("Format", static_cast<int>(a.request.format))
+			    .detail("CheckpointDir", a.request.checkpointDir);
+
+			PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.request.ranges);
+			if (ps == nullptr) {
+				a.reply.sendError(failed_to_create_checkpoint());
+				return;
+			}
+
+			rocksdb::Checkpoint* checkpoint = nullptr;
+			rocksdb::Status s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
+			if (!s.ok()) {
+				logRocksDBError(s, "Checkpoint");
+				a.reply.sendError(statusToError(s));
+				return;
+			}
+
+			rocksdb::PinnableSlice value;
+			rocksdb::ReadOptions readOptions = getReadOptions();
+			s = a.shardManager->getDb()->Get(
+			    readOptions, a.shardManager->getMetaDataShard()->cf, toSlice(persistVersion), &value);
+
+			if (!s.ok() && !s.IsNotFound()) {
+				logRocksDBError(s, "Checkpoint");
+				a.reply.sendError(statusToError(s));
+				return;
+			}
+
+			const Version version = s.IsNotFound()
+			                            ? latestVersion
+			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
+
+			ASSERT(a.request.version == version || a.request.version == latestVersion);
+			TraceEvent(SevDebug, "ShardedRocksDBServeCheckpointVersion", logId)
+			    .detail("CheckpointVersion", a.request.version)
+			    .detail("PersistVersion", version);
+
+			// TODO: set the range as the actual shard range.
+			CheckpointMetaData res(version, a.request.format, a.request.checkpointID);
+			res.ranges = a.request.ranges;
+			const std::string& checkpointDir = abspath(a.request.checkpointDir);
+
+			if (a.request.format == DataMoveRocksCF) {
+				rocksdb::ExportImportFilesMetaData* pMetadata;
+				platform::eraseDirectoryRecursive(checkpointDir);
+				s = checkpoint->ExportColumnFamily(ps->cf, checkpointDir, &pMetadata);
+				if (!s.ok()) {
+					logRocksDBError(s, "ExportColumnFamily");
+					a.reply.sendError(statusToError(s));
+					return;
+				}
+
+				populateMetaData(&res, *pMetadata);
+				delete pMetadata;
+				TraceEvent("ShardedRocksDBServeCheckpointSuccess", logId)
+				    .detail("CheckpointMetaData", res.toString())
+				    .detail("RocksDBCF", getRocksCF(res).toString());
+			} else {
+				if (checkpoint != nullptr) {
+					delete checkpoint;
+				}
+				throw not_implemented();
+			}
+
+			if (checkpoint != nullptr) {
+				delete checkpoint;
+			}
+			res.setState(CheckpointMetaData::Complete);
+			a.reply.send(res);
+		}
+		// struct RestoreAction : TypedAction<Writer, RestoreAction> {
+		// 	RestoreAction(const std::string& path, const std::vector<CheckpointMetaData>& checkpoints)
+		// 	  : path(path), checkpoints(checkpoints) {}
+
+		// 	double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+		// 	const std::string path;
+		// 	const std::vector<CheckpointMetaData> checkpoints;
+		// 	ThreadReturnPromise<Void> done;
+		// };
 	};
 
 	struct Reader : IThreadPoolReceiver {
@@ -2571,6 +2770,20 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return StorageBytes(free, total, live, free);
 	}
 
+	// Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
+	// 	auto a = new Writer::CheckpointAction(request);
+
+	// 	auto res = a->reply.getFuture();
+	// 	writeThread->post(a);
+	// 	return res;
+	// }
+
+	// Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) override {
+	// 	auto a = new Writer::RestoreAction(path, checkpoints);
+	// 	auto res = a->done.getFuture();
+	// 	writeThread->post(a);
+	// 	return res;
+	// }
 	std::vector<std::string> removeRange(KeyRangeRef range) override { return shardManager.removeRange(range); }
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) override {

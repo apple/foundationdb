@@ -553,10 +553,12 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 // each and every shards overlapping with `range`. Each checkpoint will be created at a random
 // storage server for each shard.
 // All checkpoint(s) will be created at the transaction's commit version.
-Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Transaction* tr, const std::vector<KeyRange>& ranges, CheckpointFormat format);
 
 // Same as above.
-Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format);
 
 // Gets checkpoint metadata for `keys` at the specific version, with the particular format.
 // One CheckpointMetaData will be returned for each distinctive shard.

@@ -8872,48 +8872,51 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 }
 
 ACTOR template <class T>
-static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointFormat format) {
+static Future<Void> createCheckpointImpl(T tr, const std::vector<KeyRange>& ranges, CheckpointFormat format) {
 	ASSERT(!tr->getTenant().present());
-	TraceEvent("CreateCheckpointTransactionBegin").detail("Range", range);
+	ASSERT(!ranges.empty());
+	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Range", describe(ranges));
 
-	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, range));
+	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, ranges[0]));
 	ASSERT(!keyServers.more);
 
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-	for (int i = 0; i < keyServers.size() - 1; ++i) {
-		KeyRangeRef shard(keyServers[i].key, keyServers[i + 1].key);
-		std::vector<UID> src;
-		std::vector<UID> dest;
-		decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+	if (format == DataMoveRocksCF) {
+			std::vector<UID> src;
+			std::vector<UID> dest;
+			decodeKeyServersValue(UIDtoTagMap, keyServers[0].value, src, dest);
 
-		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
-		// An alternative is to choose a healthy replica.
-		const UID checkpointID = deterministicRandom()->randomUniqueID();
-		for (int idx = 0; idx < src.size(); ++idx) {
-			CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
-			checkpoint.setState(CheckpointMetaData::Pending);
-			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
+			// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
+			// An alternative is to choose a healthy replica.
+			const UID checkpointID = deterministicRandom()->randomUniqueID();
+			for (int idx = 0; idx < src.size(); ++idx) {
+				CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
+				checkpoint.setState(CheckpointMetaData::Pending);
+				tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
+			}
+
+			TraceEvent("CreateCheckpointTransactionShard")
+			    .detail("Shard", shard)
+			    .detail("SrcServers", describe(src))
+			    .detail("ServerSelected", describe(src))
+			    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
+			    .detail("ReadVersion", tr->getReadVersion().get());
 		}
-
-		TraceEvent("CreateCheckpointTransactionShard")
-		    .detail("Shard", shard)
-		    .detail("SrcServers", describe(src))
-		    .detail("ServerSelected", describe(src))
-		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
-		    .detail("ReadVersion", tr->getReadVersion().get());
 	}
 
 	return Void();
 }
 
-Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format) {
-	return holdWhile(tr, createCheckpointImpl(tr, range, format));
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format) {
+	return holdWhile(tr, createCheckpointImpl(tr, ranges, format));
 }
 
-Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format) {
-	return createCheckpointImpl(tr, range, format);
+Future<Void> createCheckpoint(Transaction* tr, const std::vector<KeyRange>& ranges, CheckpointFormat format) {
+	return createCheckpointImpl(tr, ranges, format);
 }
 
 // Gets CheckpointMetaData of the specific keyrange, version and format from one of the storage servers, if none of the

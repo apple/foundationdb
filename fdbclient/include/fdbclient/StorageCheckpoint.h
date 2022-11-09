@@ -28,7 +28,7 @@
 enum CheckpointFormat {
 	InvalidFormat = 0,
 	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
-	RocksDBColumnFamily = 1,
+	DataMoveRocksCF = 1,
 	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
 	RocksDB = 2,
 };
@@ -59,6 +59,9 @@ struct CheckpointMetaData {
 	UID dataMoveId;
 
 	CheckpointMetaData() = default;
+	CheckpointMetaData(const std::vector<KeyRange>& ranges, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
+	  : version(invalidVersion), ranges(ranges), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
+	    referenceCount(0), gcTime(0) {}
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
 	  : version(invalidVersion), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
 	    referenceCount(0), gcTime(0) {
