@@ -168,7 +168,6 @@ template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
 	bool more;
-	Optional<KeyRef> readThrough;
 };
 
 // Convenient read/write access to a single value of type T stored at key
@@ -369,7 +368,6 @@ public:
 				    rangeResult.results.push_back(PairType(key, val));
 			    }
 			    rangeResult.more = kvs.more;
-			    rangeResult.readThrough = kvs.readThrough;
 			    return rangeResult;
 		    }));
 	}
@@ -575,7 +573,6 @@ public:
 				    rangeResult.results.push_back(PairType(key, val));
 			    }
 			    rangeResult.more = kvs.more;
-			    rangeResult.readThrough = kvs.readThrough;
 			    return rangeResult;
 		    }));
 	}
@@ -663,7 +660,6 @@ public:
 				    rangeResult.results.push_back(Codec::unpack(kvs[i].key.removePrefix(prefix)));
 			    }
 			    rangeResult.more = kvs.more;
-			    rangeResult.readThrough = kvs.readThrough;
 			    return rangeResult;
 		    }));
 	}

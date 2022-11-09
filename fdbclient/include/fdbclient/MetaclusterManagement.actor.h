@@ -1589,7 +1589,8 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 			state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
-			    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit));
+			    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
+			        tr, begin, end, std::max(limit + offset, 100)));
 			state std::vector<std::pair<TenantName, TenantMapEntry>> filterResults;
 			state int count = 0;
 			loop {
@@ -1608,13 +1609,10 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
 				if (!results.more) {
 					return filterResults;
 				}
-				if (results.readThrough.present()) {
-					begin = results.readThrough.get();
-				} else {
-					begin = keyAfter(results.results.back().first);
-				}
+				begin = keyAfter(results.results.back().first);
 				wait(store(results,
-				           ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit)));
+				           ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
+				               tr, begin, end, std::max(limit + offset, 100))));
 			}
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
