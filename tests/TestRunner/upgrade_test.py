@@ -207,6 +207,7 @@ class UpgradeTest:
                 str(TRANSACTION_RETRY_LIMIT),
                 "--stats-interval",
                 str(TESTER_STATS_INTERVAL_SEC * 1000),
+                "--retain-client-lib-copies",
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
