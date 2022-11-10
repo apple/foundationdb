@@ -4774,7 +4774,9 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
 		// Use the mappedKey as the prefix of the range query.
 		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
 		if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
-		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
+		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY || matchIndex == MATCH_INDEX_ALL ||
+		     isBoundary)) {
+			// need to keep index for the boundary, so that caller can use it as a continuation.
 			kvm->key = it->key;
 			kvm->value = it->value;
 		}
@@ -4789,16 +4791,30 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
 	return Void();
 }
 
+int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
+	auto& reqAndResult = mappedKeyValue.reqAndResult;
+	int bytes = 0;
+	if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
+		auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+		bytes = getValue.expectedSize();
+	} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
+		auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+		bytes = getRange.result.expectedSize();
+	} else {
+		throw internal_error();
+	}
+	return bytes;
+}
+
 ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    GetKeyValuesReply input,
                                                    StringRef mapper,
                                                    // To provide span context, tags, debug ID to underlying lookups.
                                                    GetMappedKeyValuesRequest* pOriginalReq,
-                                                   Optional<Key> tenantPrefix,
-                                                   int matchIndex) {
+                                                   int matchIndex,
+                                                   int* remainingLimitBytes) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
-	result.more = input.more;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);
 
@@ -4823,26 +4839,21 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state std::vector<MappedKeyValueRef> kvms(k);
 	state std::vector<Future<Void>> subqueries;
 	state int offset = 0;
+	state int cnt = 0;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.BeforeLoop");
-	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+
+	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
 			MappedKeyValueRef* kvm = &kvms[i];
 			bool isBoundary = (i + offset) == 0 || (i + offset) == sz - 1;
-			// need to keep the boundary, so that caller can use it as a continuation.
-			if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
-				kvm->key = it->key;
-				kvm->value = it->value;
-			} else {
-				// Clear key value to the default.
-				kvm->key = ""_sr;
-				kvm->value = ""_sr;
-			}
-
+			// Clear key value to the default.
+			kvm->key = ""_sr;
+			kvm->value = ""_sr;
 			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());
@@ -4868,9 +4879,22 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			                      "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			// since we always read the index, so always consider the index size
+			int indexSize = sizeof(KeyValueRef) + input.data[i + offset].expectedSize();
+			int size = indexSize + getMappedKeyValueSize(kvms[i]);
+			*remainingLimitBytes -= size;
+			++cnt;
 			result.data.push_back(result.arena, kvms[i]);
+			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes <= 0) {
+				// store index for this ending boundary, if it is already an ending boundary, no-op
+				result.data.back().key = input.data[i + offset].key;
+				result.data.back().value = input.data[i + offset].value;
+				break;
+			}
 		}
 	}
+
+	result.more = input.more || cnt < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
@@ -5125,12 +5149,15 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			req.reply.send(none);
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
-
+			// create a temporary byte limit for index fetching ONLY, this should be excessive
+			// because readRange is cheap when reading additional bytes
+			const double fraction = 0.8;
+			state int bytesForPrimary = remainingLimitBytes * fraction;
 			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
 			                                                     version,
 			                                                     KeyRangeRef(begin, end),
 			                                                     req.limit,
-			                                                     &remainingLimitBytes,
+			                                                     &bytesForPrimary,
 			                                                     span.context,
 			                                                     req.options,
 			                                                     tenantPrefix));
@@ -5144,9 +5171,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix, req.matchIndex));
+				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, req.matchIndex, &remainingLimitBytes));
 				r = _r;
 			} catch (Error& e) {
+				// TODO: cannot allow txn_too_old to reach here, need to handle it gracefully, add test
 				TraceEvent("MapError").error(e);
 				throw;
 			}
