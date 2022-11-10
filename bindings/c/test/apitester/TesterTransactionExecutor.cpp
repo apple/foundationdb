@@ -81,7 +81,8 @@ public:
 	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
 	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName),
-	    transactional(transactional), restartOnTimeout(restartOnTimeout) {
+	    transactional(transactional), restartOnTimeout(restartOnTimeout),
+	    selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		if (databaseCreateErrorInjected) {
@@ -156,6 +157,15 @@ public:
 		cleanUp();
 		ASSERT(txState == TxState::DONE);
 		contAfterDone(fdb::Error::success());
+	}
+
+	void makeSelfConflicting() override {
+		ASSERT(transactional);
+		if (restartOnTimeout) {
+			auto transaction = tx();
+			transaction.addReadConflictRange(selfConflictingKey, selfConflictingKey + fdb::Key(1, '\x00'));
+			transaction.addWriteConflictRange(selfConflictingKey, selfConflictingKey + fdb::Key(1, '\x00'));
+		}
 	}
 
 	std::string getBGBasePath() override { return bgBasePath; }
@@ -373,6 +383,9 @@ protected:
 
 	// Specifies whether the operation is transactional
 	const bool transactional;
+
+	// A randomly generated key for making transaction self-conflicting
+	const fdb::Key selfConflictingKey;
 };
 
 /**

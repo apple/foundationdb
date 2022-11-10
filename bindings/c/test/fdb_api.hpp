@@ -663,11 +663,17 @@ public:
 		native::fdb_transaction_clear_range(tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
-	void addReadConflictRange(KeyRef begin, KeyRef end) {
+	void addConflictRange(KeyRef begin, KeyRef end, FDBConflictRangeType rangeType) {
 		if (auto err = Error(native::fdb_transaction_add_conflict_range(
-		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), FDB_CONFLICT_RANGE_TYPE_READ))) {
+		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeType))) {
 			throwError("fdb_transaction_add_conflict_range returned error: ", err);
 		}
+	}
+
+	void addReadConflictRange(KeyRef begin, KeyRef end) { addConflictRange(begin, end, FDB_CONFLICT_RANGE_TYPE_READ); }
+
+	void addWriteConflictRange(KeyRef begin, KeyRef end) {
+		addConflictRange(begin, end, FDB_CONFLICT_RANGE_TYPE_WRITE);
 	}
 };
 
