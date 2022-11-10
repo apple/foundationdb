@@ -1279,9 +1279,9 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		ASSERT(snapshotVersion < version);
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
-		if (snapshotF.cipherKeysMeta.present()) {
-			ASSERT(bwData->isEncryptionEnabled);
-
+		if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
+			ASSERT(snapshotF.cipherKeysMeta.present());
+			CODE_PROBE(true, "fetching cipher keys for blob snapshot file");
 			BlobGranuleCipherKeysCtx keysCtx =
 			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
 			snapCipherKeysCtx = std::move(keysCtx);
@@ -1307,9 +1307,9 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 			deltaF = files.deltaFiles[deltaIdx];
 
-			if (deltaF.cipherKeysMeta.present()) {
-				ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
-
+			if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
+				ASSERT(deltaF.cipherKeysMeta.present());
+				CODE_PROBE(true, "fetching cipher keys for delta file");
 				BlobGranuleCipherKeysCtx keysCtx =
 				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
 				deltaCipherKeysCtx = std::move(keysCtx);
@@ -3760,10 +3760,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (encrypted) {
-							ASSERT(bwData->isEncryptionEnabled);
+						if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
+							ASSERT(encrypted);
 							ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
-
+							CODE_PROBE(true, "fetching cipher keys from meta ref for snapshot file");
 							snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
 							    bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
 						}
@@ -3778,10 +3778,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (encrypted) {
-							ASSERT(bwData->isEncryptionEnabled);
+						if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
+							ASSERT(encrypted);
 							ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
-
+							CODE_PROBE(true, "fetching cipher keys from meta ref for delta files");
 							deltaCipherKeysCtxs.emplace(
 							    deltaIdx,
 							    getGranuleCipherKeysFromKeysMetaRef(
