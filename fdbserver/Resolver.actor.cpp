@@ -282,7 +282,6 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 		reply.writtenTags = req.writtenTags;
-
 		std::vector<int> commitList;
 		std::vector<int> tooOldList;
 
@@ -441,7 +440,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChanged || reply.privateMutationCount) {
+				if (shardChanged || toCommit->getAllMessages().size() > 1) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}
