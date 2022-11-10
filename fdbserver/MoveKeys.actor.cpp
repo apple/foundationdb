@@ -2476,7 +2476,8 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	return Void();
 }
 
-Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+Future<Void> rawStartMovement(Database occ,
+                              const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		return startMoveShards(std::move(occ),
 		                       params.dataMoveId,
@@ -2499,7 +2500,7 @@ Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID
 }
 
 Future<Void> rawFinishMovement(Database occ,
-                               MoveKeysParams& params,
+                               const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		return finishMoveShards(std::move(occ),

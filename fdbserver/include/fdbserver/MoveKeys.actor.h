@@ -86,10 +86,11 @@ void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<Stor
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
-Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+Future<Void> rawStartMovement(Database occ,
+                              const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
 Future<Void> rawFinishMovement(Database occ,
-                               MoveKeysParams& params,
+                               const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping);
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,

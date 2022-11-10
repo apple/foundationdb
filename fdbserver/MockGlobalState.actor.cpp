@@ -166,6 +166,7 @@ bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardS
 
 bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) {
 	auto ranges = serverKeys.intersectingRanges(range);
+	TraceEvent("AllShardStatusIn", id).detail("RangesEmpty", ranges.empty()).detail("Range", range);
 	ASSERT(!ranges.empty()); // at least the range is allKeys
 
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
@@ -177,7 +178,15 @@ bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::se
 
 void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus status, bool restrictSize) {
 	auto ranges = serverKeys.intersectingRanges(range);
-	ASSERT(!ranges.empty());
+	TraceEvent("SetShardStatus", id).detail("KeyRange", range).detail("Status", status);
+
+	if (ranges.empty()) {
+		CODE_PROBE(true, "new shard is adding to server");
+		serverKeys.insert(range, ShardInfo{ status, 0 });
+		return;
+	}
+
+	// change the old status
 	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
 		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
@@ -502,6 +511,11 @@ bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef sh
 }
 
 bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shard) {
+	TraceEvent(SevDebug, "ServerIsDestForShard")
+	    .detail("ServerId", serverId)
+	    .detail("Keys", shard)
+	    .detail("Contains", allServers.count(serverId));
+
 	if (!allServers.count(serverId))
 		return false;
 

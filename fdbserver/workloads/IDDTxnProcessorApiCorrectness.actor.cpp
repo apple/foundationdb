@@ -260,6 +260,12 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return Void();
 	}
 
+	void verifyServerKeyDest(MoveKeysParams& params) {
+		// check destination servers
+		for(auto& id: params.destinationTeam) {
+			ASSERT(mgs->serverIsDestForShard(id, params.keys));
+		}
+	}
 	ACTOR static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {
 		state TraceInterval relocateShardInterval("RelocateShard_TestRawMovementApi");
 		state FlowLock fl1(1);
@@ -282,6 +288,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				wait(self->mock->testRawStartMovement(params, emptyTssMapping));
 				wait(self->real->testRawStartMovement(params, emptyTssMapping));
 
+				self->verifyServerKeyDest(params);
 				// test finish or started but cancelled movement
 				if (self->testStartOnly || deterministicRandom()->coinflip()) {
 					CODE_PROBE(true, "RawMovementApi partial started");
@@ -344,13 +351,15 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		params.startMoveKeysParallelismLock = &fl1;
 		params.finishMoveKeysParallelismLock = &fl2;
 		params.relocationIntervalId = relocateShardInterval.pairID;
-		TraceEvent(SevDebug, relocateShardInterval.begin(), relocateShardInterval.pairID);
+		TraceEvent(SevDebug, relocateShardInterval.begin(), relocateShardInterval.pairID)
+		    .detail("Key", params.keys)
+		    .detail("Dest", params.destinationTeam);
 
 		loop {
 			params.dataMovementComplete.reset();
 			wait(store(params.lock, self->real->takeMoveKeysLock(UID())));
 			try {
-				self->mock->moveKeys(params);
+				wait(self->mock->moveKeys(params));
 				wait(self->real->moveKeys(params));
 				break;
 			} catch (Error& e) {
@@ -375,6 +384,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		TraceEvent(SevDebug, relocateShardInterval.end(), relocateShardInterval.pairID);
 		return Void();
 	}
+
 	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {
 		state double lastTime = now();
 		state int choice = 0;

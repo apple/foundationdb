@@ -669,12 +669,12 @@ Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 	return ::getWorkers(cx);
 }
 
-Future<Void> DDTxnProcessor::rawStartMovement(MoveKeysParams& params,
+Future<Void> DDTxnProcessor::rawStartMovement(const MoveKeysParams& params,
                                               std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawStartMovement(cx, params, tssMapping);
 }
 
-Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+Future<Void> DDTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
                                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawFinishMovement(cx, params, tssMapping);
 }
@@ -927,7 +927,7 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	return Void();
 }
 
-Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
+Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
                                                   std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawStartMovement(mgs, params, tssMapping);
 }
@@ -969,7 +969,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	return Void();
 }
 
-Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+Future<Void> DDMockTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
                                                    const std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawFinishMovement(mgs, params, tssMapping);
 }
