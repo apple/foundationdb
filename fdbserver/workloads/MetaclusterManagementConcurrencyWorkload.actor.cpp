@@ -146,7 +146,6 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> listClusters(MetaclusterManagementConcurrencyWorkload* self) {
-		state UID debugId = nondeterministicRandom()->randomUniqueID();
 		state ClusterName clusterName1 = self->chooseClusterName();
 		state ClusterName clusterName2 = self->chooseClusterName();
 		state int limit = deterministicRandom()->randomInt(1, self->dataDbs.size() + 1);
@@ -156,7 +155,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			ASSERT(clusterName1 <= clusterName2);
 		} catch (Error& e) {
 			if (e.code() != error_code_inverted_range) {
-				TraceEvent(SevError, "ListClusterFailure", debugId)
+				TraceEvent(SevError, "ListClusterFailure")
 				    .error(e)
 				    .detail("ClusterName1", clusterName1)
 				    .detail("ClusterName2", clusterName2);
@@ -189,7 +188,6 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	                                                              Optional<int64_t> numTenantGroups,
 	                                                              Optional<ClusterConnectionString> connectionString) {
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
-		state UID debugId = nondeterministicRandom()->randomUniqueID();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
