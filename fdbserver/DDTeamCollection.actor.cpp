@@ -21,6 +21,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <climits>
 
 FDB_DEFINE_BOOLEAN_PARAM(IsPrimary);
 FDB_DEFINE_BOOLEAN_PARAM(IsInitialTeam);
@@ -554,6 +555,14 @@ public:
 			state int teamsToBuild;
 			teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
 
+			if (teamCount == 0 && teamsToBuild == 0 && SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0) {
+				// Use DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0 as the feature flag: Set to 0 to disable it
+				TraceEvent(SevWarnAlways, "BuildServerTeamsHaveTooManyUnhealthyTeams")
+				    .detail("Hint", "Build teams may stuck and prevent DD from relocating data")
+				    .detail("BuildExtraServerTeamsOverride", SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE);
+				teamsToBuild = SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE;
+			}
+
 			TraceEvent("BuildTeamsBegin", self->distributorId)
 			    .detail("TeamsToBuild", teamsToBuild)
 			    .detail("DesiredTeams", desiredTeams)
@@ -562,7 +571,8 @@ public:
 			    .detail("PerpetualWigglingTeams", wigglingTeams)
 			    .detail("UniqueMachines", uniqueMachines)
 			    .detail("TeamSize", self->configuration.storageTeamSize)
-			    .detail("Servers", serverCount)
+			    .detail("Servers", self->server_info.size())
+			    .detail("HealthyServers", serverCount)
 			    .detail("CurrentTrackedServerTeams", self->teams.size())
 			    .detail("HealthyTeamCount", teamCount)
 			    .detail("TotalTeamCount", totalTeamCount)
@@ -619,6 +629,10 @@ public:
 			}
 		} else {
 			self->lastBuildTeamsFailed = true;
+			TraceEvent(SevWarnAlways, "BuildTeamsNotEnoughUniqueMachines", self->distributorId)
+			    .detail("Primary", self->primary)
+			    .detail("UniqueMachines", uniqueMachines)
+			    .detail("Replication", self->configuration.storageTeamSize);
 		}
 
 		self->evaluateTeamQuality();
@@ -3109,10 +3123,11 @@ public:
 				server = server_info.begin();
 				for (i = 0; i < server_info.size(); i++) {
 					const UID& uid = server->first;
-
 					TraceEvent e("ServerStatus", self->getDistributorId());
 					e.detail("ServerUID", uid)
+					    .detail("ServerInfoIndex", i)
 					    .detail("MachineIsValid", server_info[uid]->machine.isValid())
+					    .detail("IsMachineHealthy", self->isMachineHealthy(server_info[uid]->machine))
 					    .detail("MachineTeamSize",
 					            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size()
 					                                                : -1)
@@ -3156,8 +3171,9 @@ public:
 				state bool isMachineHealthy = false;
 				for (i = 0; i < machine_info.size(); i++) {
 					Reference<TCMachineInfo> _machine = machine->second;
-					if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
-					    _machine->serversOnMachine.empty()) {
+					bool machineIDFound = machine_info.find(_machine->machineID) != machine_info.end();
+					bool zeroHealthyServersOnMachine = true;
+					if (!_machine.isValid() || !machineIDFound || _machine->serversOnMachine.empty()) {
 						isMachineHealthy = false;
 					}
 
@@ -3169,6 +3185,7 @@ public:
 						auto it = server_status.find(server->getId());
 						if (it != server_status.end() && !it->second.isUnhealthy()) {
 							isMachineHealthy = true;
+							zeroHealthyServersOnMachine = false;
 						}
 					}
 
@@ -3176,6 +3193,9 @@ public:
 					TraceEvent("MachineInfo", self->getDistributorId())
 					    .detail("MachineInfoIndex", i)
 					    .detail("Healthy", isMachineHealthy)
+					    .detail("MachineIDFound", machineIDFound)
+					    .detail("ZeroServersOnMachine", _machine->serversOnMachine.empty())
+					    .detail("ZeroHealthyServersOnMachine", zeroHealthyServersOnMachine)
 					    .detail("MachineID", machine->first.contents().toString())
 					    .detail("MachineTeamOwned", machine->second->machineTeams.size())
 					    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
@@ -3267,21 +3287,25 @@ void DDTeamCollection::traceServerInfo() const {
 	int i = 0;
 
 	TraceEvent("ServerInfo", distributorId).detail("Size", server_info.size());
-	for (auto& server : server_info) {
+	for (auto& [serverID, server] : server_info) {
 		TraceEvent("ServerInfo", distributorId)
 		    .detail("ServerInfoIndex", i++)
-		    .detail("ServerID", server.first.toString())
-		    .detail("ServerTeamOwned", server.second->getTeams().size())
-		    .detail("MachineID", server.second->machine->machineID.contents().toString())
-		    .detail("StoreType", server.second->getStoreType().toString())
-		    .detail("InDesiredDC", server.second->isInDesiredDC());
+		    .detail("ServerID", serverID.toString())
+		    .detail("ServerTeamOwned", server->getTeams().size())
+		    .detail("MachineID", server->machine->machineID.contents().toString())
+		    .detail("StoreType", server->getStoreType().toString())
+		    .detail("InDesiredDC", server->isInDesiredDC());
 	}
+	i = 0;
 	for (auto& server : server_info) {
-		const UID& uid = server.first;
+		const UID& serverID = server.first;
+		const ServerStatus& status = server_status.get(serverID);
 		TraceEvent("ServerStatus", distributorId)
-		    .detail("ServerID", uid)
-		    .detail("Healthy", !server_status.get(uid).isUnhealthy())
-		    .detail("MachineIsValid", get(server_info, uid)->machine.isValid())
+		    .detail("ServerInfoIndex", i++)
+		    .detail("ServerID", serverID)
+		    .detail("Healthy", !status.isUnhealthy())
+		    .detail("StatusString", status.toString())
+		    .detail("MachineIsValid", get(server_info, serverID)->machine.isValid())
 		    .detail("MachineTeamSize",
 		            get(server_info, uid)->machine.isValid() ? get(server_info, uid)->machine->machineTeams.size()
 		                                                     : -1);
@@ -4022,6 +4046,7 @@ void DDTeamCollection::traceAllInfo(bool shouldPrint) const {
 		}
 	}
 
+	// TODO: flush trace log to avoid trace buffer overflow when DD has too many servers and teams
 	TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);
 	traceConfigInfo();
 	traceServerInfo();
@@ -4190,10 +4215,13 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			addMachineTeam(machines);
 			addedMachineTeams++;
 		} else {
-			traceAllInfo(true);
+			// When too many teams exist in simulation, traceAllInfo will buffer too many trace logs before
+			// trace has a chance to flush its buffer, which causes assertion failure.
+			traceAllInfo(g_network->isSimulated() ? false : true);
 			TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 			    .detail("Primary", primary)
-			    .detail("Reason", "Unable to make desired machine Teams");
+			    .detail("Reason", "Unable to make desired machine Teams")
+			    .detail("Hint", "Check TraceAllInfo event");
 			lastBuildTeamsFailed = true;
 			break;
 		}
@@ -4482,13 +4510,34 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 	// machineTeamsToBuild mimics how the teamsToBuild is calculated in buildTeams()
 	int machineTeamsToBuild =
 	    std::max(0, std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount));
+	if (healthyMachineTeamCount == 0 && machineTeamsToBuild == 0 && SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0) {
+		// Use DD_BUILD_EXTRA_TEAMS_OVERRIDE > 0 as the feature flag: Set to 0 to disable it
+		TraceEvent(SevWarnAlways, "BuildMachineTeamsHaveTooManyUnhealthyMachineTeams")
+		    .detail("Hint", "Build teams may stuck and prevent DD from relocating data")
+		    .detail("BuildExtraMachineTeamsOverride", SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE);
+		machineTeamsToBuild = SERVER_KNOBS->DD_BUILD_EXTRA_TEAMS_OVERRIDE;
+	}
+	if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+		// Test when the system has lots of unhealthy machine teams, which may prevent TC from building new teams.
+		// The scenario creates a deadlock situation that DD cannot relocate data.
+		int totalMachineTeams = nChooseK(machine_info.size(), configuration.storageTeamSize);
+		TraceEvent("BuildMachineTeams")
+		    .detail("Primary", primary)
+		    .detail("CalculatedMachineTeamsToBuild", machineTeamsToBuild)
+		    .detail("OverwriteMachineTeamsToBuildForTesting", totalMachineTeams);
+
+		machineTeamsToBuild = totalMachineTeams;
+	}
 
 	{
 		TraceEvent te("BuildMachineTeams");
-		te.detail("TotalHealthyMachine", totalHealthyMachineCount)
+		te.detail("Primary", primary)
+		    .detail("TotalMachines", machine_info.size())
+		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
 		    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
 		    .detail("DesiredMachineTeams", desiredMachineTeams)
 		    .detail("MaxMachineTeams", maxMachineTeams)
+		    .detail("TotalMachineTeams", totalMachineTeamCount)
 		    .detail("MachineTeamsToBuild", machineTeamsToBuild);
 		// Pre-build all machine teams until we have the desired number of machine teams
 		if (machineTeamsToBuild > 0 || notEnoughMachineTeamsForAMachine()) {
@@ -4791,6 +4840,7 @@ Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCSer
 		machineInfo->serversOnMachine.push_back(server);
 	}
 	server->machine = machineInfo;
+	ASSERT(machineInfo->machineID == machine_id); // invariant for TC to work
 
 	return machineInfo;
 }
