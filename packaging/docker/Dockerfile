@@ -178,7 +178,7 @@ RUN yum -y install \
     rm -rf /var/cache/yum
 
 WORKDIR /tmp
-RUN curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/amd64/kubectl -o kubectl && \
+RUN NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/amd64/kubectl -o kubectl && \
     echo "860c3d37a5979491895767e7332404d28dc0d7797c7673c33df30ca80e215a07  kubectl" > kubectl.txt && \
     sha256sum --quiet -c kubectl.txt && \
     mv kubectl /usr/local/bin/kubectl && \

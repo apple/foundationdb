@@ -42,6 +42,7 @@ public:
 	int numClients;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	TestSpec testSpec;
+	bool retainClientLibCopies = false;
 };
 
 } // namespace FdbApiTester

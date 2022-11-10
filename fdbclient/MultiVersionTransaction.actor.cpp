@@ -2134,6 +2134,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		// multiple client threads are not supported on windows.
 		threadCount = extractIntOption(value, 1, 1);
 #endif
+	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
+		validateOption(value, false, true);
+		retainClientLibCopies = true;
 	} else {
 		forwardOption = true;
 	}
@@ -2177,10 +2180,7 @@ void MultiVersionApi::setupNetwork() {
 			if (externalClients.count(filename) == 0) {
 				externalClients[filename] = {};
 				for (const auto& tmp : copyExternalLibraryPerThread(path)) {
-					bool unlinkOnLoad = tmp.second;
-					if (!CLIENT_KNOBS->UNLINKONLOAD_FDBCLIB) {
-						unlinkOnLoad = false;
-					}
+					bool unlinkOnLoad = tmp.second && !retainClientLibCopies;
 					externalClients[filename].push_back(Reference<ClientInfo>(
 					    new ClientInfo(new DLApi(tmp.first, unlinkOnLoad /*unlink on load*/), path)));
 				}
@@ -2513,7 +2513,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), envOptionsLoaded(false) {}
+    bypassMultiClientApi(false), externalClient(false), retainClientLibCopies(false), apiVersion(0), threadCount(0),
+    envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
