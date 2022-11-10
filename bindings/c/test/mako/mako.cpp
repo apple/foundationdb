@@ -458,14 +458,11 @@ int populate(Database db,
 	return 0;
 }
 
-void updateErrorStatsRunMode(ThreadStatistics& stats, const Arguments& args, fdb::Error err, int op) {
+void updateErrorStatsRunMode(ThreadStatistics& stats, fdb::Error err, int op) {
 	if (err) {
 		if (err.is(1020 /*not_commited*/)) {
 			stats.incrConflictCount();
 		} else if (err.is(1031 /*timeout*/)) {
-			if (args.transaction_timeout == 0) {
-				stats.incrErrorCount(op);
-			}
 			stats.incrTimeoutCount(op);
 		} else {
 			stats.incrErrorCount(op);
@@ -503,7 +500,7 @@ transaction_begin:
 			} else {
 				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
 			}
-			updateErrorStatsRunMode(stats, args, f.error(), op);
+			updateErrorStatsRunMode(stats, f.error(), op);
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
 			postStepFn(f, tx, args, key1, key2, val);
@@ -548,7 +545,7 @@ transaction_begin:
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
 		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.transaction_timeout > 0);
-		updateErrorStatsRunMode(stats, args, f.error(), OP_COMMIT);
+		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
 		if (rc == FutureRC::OK) {

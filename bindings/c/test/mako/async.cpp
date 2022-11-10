@@ -125,9 +125,7 @@ repeat_immediate_steps:
 				postStepFn(f, tx, args, key1, key2, val);
 			if (iter.stepKind() != StepKind::ON_ERROR) {
 				if (auto err = f.error()) {
-					logr.printWithLogLevel(err.retryable() || (args.transaction_timeout > 0 && err.is(1031 /*timeout*/))
-					                           ? VERBOSE_WARN
-					                           : VERBOSE_NONE,
+					logr.printWithLogLevel(isExpectedError(err) ? VERBOSE_WARN : VERBOSE_NONE,
 					                       "ERROR",
 					                       "{}:{} returned '{}'",
 					                       iter.opName(),
@@ -194,9 +192,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		tx.commit().then([this, state = shared_from_this()](Future f) {
 			if (auto err = f.error()) {
 				// commit had errors
-				logr.printWithLogLevel(err.retryable() || (args.transaction_timeout > 0 && err.is(1031 /*timeout*/))
-				                           ? VERBOSE_WARN
-				                           : VERBOSE_NONE,
+				logr.printWithLogLevel(isExpectedError(err) ? VERBOSE_WARN : VERBOSE_NONE,
 				                       "ERROR",
 				                       "Post-iteration commit returned error: {}",
 				                       err.what());
@@ -254,14 +250,14 @@ void ResumableStateForRunWorkload::updateErrorStats(fdb::Error err, int op) {
 		if (err.is(1020 /*not_commited*/)) {
 			stats.incrConflictCount();
 		} else if (err.is(1031 /*timeout*/)) {
-			if (args.transaction_timeout == 0) {
-				stats.incrErrorCount(op);
-			}
 			stats.incrTimeoutCount(op);
 		} else {
 			stats.incrErrorCount(op);
 		}
 	}
+}
+bool ResumableStateForRunWorkload::isExpectedError(fdb::Error err) {
+	return err.retryable() || (args.transaction_timeout > 0 && err.is(1031 /*timeout*/));
 }
 
 } // namespace mako

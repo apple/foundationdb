@@ -51,7 +51,7 @@ force_inline FutureRC
 handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step, bool timeouts_expected = false) {
 	if (auto err = f.error()) {
 		assert(!(err.retryable()));
-		logr.printWithLogLevel(err.is(1031 /*timeout*/) && timeouts_expected ? VERBOSE_WARN : VERBOSE_DEFAULT,
+		logr.printWithLogLevel(err.is(1031 /*timeout*/) && timeouts_expected ? VERBOSE_WARN : VERBOSE_NONE,
 		                       "ERROR",
 		                       "Unretryable error '{}' found at on_error(), step: {}",
 		                       err.what(),
@@ -86,7 +86,7 @@ waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step, b
 		return FutureRC::OK;
 	}
 	logr.printWithLogLevel(((err.is(1031 /*timeout*/) && timeouts_expected) || err.retryable()) ? VERBOSE_WARN
-	                                                                                            : VERBOSE_DEFAULT,
+	                                                                                            : VERBOSE_NONE,
 	                       "ERROR",
 	                       "step {} returned '{}'",
 	                       step,
