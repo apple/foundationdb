@@ -111,3 +111,10 @@ extension FutureStreamCInt: _FlowFutureStreamOps {
         }
     }
 }
+
+public final class _Box<Value> {
+    let value: Value
+    init(_ value: Value) {
+        self.value = value
+    }
+}
