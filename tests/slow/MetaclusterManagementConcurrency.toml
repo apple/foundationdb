@@ -1,6 +1,6 @@
 [configuration]
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = ['optional', 'required']
 allowCreatingTenants = false
 extraDatabaseMode = 'Multiple'
 extraDatabaseCount = 5
@@ -13,4 +13,4 @@ runSetup = true
 
     [[test.workload]]
     testName = 'MetaclusterManagementConcurrency'
-    testDuration = 60
+    testDuration = 30
