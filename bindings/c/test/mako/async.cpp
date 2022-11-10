@@ -125,7 +125,7 @@ repeat_immediate_steps:
 				postStepFn(f, tx, args, key1, key2, val);
 			if (iter.stepKind() != StepKind::ON_ERROR) {
 				if (auto err = f.error()) {
-					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+					logr.printWithLogLevel(isExpectedError(err) ? VERBOSE_WARN : VERBOSE_NONE,
 					                       "ERROR",
 					                       "{}:{} returned '{}'",
 					                       iter.opName(),
@@ -133,7 +133,8 @@ repeat_immediate_steps:
 					                       err.what());
 					updateErrorStats(err, iter.op);
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						const auto rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
+						const auto rc = handleForOnError(
+						    tx, f, fmt::format("{}:{}", iter.opName(), iter.step), args.transaction_timeout > 0);
 						onIterationEnd(rc);
 					});
 				} else {
@@ -149,7 +150,7 @@ repeat_immediate_steps:
 			} else {
 				// blob granules op error
 				updateErrorStats(f.error(), iter.op);
-				FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR");
+				FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR", args.transaction_timeout > 0);
 				onIterationEnd(rc);
 			}
 		});
@@ -191,13 +192,13 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		tx.commit().then([this, state = shared_from_this()](Future f) {
 			if (auto err = f.error()) {
 				// commit had errors
-				logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+				logr.printWithLogLevel(isExpectedError(err) ? VERBOSE_WARN : VERBOSE_NONE,
 				                       "ERROR",
 				                       "Post-iteration commit returned error: {}",
 				                       err.what());
 				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
-					const auto rc = handleForOnError(tx, f, "ON_ERROR");
+					const auto rc = handleForOnError(tx, f, "ON_ERROR", args.transaction_timeout > 0);
 					onIterationEnd(rc);
 				});
 			} else {
@@ -248,10 +249,15 @@ void ResumableStateForRunWorkload::updateErrorStats(fdb::Error err, int op) {
 	if (err) {
 		if (err.is(1020 /*not_commited*/)) {
 			stats.incrConflictCount();
+		} else if (err.is(1031 /*timeout*/)) {
+			stats.incrTimeoutCount(op);
 		} else {
 			stats.incrErrorCount(op);
 		}
 	}
+}
+bool ResumableStateForRunWorkload::isExpectedError(fdb::Error err) {
+	return err.retryable() || (args.transaction_timeout > 0 && err.is(1031 /*timeout*/));
 }
 
 } // namespace mako

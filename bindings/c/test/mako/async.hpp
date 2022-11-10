@@ -118,6 +118,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	void onTransactionSuccess();
 	void onIterationEnd(FutureRC rc);
 	void updateErrorStats(fdb::Error err, int op);
+	bool isExpectedError(fdb::Error err);
 };
 
 using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;
