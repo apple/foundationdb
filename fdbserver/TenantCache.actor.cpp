@@ -288,11 +288,11 @@ Optional<Reference<TCTenantInfo>> TenantCache::tenantOwning(KeyRef key) const {
 	return it->value;
 }
 
-std::vector<TenantName> TenantCache::getTenantsOverQuota() const {
-	std::vector<TenantName> tenants;
+std::unordered_set<TenantName> TenantCache::getTenantsOverQuota() const {
+	std::unordered_set<TenantName> tenants;
 	for (const auto& [tenant, storage] : tenantStorageMap) {
 		if (storage.usage > storage.quota) {
-			tenants.push_back(tenant);
+			tenants.insert(tenant);
 		}
 	}
 	return tenants;
