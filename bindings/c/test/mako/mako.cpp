@@ -896,17 +896,17 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		network::setOption(FDB_NET_OPTION_TLS_CA_PATH, args.tls_ca_file.value());
 	}
 
-	/* enable flatbuffers if specified */
+	/* enable flowserializer if specified */
 	if (args.flatbuffers) {
 #ifdef FDB_NET_OPTION_USE_FLATBUFFERS
-		logr.debug("Using flatbuffers");
+		logr.debug("Using flowserializer");
 		err = network::setOptionNothrow(FDB_NET_OPTION_USE_FLATBUFFERS,
-		                                BytesRef(&args.flatbuffers, sizeof(args.flatbuffers)));
+		                                BytesRef(&args.flowserializer, sizeof(args.flowserializer)));
 		if (err) {
 			logr.error("network::setOption(USE_FLATBUFFERS): {}", err.what());
 		}
 #else
-		logr.info("flatbuffers is not supported in FDB API version {}", FDB_API_VERSION);
+		logr.info("flowserializer is not supported in FDB API version {}", FDB_API_VERSION);
 #endif
 	}
 
@@ -1287,7 +1287,7 @@ void usage() {
 	       "    --txntagging_prefix",
 	       "Specify the prefix of transaction tag - mako${txntagging_prefix} (Default: '')");
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
-	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
+	printf("%-24s %s\n", "    --flowserializer", "Use flowserializer");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
 	printf(
@@ -1346,7 +1346,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "help", no_argument, NULL, 'h' },
 			{ "zipf", no_argument, NULL, 'z' },
 			{ "commitget", no_argument, NULL, ARG_COMMITGET },
-			{ "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
+			{ "flowserializer", no_argument, NULL, ARG_FLATBUFFERS },
 			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
 			{ "trace", no_argument, NULL, ARG_TRACE },
 			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
@@ -2315,7 +2315,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"tracepath\": \"%s\",", args.tracepath);
 		fmt::fprintf(fp, "\"traceformat\": %d,", args.traceformat);
 		fmt::fprintf(fp, "\"knobs\": \"%s\",", args.knobs);
-		fmt::fprintf(fp, "\"flatbuffers\": %d,", args.flatbuffers);
+		fmt::fprintf(fp, "\"flowserializer\": %d,", args.flatbuffers);
 		fmt::fprintf(fp, "\"txntrace\": %d,", args.txntrace);
 		fmt::fprintf(fp, "\"txntagging\": %d,", args.txntagging);
 		fmt::fprintf(fp, "\"txntagging_prefix\": \"%s\",", args.txntagging_prefix);

@@ -299,22 +299,22 @@ you are holding the corresponding future.
 
 1. Introduction
 
-    The goal is to have a more robust serialization protocol.  One feature of
-    flatbuffers is that you can add a new field to a network message without
-    requiring a protocol-incompatible upgrade. In order for this to work,
-    correctness must not depend on that field always being present. This can be
-    tested in simulation by randomly (use buggify) default-initializing that
-    field when deserializing. Once you make a protocol-incompatible upgrade you
-    can rely on the field always being present in the new protocol, just like
-    before. Currently we are using a custom flatbuffers implementation so to
-    that we can present (roughly) the same serialization api as before.
-    Currently the ObjectSerializer is only used for network messages, but that
-    may change.  Flatbuffers was selected because it is (relatively) simple
-    among protocols providing forwards/backwards compatibility, and its binary
-    format is [well
-    documented](https://github.com/dvidelabs/flatcc/blob/master/doc/binary-format.md)
+   The goal is to have a more robust serialization protocol. One feature of
+   flowserializer is that you can add a new field to a network message without
+   requiring a protocol-incompatible upgrade. In order for this to work,
+   correctness must not depend on that field always being present. This can be
+   tested in simulation by randomly (use buggify) default-initializing that
+   field when deserializing. Once you make a protocol-incompatible upgrade you
+   can rely on the field always being present in the new protocol, just like
+   before. Currently we are using a custom flowserializer implementation so to
+   that we can present (roughly) the same serialization api as before.
+   Currently the ObjectSerializer is only used for network messages, but that
+   may change. Flatbuffers was selected because it is (relatively) simple
+   among protocols providing forwards/backwards compatibility, and its binary
+   format is [well
+   documented](https://github.com/dvidelabs/flatcc/blob/master/doc/binary-format.md)
 
-1. Correspondence to flatbuffers IDL
+1. Correspondence to flowserializer IDL
     - Tables
     ```
     // Flow type
@@ -359,15 +359,16 @@ you are holding the corresponding future.
 
 1. Flatbuffers Traits
 
-    In order to serialize a type as a flatbuffers vector, struct, or union, you can implement the appropriate trait for your type.
-    - `scalar_traits` corresponds to a flatbuffers struct. See `UID` for an example.
-    - `vector_like_traits` corresponds to a flatbuffers vector. See `VectorRef` for an example.
-    - `dynamic_size_traits` corresponds to a flatbuffers vector of uint8_t. See `StringRef` for an example.
-    - `union_like_traits` corresponds to a flatbuffers union. See `std::variant` for an example.
+   In order to serialize a type as a flowserializer vector, struct, or union, you can implement the appropriate trait
+   for your type.
+    - `scalar_traits` corresponds to a flowserializer struct. See `UID` for an example.
+    - `vector_like_traits` corresponds to a flowserializer vector. See `VectorRef` for an example.
+    - `dynamic_size_traits` corresponds to a flowserializer vector of uint8_t. See `StringRef` for an example.
+    - `union_like_traits` corresponds to a flowserializer union. See `std::variant` for an example.
 
 1. Potential Gotchas
     - Flatbuffers 'vtables' are collected from default-constructed instances of
-      each type. Consequently types serialized by flatbuffers should have cheap
+      each type. Consequently types serialized by flowserializer should have cheap
       default constructors. Future work: we may be able to collect vtables
       without an instance of a type using `declval`.
 
@@ -379,18 +380,18 @@ you are holding the corresponding future.
 
    - In a call to `serializer`, arenas must come after any members whose memory
      the arena owns. It's safe to reorder an arena in a `serializer` call
-     because arenas are ignored for the flatbuffers schema. (Future work)
+     because arenas are ignored for the flowserializer schema. (Future work)
      Enforce that no fields appear after an arena at compile time.
 
 1. File identifiers
 
-    [File identifiers](https://google.github.io/flatbuffers/md__schemas.html)
+   [File identifiers](https://google.github.io/flowserializer/md__schemas.html)
     are used to sanity check that the message you're deserializing is of the
-    schema you expect. You can give a type `T` a file identifier by making
+   schema you expect. You can give a type `T` a file identifier by making
     `T::file_identifier` a static member of type `FileIdentifier`. If you don't
-    control `T`, you can specialize the `FileIdentifierFor` template. See
+   control `T`, you can specialize the `FileIdentifierFor` template. See
     `flow/FileIdentifier.h` for examples. You don't need to change the file
-    identifier for a type when evolving its schema.
+   identifier for a type when evolving its schema.
 
 1. Schema evolution
 

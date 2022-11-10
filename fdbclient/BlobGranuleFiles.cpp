@@ -666,7 +666,7 @@ struct IndexedBlobGranuleFile {
 
 // Since ObjectReader doesn't update read offset after reading, we have to make the block offsets absolute offsets by
 // serializing once, adding the serialized size to each offset, and serializing again. This relies on the fact that
-// ObjectWriter/flatbuffers uses fixed size integers instead of variable size.
+// ObjectWriter/flowserializer uses fixed size integers instead of variable size.
 
 Value serializeIndexBlock(Standalone<IndexedBlobGranuleFile>& file, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	file.indexBlockRef.finalize(cipherKeysCtx, file.arena());

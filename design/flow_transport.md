@@ -52,14 +52,17 @@ in practice this hasn't happened and shouldn't ever need to happen.
 Prior to release-6.2 the structure of messages (e.g. how many fields a
 message has) was implicitly part of the protocol version, and so adding a
 field to any message required a protocol version bump. Since release-6.2
-messages are encoded as flatbuffers messages, and you can technically add
+messages are encoded as flowserializer messages, and you can technically add
 fields without a protocol version bump. This is a powerful and dangerous tool
-that needs to be used with caution. If you add a field without a protocol version bump, then you can no longer be certain that this field will always be present (e.g. if you get a message from an old peer it might not include that field.) 
+that needs to be used with caution. If you add a field without a protocol version bump, then you can no longer be
+certain that this field will always be present (e.g. if you get a message from an old peer it might not include that
+field.)
 We don't have a good way to test two or more fdbserver binaries in
 simulation, so we discourage adding fields or otherwise making any protocol
 changes without a protocol version bump.
 ​
-Bumping the protocol version is costly for clients though, since now they need a whole new libfdb_c.so to be able to talk to the cluster _at all_.
+Bumping the protocol version is costly for clients though, since now they need a whole new libfdb_c.so to be able to
+talk to the cluster _at all_.
 ​
 ## Stable Endpoints
 ​

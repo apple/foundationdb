@@ -362,7 +362,7 @@ TEST_CASE("/flow/flow/cancel2") {
 }
 
 namespace flow_tests_details {
-// Simple message for flatbuffers unittests
+// Simple message for flowserializer unittests
 struct Int {
 	constexpr static FileIdentifier file_identifier = 12345;
 	uint32_t value;
