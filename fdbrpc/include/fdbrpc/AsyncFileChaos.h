@@ -114,13 +114,13 @@ public:
 		}
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(getDelay()), [=](Void _) -> Future<Void> {
 			if (pdata) {
-				// if (g_network->isSimulated())
-				return map(holdWhile(arena, file->write(pdata, length, offset)), [corruptedBlock, this](auto res) {
-					if (g_network->isSimulated()) {
-						g_simulator->corruptedBlocks.emplace(file->getFilename(), corruptedBlock);
-					}
-					return res;
-				});
+				return map(holdWhile(arena, file->write(pdata, length, offset)),
+				           [corruptedBlock, file = file](auto res) {
+					           if (g_network->isSimulated()) {
+						           g_simulator->corruptedBlocks.emplace(file->getFilename(), corruptedBlock);
+					           }
+					           return res;
+				           });
 			}
 
 			return file->write(data, length, offset);
