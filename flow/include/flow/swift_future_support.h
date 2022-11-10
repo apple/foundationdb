@@ -51,7 +51,12 @@ class FlowCallbackForSwiftContinuation : Callback<T> {
     SwiftCC continuationInstance;
 public:
     void set(const void * _Nonnull pointerToContinuationInstance,
-             Future<T> f) {
+             Future<T> f,
+             const void * _Nonnull thisPointer) {
+        // Verify Swift did not make a copy of the `self` value for this method
+        // call.
+        assert(this == thisPointer);
+
         // FIXME: Propagate `SwiftCC` to Swift using forward
         // interop, without relying on passing it via a `void *`
         // here. That will let us avoid this hack.
@@ -87,18 +92,5 @@ public:
 
 using FlowCallbackForSwiftContinuationCInt = FlowCallbackForSwiftContinuation<int>;
 using FlowCallbackForSwiftContinuationVoid = FlowCallbackForSwiftContinuation<Void>;
-
-// FIXME: Remove these stubs, when we can gurantee that Swift won't copy .pointee.set when doing the method call from Swift.
-inline void setContinutation(FlowCallbackForSwiftContinuation<int> * _Nonnull swiftCCStruct,
-                      const void * _Nonnull ptrToCC,
-                      const Future<int> &f) {
-    swiftCCStruct->set(ptrToCC, f);
-}
-
-inline void setContinutation(FlowCallbackForSwiftContinuation<Void> * _Nonnull swiftCCStruct,
-                      const void * _Nonnull ptrToCC,
-                      const Future<Void> &f) {
-    swiftCCStruct->set(ptrToCC, f);
-}
 
 #endif

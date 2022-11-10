@@ -45,7 +45,7 @@ extension FutureCInt: _FlowFutureOps {
                 withUnsafeMutablePointer(to: &s) { ptr in
                     let ecc = FlowCheckedContinuation<CInt>(cc)
                     withUnsafePointer(to: ecc) { ccPtr in
-                        setContinutation(ptr, UnsafeRawPointer(ccPtr), self)
+                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                     }
                 }
             }
@@ -75,7 +75,7 @@ extension FutureVoid: _FlowFutureOps {
                 withUnsafeMutablePointer(to: &s) { ptr in
                     let ecc = FlowCheckedContinuation<Void>(cc)
                     withUnsafePointer(to: ecc) { ccPtr in
-                        setContinutation(ptr, UnsafeRawPointer(ccPtr), self)
+                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                     }
                 }
             }
