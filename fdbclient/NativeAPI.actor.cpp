@@ -7580,6 +7580,8 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		} else if (e.code() == error_code_unknown_tenant && trState.present() &&
 		           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
 			wait(trState.get()->handleUnknownTenant());
+		} else if (e.code() == error_code_future_version) {
+			wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 		} else {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
@@ -7839,6 +7841,8 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			} else if (e.code() == error_code_unknown_tenant && trState.present() &&
 			           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
 				wait(trState.get()->handleUnknownTenant());
+			} else if (e.code() == error_code_future_version) {
+				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 			} else {
 				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 				throw;
