@@ -117,7 +117,7 @@ public:
 				// if (g_network->isSimulated())
 				return map(holdWhile(arena, file->write(pdata, length, offset)), [corruptedBlock, this](auto res) {
 					if (g_network->isSimulated()) {
-						g_simulator->corruptedBlocks.template emplace(file->getFilename(), corruptedBlock);
+						g_simulator->corruptedBlocks.emplace(file->getFilename(), corruptedBlock);
 					}
 					return res;
 				});
