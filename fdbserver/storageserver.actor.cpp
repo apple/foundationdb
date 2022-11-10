@@ -10355,9 +10355,12 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 
 ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
-		state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
 		state Optional<TenantMapEntry> entry;
 		try {
+			// The call to `waitForVersionNoTooOld()` can throw `future_version()`. Since we're requesting
+			// `latestVersion`, this can only happen if the version at the storage server is currently `0`.
+			// It is okay for the caller to retry after a delay to give the server some time to catch up.
+			state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
 			entry = self->getTenantEntry(version, req.tenantInfo.get());
 		} catch (Error& e) {
 			self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
