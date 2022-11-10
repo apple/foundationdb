@@ -45,12 +45,14 @@ bool storageWiggleStatsEqual(StorageWiggleMetrics const& a, StorageWiggleMetrics
 	return res;
 }
 
-ACTOR Future<ConfigurationResult> IssueConfigurationChange(Database cx, std::string config, bool force) {
+ACTOR Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
 	printf("Issuing configuration change: %s\n", config.c_str());
 	state ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), config, force));
-	ASSERT(res == ConfigurationResult::SUCCESS);
+	if (res != ConfigurationResult::SUCCESS) {
+		return false;
+	}
 	wait(delay(5.0)); // wait for read window
-	return res;
+	return true;
 }
 
 // a wrapper for test protected method
@@ -65,8 +67,12 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		wait(self->storageWiggler->restoreStats());
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
+		{
+			bool success = wait(IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			if (!success)
+				return Void();
+		}
 
 		// restore from FDB
 		metrics.reset();
@@ -81,11 +87,19 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		wait(self->storageWiggler->restoreStats());
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
+		{
+			bool success = wait(IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			if (!success)
+				return Void();
+		}
 		// enable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
+		{
+			bool success = wait(IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
+			if (!success)
+				return Void();
+		}
 		// restart
 		wait(self->storageWiggler->restoreStats());
 		metrics.reset();
@@ -99,13 +113,21 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		wait(self->storageWiggler->restoreStats());
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
+		{
+			bool success = wait(IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			if (!success)
+				return Void();
+		}
 		wait(self->storageWiggler->finishWiggle());
 
 		// restart perpetual wiggle
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
+		{
+			bool success = wait(IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
+			if (!success)
+				return Void();
+		}
 		wait(self->storageWiggler->restoreStats());
 		metrics.reset();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
@@ -134,13 +156,15 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	ACTOR static Future<Void> _setup(PerpetualWiggleStatsWorkload* self, Database cx) {
 		int oldMode = wait(setDDMode(cx, 0));
 		MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID())); // force current DD to quit
-		wait(success(IssueConfigurationChange(cx, "storage_migration_type=disabled", true)));
+		bool success = wait(IssueConfigurationChange(cx, "storage_migration_type=disabled", true));
+		ASSERT(success);
 		return Void();
 	}
 
 	ACTOR static Future<Void> prepareTestEnv(PerpetualWiggleStatsWorkload* self, Database cx) {
 		// enable perpetual wiggle
-		wait(success(IssueConfigurationChange(cx, "perpetual_storage_wiggle=1", true)));
+		bool change = wait(IssueConfigurationChange(cx, "perpetual_storage_wiggle=1", true));
+		ASSERT(change);
 		// update wiggle metrics
 		self->lastMetrics = getRandomWiggleMetrics();
 		auto& lastMetrics = self->lastMetrics;
