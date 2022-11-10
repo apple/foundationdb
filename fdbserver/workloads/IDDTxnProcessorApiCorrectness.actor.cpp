@@ -319,6 +319,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 		TraceEvent(SevDebug, relocateShardInterval.end(), relocateShardInterval.pairID);
+		self->mock->setupMockGlobalState(self->realInitDD); // in case SS remove or recruit
 		return Void();
 	}
 
@@ -383,6 +384,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 		TraceEvent(SevDebug, relocateShardInterval.end(), relocateShardInterval.pairID);
+		self->mock->setupMockGlobalState(self->realInitDD); // in case SS remove or recruit
 		return Void();
 	}
 
