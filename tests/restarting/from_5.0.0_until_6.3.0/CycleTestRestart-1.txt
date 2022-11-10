@@ -1,5 +1,6 @@
 testTitle=Clogged
 clearAfterTest=false 
+storageEngineExcludeTypes = 4, 5
 
     testName=Cycle
     transactionsPerSecond=500.0
