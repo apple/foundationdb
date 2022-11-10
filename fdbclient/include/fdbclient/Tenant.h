@@ -49,7 +49,6 @@ typedef Standalone<TenantGroupNameRef> TenantGroupName;
 // RENAMING_TO - the tenant is being created as a rename from an existing tenant and is awaiting the rename to complete
 //               on the data cluster
 // ERROR - the tenant is in an error state
-// INVALID - Unrecognized state - likely the result of a failed parsing
 //
 // A tenant in any configuration is allowed to be removed. Only tenants in the READY or UPDATING_CONFIGURATION phases
 // can have their configuration updated. A tenant must not exist or be in the REGISTERING phase to be created. To be
@@ -58,16 +57,7 @@ typedef Standalone<TenantGroupNameRef> TenantGroupName;
 //
 // If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
 // successful, the tenant will return to the READY state.
-enum class TenantState {
-	REGISTERING,
-	READY,
-	REMOVING,
-	UPDATING_CONFIGURATION,
-	RENAMING_FROM,
-	RENAMING_TO,
-	ERROR,
-	INVALID
-};
+enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, RENAMING_FROM, RENAMING_TO, ERROR };
 
 // Represents the lock state the tenant could be in.
 // Can be used in conjunction with the other tenant states above.

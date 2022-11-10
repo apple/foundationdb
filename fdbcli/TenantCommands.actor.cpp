@@ -113,14 +113,19 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 			}
 		} else if (tokencmp(param, "offset")) {
 			offset = std::stoi(value.get().toString());
-			if (offset <= 0) {
+			if (offset < 0) {
 				fmt::print(stderr, "ERROR: invalid offset `{}'\n", token.toString().c_str());
 				return false;
 			}
 		} else if (tokencmp(param, "state")) {
 			auto filterStrings = value.get().splitAny(","_sr);
-			for (auto sref : filterStrings) {
-				filters.push_back(TenantMapEntry::stringToTenantState(sref.toString()));
+			try {
+				for (auto sref : filterStrings) {
+					filters.push_back(TenantMapEntry::stringToTenantState(sref.toString()));
+				}
+			} catch (Error& e) {
+				fmt::print(stderr, "ERROR: unrecognized tenant state(s) `{}'.\n", value.get().toString());
+				return false;
 			}
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized parameter `{}'.\n", param.toString().c_str());

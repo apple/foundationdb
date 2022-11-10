@@ -396,12 +396,18 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		try {
 			state TenantMapEntry checkEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
 			state TenantState checkState = checkEntry.tenantState;
-			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
 			state std::vector<TenantState> filters;
 			filters.push_back(checkState);
-			wait(store(tenantList,
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
+			// Possible to have changed state between now and the getTenant call above
+			state TenantMapEntry checkEntry2;
+			wait(store(checkEntry2, MetaclusterAPI::getTenant(self->managementDb, tenant)) &&
+			     store(tenantList,
 			           MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
-			ASSERT(!tenantList.empty());
+			if (tenantList.empty()) {
+				ASSERT(checkEntry2.tenantState != checkState);
+				return Void();
+			}
 			bool found = false;
 			for (auto pair : tenantList) {
 				ASSERT(pair.second.tenantState == checkState);

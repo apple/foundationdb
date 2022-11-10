@@ -1581,9 +1581,14 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			if (offset == 0 && filters.empty()) {
-				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(listTenantsTransaction(tr, begin, end, limit));
+			if (filters.empty()) {
+				state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+				wait(store(tenants, listTenantsTransaction(tr, begin, end, limit + offset)));
+				if (offset >= tenants.size()) {
+					tenants.clear();
+				} else if (offset > 0) {
+					tenants.erase(tenants.begin(), tenants.begin() + offset);
+				}
 				return tenants;
 			}
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
