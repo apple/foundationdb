@@ -46,8 +46,8 @@ using CallbackVoid = Callback<Void>;
 // MARK: Callback types
 
 template<class T>
-class SwiftContinuationCallbackStruct : Callback<T> {
-    using SwiftCC = flow_swift::ExposedCheckedContinuation<T>;
+class FlowCallbackForSwiftContinuation : Callback<T> {
+    using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
     SwiftCC continuationInstance;
 public:
     void set(const void * _Nonnull pointerToContinuationInstance,
@@ -64,7 +64,7 @@ public:
         f.addCallbackAndClear(this);
     }
 
-    SwiftContinuationCallbackStruct() : continuationInstance(SwiftCC::init()) {
+    FlowCallbackForSwiftContinuation() : continuationInstance(SwiftCC::init()) {
     }
 
     void fire(const T &value) override {
@@ -85,17 +85,17 @@ public:
     }
 };
 
-using SwiftContinuationCallbackStructCInt = SwiftContinuationCallbackStruct<int>;
-using SwiftContinuationCallbackStructVoid = SwiftContinuationCallbackStruct<Void>;
+using FlowCallbackForSwiftContinuationCInt = FlowCallbackForSwiftContinuation<int>;
+using FlowCallbackForSwiftContinuationVoid = FlowCallbackForSwiftContinuation<Void>;
 
 // FIXME: Remove these stubs, when we can gurantee that Swift won't copy .pointee.set when doing the method call from Swift.
-inline void setContinutation(SwiftContinuationCallbackStruct<int> * _Nonnull swiftCCStruct,
+inline void setContinutation(FlowCallbackForSwiftContinuation<int> * _Nonnull swiftCCStruct,
                       const void * _Nonnull ptrToCC,
                       const Future<int> &f) {
     swiftCCStruct->set(ptrToCC, f);
 }
 
-inline void setContinutation(SwiftContinuationCallbackStruct<Void> * _Nonnull swiftCCStruct,
+inline void setContinutation(FlowCallbackForSwiftContinuation<Void> * _Nonnull swiftCCStruct,
                       const void * _Nonnull ptrToCC,
                       const Future<Void> &f) {
     swiftCCStruct->set(ptrToCC, f);

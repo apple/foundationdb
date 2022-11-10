@@ -40,10 +40,10 @@ extension FutureCInt: _FlowFutureOps {
                     return self.__getUnsafe().pointee
                 }
             }
-            var s = SwiftContinuationCallbackStructCInt()
+            var s = FlowCallbackForSwiftContinuationCInt()
             return try await withCheckedThrowingContinuation { cc in
                 withUnsafeMutablePointer(to: &s) { ptr in
-                    let ecc = ExposedCheckedContinuation<CInt>(cc)
+                    let ecc = FlowCheckedContinuation<CInt>(cc)
                     withUnsafePointer(to: ecc) { ccPtr in
                         setContinutation(ptr, UnsafeRawPointer(ccPtr), self)
                     }
@@ -70,10 +70,10 @@ extension FutureVoid: _FlowFutureOps {
                 }
             }
 
-            var s = SwiftContinuationCallbackStructVoid()
+            var s = FlowCallbackForSwiftContinuationVoid()
             return try await withCheckedThrowingContinuation { cc in
                 withUnsafeMutablePointer(to: &s) { ptr in
-                    let ecc = ExposedCheckedContinuation<Void>(cc)
+                    let ecc = FlowCheckedContinuation<Void>(cc)
                     withUnsafePointer(to: ecc) { ccPtr in
                         setContinutation(ptr, UnsafeRawPointer(ccPtr), self)
                     }

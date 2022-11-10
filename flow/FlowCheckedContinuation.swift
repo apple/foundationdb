@@ -5,12 +5,16 @@ public struct ExposeVoidConf<T> {
     let x: CInt
 }
 
+// FIXME: return Void? for conformance instead once header supports stdlib
+// types.
 @_expose(Cxx)
+// This function ensures that the value witness table for `Void` to C++ is
+// exposed in the generated C++ header.
 public func _exposeVoidValueTypeConformanceToCpp(_ val: ExposeVoidConf<Void>)  {
 }
 
 @_expose(Cxx)
-public struct ExposedCheckedContinuation<T> {
+public struct FlowCheckedContinuation<T> {
     public typealias CC = CheckedContinuation<T, Swift.Error>
     var cc: CC?
 
@@ -20,7 +24,7 @@ public struct ExposedCheckedContinuation<T> {
         self.cc = cc
     }
 
-    public mutating func set(_ other: ExposedCheckedContinuation<T>) {
+    public mutating func set(_ other: FlowCheckedContinuation<T>) {
         // precondition: other continuation must be set.
         assert(other.cc != nil)
         cc = other.cc
