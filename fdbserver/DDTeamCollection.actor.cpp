@@ -1951,6 +1951,60 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<double> loadBytesBalanceRatio(DDTeamCollection* self) {
+		wait(delayJittered(SERVER_KNOBS->CHECK_LOAD_BYTES_BALANCE_DELAY)); // at most 3 min simulation
+		double minLoadBytes = std::numeric_limits<double>::max();
+		double avgLoadBytes = 0;
+		int count = 0;
+		for (auto& [id, s] : self->server_info) {
+			// If a healthy SS don't have storage metrics, skip this round
+			if (self->server_status.get(s->getId()).isUnhealthy()) {
+				continue;
+			} else if (!s->metricsPresent()) {
+				return 0;
+			}
+
+			double load = s->loadBytes();
+			avgLoadBytes += load;
+			++count;
+			minLoadBytes = std::min(minLoadBytes, load);
+		}
+		avgLoadBytes /= count;
+		return minLoadBytes / avgLoadBytes;
+	}
+
+	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
+		state Future<Void> maxDelay = delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY);
+		state bool takeRest = true;
+		while (takeRest) {
+			choose {
+				when(wait(maxDelay)) { break; }
+				when(double balance = wait(loadBytesBalanceRatio(self))) {
+					// there must not have other teams to place wiggled data
+					takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
+					           self->machine_info.size() < self->configuration.storageTeamSize ||
+					           balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE;
+
+					CODE_PROBE(balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE,
+					           "Perpetual Wiggle pause because cluster is imbalance.");
+
+					if (takeRest) {
+						self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
+						if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+							TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
+							    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+							    .detail("BytesBalance", balance)
+							    .detail("ServerSize", self->server_info.size())
+							    .detail("MachineSize", self->machine_info.size())
+							    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+						}
+					}
+				}
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
 	                                                         AsyncVar<bool>* stopSignal,
 	                                                         FutureStream<Void> finishStorageWiggleSignal) {
@@ -1958,24 +2012,9 @@ public:
 			choose {
 				when(wait(stopSignal->onChange())) {}
 				when(waitNext(finishStorageWiggleSignal)) {
-					state bool takeRest = true; // delay to avoid delete and update ServerList too frequently
-					while (takeRest) {
-						wait(delayJittered(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
-						// there must not have other teams to place wiggled data
-						takeRest =
-						    teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
-						    teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-						if (takeRest) {
-							teamCollection->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
-							if (teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-								TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", teamCollection->distributorId)
-								    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-								    .detail("ServerSize", teamCollection->server_info.size())
-								    .detail("MachineSize", teamCollection->machine_info.size())
-								    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
-							}
-						}
-					}
+					// delay to avoid delete and update ServerList too frequently, which could result busy loop or over
+					// utilize the disk of other active SS
+					wait(perpetualStorageWiggleRest(teamCollection));
 					wait(updateNextWigglingStorageID(teamCollection));
 				}
 			}

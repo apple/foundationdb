@@ -245,7 +245,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ALL_DATA_REMOVED_DELAY,                                1.0 );
 	init( INITIAL_FAILURE_REACTION_DELAY,                       30.0 ); if( randomize && BUGGIFY ) INITIAL_FAILURE_REACTION_DELAY = 0.0;
 	init( CHECK_TEAM_DELAY,                                     30.0 );
-	init( PERPETUAL_WIGGLE_DELAY,                               50.0 );
+	// PERPETUAL_WIGGLE_DELAY default 6 hours. This knob's ideal value would vary by cluster based on its size and disk type, but the basic idea is let PW wait for the re-included storage to take on data before wiggling the next one. We want to avoid a small cluster don't have enough space when excluding and including too fast.
+	init( PERPETUAL_WIGGLE_DELAY,                        6 * 60 * 60 ); if( isSimulated ) PERPETUAL_WIGGLE_DELAY = 50.0;
+	init( CHECK_LOAD_BYTES_BALANCE_DELAY,                    15 * 60 ); if( isSimulated ) CHECK_LOAD_BYTES_BALANCE_DELAY = PERPETUAL_WIGGLE_DELAY / 5.0;
+	init( PERPETUAL_WIGGLE_MIN_BYTES_BALANCE,                   0.85 );
 	init( PERPETUAL_WIGGLE_DISABLE_REMOVER,                     true );
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
