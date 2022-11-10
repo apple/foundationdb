@@ -1482,7 +1482,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 	try {
 		wait(trackInitialShards(&self, initData));
-		initData.clear(); // we can release initData after initialization
+		initData.clear(); // Release reference count.
 
 		state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
 		if (self.ddTenantCache.present()) {

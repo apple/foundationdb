@@ -279,6 +279,10 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });
 }
 
+Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& path, const std::string& contents) {
+	return writeEntireFileFallback(path, contents);
+}
+
 Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) {
 	::deleteFile(joinPath(m_path, path));
 	return Void();

@@ -275,6 +275,7 @@ logdir = {logdir}
         assert self.running, "Server is not running"
         if self.process.poll() is None:
             self.process.terminate()
+            self.process.communicate(timeout=10)
         self.running = False
 
     def ensure_ports_released(self, timeout_sec=5):

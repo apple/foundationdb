@@ -413,6 +413,12 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						continue;
 					}
 
+					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
+					if (tenantName.present() && commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+						req.reply.sendError(storage_quota_exceeded());
+						continue;
+					}
+
 					++commitData->stats.txnCommitIn;
 
 					if (req.debugID.present()) {
@@ -2569,6 +2575,44 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 	}
 }
 
+// Get the list of tenants that are over the storage quota from the data distributor for quota enforcement.
+ACTOR Future<Void> monitorTenantsOverStorageQuota(UID myID,
+                                                  Reference<AsyncVar<ServerDBInfo> const> db,
+                                                  ProxyCommitData* commitData) {
+	state Future<Void> nextRequestTimer = Never();
+	state Future<TenantsOverStorageQuotaReply> nextReply = Never();
+	if (db->get().distributor.present())
+		nextRequestTimer = Void();
+	loop choose {
+		when(wait(db->onChange())) {
+			if (db->get().distributor.present()) {
+				CODE_PROBE(true, "ServerDBInfo changed during monitorTenantsOverStorageQuota");
+				TraceEvent("ServerDBInfoChanged", myID).detail("DDID", db->get().distributor.get().id());
+				nextRequestTimer = Void();
+			} else {
+				TraceEvent("DataDistributorDied", myID).log();
+				nextRequestTimer = Never();
+			}
+		}
+		when(wait(nextRequestTimer)) {
+			nextRequestTimer = Never();
+			if (db->get().distributor.present()) {
+				nextReply = brokenPromiseToNever(
+				    db->get().distributor.get().tenantsOverStorageQuota.getReply(TenantsOverStorageQuotaRequest()));
+			} else {
+				nextReply = Never();
+			}
+		}
+		when(TenantsOverStorageQuotaReply reply = wait(nextReply)) {
+			nextReply = Never();
+			commitData->tenantsOverStorageQuota = reply.tenants;
+			TraceEvent(SevDebug, "MonitorTenantsOverStorageQuota")
+			    .detail("NumTenants", commitData->tenantsOverStorageQuota.size());
+			nextRequestTimer = delay(SERVER_KNOBS->CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL);
+		}
+	}
+}
+
 namespace {
 struct ExpireServerEntry {
 	int64_t timeReceived;
@@ -2927,6 +2971,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                         proxy.expireIdempotencyId,
 	                                         commitData.expectedIdempotencyIdCountForKey,
 	                                         &commitData.idempotencyClears));
+	addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

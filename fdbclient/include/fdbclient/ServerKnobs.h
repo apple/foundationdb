@@ -242,6 +242,8 @@ public:
 	                                                 // in the TenantCache
 	int TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL; // How often the storage quota allocated to each tenant is
 	                                                 // refreshed in the TenantCache
+	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
+	                                                  // distributor to fetch the list of tenants over storage quota
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -307,11 +309,12 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
-	int ROCKSDB_READER_THREAD_PRIORITY;
-	int ROCKSDB_WRITER_THREAD_PRIORITY;
+	bool ROCKSDB_SET_READ_TIMEOUT;
 	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int ROCKSDB_READ_RANGE_ROW_LIMIT;
+	int ROCKSDB_READER_THREAD_PRIORITY;
+	int ROCKSDB_WRITER_THREAD_PRIORITY;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
@@ -354,6 +357,7 @@ public:
 	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
 	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
+	int ROCKSDB_STATS_LEVEL;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
@@ -917,6 +921,7 @@ public:
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
+	int FILE_LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	// Cluster recovery
@@ -962,6 +967,7 @@ public:
 	bool BG_ENABLE_READ_DRIVEN_COMPACTION;
 	int BG_RDC_BYTES_FACTOR;
 	int BG_RDC_READ_FACTOR;
+	bool BG_WRITE_MULTIPART;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;

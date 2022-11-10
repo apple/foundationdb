@@ -4356,6 +4356,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
 	state Span span("NAPI:getRange"_loc, trState->spanContext);
+	state Optional<UID> getRangeID = Optional<UID>();
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
@@ -4440,11 +4441,14 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.spanContext = span.context;
+			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				getRangeID = nondeterministicRandom()->randomUniqueID();
+				g_traceBatch.addAttach(
+				    "TransactionAttachID", trState->readOptions.get().debugID.get().first(), getRangeID.get().first());
+			}
 			try {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Before");
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
@@ -4484,9 +4488,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					throw;
 				}
 
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
+					                      getRangeID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
 					/*TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
@@ -4600,11 +4604,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				}
 
 			} catch (Error& e) {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Error");
-					TraceEvent("TransactionDebugError", trState->readOptions.get().debugID.get()).error(e);
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Error");
+					TraceEvent("TransactionDebugError", getRangeID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
@@ -5835,7 +5837,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	// NOTE: The throttling cost of each clear is assumed to be one page.
 	// This makes compuation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6585,7 +6587,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
-			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled) {
+			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled &&
+			    e.code() != error_code_storage_quota_exceeded) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -7578,6 +7581,8 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		} else if (e.code() == error_code_unknown_tenant && trState.present() &&
 		           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
 			wait(trState.get()->handleUnknownTenant());
+		} else if (e.code() == error_code_future_version) {
+			wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 		} else {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
@@ -7837,6 +7842,8 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			} else if (e.code() == error_code_unknown_tenant && trState.present() &&
 			           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
 				wait(trState.get()->handleUnknownTenant());
+			} else if (e.code() == error_code_future_version) {
+				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 			} else {
 				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 				throw;
