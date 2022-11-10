@@ -1118,7 +1118,7 @@ Arguments::Arguments() {
 	bg_file_path[0] = '\0';
 	distributed_tracer_client = 0;
 	transaction_timeout = 0;
-  num_report_files = 0;
+	num_report_files = 0;
 }
 
 /* parse transaction specification */
