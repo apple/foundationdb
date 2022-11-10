@@ -1,4 +1,6 @@
 import Flow
+import flow_swift
+import FlowFutureSupport
 
 // ==== ---------------------------------------------------------------------------------------------------------------
 
@@ -17,14 +19,10 @@ import Flow
 public protocol _FlowFutureOps {
     /// Element type of the future
     associatedtype _T
-    /// Swift continuation wrapper type to use for the async/await bridging
-    associatedtype CB
-    typealias CCBox = _Box<CheckedContinuation<_T, Swift.Error>>
 }
 
 extension FutureCInt: _FlowFutureOps {
     public typealias _T = CInt
-    public typealias CB = SwiftContinuationCallbackCInt
 
     // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
     public var waitValue: _T {
@@ -42,23 +40,14 @@ extension FutureCInt: _FlowFutureOps {
                     return self.__getUnsafe().pointee
                 }
             }
-
+            var s = FlowCallbackForSwiftContinuationCInt()
             return try await withCheckedThrowingContinuation { cc in
-                let ccBox = CCBox(cc)
-                let rawCCBox = UnsafeMutableRawPointer(Unmanaged.passRetained(ccBox).toOpaque())
-
-                 let cb = CB.make(
-                    rawCCBox,
-                    /*returning:*/ { (_cc: UnsafeMutableRawPointer, value: _T) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(returning: value)
-                    },
-                    /*throwing:*/ { (_cc: UnsafeMutableRawPointer, error: Flow.Error) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(throwing: GeneralFlowError()) // TODO: map errors
+                withUnsafeMutablePointer(to: &s) { ptr in
+                    let ecc = FlowCheckedContinuation<CInt>(cc)
+                    withUnsafePointer(to: ecc) { ccPtr in
+                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                     }
-                )
-                cb.addCallbackAndClearTo(self)
+                }
             }
         }
     }
@@ -66,7 +55,6 @@ extension FutureCInt: _FlowFutureOps {
 
 extension FutureVoid: _FlowFutureOps {
     public typealias _T = Void
-    public typealias CB = SwiftContinuationCallbackVoid
 
     // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
     public var waitValue: _T {
@@ -82,22 +70,14 @@ extension FutureVoid: _FlowFutureOps {
                 }
             }
 
+            var s = FlowCallbackForSwiftContinuationVoid()
             return try await withCheckedThrowingContinuation { cc in
-                let ccBox = CCBox(cc)
-                let rawCCBox = UnsafeMutableRawPointer(Unmanaged.passRetained(ccBox).toOpaque())
-
-                 let cb = CB.make(
-                    rawCCBox,
-                    /*returning:*/ { (_cc: UnsafeMutableRawPointer, value: _T) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(returning: value)
-                    },
-                    /*throwing:*/ { (_cc: UnsafeMutableRawPointer, error: Flow.Error) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(throwing: GeneralFlowError()) // TODO: map errors
+                withUnsafeMutablePointer(to: &s) { ptr in
+                    let ecc = FlowCheckedContinuation<Void>(cc)
+                    withUnsafePointer(to: ecc) { ccPtr in
+                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                     }
-                )
-                cb.addCallbackAndClearTo(self)
+                }
             }
         }
     }
@@ -105,21 +85,3 @@ extension FutureVoid: _FlowFutureOps {
 
 // ==== ---------------------------------------------------------------------------------------------------------------
 
-public struct GeneralFlowError: Swift.Error {
-    let underlying: Flow.Error?
-
-    public init() {
-        self.underlying = nil
-    }
-
-    public init(_ underlying: Flow.Error) {
-        self.underlying = underlying
-    }
-}
-
-public final class _Box<Value> {
-    let value: Value
-    init(_ value: Value) {
-        self.value = value
-    }
-}

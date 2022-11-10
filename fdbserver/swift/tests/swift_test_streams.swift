@@ -20,6 +20,8 @@
 
 import Flow
 import flow_swift
+import FlowFutureSupport
+import flow_swift_future
 
 /// Corresponds to FlowTests.actor.cpp "/flow/flow/trivial promisestreams"
 func swift_flow_trivial_promisestreams() async throws {
