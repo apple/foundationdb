@@ -89,13 +89,13 @@ using SwiftContinuationCallbackStructCInt = SwiftContinuationCallbackStruct<int>
 using SwiftContinuationCallbackStructVoid = SwiftContinuationCallbackStruct<Void>;
 
 // FIXME: Remove these stubs, when we can gurantee that Swift won't copy .pointee.set when doing the method call from Swift.
-void setContinutation(SwiftContinuationCallbackStruct<int> * _Nonnull swiftCCStruct,
+inline void setContinutation(SwiftContinuationCallbackStruct<int> * _Nonnull swiftCCStruct,
                       const void * _Nonnull ptrToCC,
                       const Future<int> &f) {
     swiftCCStruct->set(ptrToCC, f);
 }
 
-void setContinutation(SwiftContinuationCallbackStruct<Void> * _Nonnull swiftCCStruct,
+inline void setContinutation(SwiftContinuationCallbackStruct<Void> * _Nonnull swiftCCStruct,
                       const void * _Nonnull ptrToCC,
                       const Future<Void> &f) {
     swiftCCStruct->set(ptrToCC, f);
