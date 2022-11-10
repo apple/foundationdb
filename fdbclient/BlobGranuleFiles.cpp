@@ -1358,10 +1358,6 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 		}
 	}
 
-	if (chunk.snapshotFile.present()) {
-		stats.snapshotRows += streams[0].size();
-	}
-
 	RangeResult result;
 	std::vector<MergeStreamNext> cur;
 	cur.reserve(streams.size());
@@ -1471,7 +1467,10 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 			streams.push_back(snapshotRows);
 			startClears.push_back(false);
 			arena.dependsOn(streams.back().arena());
+			stats.snapshotRows += snapshotRows.size();
 		}
+	} else {
+		ASSERT(!chunk.snapshotFile.present());
 	}
 
 	if (BG_READ_DEBUG) {
