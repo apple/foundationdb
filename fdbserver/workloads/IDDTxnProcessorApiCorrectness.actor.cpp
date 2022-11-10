@@ -84,7 +84,8 @@ public:
 		return rawStartMovement(params, tssMapping);
 	}
 
-	Future<Void> testRawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping) {
+	Future<Void> testRawFinishMovement(MoveKeysParams& params,
+	                                   const std::map<UID, StorageServerInterface>& tssMapping) {
 		return rawFinishMovement(params, tssMapping);
 	}
 };
@@ -262,7 +263,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 	void verifyServerKeyDest(MoveKeysParams& params) {
 		// check destination servers
-		for(auto& id: params.destinationTeam) {
+		for (auto& id : params.destinationTeam) {
 			ASSERT(mgs->serverIsDestForShard(id, params.keys));
 		}
 	}

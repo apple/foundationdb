@@ -169,7 +169,7 @@ void ShardsAffectedByTeamFailure::rawMoveShard(KeyRangeRef keys,
 		erase(*t, it->range());
 	}
 	it.value() = std::make_pair(destinationTeams, srcTeams);
-	for(auto& team: destinationTeams) {
+	for (auto& team : destinationTeams) {
 		insert(team, keys);
 	}
 

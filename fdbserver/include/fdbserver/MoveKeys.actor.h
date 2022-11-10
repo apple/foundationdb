@@ -87,7 +87,8 @@ void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<Stor
 // establishing a set of shard servers and all invariants of the systemKeys.
 
 Future<Void> rawStartMovement(Database occ,
-                              const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+                              const MoveKeysParams& params,
+                              std::map<UID, StorageServerInterface>& tssMapping);
 
 Future<Void> rawFinishMovement(Database occ,
                                const MoveKeysParams& params,
