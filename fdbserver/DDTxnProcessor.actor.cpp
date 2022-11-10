@@ -316,6 +316,7 @@ class DDTxnProcessorImpl {
 
 				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
+				// For each data move, find out the src or dst servers are in primary or remote DC.
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
@@ -353,10 +354,10 @@ class DDTxnProcessorImpl {
 
 				break;
 			} catch (Error& e) {
+				TraceEvent("GetInitialTeamsRetry", distributorId).error(e);
 				wait(tr.onError(e));
 
 				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("GetInitialTeamsRetry", distributorId).log();
 			}
 		}
 
