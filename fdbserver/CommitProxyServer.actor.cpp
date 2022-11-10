@@ -2524,8 +2524,8 @@ ACTOR Future<Void> monitorTenantsOverStorageQuota(UID myID,
 	loop choose {
 		when(wait(db->onChange())) {
 			if (db->get().distributor.present()) {
-				CODE_PROBE(true, "DataDistributor changed during monitorTenantsOverStorageQuota");
-				TraceEvent("DataDistributorChanged", myID).detail("DDID", db->get().distributor.get().id());
+				CODE_PROBE(true, "ServerDBInfo changed during monitorTenantsOverStorageQuota");
+				TraceEvent("ServerDBInfoChanged", myID).detail("DDID", db->get().distributor.get().id());
 				nextRequestTimer = Void();
 			} else {
 				TraceEvent("DataDistributorDied", myID).log();

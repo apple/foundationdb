@@ -200,7 +200,7 @@ struct TenantsOverStorageQuotaReply {
 	std::unordered_set<TenantName> tenants;
 
 	TenantsOverStorageQuotaReply() {}
-	explicit TenantsOverStorageQuotaReply(std::unordered_set<TenantName> tenants) : tenants(tenants) {}
+	explicit TenantsOverStorageQuotaReply(std::unordered_set<TenantName> const& tenants) : tenants(tenants) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
