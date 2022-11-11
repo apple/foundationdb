@@ -1423,7 +1423,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
-	state bool enablePhysicalShardMove =
+	state bool enableShardMove =
 	    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
 	try {
@@ -1541,7 +1541,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
 
-						if (enablePhysicalShardMove && tciIndex == 1) {
+						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
 							       physicalShardIDCandidate != anonymousShardId.first());
 							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
@@ -1588,7 +1588,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							anyWithSource = true;
 						}
 
-						if (enablePhysicalShardMove) {
+						if (enableShardMove) {
 							if (tciIndex == 1 && !forceToUseNewPhysicalShard) {
 								// critical to the correctness of team selection by PhysicalShardCollection
 								// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
@@ -1660,7 +1660,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size())
 					    .detail("Servers", destServersString(bestTeams));
-					if (enablePhysicalShardMove) {
+					if (enableShardMove) {
 						if (rd.isRestore() && destOverloadedCount > 50) {
 							throw data_move_dest_team_not_found();
 						}
@@ -1684,14 +1684,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				// When forceToUseNewPhysicalShard = false, we get paired primary team and remote team
 				// However, this may be failed
 				// Any retry triggers to use new physicalShard which enters the normal routine
-				if (enablePhysicalShardMove) {
+				if (enableShardMove) {
 					forceToUseNewPhysicalShard = true;
 				}
 
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
 			}
 
-			if (enablePhysicalShardMove) {
+			if (enableShardMove) {
 				if (!rd.isRestore()) {
 					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
 					// thus, update the physicalShardIDCandidate to related data structures
@@ -1949,7 +1949,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
-					if (enablePhysicalShardMove) {
+					if (enableShardMove) {
 						// update physical shard collection
 						std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams;
 						for (int i = 0; i < bestTeams.size(); i++) {
