@@ -40,7 +40,7 @@ ACTOR static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
 	}
 
 	state int concurrency = priorities.size() * 10;
-	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
+	state Reference<PriorityMultiLock> pml = makeReference<PriorityMultiLock>(concurrency, priorities);
 
 	// Clog the lock buy taking n=concurrency locks
 	state std::deque<Future<PriorityMultiLock::Lock>> lockFutures;
@@ -78,7 +78,6 @@ ACTOR static Future<Void> benchPriorityMultiLock(benchmark::State* benchState) {
 
 	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()));
 
-	delete pml;
 	return Void();
 }
 

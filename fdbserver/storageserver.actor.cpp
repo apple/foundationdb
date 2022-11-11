@@ -1015,13 +1015,13 @@ public:
 
 	FlowLock serveFetchCheckpointParallelismLock;
 
-	PriorityMultiLock ssLock;
+	Reference<PriorityMultiLock> ssLock;
 	std::vector<int> readPriorityRanks;
 
 	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
 		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
 		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
-		return ssLock.lock(readPriorityRanks[readType]);
+		return ssLock->lock(readPriorityRanks[readType]);
 	}
 
 	FlowLock serveAuditStorageParallelismLock;
@@ -1302,7 +1302,8 @@ public:
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
-	    ssLock(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY, SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
+	    ssLock(makeReference<PriorityMultiLock>(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY,
+	                                            SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES)),
 	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
@@ -10159,20 +10160,20 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;
-		    te.detail("ReadsActive", self->ssLock.totalRunners());
-		    te.detail("ReadsWaiting", self->ssLock.totalWaiters());
+		    te.detail("ReadsActive", self->ssLock->totalRunners());
+		    te.detail("ReadsWaiting", self->ssLock->totalWaiters());
 		    int type = (int)ReadType::FETCH;
-		    te.detail("ReadFetchActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadFetchWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadFetchActive", self->ssLock->numRunners(rpr[type]));
+		    te.detail("ReadFetchWaiting", self->ssLock->numWaiters(rpr[type]));
 		    type = (int)ReadType::LOW;
-		    te.detail("ReadLowActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadLowWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadLowActive", self->ssLock->numRunners(rpr[type]));
+		    te.detail("ReadLowWaiting", self->ssLock->numWaiters(rpr[type]));
 		    type = (int)ReadType::NORMAL;
-		    te.detail("ReadNormalActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadNormalWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadNormalActive", self->ssLock->numRunners(rpr[type]));
+		    te.detail("ReadNormalWaiting", self->ssLock->numWaiters(rpr[type]));
 		    type = (int)ReadType::HIGH;
-		    te.detail("ReadHighActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadHighWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadHighActive", self->ssLock->numRunners(rpr[type]));
+		    te.detail("ReadHighWaiting", self->ssLock->numWaiters(rpr[type]));
 		    StorageBytes sb = self->storage.getStorageBytes();
 		    te.detail("KvstoreBytesUsed", sb.used);
 		    te.detail("KvstoreBytesFree", sb.free);
@@ -10988,7 +10989,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 
-		self.ssLock.kill();
+		self.ssLock->kill();
 
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
@@ -11086,7 +11087,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		throw internal_error();
 	} catch (Error& e) {
 
-		self.ssLock.kill();
+		self.ssLock->kill();
 
 		if (self.byteSampleRecovery.isValid()) {
 			self.byteSampleRecovery.cancel();

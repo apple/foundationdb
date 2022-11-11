@@ -46,7 +46,8 @@
 
 // A multi user lock with a concurrent holder limit where waiters request a lock with a priority
 // id and are granted locks based on a total concurrency and relative weights of the current active
-// priorities.  Priority id's must start at 0 and are sequential integers.
+// priorities.  Priority id's must start at 0 and are sequential integers.  Priority id numbers
+// are not related to the importance of the priority in execution.
 //
 // Scheduling logic
 // Let
@@ -67,10 +68,10 @@
 // The interface is similar to FlowMutex except that lock holders can just drop the lock to release it.
 //
 // Usage:
-//   Lock lock = wait(prioritylock.lock(priorityLevel));
+//   Lock lock = wait(prioritylock.lock(priority_id));
 //   lock.release();  // Explicit release, or
 //   // let lock and all copies of lock go out of scope to release
-class PriorityMultiLock {
+class PriorityMultiLock : public ReferenceCounted<PriorityMultiLock> {
 public:
 	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
 	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
@@ -142,28 +143,18 @@ public:
 		fRunner.cancel();
 		available = 0;
 
-		// Cancel and clean up runners
-		auto r = runners.begin();
-		while (r != runners.end()) {
-			r->handler.cancel();
-			Runner* runner = &*r;
-			r = runners.erase(r);
-			delete runner;
-		}
-
 		waitingPriorities.clear();
 		priorities.clear();
 	}
 
 	std::string toString() const {
-		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersList=%d "
+		std::string s = format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d "
 		                       "pendingWeights=%d ",
 		                       this,
 		                       concurrency,
 		                       available,
 		                       concurrency - available,
 		                       waiting,
-		                       runners.size(),
 		                       totalPendingWeights);
 
 		for (auto& p : priorities) {
@@ -171,11 +162,6 @@ public:
 		}
 
 		s += "}";
-
-		if (concurrency - available != runners.size()) {
-			pml_debug_printf("%s\n", s.c_str());
-			ASSERT_EQ(concurrency - available, runners.size());
-		}
 
 		return s;
 	}
@@ -241,66 +227,35 @@ private:
 	// does not have to iterage over the priorities vector checking priorities without waiters.
 	WaitingPrioritiesList waitingPriorities;
 
-	struct Runner : boost::intrusive::list_base_hook<>, FastAllocated<Runner> {
-		Runner(Priority* p) : priority(p) {
-#if PRIORITYMULTILOCK_DEBUG || !defined(NO_INTELLISENSE)
-			debugID = deterministicRandom()->randomUniqueID();
-#endif
-		}
-
-		Future<Void> handler;
-		Priority* priority;
-#if PRIORITYMULTILOCK_DEBUG || !defined(NO_INTELLISENSE)
-		UID debugID;
-#endif
-	};
-
-	// Current runners list.  This is an intrusive list of FastAllocated items so that they can remove themselves
-	// efficiently as they complete. size() will be linear because it's only used in toString() for debugging
-	typedef boost::intrusive::list<Runner, boost::intrusive::constant_time_size<false>> RunnerList;
-	RunnerList runners;
-
 	Future<Void> fRunner;
 	AsyncTrigger wakeRunner;
 	Promise<Void> brokenOnDestruct;
 
-	ACTOR static Future<Void> handleRelease(PriorityMultiLock* self, Runner* r, Future<Void> holder) {
-		pml_debug_printf("%f handleRelease self=%p id=%s start \n", now(), self, r->debugID.toString().c_str());
+	ACTOR static void handleRelease(Reference<PriorityMultiLock> self, Priority* priority, Future<Void> holder) {
+		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());
 		try {
 			wait(holder);
-			pml_debug_printf("%f handleRelease self=%p id=%s success\n", now(), self, r->debugID.toString().c_str());
+			pml_debug_printf("%f handleRelease self=%p success\n", now(), self.getPtr());
 		} catch (Error& e) {
-			pml_debug_printf(
-			    "%f handleRelease self=%p id=%s error %s\n", now(), self, r->debugID.toString().c_str(), e.what());
-			if (e.code() == error_code_actor_cancelled) {
-				// self is shutting down so no need to clean up r, this is done in kill()
-				throw;
-			}
+			pml_debug_printf("%f handleRelease self=%p error %s\n", now(), self.getPtr(), e.what());
 		}
 
-		pml_debug_printf("lock release priority %d  %s\n", (int)(r->priority->priority), self->toString().c_str());
+		pml_debug_printf("lock release priority %d  %s\n", (int)(priority->priority), self->toString().c_str());
 
-		pml_debug_printf("%f handleRelease self=%p id=%s releasing\n", now(), self, r->debugID.toString().c_str());
+		pml_debug_printf("%f handleRelease self=%p releasing\n", now(), self.getPtr());
 		++self->available;
-		r->priority->runners -= 1;
-
-		// Remove r from runners list and delete it
-		self->runners.erase(RunnerList::s_iterator_to(*r));
-		delete r;
+		priority->runners -= 1;
 
 		// If there are any waiters or if the runners array is getting large, trigger the runner loop
 		if (self->waiting > 0) {
 			self->wakeRunner.trigger();
 		}
-		return Void();
 	}
 
 	void addRunner(Lock& lock, Priority* priority) {
 		priority->runners += 1;
 		--available;
-		Runner* runner = new Runner(priority);
-		runners.push_back(*runner);
-		runner->handler = handleRelease(this, runner, lock.promise.getFuture());
+		handleRelease(Reference<PriorityMultiLock>::addRef(this), priority, lock.promise.getFuture());
 	}
 
 	// Current maximum running tasks for the specified priority, which must have waiters
