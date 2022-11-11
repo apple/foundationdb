@@ -711,10 +711,10 @@ const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
 // Storage quota per tenant
-// "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
+// "\xff/storageQuota/[[tenantGroupName]]" := "[[quota]]"
 extern const KeyRangeRef storageQuotaKeys;
 extern const KeyRef storageQuotaPrefix;
-Key storageQuotaKey(StringRef tenantName);
+Key storageQuotaKey(StringRef tenantGroupName);
 
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;
