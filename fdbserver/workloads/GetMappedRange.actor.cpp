@@ -486,8 +486,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		} else if (r < 0.75) {
 			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
 		}
-		const double r2 = deterministicRandom()->random01();
-		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinFlip();
+		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
 
 		{
