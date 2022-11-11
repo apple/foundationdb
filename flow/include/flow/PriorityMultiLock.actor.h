@@ -102,9 +102,7 @@ public:
 
 	~PriorityMultiLock() { kill(); }
 
-	Future<Lock> lock(int priority = 0,
-	                  TaskPriority flowDelayPriority = TaskPriority::DefaultEndpoint,
-	                  UserTag userTag = 0) {
+	Future<Lock> lock(int priority = 0, UserTag userTag = 0) {
 		Priority& p = priorities[priority];
 		Queue& q = p.queue;
 
@@ -131,7 +129,7 @@ public:
 			waitingPriorities.push_back(p);
 		}
 
-		Waiter& w = q.emplace_back(flowDelayPriority, userTag);
+		Waiter& w = q.emplace_back(userTag);
 		++waiting;
 
 		pml_debug_printf("lock wait priority %d  %s\n", priority, toString().c_str());
@@ -202,9 +200,8 @@ public:
 
 private:
 	struct Waiter {
-		Waiter(const TaskPriority& t, const UserTag& u) : flowDelayPriority(t), userTag(u) {}
+		Waiter(const UserTag& u) : userTag(u) {}
 		Promise<Lock> lockPromise;
-		TaskPriority flowDelayPriority;
 		UserTag userTag;
 	};
 
@@ -385,12 +382,6 @@ private:
 				                 !lock.promise.canBeSet(),
 				                 pPriority->priority,
 				                 self->toString().c_str());
-
-				// If the task returned the lock immediately and did not wait, then delay to let the Flow run loop
-				// schedule other tasks if needed
-				if (!lock.promise.canBeSet()) {
-					wait(delay(0, w.flowDelayPriority));
-				}
 			}
 		}
 	}
