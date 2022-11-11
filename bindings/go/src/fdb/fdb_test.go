@@ -320,24 +320,26 @@ func ExamplePrintable() {
 func TestDatabaseCloseRemovesResources(t *testing.T) {
 	err := fdb.APIVersion(API_VERSION)
 	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", e)
+		t.Fatalf("Unable to set API version: %v\n", err)
 	}
 
 	// OpenDefault opens the database described by the platform-specific default
 	// cluster file
 	db, err := fdb.OpenDefault()
 	if err != nil {
-		t.Fatalf("Unable to set API version: %v\n", e)
+		t.Fatalf("Unable to set API version: %v\n", err)
 	}
 
-	clusterFile := db.clusterFile
-
 	// Close the database after usage
-	defer db.Close()
+	db.Close()
 
-	_, ok := openDatabases[clusterFile]
+	// Open the same database again, if the database is still in the cache we would return the same object, if not we create a new object with a new pointer
+	newDB, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
 
-	if ok {
-		t.Fatalf("Expected key: %s doesn't exist\n", clusterFile)
+	if db == newDB {
+		t.Fatalf("Expected a different database object, got: %v and %v\n", db, newDB)
 	}
 }

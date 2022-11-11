@@ -42,6 +42,7 @@ import (
 // usually created and committed automatically by the (Database).Transact
 // method.
 type Database struct {
+	// String reference to the cluster file.
 	clusterFile string
 	*database
 }
@@ -61,9 +62,7 @@ type DatabaseOptions struct {
 // You have to ensure that you're not resuing this database.
 func (d *Database) Close() {
 	// Remove database object from the cached databases
-	if d.clusterFile != "" {
-		delete(openDatabases, d.clusterFile)
-	}
+	delete(openDatabases, d.clusterFile)
 
 	// Destroy the database
 	d.destroy()
@@ -76,6 +75,10 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 }
 
 func (d *database) destroy() {
+	if d.ptr == nil {
+		return
+	}
+
 	C.fdb_database_destroy(d.ptr)
 }
 
