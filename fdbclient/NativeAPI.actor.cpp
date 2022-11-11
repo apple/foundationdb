@@ -10915,6 +10915,37 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenantName);
 }
 
+ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state Key key = blobRestoreCommandKeyFor(range);
+			Optional<Value> value = wait(tr->get(key));
+			if (value.present()) {
+				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
+				if (status.progress < 100) {
+					return false; // stop if there is in-progress restore.
+				}
+			}
+			Standalone<BlobRestoreStatus> status;
+			status.progress = 0;
+			Value newValue = blobRestoreCommandValueFor(status);
+			tr->set(key, newValue);
+			wait(tr->commit());
+			return true;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<bool> DatabaseContext::blobRestore(KeyRange range) {
+	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range);
+}
+
 int64_t getMaxKeySize(KeyRef const& key) {
 	return getMaxWriteKeySize(key, true);
 }

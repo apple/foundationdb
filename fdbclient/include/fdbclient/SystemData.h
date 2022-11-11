@@ -710,6 +710,13 @@ UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
+// Blob restore command
+extern const KeyRangeRef blobRestoreCommandKeys;
+const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
+const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
+const Value blobRestoreCommandValueFor(BlobRestoreStatus status);
+Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value);
+
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
 extern const KeyRangeRef storageQuotaKeys;
