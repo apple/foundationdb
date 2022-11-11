@@ -42,6 +42,7 @@ import (
 // usually created and committed automatically by the (Database).Transact
 // method.
 type Database struct {
+	clusterFile string
 	*database
 }
 
@@ -64,6 +65,18 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 
 func (d *database) destroy() {
 	C.fdb_database_destroy(d.ptr)
+}
+
+// Close will close the Database and clean up all resources.
+// You have to ensure that you're not resuing this database.
+func (d *Database) Close() {
+	// Remove database object from the cached databases
+	if d.clusterFile != "" {
+		delete(openDatabases, d.clusterFile)
+	}
+
+	// Destroy the database
+	d.destroy()
 }
 
 // CreateTransaction returns a new FoundationDB transaction. It is generally

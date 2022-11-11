@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,10 @@ func ExampleOpenDefault() {
 		return
 	}
 
-	_ = db
+	// Close the database after usage
+	defer db.Close()
+
+	// Do work here
 
 	// Output:
 }
@@ -312,4 +315,25 @@ func TestKeyToString(t *testing.T) {
 func ExamplePrintable() {
 	fmt.Println(fdb.Printable([]byte{0, 1, 2, 'a', 'b', 'c', '1', '2', '3', '!', '?', 255}))
 	// Output: \x00\x01\x02abc123!?\xff
+}
+
+func ExampleOpenWithConnectionString() {
+	var e error
+
+	e = fdb.APIVersion(API_VERSION)
+	if e != nil {
+		fmt.Printf("Unable to set API version: %v\n", e)
+		return
+	}
+
+	// OpenWithConnectionString opens the database described by the connection string
+	db, e := fdb.OpenWithConnectionString("")
+	if e != nil {
+		fmt.Printf("Unable to open database: %v\n", e)
+		return
+	}
+
+	_ = db
+
+	// Output:
 }
