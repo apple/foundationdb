@@ -4,4 +4,3 @@ testName=Storefront
 actorsPerClient=50
 itemCount=100000
 maxOrderSize=4
-storageEngineExcludeTypes = 4, 5

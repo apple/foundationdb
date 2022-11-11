@@ -5,7 +5,6 @@ runSetup=false
 clearAfterTest=false
 simBackupAgents=BackupToDB
 waitForQuiescenceBegin=false
-storageEngineExcludeTypes = 4, 5
 
     testName=Cycle
     nodeCount=30000

@@ -385,7 +385,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
 	init( ROCKSDB_READ_PARALLELISM,                                4 );
 	// If true, do not process and store RocksDB logs
-	init( ROCKSDB_MUTE_LOGS,                                   false );
+	init( ROCKSDB_MUTE_LOGS,                                    true );
 	// Use a smaller memtable in simulation to avoid OOMs.
 	int64_t memtableBytes = isSimulated ? 32 * 1024 : 512 * 1024 * 1024;
 	init( ROCKSDB_MEMTABLE_BYTES,                      memtableBytes );
@@ -954,7 +954,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );
 
 	// Blob granlues
-	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually	
+	init( BG_URL,        isSimulated ? "file://simfdb/fdbblob/" : "" ); // TODO: store in system key space or something, eventually	
 	bool buggifyMediumGranules = simulationMediumShards || (randomize && BUGGIFY);
 	// BlobGranuleVerify* simulation tests use "knobs", BlobGranuleCorrectness* use "tenant", default in real clusters is "knobs"
 	init( BG_METADATA_SOURCE,                                "knobs" );
