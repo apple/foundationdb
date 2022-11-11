@@ -25,6 +25,7 @@
 #include <set>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -32,6 +33,7 @@
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -66,6 +68,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -389,7 +392,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, true /* exThrown */));
+			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/true));
 			ASSERT(addActor.isEmpty());
 
 			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
@@ -3025,6 +3028,18 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, ClusterControllerFullInterface ccInterf) {
+	loop {
+		state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
+		TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
+		EncryptionAtRestMode mode = wait(self->encryptionAtRestMode.getFuture());
+		GetEncryptionAtRestModeResponse resp;
+		resp.mode = mode;
+		req.reply.send(resp);
+		TraceEvent("HandleGetEncryptionAtRestModeEnd").detail("TlogId", req.tlogId).detail("Mode", resp.mode);
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -3070,6 +3085,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(metaclusterMetricsUpdater(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
+	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));
 	self.addActor.send(self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
 	                                                               self.id,
 	                                                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
@@ -3090,8 +3106,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
 			}
 
-			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected cluster
-			// controller)
+			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected
+			// cluster controller)
 			return Void();
 		}
 		when(OpenDatabaseRequest req = waitNext(interf.clientInterface.openDatabase.getFuture())) {
@@ -3243,11 +3259,11 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 
 	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
-	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of encryption keys
-	// created and managed by external KeyManagementService (KMS).
+	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of
+	// encryption keys created and managed by external KeyManagementService (KMS).
 	//
-	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the new CC before
-	// recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
+	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the
+	// new CC before recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
 
 	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		wait(recoveredDiskFiles);
@@ -3278,8 +3294,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 
 namespace {
 
-// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth` based on
-// `UpdateWorkerHealth` request correctly.
+// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
+// based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
 	state ClusterControllerData data(ClusterControllerFullInterface(),
@@ -3292,8 +3308,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 	state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
 	state NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 
-	// Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the `workerAddress`'s
-	// degradedPeers.
+	// Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the
+	// `workerAddress`'s degradedPeers.
 	{
 		UpdateWorkerHealthRequest req;
 		req.address = workerAddress;
@@ -3354,8 +3370,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		previousRefreshTime = health.degradedPeers[badPeer3].lastRefreshTime;
 	}
 
-	// Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should not remove the worker from
-	// `workerHealth`.
+	// Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should not remove the worker
+	// from `workerHealth`.
 	{
 		wait(delay(0.001));
 		UpdateWorkerHealthRequest req;
@@ -3439,8 +3455,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 	NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 	NetworkAddress badPeer4(IPAddress(0x05050505), 1);
 
-	// Test that a reported degraded link should stay for sometime before being considered as a degraded link by
-	// cluster controller.
+	// Test that a reported degraded link should stay for sometime before being considered as a degraded
+	// link by cluster controller.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now(), now() };
 		data.workerHealth[worker].disconnectedPeers[badPeer2] = { now(), now() };
@@ -3472,7 +3488,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded server.
+	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded
+	// server.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
@@ -3553,8 +3570,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server is
-	// returned.
+	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server
+	// is returned.
 	{
 		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,

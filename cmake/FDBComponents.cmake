@@ -137,7 +137,7 @@ endif()
 if(NOT BUILD_GO_BINDING OR NOT BUILD_C_BINDING)
   set(WITH_GO_BINDING OFF)
 else()
-  find_program(GO_EXECUTABLE go)
+  find_program(GO_EXECUTABLE go HINTS /usr/local/go/bin/)
   # building the go binaries is currently not supported on Windows
   if(GO_EXECUTABLE AND NOT WIN32 AND WITH_C_BINDING)
     set(WITH_GO_BINDING ON)

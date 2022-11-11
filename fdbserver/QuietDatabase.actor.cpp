@@ -656,7 +656,7 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
-	if (g_network->isSimulated() && g_simulator->usableRegions > 1) {
+	if (g_network->isSimulated() && g_simulator->usableRegions > 1 && !g_simulator->quiesced) {
 		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
 		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 

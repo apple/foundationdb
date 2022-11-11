@@ -100,5 +100,5 @@ public:
 	Optional<Reference<TCTenantInfo>> tenantOwning(KeyRef key) const;
 
 	// Get the list of tenants where the storage bytes currently used is greater than the quota allocated
-	std::vector<TenantName> getTenantsOverQuota() const;
+	std::unordered_set<TenantName> getTenantsOverQuota() const;
 };

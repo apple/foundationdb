@@ -91,11 +91,11 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 			if (limitType == LimitType::TOTAL) {
 				// Round up to nearest page size
 				quota.totalQuota =
-				    ((value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+				    ((value - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 			} else if (limitType == LimitType::RESERVED) {
 				// Round up to nearest page size
 				quota.reservedQuota =
-				    ((value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+				    ((value - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 			}
 			if (!quota.isValid()) {
 				throw invalid_throttle_quota_value();
