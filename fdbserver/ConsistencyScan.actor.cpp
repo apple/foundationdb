@@ -129,6 +129,7 @@ ACTOR Future<bool> getKeyServers(
 					// one needs to be reachable
 					if (performQuiescentChecks && !shards.present()) {
 						TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
+						    .error(shards.getError())
 						    .detail("CommitProxyID", commitProxyInfo->getId(i));
 						testFailure("Commit proxy unavailable", performQuiescentChecks, true);
 						return false;
