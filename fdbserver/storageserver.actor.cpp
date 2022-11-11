@@ -3851,15 +3851,29 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
 	return Void();
 }
 
+int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
+	auto& reqAndResult = mappedKeyValue.reqAndResult;
+	int bytes = 0;
+	if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
+		const auto& getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+		bytes = getValue.expectedSize();
+	} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
+		const auto& getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+		bytes = getRange.result.expectedSize();
+	} else {
+		throw internal_error();
+	}
+	return bytes;
+}
+
 ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    GetKeyValuesReply input,
                                                    StringRef mapper,
                                                    // To provide span context, tags, debug ID to underlying lookups.
                                                    GetMappedKeyValuesRequest* pOriginalReq,
-                                                   Optional<Key> tenantPrefix) {
+                                                   int* remainingLimitBytes) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
-	result.more = input.more;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);
 
@@ -3887,7 +3901,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->debugID.present())
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.BeforeLoop");
-	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+	for (; offset<sz&& * remainingLimitBytes> 0; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
@@ -3911,12 +3925,21 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			// since we always read the index, so always consider the index size
+			int indexSize = sizeof(KeyValueRef) + input.data[i + offset].expectedSize();
+			int size = indexSize + getMappedKeyValueSize(kvms[i]);
+			*remainingLimitBytes -= size;
 			result.data.push_back(result.arena, kvms[i]);
+			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes <= 0) {
+				break;
+			}
 		}
 	}
 	if (pOriginalReq->debugID.present())
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.AfterAll");
+
+	result.more = input.more || result.data.size() < sz;
 	return result;
 }
 
@@ -4058,23 +4081,21 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			req.reply.send(none);
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
-
-			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
-			                                                     version,
-			                                                     KeyRangeRef(begin, end),
-			                                                     req.limit,
-			                                                     &remainingLimitBytes,
-			                                                     span.context,
-			                                                     type,
-			                                                     tenantPrefix));
+			// create a temporary byte limit for index fetching ONLY, this should be excessive
+			// because readRange is cheap when reading additional bytes
+			state int bytesForIndex =
+			    std::min(req.limitBytes, (int)(req.limitBytes * SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH));
+			GetKeyValuesReply getKeyValuesReply = wait(readRange(
+			    data, version, KeyRangeRef(begin, end), req.limit, &bytesForIndex, span.context, type, tenantPrefix));
 
 			state GetMappedKeyValuesReply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix));
+				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, &remainingLimitBytes));
 				r = _r;
 			} catch (Error& e) {
+				// catch txn_too_old here if prefetch runs for too long, and returns it back to client
 				TraceEvent("MapError").error(e);
 				throw;
 			}

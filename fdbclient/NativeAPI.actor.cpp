@@ -4399,9 +4399,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
-					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
+					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
+					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
+						// disable it on prefetch, because boundary entries serve as continuations
 						RangeResultFamily copy;
 						int newSize =
 						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());

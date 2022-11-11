@@ -38,6 +38,8 @@ const KeyRef prefix = "prefix"_sr;
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
 
+int recordSize;
+int indexSize;
 struct GetMappedRangeWorkload : ApiWorkload {
 	bool enabled;
 	Snapshot snapshot = Snapshot::False;
@@ -98,19 +100,32 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		loop {
 			std::cout << "start fillInRecords n=" << n << std::endl;
 			// TODO: When n is large, split into multiple transactions.
+			recordSize = 0;
+			indexSize = 0;
 			try {
 				for (int i = 0; i < n; i++) {
 					if (self->SPLIT_RECORDS) {
 						for (int split = 0; split < SPLIT_SIZE; split++) {
 							tr.set(recordKey(i, split), recordValue(i, split));
+							if (i == 0) {
+								recordSize +=
+								    recordKey(i, split).size() + recordValue(i, split).size() + sizeof(KeyValueRef);
+							}
 						}
 					} else {
 						tr.set(recordKey(i), recordValue(i));
+						if (i == 0) {
+							recordSize += recordKey(i).size() + recordValue(i).size() + sizeof(KeyValueRef);
+						}
 					}
 					tr.set(indexEntryKey(i), EMPTY);
+					if (i == 0) {
+						indexSize += indexEntryKey(i).size() + sizeof(KeyValueRef);
+					}
 				}
 				wait(tr.commit());
-				std::cout << "finished fillInRecords with version " << tr.getCommittedVersion() << std::endl;
+				std::cout << "finished fillInRecords with version " << tr.getCommittedVersion() << " recordSize "
+				          << recordSize << " indexSize " << indexSize << std::endl;
 				break;
 			} catch (Error& e) {
 				std::cout << "failed fillInRecords, retry" << std::endl;
@@ -188,17 +203,23 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                          KeySelector endSelector,
 	                                                          Key mapper,
 	                                                          int limit,
+	                                                          int byteLimit,
 	                                                          int expectedBeginId,
 	                                                          GetMappedRangeWorkload* self) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId
-		          << " limit:" << limit << std::endl;
+		          << " limit:" << limit << " byteLimit: " << byteLimit << "  recordSize: " << recordSize
+		          << " STRICTLY_ENFORCE_BYTE_LIMIT: " << SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT << std::endl;
 		loop {
 			state Reference<TransactionWrapper> tr = self->createTransaction();
 			try {
-				MappedRangeResult result = wait(tr->getMappedRange(
-				    beginSelector, endSelector, mapper, GetRangeLimits(limit), self->snapshot, Reverse::False));
+				MappedRangeResult result = wait(tr->getMappedRange(beginSelector,
+				                                                   endSelector,
+				                                                   mapper,
+				                                                   GetRangeLimits(limit, byteLimit),
+				                                                   self->snapshot,
+				                                                   Reverse::False));
 				//			showResult(result);
 				if (self->BAD_MAPPER) {
 					TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
@@ -242,16 +263,43 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
 		state KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
 		state int limit = 100;
+		state int byteLimit = deterministicRandom()->randomInt(1, 9) * 10000;
 		state int expectedBeginId = beginId;
+		std::cout << "ByteLimit: " << byteLimit << " limit: " << limit
+		          << " FRACTION_INDEX_BYTELIMIT_PREFETCH: " << SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH
+		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
-			MappedRangeResult result = wait(
-			    self->scanMappedRangeWithLimits(cx, beginSelector, endSelector, mapper, limit, expectedBeginId, self));
+			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, expectedBeginId, self));
 			expectedBeginId += result.size();
 			if (result.more) {
 				if (result.empty()) {
 					// This is usually not expected.
 					std::cout << "not result but have more, try again" << std::endl;
 				} else {
+					int size = indexSize + recordSize;
+					int expectedCnt = limit;
+					int indexByteLimit = byteLimit * SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH;
+					int indexCountByteLimit = indexByteLimit / indexSize + (indexByteLimit % indexSize != 0);
+					int indexCount = std::min(limit, indexCountByteLimit);
+					std::cout << "indexCount:  " << indexCount << std::endl;
+					// result set cannot be larger than the number of index fetched
+					ASSERT(result.size() <= indexCount);
+
+					expectedCnt = std::min(expectedCnt, indexCount);
+					int boundByRecord;
+					if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT) {
+						// might have 1 additional entry over the limit
+						boundByRecord = byteLimit / size + (byteLimit % size != 0);
+					} else {
+						// might have 1 additional batch over the limit
+						int roundSize = size * SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
+						int round = byteLimit / roundSize + (byteLimit % roundSize != 0);
+						boundByRecord = round * SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
+					}
+					expectedCnt = std::min(expectedCnt, boundByRecord);
+					std::cout << "boundByRecord:  " << boundByRecord << std::endl;
+					ASSERT(result.size() == expectedCnt);
 					beginSelector = KeySelector(firstGreaterThan(result.back().key));
 				}
 			} else {
@@ -260,6 +308,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			}
 		}
 		ASSERT(expectedBeginId == endId);
+
 		return Void();
 	}
 
@@ -394,7 +443,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		Key mapper = getMapper(self);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
+		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
+		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
+		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 		return Void();
 	}
 
