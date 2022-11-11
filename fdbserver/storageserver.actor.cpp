@@ -4766,7 +4766,6 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
                                Arena* pArena,
                                int matchIndex,
                                bool isRangeQuery,
-                               bool isBoundary,
                                KeyValueRef* it,
                                MappedKeyValueRef* kvm,
                                Key mappedKey) {
@@ -4774,19 +4773,14 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
 		// Use the mappedKey as the prefix of the range query.
 		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
 		if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
-		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY || matchIndex == MATCH_INDEX_ALL ||
-		     isBoundary)) {
-			// need to keep index for the boundary, so that caller can use it as a continuation.
+		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) || matchIndex == MATCH_INDEX_ALL) {
 			kvm->key = it->key;
 			kvm->value = it->value;
 		}
-
-		kvm->boundaryAndExist = isBoundary && !getRange.result.empty();
 		kvm->reqAndResult = getRange;
 	} else {
 		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
 		kvm->reqAndResult = getValue;
-		kvm->boundaryAndExist = isBoundary && getValue.result.present();
 	}
 	return Void();
 }
@@ -4839,7 +4833,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state std::vector<MappedKeyValueRef> kvms(k);
 	state std::vector<Future<Void>> subqueries;
 	state int offset = 0;
-	state int cnt = 0;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
@@ -4850,7 +4843,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
 			MappedKeyValueRef* kvm = &kvms[i];
-			bool isBoundary = (i + offset) == 0 || (i + offset) == sz - 1;
 			// Clear key value to the default.
 			kvm->key = ""_sr;
 			kvm->value = ""_sr;
@@ -4861,16 +4853,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-			subqueries.push_back(mapSubquery(data,
-			                                 input.version,
-			                                 pOriginalReq,
-			                                 &result.arena,
-			                                 matchIndex,
-			                                 isRangeQuery,
-			                                 isBoundary,
-			                                 it,
-			                                 kvm,
-			                                 mappedKey));
+			subqueries.push_back(mapSubquery(
+			    data, input.version, pOriginalReq, &result.arena, matchIndex, isRangeQuery, it, kvm, mappedKey));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -4878,23 +4862,43 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			                      pOriginalReq->options.get().debugID.get().first(),
 			                      "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
+		TraceEvent("Hfu5Batch")
+		    .detail("Cnt", result.data.size())
+		    .detail("Sz", sz)
+		    .detail("STRICTLY", SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT)
+		    .detail("RemainBytes", *remainingLimitBytes);
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			// since we always read the index, so always consider the index size
 			int indexSize = sizeof(KeyValueRef) + input.data[i + offset].expectedSize();
 			int size = indexSize + getMappedKeyValueSize(kvms[i]);
 			*remainingLimitBytes -= size;
-			++cnt;
 			result.data.push_back(result.arena, kvms[i]);
 			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes <= 0) {
-				// store index for this ending boundary, if it is already an ending boundary, no-op
-				result.data.back().key = input.data[i + offset].key;
-				result.data.back().value = input.data[i + offset].value;
+				TraceEvent("Hfu5Break").detail("Cnt", result.data.size()).detail("Sz", sz);
 				break;
 			}
 		}
 	}
 
-	result.more = input.more || cnt < sz;
+	int resultSize = result.data.size();
+	if (resultSize > 0) {
+		// keep index for boundary index entries, so that caller can use it as a continuation.
+		result.data[0].key = input.data[0].key;
+		result.data[0].value = input.data[0].value;
+		result.data[0].boundaryAndExist = getMappedKeyValueSize(kvms[0]) > 0;
+
+		result.data.back().key = input.data[resultSize - 1].key;
+		result.data.back().value = input.data[resultSize - 1].value;
+		// index needs to be -1
+		int index = (resultSize - 1) % SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
+		result.data.back().boundaryAndExist = getMappedKeyValueSize(kvms[index]) > 0;
+	}
+	TraceEvent("Hfu5Quit")
+	    .detail("Cnt", result.data.size())
+	    .detail("Sz", sz)
+	    .detail("STRICTLY", SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT)
+	    .detail("RemainBytes", *remainingLimitBytes);
+	result.more = input.more || resultSize < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
@@ -5151,13 +5155,13 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			state int remainingLimitBytes = req.limitBytes;
 			// create a temporary byte limit for index fetching ONLY, this should be excessive
 			// because readRange is cheap when reading additional bytes
-			const double fraction = 0.8;
-			state int bytesForPrimary = remainingLimitBytes * fraction;
+			state int bytesForIndex =
+			    std::min(req.limitBytes, (int)(req.limitBytes * SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH));
 			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
 			                                                     version,
 			                                                     KeyRangeRef(begin, end),
 			                                                     req.limit,
-			                                                     &bytesForPrimary,
+			                                                     &bytesForIndex,
 			                                                     span.context,
 			                                                     req.options,
 			                                                     tenantPrefix));
@@ -5174,7 +5178,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, req.matchIndex, &remainingLimitBytes));
 				r = _r;
 			} catch (Error& e) {
-				// TODO: cannot allow txn_too_old to reach here, need to handle it gracefully, add test
+				// catch txn_too_old here if prefetch runs for too long, and returns it back to client
 				TraceEvent("MapError").error(e);
 				throw;
 			}

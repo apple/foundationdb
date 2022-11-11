@@ -162,8 +162,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                           bool isBoundary,
 	                           bool allMissing) {
 		// std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
-		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << " match index "
-		//           << matchIndex << std::endl;
+		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId))
+		//           << " matchIndex: " << matchIndex << std::endl;
 		if (matchIndex == MATCH_INDEX_ALL || isBoundary) {
 			ASSERT(it->key == indexEntryKey(expectedId));
 		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
@@ -223,8 +223,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId
-		          << " limit:" << limit << " byteLimit: " << byteLimit << "  record size " << recordSize
-		          << " STRICTLY_ENFORCE_BYTE_LIMIT " << SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT << std::endl;
+		          << " limit:" << limit << " byteLimit: " << byteLimit << "  recordSize: " << recordSize
+		          << " STRICTLY_ENFORCE_BYTE_LIMIT: " << SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT << " allMissing "
+		          << allMissing << std::endl;
 		loop {
 			state Reference<TransactionWrapper> tr = self->createTransaction();
 			try {
@@ -289,6 +290,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state int limit = 100;
 		state int byteLimit = deterministicRandom()->randomInt(1, 9) * 10000;
 		state int expectedBeginId = beginId;
+		std::cout << "ByteLimit: " << byteLimit << " limit: " << limit
+		          << " FRACTION_INDEX_BYTELIMIT_PREFETCH: " << SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH
+		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
 			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(cx,
 			                                                                beginSelector,
@@ -307,24 +311,28 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					std::cout << "not result but have more, try again" << std::endl;
 				} else {
 					int size = allMissing ? indexSize : (indexSize + recordSize);
-					if (byteLimit < size * limit) {
-						int expectedCnt = byteLimit / size;
-						if (byteLimit % size != 0) {
-							++expectedCnt;
-						}
-						if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT) {
-							// only a partial of a batch is returned
-							ASSERT(result.size() < limit);
-							ASSERT(result.size() == expectedCnt);
-						} else {
-							// whole batches + sub batches will be returned
-							ASSERT(result.size() >= expectedCnt);
-							int resultSize = result.size();
-							ASSERT(resultSize % SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE == 0);
-						}
+					int expectedCnt = limit;
+					int indexByteLimit = byteLimit * SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH;
+					int indexCountByteLimit = indexByteLimit / indexSize + (indexByteLimit % indexSize != 0);
+					int indexCount = std::min(limit, indexCountByteLimit);
+					std::cout << "indexCount:  " << indexCount << std::endl;
+					// result set cannot be larger than the number of index fetched
+					ASSERT(result.size() <= indexCount);
+
+					expectedCnt = std::min(expectedCnt, indexCount);
+					int boundByRecord;
+					if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT) {
+						// might have 1 additional entry over the limit
+						boundByRecord = byteLimit / size + (byteLimit % size != 0);
 					} else {
-						ASSERT(result.size() == limit);
+						// might have 1 additional batch over the limit
+						int roundSize = size * SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
+						int round = byteLimit / roundSize + (byteLimit % roundSize != 0);
+						boundByRecord = round * SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
 					}
+					expectedCnt = std::min(expectedCnt, boundByRecord);
+					std::cout << "boundByRecord:  " << boundByRecord << std::endl;
+					ASSERT(result.size() == expectedCnt);
 					beginSelector = KeySelector(firstGreaterThan(result.back().key));
 				}
 			} else {
