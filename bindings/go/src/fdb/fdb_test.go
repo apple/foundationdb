@@ -343,3 +343,24 @@ func TestDatabaseCloseRemovesResources(t *testing.T) {
 		t.Fatalf("Expected a different database object, got: %v and %v\n", db, newDB)
 	}
 }
+
+func ExampleOpenWithConnectionString() {
+	var e error
+
+	e = fdb.APIVersion(API_VERSION)
+	if e != nil {
+		fmt.Printf("Unable to set API version: %v\n", e)
+		return
+	}
+
+	// OpenWithConnectionString opens the database described by the connection string
+	db, e := fdb.OpenWithConnectionString("")
+	if e != nil {
+		fmt.Printf("Unable to open database: %v\n", e)
+		return
+	}
+
+	_ = db
+
+	// Output:
+}

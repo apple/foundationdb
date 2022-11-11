@@ -29,6 +29,7 @@ import "C"
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -265,24 +266,13 @@ func MustOpenDefault() Database {
 // To connect to multiple clusters running at different, incompatible versions,
 // the multi-version client API must be used.
 func OpenDatabase(clusterFile string) (Database, error) {
-	networkMutex.Lock()
-	defer networkMutex.Unlock()
-
-	if apiVersion == 0 {
-		return Database{}, errAPIVersionUnset
-	}
-
-	var e error
-
-	if !networkStarted {
-		e = startNetwork()
-		if e != nil {
-			return Database{}, e
-		}
+	if err := ensureNetworkIsStarted(); err != nil {
+		return Database{}, err
 	}
 
 	db, ok := openDatabases[clusterFile]
 	if !ok {
+		var e error
 		db, e = createDatabase(clusterFile)
 		if e != nil {
 			return Database{}, e
@@ -291,6 +281,22 @@ func OpenDatabase(clusterFile string) (Database, error) {
 	}
 
 	return db, nil
+}
+
+// ensureNetworkIsStarted starts the network if not already done and ensures that the API version is set.
+func ensureNetworkIsStarted() error {
+	networkMutex.Lock()
+	defer networkMutex.Unlock()
+
+	if apiVersion == 0 {
+		return errAPIVersionUnset
+	}
+
+	if !networkStarted {
+		return startNetwork()
+	}
+
+	return nil
 }
 
 // MustOpenDatabase is like OpenDatabase but panics if the default database cannot
@@ -339,6 +345,34 @@ func createDatabase(clusterFile string) (Database, error) {
 	runtime.SetFinalizer(db, (*database).destroy)
 
 	return Database{clusterFile, db}, nil
+}
+
+// OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
+// by the provided connection string. This method can be useful for scenarios where you want to connect
+// to the database only for a short time e.g. to test different connection strings.
+func OpenWithConnectionString(connectionString string) (Database, error) {
+	if err := ensureNetworkIsStarted(); err != nil {
+		return Database{}, err
+	}
+
+	var cf *C.char
+
+	if connectionString == "" {
+		return Database{}, errors.New("connection string must be a non-empty string")
+	}
+
+	cf = C.CString(connectionString)
+	defer C.free(unsafe.Pointer(cf))
+
+	var outdb *C.FDBDatabase
+	if err := C.fdb_create_database_from_connection_string(cf, &outdb); err != 0 {
+		return Database{}, Error{int(err)}
+	}
+
+	db := &database{outdb}
+	runtime.SetFinalizer(db, (*database).destroy)
+
+	return Database{db}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.
