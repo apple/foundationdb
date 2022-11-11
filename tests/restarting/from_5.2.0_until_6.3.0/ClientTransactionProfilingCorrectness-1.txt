@@ -1,4 +1,3 @@
-storageEngineExcludeTypes = 4, 5
 testTitle=ClientTransactionProfilingCorrectness
 clearAfterTest=false
 runSetup=true

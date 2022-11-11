@@ -3,7 +3,6 @@ extraDB=3
 testTitle=DrUpgrade
 clearAfterTest=false
 simBackupAgents=BackupToDB
-storageEngineExcludeTypes = 4, 5
 
     testName=Cycle
     nodeCount=30000
