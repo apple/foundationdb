@@ -48,7 +48,10 @@ func ExampleOpenDefault() {
 		return
 	}
 
-	_ = db
+	// Close the database after usage
+	defer db.Close()
+
+	// Do work here
 
 	// Output:
 }
@@ -312,4 +315,29 @@ func TestKeyToString(t *testing.T) {
 func ExamplePrintable() {
 	fmt.Println(fdb.Printable([]byte{0, 1, 2, 'a', 'b', 'c', '1', '2', '3', '!', '?', 255}))
 	// Output: \x00\x01\x02abc123!?\xff
+}
+
+func TestDatabaseCloseRemovesResources(t *testing.T) {
+	err := fdb.APIVersion(API_VERSION)
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", e)
+	}
+
+	// OpenDefault opens the database described by the platform-specific default
+	// cluster file
+	db, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", e)
+	}
+
+	clusterFile := db.clusterFile
+
+	// Close the database after usage
+	defer db.Close()
+
+	_, ok := openDatabases[clusterFile]
+
+	if ok {
+		t.Fatalf("Expected key: %s doesn't exist\n", clusterFile)
+	}
 }
