@@ -1346,6 +1346,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "configure-storage-engine")) {
+					bool _result = wait(
+					    makeInterruptable(configureStorageEngineCommandActor(db, localDb, tokens, &linenoise, warn)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "fileconfigure")) {
 					if (tokens.size() == 2 ||
 					    (tokens.size() == 3 && (tokens[1] == "new"_sr || tokens[1] == "FORCE"_sr))) {
