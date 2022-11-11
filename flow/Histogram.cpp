@@ -112,7 +112,7 @@ void Histogram::writeToLog(double elapsed) {
 			totalCount += buckets[i];
 			switch (unit) {
 			case Unit::microseconds:
-				e.detail(format("LessThan%u.%03u", int(value / 1000), int(value % 1000)), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
 				break;
 			case Unit::bytes:
 			case Unit::bytes_per_second:
