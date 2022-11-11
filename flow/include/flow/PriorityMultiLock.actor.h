@@ -72,8 +72,6 @@
 //   // let lock and all copies of lock go out of scope to release
 class PriorityMultiLock {
 public:
-	typedef int64_t UserTag;
-
 	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
 	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
 	// the Lock before it goes out of scope.
@@ -102,7 +100,7 @@ public:
 
 	~PriorityMultiLock() { kill(); }
 
-	Future<Lock> lock(int priority = 0, UserTag userTag = 0) {
+	Future<Lock> lock(int priority = 0) {
 		Priority& p = priorities[priority];
 		Queue& q = p.queue;
 
@@ -119,7 +117,7 @@ public:
 
 				// Return a Lock to the caller
 				Lock lock;
-				addRunner(lock, userTag, &p);
+				addRunner(lock, &p);
 
 				pml_debug_printf("lock nowait priority %d  %s\n", priority, toString().c_str());
 				return lock;
@@ -129,7 +127,7 @@ public:
 			waitingPriorities.push_back(p);
 		}
 
-		Waiter& w = q.emplace_back(userTag);
+		Waiter& w = q.emplace_back();
 		++waiting;
 
 		pml_debug_printf("lock wait priority %d  %s\n", priority, toString().c_str());
@@ -200,9 +198,7 @@ public:
 
 private:
 	struct Waiter {
-		Waiter(const UserTag& u) : userTag(u) {}
 		Promise<Lock> lockPromise;
-		UserTag userTag;
 	};
 
 	// Total execution slots allowed across all priorities
@@ -246,14 +242,13 @@ private:
 	WaitingPrioritiesList waitingPriorities;
 
 	struct Runner : boost::intrusive::list_base_hook<>, FastAllocated<Runner> {
-		Runner(Priority* p, const UserTag& u) : priority(p), userTag(u) {
+		Runner(Priority* p) : priority(p) {
 #if PRIORITYMULTILOCK_DEBUG || !defined(NO_INTELLISENSE)
 			debugID = deterministicRandom()->randomUniqueID();
 #endif
 		}
 
 		Future<Void> handler;
-		UserTag userTag;
 		Priority* priority;
 #if PRIORITYMULTILOCK_DEBUG || !defined(NO_INTELLISENSE)
 		UID debugID;
@@ -300,10 +295,10 @@ private:
 		return Void();
 	}
 
-	void addRunner(Lock& lock, UserTag userTag, Priority* priority) {
+	void addRunner(Lock& lock, Priority* priority) {
 		priority->runners += 1;
 		--available;
-		Runner* runner = new Runner(priority, userTag);
+		Runner* runner = new Runner(priority);
 		runners.push_back(*runner);
 		runner->handler = handleRelease(this, runner, lock.promise.getFuture());
 	}
@@ -375,7 +370,7 @@ private:
 
 				// If the lock was not already released, add it to the runners future queue
 				if (lock.promise.canBeSet()) {
-					self->addRunner(lock, w.userTag, pPriority);
+					self->addRunner(lock, pPriority);
 				}
 
 				pml_debug_printf("    launched alreadyDone=%d priority=%d  %s\n",
