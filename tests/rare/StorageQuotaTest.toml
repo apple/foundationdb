@@ -8,20 +8,36 @@ testTitle = 'TenantCreation'
     [[test.workload]]
     testName = 'CreateTenant'
     name = 'First'
+    group = 'GroupA'
 
     [[test.workload]]
     testName = 'CreateTenant'
     name = 'Second'
+    group = 'GroupA'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'Third'
+    group = 'GroupB'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'Fourth'
+    group = 'GroupB'
 
 [[test]]
 testTitle = 'StorageQuota'
 
     [[test.workload]]
     testName = 'StorageQuota'
+    group = 'GroupA'
     tenant = 'First'
     nodeCount = 250000
+    emptyTenant = 'Second'
 
     [[test.workload]]
     testName = 'StorageQuota'
-    tenant = 'Second'
+    group = 'GroupB'
+    tenant = 'Third'
     nodeCount = 25000
+    emptyTenant = 'Fourth'

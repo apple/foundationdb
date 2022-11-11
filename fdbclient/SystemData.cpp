@@ -1693,8 +1693,8 @@ Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value) {
 const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 
-Key storageQuotaKey(StringRef tenantName) {
-	return tenantName.withPrefix(storageQuotaPrefix);
+Key storageQuotaKey(StringRef tenantGroupName) {
+	return tenantGroupName.withPrefix(storageQuotaPrefix);
 }
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
