@@ -1423,6 +1423,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
+	state bool enablePhysicalShardMove =
+	    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1539,8 +1541,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
 
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
-						    tciIndex == 1) {
+						if (enablePhysicalShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
 							       physicalShardIDCandidate != anonymousShardId.first());
 							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
@@ -1587,62 +1588,56 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							anyWithSource = true;
 						}
 
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
-							// critical to the correctness of team selection by PhysicalShardCollection
-							// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
-							// team Thus, tryGetAvailableRemoteTeamWith() may select an almost full remote team In this
-							// case, we must re-select a remote team We set foundTeams = false to avoid finishing team
-							// selection Then, forceToUseNewPhysicalShard is set, which enforce to use getTeam to select
-							// a remote team
+						if (enablePhysicalShardMove) {
 							if (tciIndex == 1 && !forceToUseNewPhysicalShard) {
+								// critical to the correctness of team selection by PhysicalShardCollection
+								// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
+								// team Thus, tryGetAvailableRemoteTeamWith() may select an almost full remote team In
+								// this case, we must re-select a remote team We set foundTeams = false to avoid
+								// finishing team selection Then, forceToUseNewPhysicalShard is set, which enforce to
+								// use getTeam to select a remote team
 								bool minAvailableSpaceRatio = bestTeam.first.get()->getMinAvailableSpaceRatio(true);
 								if (minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
 									retryFindDstReason = DDQueue::RetryFindDstReason::RemoteTeamIsFull;
 									foundTeams = false;
 									break;
 								}
-							}
-						}
 
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+								// critical to the correctness of team selection by PhysicalShardCollection
+								// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
+								// team Thus, tryGetAvailableRemoteTeamWith() may select an unhealthy remote team In
+								// this case, we must re-select a remote team We set foundTeams = false to avoid
+								// finishing team selection Then, forceToUseNewPhysicalShard is set, which enforce to
+								// use getTeam to select a remote team
+								if (!bestTeam.first.get()->isHealthy()) {
+									retryFindDstReason = DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy;
+									foundTeams = false;
+									break;
+								}
+							}
+
 							bestTeams.emplace_back(bestTeam.first.get(), true);
 							// Always set bestTeams[i].second = true to disable optimization in data move between DCs
 							// for the correctness of PhysicalShardCollection
 							// Currently, enabling the optimization will break the invariant of PhysicalShardCollection
 							// Invariant: once a physical shard is created with a specific set of SSes, this SS set will
 							// never get changed.
+
+							if (tciIndex == 0) {
+								ASSERT(foundTeams);
+								ShardsAffectedByTeamFailure::Team primaryTeam =
+								    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
+								physicalShardIDCandidate =
+								    self->physicalShardCollection->determinePhysicalShardIDGivenPrimaryTeam(
+								        primaryTeam, metrics, forceToUseNewPhysicalShard, debugID);
+								ASSERT(physicalShardIDCandidate != UID().first() &&
+								       physicalShardIDCandidate != anonymousShardId.first());
+							}
 						} else {
 							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 						}
-
-						// get physicalShardIDCandidate
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
-						    tciIndex == 0) {
-							ASSERT(foundTeams);
-							ShardsAffectedByTeamFailure::Team primaryTeam =
-							    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
-							physicalShardIDCandidate =
-							    self->physicalShardCollection->determinePhysicalShardIDGivenPrimaryTeam(
-							        primaryTeam, metrics, forceToUseNewPhysicalShard, debugID);
-							ASSERT(physicalShardIDCandidate != UID().first() &&
-							       physicalShardIDCandidate != anonymousShardId.first());
-						}
 					}
 					tciIndex++;
-				}
-
-				// critical to the correctness of team selection by PhysicalShardCollection
-				// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary team
-				// Thus, tryGetAvailableRemoteTeamWith() may select an unhealthy remote team
-				// In this case, we must re-select a remote team
-				// We set foundTeams = false to avoid finishing team selection
-				// Then, forceToUseNewPhysicalShard is set, which enforce to use getTeam to select a remote team
-				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
-				    bestTeams.size() > 1 && !forceToUseNewPhysicalShard) {
-					if (!bestTeams[1].first->isHealthy()) {
-						retryFindDstReason = DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy;
-						foundTeams = false;
-					}
 				}
 
 				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
@@ -1665,7 +1660,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size())
 					    .detail("Servers", destServersString(bestTeams));
-					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+					if (enablePhysicalShardMove) {
 						if (rd.isRestore() && destOverloadedCount > 50) {
 							throw data_move_dest_team_not_found();
 						}
@@ -1689,14 +1684,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				// When forceToUseNewPhysicalShard = false, we get paired primary team and remote team
 				// However, this may be failed
 				// Any retry triggers to use new physicalShard which enters the normal routine
-				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				if (enablePhysicalShardMove) {
 					forceToUseNewPhysicalShard = true;
 				}
 
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
 			}
 
-			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+			if (enablePhysicalShardMove) {
 				if (!rd.isRestore()) {
 					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
 					// thus, update the physicalShardIDCandidate to related data structures
@@ -1954,7 +1949,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
-					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+					if (enablePhysicalShardMove) {
 						// update physical shard collection
 						std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams;
 						for (int i = 0; i < bestTeams.size(); i++) {
