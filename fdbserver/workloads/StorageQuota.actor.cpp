@@ -87,7 +87,7 @@ struct StorageQuotaWorkload : TestWorkload {
 		state Optional<int64_t> quotaRead = wait(getStorageQuotaHelper(cx, self->group));
 		ASSERT(quotaRead.present() && quotaRead.get() == quota);
 
-		if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+		if (!SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 			return Void();
 		}
 
