@@ -4789,10 +4789,10 @@ int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
 	auto& reqAndResult = mappedKeyValue.reqAndResult;
 	int bytes = 0;
 	if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
-		auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+		const auto& getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
 		bytes = getValue.expectedSize();
 	} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
-		auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+		const auto& getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
 		bytes = getRange.result.expectedSize();
 	} else {
 		throw internal_error();

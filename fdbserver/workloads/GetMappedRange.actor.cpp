@@ -487,11 +487,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
 		}
 		const double r2 = deterministicRandom()->random01();
-		if (r2 < 0.5) {
-			(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = true;
-		} else {
-			(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = false;
-		}
+		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinFlip();
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
 
 		{
@@ -499,6 +495,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			wait(self->scanMappedRange(cx, 10, 490, mapper, self, MATCH_INDEX_UNMATCHED_ONLY, true));
 		}
 
+		// reset it to default
+		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = false;
 		return Void();
 	}
 
