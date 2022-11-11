@@ -20,6 +20,7 @@
 
 #ifndef FDBRPC_TIMED_REQUEST_H
 #define FDBRPC_TIMED_REQUEST_H
+#include "flow/network.h"
 #pragma once
 
 #include <fdbrpc/fdbrpc.h>
@@ -35,7 +36,7 @@ public:
 
 	TimedRequest() {
 		if (!FlowTransport::isClient()) {
-			_requestTime = timer();
+			_requestTime = g_network->timer();
 		} else {
 			_requestTime = 0.0;
 		}
