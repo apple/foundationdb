@@ -131,6 +131,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			try {
 				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
 				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
+				if (g_network->isSimulated()) {
+					g_simulator->quiesced = true;
+					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", g_simulator->quiesced);
+				}
 			} catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
 				self->testFailure("Unable to achieve a quiet database");
@@ -200,6 +204,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 				when(wait(self->suspendConsistencyCheck.onChange())) {}
 			}
+		}
+		if (self->firstClient && g_network->isSimulated() && self->performQuiescentChecks) {
+			g_simulator->quiesced = false;
+			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", g_simulator->quiesced);
 		}
 		return Void();
 	}
@@ -558,6 +566,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 					req.version = version;
 					req.tags = TagSet();
+					req.options = ReadOptions(debugRandom()->randomUniqueID());
+					DisabledTraceEvent("CCD", req.options.get().debugID.get()).detail("Version", version);
 
 					// Try getting the entries in the specified range
 					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;

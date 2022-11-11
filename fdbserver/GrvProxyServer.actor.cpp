@@ -27,7 +27,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbserver/GrvProxyTransactionTagThrottler.h"
+#include "fdbserver/GrvProxyTagThrottler.h"
 #include "fdbserver/GrvTransactionRateInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -62,7 +62,7 @@ struct GrvProxyStats {
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
 
-	// These latency bands and samples ignore latency injected by the GrvProxyTransactionTagThrottler
+	// These latency bands and samples ignore latency injected by the GrvProxyTagThrottler
 	LatencyBands grvLatencyBands;
 	LatencySample grvLatencySample; // GRV latency metric sample of default priority
 	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
@@ -183,6 +183,8 @@ struct GrvProxyData {
 	Version version;
 	Version minKnownCommittedVersion; // we should ask master for this version.
 
+	GrvProxyTagThrottler tagThrottler;
+
 	// Cache of the latest commit versions of storage servers.
 	VersionVector ssVersionVectorCache;
 
@@ -195,6 +197,7 @@ struct GrvProxyData {
 			if (newLatencyBandConfig.present()) {
 				for (auto band : newLatencyBandConfig.get().grvConfig.bands) {
 					stats.grvLatencyBands.addThreshold(band);
+					tagThrottler.addLatencyBandThreshold(band);
 				}
 			}
 		}
@@ -213,7 +216,8 @@ struct GrvProxyData {
 	                                dbgid,
 	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    updateCommitRequests(0), lastCommitTime(0), version(0), minKnownCommittedVersion(invalidVersion) {}
+	    updateCommitRequests(0), lastCommitTime(0), version(0), minKnownCommittedVersion(invalidVersion),
+	    tagThrottler(SERVER_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION) {}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -363,7 +367,6 @@ ACTOR Future<Void> getRate(UID myID,
                            GetHealthMetricsReply* detailedHealthMetricsReply,
                            TransactionTagMap<uint64_t>* transactionTagCounter,
                            PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
-                           GrvProxyTransactionTagThrottler* tagThrottler,
                            GrvProxyStats* stats,
                            GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
@@ -424,7 +427,7 @@ ACTOR Future<Void> getRate(UID myID,
 				*clientThrottledTags = std::move(rep.clientThrottledTags.get());
 			}
 			if (rep.proxyThrottledTags.present()) {
-				tagThrottler->updateRates(rep.proxyThrottledTags.get());
+				proxyData->tagThrottler.updateRates(rep.proxyThrottledTags.get());
 			}
 		}
 		when(wait(leaseTimeout)) {
@@ -443,11 +446,14 @@ void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* 
 	++stats->txnRequestErrors;
 	req->reply.sendError(grv_proxy_memory_limit_exceeded());
 	if (req->priority == TransactionPriority::IMMEDIATE) {
-		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededSystem").suppressFor(60);
+		TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "ProxyGRVThresholdExceededSystem")
+		    .suppressFor(60);
 	} else if (req->priority == TransactionPriority::DEFAULT) {
-		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededDefault").suppressFor(60);
+		TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "ProxyGRVThresholdExceededDefault")
+		    .suppressFor(60);
 	} else {
-		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededBatch").suppressFor(60);
+		TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "ProxyGRVThresholdExceededBatch")
+		    .suppressFor(60);
 	}
 }
 
@@ -470,7 +476,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
                                                GrvProxyStats* stats,
                                                GrvTransactionRateInfo* batchRateInfo,
                                                TransactionTagMap<uint64_t>* transactionTagCounter,
-                                               GrvProxyTransactionTagThrottler* tagThrottler) {
+                                               GrvProxyTagThrottler* tagThrottler) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
@@ -721,7 +727,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		reply.proxyId = grvProxyData->dbgid;
 		reply.proxyTagThrottledDuration = request.proxyTagThrottledDuration;
 
-		if (!request.tags.empty()) {
+		if (request.isTagged()) {
 			auto& priorityThrottledTags = clientThrottledTags[request.priority];
 			for (auto tag : request.tags) {
 				auto tagItr = priorityThrottledTags.find(tag.first);
@@ -824,7 +830,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state int64_t batchTransactionCount = 0;
 	state GrvTransactionRateInfo normalRateInfo(10);
 	state GrvTransactionRateInfo batchRateInfo(0);
-	state GrvProxyTransactionTagThrottler tagThrottler;
 
 	state Deque<GetReadVersionRequest> systemQueue;
 	state Deque<GetReadVersionRequest> defaultQueue;
@@ -850,7 +855,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      detailedHealthMetricsReply,
 	                      &transactionTagCounter,
 	                      &clientThrottledTags,
-	                      &tagThrottler,
 	                      &grvProxyData->stats,
 	                      grvProxyData));
 	addActor.send(queueGetReadVersionRequests(db,
@@ -865,7 +869,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                                          &grvProxyData->stats,
 	                                          &batchRateInfo,
 	                                          &transactionTagCounter,
-	                                          &tagThrottler));
+	                                          &grvProxyData->tagThrottler));
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
 	       db->get().client.grvProxies.end()) {
@@ -888,7 +892,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			elapsed = 1e-15;
 		}
 
-		tagThrottler.releaseTransactions(elapsed, defaultQueue, batchQueue);
+		grvProxyData->tagThrottler.releaseTransactions(elapsed, defaultQueue, batchQueue);
 		normalRateInfo.startReleaseWindow();
 		batchRateInfo.startReleaseWindow();
 

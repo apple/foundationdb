@@ -68,7 +68,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("RandomMoveKeys");
+
+		// Rollback interferes with the
+		// \xff\xff/worker_interfaces test, since it can
+		// trigger a cluster recvoery, causing the worker
+		// interface for a machine to be updated in the middle
+		// of the test.
+		out.insert("RollbackWorkload");
+	}
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
@@ -84,7 +94,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Key startKey(baseKey + "/");
 			Key endKey(baseKey + "/\xff");
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			if (deterministicRandom()->random01() < 0.2) {
+			if (deterministicRandom()->random01() < 0.2 && !self->rwImpls.empty()) {
 				self->asyncReadImpls.push_back(std::make_shared<SKSCTestAsyncReadImpl>(KeyRangeRef(startKey, endKey)));
 				cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
 				                                      SpecialKeySpace::IMPLTYPE::READONLY,
@@ -106,6 +116,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
+		ASSERT(rwImpls.size() > 0);
+
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
@@ -250,6 +262,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	KeyRange randomRWKeyRange() {
+		ASSERT(rwImpls.size() > 0);
 		Key prefix = rwImpls[deterministicRandom()->randomInt(0, rwImpls.size())]->getKeyRange().begin;
 		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
 		                .withPrefix(prefix);

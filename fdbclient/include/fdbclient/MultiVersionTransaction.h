@@ -377,6 +377,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
+	FDBFuture* (*transactionGetTotalCost)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
 	FDBFuture* (*transactionWatch)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
 	FDBFuture* (*transactionOnError)(FDBTransaction* tr, fdb_error_t error);
@@ -505,6 +506,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override { return SpanContext(); };
+	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -732,6 +734,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -1100,8 +1103,12 @@ public:
 	Reference<ClientInfo> getLocalClient();
 	void runOnExternalClients(int threadId,
 	                          std::function<void(Reference<ClientInfo>)>,
-	                          bool runOnFailedClients = false);
-	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients = false);
+	                          bool runOnFailedClients = false,
+	                          bool failOnError = false);
+	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>,
+	                                    bool runOnFailedClients = false,
+	                                    bool failOnError = false);
+	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
 
@@ -1148,6 +1155,8 @@ private:
 	bool disableBypass;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
+	bool ignoreExternalClientFailures;
+	bool retainClientLibCopies;
 	ApiVersion apiVersion;
 
 	int nextThread = 0;

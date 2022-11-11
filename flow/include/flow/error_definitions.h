@@ -133,6 +133,8 @@ ERROR( incompatible_software_version, 1220, "Current software does not support d
 ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
 ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
 ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
+ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
+ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -232,6 +234,8 @@ ERROR( client_lib_already_exists, 2119, "Client library with same identifier alr
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
 ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
+ERROR( no_external_client_provided, 2123, "No external client library provided." )
+ERROR( all_external_clients_failed, 2124, "All external clients have failed." )
 
 ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )
@@ -264,6 +268,7 @@ ERROR( api_version_unset, 2200, "API version is not set" )
 ERROR( api_version_already_set, 2201, "API version may be set only once" )
 ERROR( api_version_invalid, 2202, "API version not valid" )
 ERROR( api_version_not_supported, 2203, "API version not supported" )
+ERROR( api_function_missing, 2204, "Failed to load a required FDB API function." )
 ERROR( exact_mode_without_limits, 2210, "EXACT streaming mode requires limits, but none were given" )
 
 ERROR( invalid_tuple_data_type, 2250, "Unrecognized data type in packed tuple")

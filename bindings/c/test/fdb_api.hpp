@@ -23,7 +23,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #endif
 
 #include <cassert>
@@ -663,11 +663,17 @@ public:
 		native::fdb_transaction_clear_range(tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
-	void addReadConflictRange(KeyRef begin, KeyRef end) {
+	void addConflictRange(KeyRef begin, KeyRef end, FDBConflictRangeType rangeType) {
 		if (auto err = Error(native::fdb_transaction_add_conflict_range(
-		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), FDB_CONFLICT_RANGE_TYPE_READ))) {
+		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeType))) {
 			throwError("fdb_transaction_add_conflict_range returned error: ", err);
 		}
+	}
+
+	void addReadConflictRange(KeyRef begin, KeyRef end) { addConflictRange(begin, end, FDB_CONFLICT_RANGE_TYPE_READ); }
+
+	void addWriteConflictRange(KeyRef begin, KeyRef end) {
+		addConflictRange(begin, end, FDB_CONFLICT_RANGE_TYPE_WRITE);
 	}
 };
 
@@ -715,6 +721,12 @@ public:
 		if (err)
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
+	}
+
+	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) {
+		if (!tenant)
+			throw std::runtime_error("blobbifyRange from null tenant");
+		return native::fdb_tenant_blobbify_range(tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 };
 

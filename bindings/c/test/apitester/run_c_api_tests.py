@@ -38,6 +38,7 @@ from tmp_cluster import TempCluster
 from local_cluster import TLSConfig
 # fmt: on
 
+
 TESTER_STATS_INTERVAL_SEC = 5
 
 
@@ -98,6 +99,9 @@ def run_tester(args, cluster, test_file):
         external_client_library = Path(args.external_client_library).resolve()
         cmd += ["--external-client-library", external_client_library]
 
+    if args.retain_client_lib_copies:
+        cmd += ["--retain-client-lib-copies"]
+
     if cluster.blob_granules_enabled:
         cmd += [
             "--blob-granule-local-file-path",
@@ -138,7 +142,7 @@ def run_tester(args, cluster, test_file):
         else:
             reason = "exit code: %d" % ret_code
         get_logger().error("\n'%s' did not complete succesfully (%s)" % (cmd[0], reason))
-        if log_dir is not None:
+        if log_dir is not None and not args.disable_log_dump:
             dump_client_logs(log_dir)
 
     get_logger().info("")
@@ -210,6 +214,12 @@ def parse_args(argv):
     parser.add_argument("--api-tester-bin", type=str, help="Path to the fdb_c_api_tester executable.", required=True)
     parser.add_argument("--external-client-library", type=str, help="Path to the external client library.")
     parser.add_argument(
+        "--retain-client-lib-copies",
+        action="store_true",
+        default=False,
+        help="Retain temporary external client library copies.",
+    )
+    parser.add_argument(
         "--cluster-file",
         type=str,
         default="fdb.cluster",
@@ -247,6 +257,11 @@ def parse_args(argv):
         action="append",
         dest="knobs",
         help="[lowercase-knob-name]=[knob-value] (there may be multiple --knob options)",
+    )
+    parser.add_argument(
+        "--disable-log-dump",
+        help="Do not dump logs on error",
+        action="store_true",
     )
 
     return parser.parse_args(argv)

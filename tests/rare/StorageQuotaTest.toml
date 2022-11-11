@@ -1,5 +1,27 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['optional', 'required']
+
+[[test]]
+testTitle = 'TenantCreation'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'First'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'Second'
+
 [[test]]
 testTitle = 'StorageQuota'
 
     [[test.workload]]
     testName = 'StorageQuota'
+    tenant = 'First'
+    nodeCount = 250000
+
+    [[test.workload]]
+    testName = 'StorageQuota'
+    tenant = 'Second'
+    nodeCount = 25000
