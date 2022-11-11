@@ -1310,7 +1310,7 @@ public:
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
-		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READ_RANKS, ',');
+		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READTYPE_PRIORITY_MAP, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
 		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.getId());
