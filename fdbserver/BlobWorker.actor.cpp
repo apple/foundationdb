@@ -36,6 +36,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 
+#include "fdbrpc/simulator.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
@@ -1279,8 +1280,13 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		ASSERT(snapshotVersion < version);
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
-		if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
-			ASSERT(snapshotF.cipherKeysMeta.present());
+		if (g_simulator && g_simulator->isSimulated() &&
+		    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) &&
+		    !snapshotF.cipherKeysMeta.present()) {
+			ASSERT(false);
+		}
+		if (snapshotF.cipherKeysMeta.present()) {
+			ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
 			CODE_PROBE(true, "fetching cipher keys for blob snapshot file");
 			BlobGranuleCipherKeysCtx keysCtx =
 			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
@@ -1307,8 +1313,14 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 			deltaF = files.deltaFiles[deltaIdx];
 
-			if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
-				ASSERT(deltaF.cipherKeysMeta.present());
+			if (g_simulator && g_simulator->isSimulated() &&
+			    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) &&
+			    !deltaF.cipherKeysMeta.present()) {
+				ASSERT(false);
+			}
+
+			if (deltaF.cipherKeysMeta.present()) {
+				ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
 				CODE_PROBE(true, "fetching cipher keys for delta file");
 				BlobGranuleCipherKeysCtx keysCtx =
 				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
