@@ -4862,11 +4862,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			                      pOriginalReq->options.get().debugID.get().first(),
 			                      "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
-		TraceEvent("Hfu5Batch")
-		    .detail("Cnt", result.data.size())
-		    .detail("Sz", sz)
-		    .detail("STRICTLY", SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT)
-		    .detail("RemainBytes", *remainingLimitBytes);
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			// since we always read the index, so always consider the index size
 			int indexSize = sizeof(KeyValueRef) + input.data[i + offset].expectedSize();
@@ -4874,7 +4869,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			*remainingLimitBytes -= size;
 			result.data.push_back(result.arena, kvms[i]);
 			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes <= 0) {
-				TraceEvent("Hfu5Break").detail("Cnt", result.data.size()).detail("Sz", sz);
 				break;
 			}
 		}
@@ -4893,11 +4887,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		int index = (resultSize - 1) % SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
 		result.data.back().boundaryAndExist = getMappedKeyValueSize(kvms[index]) > 0;
 	}
-	TraceEvent("Hfu5Quit")
-	    .detail("Cnt", result.data.size())
-	    .detail("Sz", sz)
-	    .detail("STRICTLY", SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT)
-	    .detail("RemainBytes", *remainingLimitBytes);
 	result.more = input.more || resultSize < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent("TransactionDebug",
