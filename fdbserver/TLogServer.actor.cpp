@@ -1445,7 +1445,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(TLogData* self,
@@ -1606,7 +1608,9 @@ ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Ve
 			// we want the caller to finish first, otherwise the data structure it is building might not be complete
 			wait(delay(0.0));
 		}
-		when(wait(delay(timeout))) { self->blockingPeekTimeouts += 1; }
+		when(wait(delay(timeout))) {
+			self->blockingPeekTimeouts += 1;
+		}
 	}
 	return Void();
 }
@@ -1824,8 +1828,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
 				UID ssID = nondeterministicRandom()->randomUniqueID();
 				std::string s = "BlockingPeekLatencies-" + reqTag.toString();
-				logData->blockingPeekLatencies.try_emplace(
-				    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+				logData->blockingPeekLatencies.try_emplace(reqTag,
+				                                           s,
+				                                           ssID,
+				                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+				                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 			}
 			LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
 			sample.addMeasurement(latency);
@@ -2788,7 +2795,9 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+					break;
+				}
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -3269,7 +3278,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						} else {
@@ -3280,7 +3291,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -3626,7 +3639,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 						forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 					}
 				}
-				when(wait(error)) { throw internal_error(); }
+				when(wait(error)) {
+					throw internal_error();
+				}
 				when(wait(activeSharedChange)) {
 					if (activeSharedTLog->get() == tlogId) {
 						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
