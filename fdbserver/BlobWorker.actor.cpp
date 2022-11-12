@@ -292,6 +292,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	int64_t lastResidentMemory = 0;
 	double lastResidentMemoryCheckTime = -100.0;
 
+	bool isFullRestoreMode = false;
+
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
@@ -2145,7 +2147,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		// No need to start Change Feed in full restore mode
-		if (isFullRestoreMode())
+		if (bwData->isFullRestoreMode)
 			return Void();
 
 		checkMergeCandidate = granuleCheckMergeCandidate(bwData,
@@ -3587,7 +3589,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			state Reference<GranuleMetadata> metadata = m;
 			// state Version granuleBeginVersion = req.beginVersion;
 			// skip waiting for CF ready for recovery mode
-			if (!isFullRestoreMode()) {
+			if (!bwData->isFullRestoreMode) {
 				choose {
 					when(wait(metadata->readable.getFuture())) {}
 					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
@@ -3645,7 +3647,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// this is an active granule query
 				loop {
 					// skip check since CF doesn't start for bare metal recovery mode
-					if (isFullRestoreMode()) {
+					if (bwData->isFullRestoreMode) {
 						break;
 					}
 					if (!metadata->activeCFData.get().isValid() || !metadata->cancelled.canBeSet()) {
@@ -3688,7 +3690,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// if feed was popped by another worker and BW only got empty versions, it wouldn't itself see that it
 				// got popped, but we can still reject the in theory this should never happen with other protections but
 				// it's a useful and inexpensive sanity check
-				if (!isFullRestoreMode()) {
+				if (!bwData->isFullRestoreMode) {
 					Version emptyVersion = metadata->activeCFData.get()->popVersion - 1;
 					if (req.readVersion > metadata->durableDeltaVersion.get() &&
 					    emptyVersion > metadata->bufferedDeltaVersion) {
@@ -3994,6 +3996,9 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				throw granule_assignment_conflict();
 			}
 
+			bool isFullRestore = wait(isFullRestoreMode(bwData->db, req.keyRange));
+			bwData->isFullRestoreMode = isFullRestore;
+
 			Optional<Value> prevLockValue = wait(fLockValue);
 			state bool hasPrevOwner = prevLockValue.present();
 			state bool createChangeFeed = false;
@@ -4068,7 +4073,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 
 				// for recovery mode - don't create change feed, don't create snapshot
-				if (isFullRestoreMode()) {
+				if (bwData->isFullRestoreMode) {
 					createChangeFeed = false;
 					info.doSnapshot = false;
 					GranuleFiles granuleFiles = wait(loadPreviousFiles(&tr, info.granuleID));
@@ -4090,7 +4095,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 			}
 
-			if (createChangeFeed && !isFullRestoreMode()) {
+			if (createChangeFeed && !bwData->isFullRestoreMode) {
 				// create new change feed for new version of granule
 				wait(updateChangeFeed(
 				    &tr, granuleIDToCFKey(info.granuleID), ChangeFeedStatus::CHANGE_FEED_CREATE, req.keyRange));
@@ -4102,7 +4107,8 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			// If anything in previousGranules, need to do the handoff logic and set
 			// ret.previousChangeFeedId, and the previous durable version will come from the previous
 			// granules
-			if (info.history.present() && info.history.get().value.parentVersions.size() > 0 && !isFullRestoreMode()) {
+			if (info.history.present() && info.history.get().value.parentVersions.size() > 0 &&
+			    !bwData->isFullRestoreMode) {
 				CODE_PROBE(true, "Granule open found parent");
 				if (info.history.get().value.parentVersions.size() == 1) { // split
 					state KeyRangeRef parentRange(info.history.get().value.parentBoundaries[0],
