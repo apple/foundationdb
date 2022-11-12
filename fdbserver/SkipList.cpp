@@ -816,6 +816,10 @@ struct TransactionInfo {
 	bool reportConflictingKeys;
 };
 
+Version ConflictBatch::oldestConflictSetVersion() const {
+	return cs->oldestVersion;
+}
+
 void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOldestVersion) {
 	const int t = transactionCount++;
 

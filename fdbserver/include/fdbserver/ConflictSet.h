@@ -45,6 +45,7 @@ struct ConflictBatch {
 		TransactionCommitted,
 	};
 
+	Version oldestConflictSetVersion() const;
 	void addTransaction(const CommitTransactionRef& transaction, Version newOldestVersion);
 	void detectConflicts(Version now,
 	                     Version newOldestVersion,

@@ -2031,6 +2031,12 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		int lastSize = pProxyCommitData->keyResolvers.size();
 		auto rs = pProxyCommitData->keyResolvers.ranges();
 		Version oldestVersion = self->prevVersion - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+
+		// After speedUpSimulation, start using the default 5s max transaction life
+		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+			oldestVersion = self->prevVersion - 5 * SERVER_KNOBS->VERSIONS_PER_SECOND;
+		}
+
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
 			while (r->value().size() > 1 && r->value()[1].first < oldestVersion)
 				r->value().pop_front();
