@@ -217,7 +217,8 @@ public:
 class LatencySample {
 public:
 	LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
-	  : name(name), id(id), sampleStart(now()), sketch(accuracy) {
+	  : name(name), id(id), sampleStart(now()), sketch(accuracy),
+		latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 
