@@ -414,8 +414,8 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
-					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && tenantName.present() &&
-					    commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.transaction.bypass_storage_quota &&
+					    tenantName.present() && commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
 						req.reply.sendError(storage_quota_exceeded());
 						continue;
 					}
