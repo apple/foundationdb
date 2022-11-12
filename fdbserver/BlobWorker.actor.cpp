@@ -1752,6 +1752,7 @@ bool granuleCanRetry(const Error& e) {
 	case error_code_http_request_failed:
 	case error_code_connection_failed:
 	case error_code_lookup_failed: // dns
+	case error_code_platform_error: // injected faults
 		return true;
 	default:
 		return false;

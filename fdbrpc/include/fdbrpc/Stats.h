@@ -246,7 +246,7 @@ private:
 		    .detail("P95", sketch.percentile(0.95))
 		    .detail("P99", sketch.percentile(0.99))
 		    .detail("P99.9", sketch.percentile(0.999))
-		    .trackLatest(id.toString() + "/" + name);
+		    .trackLatest(latencySampleEventHolder->trackingKey);
 
 		sketch.clear();
 		sampleStart = now();
