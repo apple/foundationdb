@@ -168,16 +168,15 @@ public:
 
 	int maxPriority() const { return priorities.size() - 1; }
 
-	int totalWaiters() const { return waiting; }
+	int getRunnersCount() const { return concurrency - available; }
+	int getWaitersCount() const { return waiting; }
 
-	int numWaiters(const unsigned int priority) const {
+	int getWaitersCount(const unsigned int priority) const {
 		ASSERT(priority < priorities.size());
 		return priorities[priority].queue.size();
 	}
 
-	int totalRunners() const { return concurrency - available; }
-
-	int numRunners(const unsigned int priority) const {
+	int getRunnersCount(const unsigned int priority) const {
 		ASSERT(priority < priorities.size());
 		return priorities[priority].runners;
 	}

@@ -917,7 +917,7 @@ public:
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 	bool REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; // Whether to split pages by tenant if encryption is enabled
 
-	std::string REDWOOD_PRIORITY_LAUNCHS;
+	std::string REDWOOD_IO_PRIORITIES;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
