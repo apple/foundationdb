@@ -339,6 +339,8 @@ public:
 	ACTOR static UNCANCELLABLE Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
 	                                                     Standalone<StringRef> pageData,
 	                                                     std::vector<Reference<SyncQueue>>* toSync) {
+		state TrackMe trackMe(self);
+
 		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT(self->readingFile == 2);
@@ -440,6 +442,7 @@ public:
 	                                                      Standalone<StringRef> pageData,
 	                                                      StringBuffer* pageMem,
 	                                                      uint64_t poppedPages) {
+		state TrackMe trackMe(self);
 		state Promise<Void> pushing, committed;
 		state Promise<Void> errorPromise = self->error;
 		state std::string filename = self->files[0].dbgFilename;
@@ -594,6 +597,8 @@ public:
 	}
 
 	ACTOR static void shutdown(RawDiskQueue_TwoFiles* self, bool deleteFiles) {
+		state TrackMe trackMe(self);
+
 		// Wait for all reads and writes on the file, and all actors referencing self, to be finished
 		state Error error = success();
 		try {
