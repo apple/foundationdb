@@ -926,18 +926,18 @@ struct ChangeFeedPopRequest {
 struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version version; // The FDB version at which the checkpoint is created.
-	KeyRange range;
+	std::vector<KeyRange> ranges;
 	int16_t format; // CheckpointFormat.
-	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	Optional<UID> dataMoveId;
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
-	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
-	  : version(version), range(range), format(format) {}
+	GetCheckpointRequest(const UID& dataMoveId, Version version, CheckpointFormat format)
+	  : version(version), ranges(ranges), format(format), dataMoveId(dataMoveId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, checkpointID, reply);
+		serializer(ar, version, ranges, format, dataMoveId, reply);
 	}
 };
 

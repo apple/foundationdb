@@ -113,6 +113,25 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                           includes,
 		                           excludes)));
 
+		state KeyRange testRange = KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr);
+		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);
+		// Create checkpoint.
+		state Transaction tr(cx);
+		state CheckpointFormat format = DataMoveRocksCF;
+		state UID dataMoveId = deterministicRandom()->randomUniqueID();
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				wait(createCheckpoint(&tr, { testRange }, format, dataMoveId));
+				wait(tr.commit());
+				// version = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());
 		state std::vector<UID> teamB = wait(self->moveShard(self,

@@ -52,6 +52,7 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 27) ? ROCKSDB_PATCH >= 3 :
 
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
+const std::string SPECIAL_KEYS_SHARD_ID = "default";
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
 // TODO: move constants to a header file.
 const KeyRef persistVersion = "\xff\xffVersion"_sr;
@@ -564,7 +565,7 @@ struct PhysicalShard {
 		readIterPool.reset();
 
 		// Deleting default column family is not allowed.
-		if (id == "default") {
+		if (id == SPECIAL_KEYS_SHARD_ID) {
 			return;
 		}
 
@@ -718,7 +719,7 @@ public:
 		std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
 		bool foundMetadata = false;
 		for (const auto& name : columnFamilies) {
-			if (name == METADATA_SHARD_ID) {
+			if (name == SPECIAL_KEYS_SHARD_ID) {
 				foundMetadata = true;
 			}
 			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
@@ -728,7 +729,7 @@ public:
 
 		// Add default column family if it's a newly opened database.
 		if (descriptors.size() == 0) {
-			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ "default", cfOptions });
+			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ SPECIAL_KEYS_SHARD_ID, cfOptions });
 		}
 
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
@@ -755,7 +756,7 @@ public:
 
 			std::set<std::string> unusedShards(columnFamilies.begin(), columnFamilies.end());
 			unusedShards.erase(METADATA_SHARD_ID);
-			unusedShards.erase("default");
+			unusedShards.erase(SPECIAL_KEYS_SHARD_ID);
 
 			KeyRange keyRange = prefixRange(shardMappingPrefix);
 			while (true) {
@@ -829,7 +830,7 @@ public:
 			ASSERT(handles.size() == 1);
 
 			// Add SpecialKeys range. This range should not be modified.
-			std::shared_ptr<PhysicalShard> defaultShard = std::make_shared<PhysicalShard>(db, "default", handles[0]);
+			std::shared_ptr<PhysicalShard> defaultShard = std::make_shared<PhysicalShard>(db, SPECIAL_KEYS_SHARD_ID, handles[0]);
 			columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
 			std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(specialKeys, defaultShard.get());
 			dataShardMap.insert(specialKeys, dataShard.get());
@@ -869,8 +870,8 @@ public:
 		return shard;
 	}
 
-	PhysicalShard* getMetaDataShard() {
-		auto it = physicalShards.find(METADATA_SHARD_ID);
+	PhysicalShard* getSpecialKeysShard() {
+		auto it = physicalShards.find(SPECIAL_KEYS_SHARD_ID);
 		ASSERT(it != physicalShards.end());
 		return it->second.get();
 	}
@@ -2107,7 +2108,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = getReadOptions();
 			s = a.shardManager->getDb()->Get(
-			    readOptions, a.shardManager->getMetaDataShard()->cf, toSlice(persistVersion), &value);
+			    readOptions, a.shardManager->getSpecialKeysShard()->cf, toSlice(persistVersion), &value);
 
 			if (!s.ok() && !s.IsNotFound()) {
 				logRocksDBError(s, "Checkpoint");
@@ -2119,10 +2120,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			                            ? latestVersion
 			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 
-			ASSERT(a.request.version == version || a.request.version == latestVersion);
 			TraceEvent(SevDebug, "ShardedRocksDBServeCheckpointVersion", logId)
 			    .detail("CheckpointVersion", a.request.version)
 			    .detail("PersistVersion", version);
+			ASSERT(a.request.version == version || a.request.version == latestVersion);
 
 			// TODO: set the range as the actual shard range.
 			CheckpointMetaData res(version, a.request.format, a.request.checkpointID);
@@ -2141,7 +2142,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 				populateMetaData(&res, *pMetadata);
 				delete pMetadata;
-				TraceEvent("ShardedRocksDBServeCheckpointSuccess", logId)
+				TraceEvent(SevInfo, "ShardedRocksDBServeCheckpointSuccess", logId)
 				    .detail("CheckpointMetaData", res.toString())
 				    .detail("RocksDBCF", getRocksCF(res).toString());
 			} else {
@@ -2770,13 +2771,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return StorageBytes(free, total, live, free);
 	}
 
-	// Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
-	// 	auto a = new Writer::CheckpointAction(request);
+	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
+		auto a = new Writer::CheckpointAction(&shardManager, request);
 
-	// 	auto res = a->reply.getFuture();
-	// 	writeThread->post(a);
-	// 	return res;
-	// }
+		auto res = a->reply.getFuture();
+		writeThread->post(a);
+		return res;
+	}
 
 	// Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) override {
 	// 	auto a = new Writer::RestoreAction(path, checkpoints);
@@ -3098,7 +3099,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("m"_sr, "n"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("u"_sr, "v"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("x"_sr, "z"_sr)), "shard-1"));
-	mapping.push_back(std::make_pair(specialKeys, "default"));
+	mapping.push_back(std::make_pair(specialKeys, SPECIAL_KEYS_SHARD_ID));
 
 	for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
 		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
