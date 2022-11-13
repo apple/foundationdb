@@ -2175,7 +2175,7 @@ void DatabaseContext::removeWatch() {
 	ASSERT(outstandingWatches >= 0);
 }
 
-Future<Void> DatabaseContext::onConnected() {
+Future<Void> DatabaseContext::onConnected() const {
 	return connected;
 }
 

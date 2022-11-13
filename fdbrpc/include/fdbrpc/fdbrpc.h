@@ -515,7 +515,7 @@ public:
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
-	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+	bool connected() const { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
 
 	Future<Void> onConnected() {
 		if (connected()) {

@@ -1832,7 +1832,7 @@ public:
 		return true;
 	}
 
-	bool isError() {
+	bool isError() const {
 		for (int i = 0; i < futures.size(); i++)
 			if (futures[i].isError())
 				return true;
