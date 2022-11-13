@@ -415,6 +415,20 @@ Version DLTransaction::getCommittedVersion() {
 	return version;
 }
 
+ThreadFuture<double> DLTransaction::getTagThrottledDuration() {
+	if (!api->transactionGetTagThrottledDuration) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->transactionGetTagThrottledDuration(tr);
+	return toThreadFuture<double>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		double duration;
+		FdbCApi::fdb_error_t error = api->futureGetDouble(f, &duration);
+		ASSERT(!error);
+		return duration;
+	});
+}
+
 ThreadFuture<int64_t> DLTransaction::getTotalCost() {
 	if (!api->transactionGetTotalCost) {
 		return unsupported_operation();
@@ -965,6 +979,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_committed_version",
 	                   headerVersion >= 0);
+	loadClientFunction(&api->transactionGetTagThrottledDuration,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_tag_throttled_duration",
+	                   headerVersion >= ApiVersion::withGetTagThrottledDuration().version());
 	loadClientFunction(&api->transactionGetTotalCost,
 	                   lib,
 	                   fdbCPath,
@@ -1014,6 +1033,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_summarize_blob_granules",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->futureGetDouble,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_get_double",
+	                   headerVersion >= ApiVersion::withFutureGetDouble().version());
 	loadClientFunction(&api->futureGetInt64,
 	                   lib,
 	                   fdbCPath,
@@ -1504,6 +1528,12 @@ ThreadFuture<SpanContext> MultiVersionTransaction::getSpanContext() {
 	}
 
 	return SpanContext();
+}
+
+ThreadFuture<double> MultiVersionTransaction::getTagThrottledDuration() {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getTagThrottledDuration() : makeTimeout<double>();
+	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getTotalCost() {

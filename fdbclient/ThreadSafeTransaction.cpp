@@ -626,6 +626,14 @@ ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	});
 }
 
+ThreadFuture<double> ThreadSafeTransaction::getTagThrottledDuration() {
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<double> {
+		tr->checkDeferredError();
+		return tr->getTagThrottledDuration();
+	});
+}
+
 ThreadFuture<int64_t> ThreadSafeTransaction::getTotalCost() {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> {

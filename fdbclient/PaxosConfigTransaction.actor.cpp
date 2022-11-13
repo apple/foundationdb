@@ -564,6 +564,10 @@ Version PaxosConfigTransaction::getCommittedVersion() const {
 	return impl->getCommittedVersion();
 }
 
+double PaxosConfigTransaction::getTagThrottledDuration() const {
+	return 0.0;
+}
+
 int64_t PaxosConfigTransaction::getTotalCost() const {
 	return 0;
 }

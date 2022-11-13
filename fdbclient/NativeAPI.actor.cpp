@@ -7190,6 +7190,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	double latency = replyTime - trState->startTime;
 	trState->cx->lastProxyRequestTime = trState->startTime;
 	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
+	trState->proxyTagThrottledDuration = rep.proxyTagThrottledDuration;
 	if (rep.rkBatchThrottled) {
 		trState->cx->lastRkBatchThrottleTime = replyTime;
 	}
@@ -7376,6 +7377,11 @@ Optional<Version> Transaction::getCachedReadVersion() const {
 	} else {
 		return Optional<Version>();
 	}
+}
+
+double Transaction::getTagThrottledDuration() const {
+	// TODO: Implement
+	return 0.0;
 }
 
 Future<Standalone<StringRef>> Transaction::getVersionstamp() {
