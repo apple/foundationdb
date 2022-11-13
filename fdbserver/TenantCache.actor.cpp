@@ -177,6 +177,11 @@ public:
 		loop {
 			try {
 				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+				// Reset the quota for all groups; this essentially sets the quota to `max` for groups where the
+				// quota might have been cleared (i.e., groups that will not be returned in `getRange` request above).
+				for (auto& [group, storage] : tenantCache->tenantStorageMap) {
+					storage.quota = std::numeric_limits<int64_t>::max();
+				}
 				for (const auto kv : currentQuotas) {
 					const TenantGroupName group = kv.key.removePrefix(storageQuotaPrefix);
 					const int64_t quota = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
