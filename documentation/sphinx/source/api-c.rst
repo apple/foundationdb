@@ -302,6 +302,12 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1| |future-get-return2|.
 
+.. function:: fdb_error_t fdb_future_get_double(FDBFuture* future, double* out)
+
+   Extracts a double from a pointer to :type:`FDBFuture` into a caller-provided variable of type ``double``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
 .. function:: fdb_error_t fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
 
    Extracts an array of :type:`FDBKey` from an ``FDBFuture*`` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
@@ -842,6 +848,14 @@ Applications must provide error handling and an appropriate retry loop around th
    Note that database versions are not necessarily unique to a given transaction and so cannot be used to determine in what order two transactions completed. The only use for this function is to manually enforce causal consistency when calling :func:`fdb_transaction_set_read_version()` on another subsequent transaction.
 
    Most applications will not call this function.
+
+.. function:: FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* transaction)
+
+  |future-return0| the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. |future-return1| call :func:`fdb_future_get_double()` to extract the size, |future-return2|
+
+.. function:: FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* transaction)
+
+  |future-return0| the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler, and used for tag throttling if throughput quotas are specified. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* transaction)
 
