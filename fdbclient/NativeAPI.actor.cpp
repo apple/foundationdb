@@ -7190,7 +7190,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	double latency = replyTime - trState->startTime;
 	trState->cx->lastProxyRequestTime = trState->startTime;
 	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
-	trState->proxyTagThrottledDuration = rep.proxyTagThrottledDuration;
+	trState->proxyTagThrottledDuration += rep.proxyTagThrottledDuration;
 	if (rep.rkBatchThrottled) {
 		trState->cx->lastRkBatchThrottleTime = replyTime;
 	}
@@ -7380,8 +7380,7 @@ Optional<Version> Transaction::getCachedReadVersion() const {
 }
 
 double Transaction::getTagThrottledDuration() const {
-	// TODO: Implement
-	return 0.0;
+	return trState->proxyTagThrottledDuration;
 }
 
 Future<Standalone<StringRef>> Transaction::getVersionstamp() {
@@ -7541,6 +7540,9 @@ Future<Void> Transaction::onError(Error const& e) {
 			++trState->cx->transactionsProcessBehind;
 		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
 			++trState->cx->transactionsThrottled;
+		} else if (e.code() == error_code_proxy_tag_throttled) {
+			++trState->cx->transactionsThrottled;
+			trState->proxyTagThrottledDuration += CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION;
 		}
 
 		double backoff = getBackoff(e.code());
