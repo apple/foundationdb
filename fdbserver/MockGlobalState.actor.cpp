@@ -320,7 +320,7 @@ Future<Void> MockStorageServer::run() {
 
 	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
 	addActor(serveStorageMetricsRequests(this, ssi));
-	addActor(MockStorageServerImpl::serveMockStorageServer(this));
+	// addActor(MockStorageServerImpl::serveMockStorageServer(this));
 	return actors.getResult();
 }
 
@@ -411,13 +411,15 @@ void MockStorageServer::notifyWriteMetrics(KeyRef const& key, int64_t size) {
 	// update write bandwidth and iops as mock the cost of writing a mutation
 	StorageMetrics s;
 	// FIXME: remove the / 2 and double the related knobs.
-	s.writeBytesPerKSecond = mvccStorageBytes(size) / 2;
+	s.bytesWrittenPerKSecond = mvccStorageBytes(size) / 2;
 	s.iosPerKSecond = 1;
 	metrics.notify(key, s);
 }
 
 void MockStorageServer::signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes) {
-	fetchKeysRequests.send({ range, rangeTotalBytes });
+	if (!allShardStatusEqual(range, MockShardStatus::COMPLETED)) {
+		actors.add(MockStorageServerImpl::waitFetchKeysFinish(this, { range, rangeTotalBytes }));
+	}
 }
 
 Future<Void> MockStorageServer::fetchKeys(const MockStorageServer::FetchKeysParams& param) {
@@ -999,22 +1001,22 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 
 	// insert
 	{
-		mgs->set("a"_sr, 1 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
-		mgs->set("b"_sr, 2 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
-		mgs->set("c"_sr, 3 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE, true);
+		mgs->set("a"_sr, 1 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE, true);
+		mgs->set("b"_sr, 2 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE, true);
+		mgs->set("c"_sr, 3 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE, true);
 		for (auto& server : mgs->allServers) {
-			ASSERT_EQ(server.second.usedDiskSpace, 3 + 6 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE);
+			ASSERT_EQ(server.second.usedDiskSpace, 3 + 6 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE);
 		}
 		ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
 		std::pair<Optional<StorageMetrics>, int> res = wait(
 		    mgs->waitStorageMetrics(KeyRangeRef("a"_sr, "bc"_sr), bounds.min, bounds.max, bounds.permittedError, 1, 1));
 
-		int64_t testSize = 2 + 3 * SERVER_KNOBS->BYTES_WRITE_UNITS_PER_SAMPLE;
+		int64_t testSize = 2 + 3 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE;
 		// SOMEDAY: how to integrate with isKeyValueInSample() better?
 		if (res.first.get().bytes > 0) {
 			// If sampled
 			ASSERT_EQ(res.first.get().bytes, testSize);
-			ASSERT_GT(res.first.get().writeBytesPerKSecond, 0);
+			ASSERT_GT(res.first.get().bytesWrittenPerKSecond, 0);
 		}
 	}
 	return Void();

@@ -709,7 +709,7 @@ struct DDMockTxnProcessorImpl {
 		loop {
 			wait(delayJittered(1.0));
 			DDMockTxnProcessor* selfP = self;
-			KeyRangeRef cloneRef;
+			KeyRangeRef cloneRef = range;
 			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
 				    auto& server = selfP->mgs->allServers.at(id);
 				    return server.allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });

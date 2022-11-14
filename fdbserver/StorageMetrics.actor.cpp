@@ -75,7 +75,7 @@ KeyRef StorageMetricSample::splitEstimate(KeyRangeRef range, int64_t offset, boo
 StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 	StorageMetrics result;
 	result.bytes = byteSample.getEstimate(keys);
-	result.writeBytesPerKSecond =
+	result.bytesWrittenPerKSecond =
 	    bytesWriteSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.iosPerKSecond = iopsSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.bytesReadPerKSecond =
@@ -88,7 +88,7 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 	ASSERT(metrics.bytes == 0); // ShardNotifyMetrics
 	if (g_network->isSimulated()) {
-		CODE_PROBE(metrics.writeBytesPerKSecond != 0, "ShardNotifyMetrics bytes");
+		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
 		CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
 		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead", probe::decoration::rare);
 	}
@@ -97,9 +97,10 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 
 	StorageMetrics notifyMetrics;
 
-	if (metrics.writeBytesPerKSecond)
-		notifyMetrics.writeBytesPerKSecond = bytesWriteSample.addAndExpire(key, metrics.writeBytesPerKSecond, expire) *
-		                                     SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	if (metrics.bytesWrittenPerKSecond)
+		notifyMetrics.bytesWrittenPerKSecond =
+		    bytesWriteSample.addAndExpire(key, metrics.bytesWrittenPerKSecond, expire) *
+		    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	if (metrics.iosPerKSecond)
 		notifyMetrics.iosPerKSecond = iopsSample.addAndExpire(key, metrics.iosPerKSecond, expire) *
 		                              SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -177,7 +178,7 @@ void StorageServerMetrics::notifyNotReadable(KeyRangeRef keys) {
 void StorageServerMetrics::poll() {
 	{
 		StorageMetrics m;
-		m.writeBytesPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		m.bytesWrittenPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		bytesWriteSample.poll(waitMetricsMap, m);
 	}
 	{
@@ -250,7 +251,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			if (remaining.bytes < 2 * minSplitBytes)
 				break;
 			KeyRef key = req.keys.end;
-			bool hasUsed = used.bytes != 0 || used.writeBytesPerKSecond != 0 || used.iosPerKSecond != 0;
+			bool hasUsed = used.bytes != 0 || used.bytesWrittenPerKSecond != 0 || used.iosPerKSecond != 0;
 			key = getSplitKey(remaining.bytes,
 			                  estimated.bytes,
 			                  req.limits.bytes,
@@ -276,10 +277,10 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			                  lastKey,
 			                  key,
 			                  hasUsed);
-			key = getSplitKey(remaining.writeBytesPerKSecond,
-			                  estimated.writeBytesPerKSecond,
-			                  req.limits.writeBytesPerKSecond,
-			                  used.writeBytesPerKSecond,
+			key = getSplitKey(remaining.bytesWrittenPerKSecond,
+			                  estimated.bytesWrittenPerKSecond,
+			                  req.limits.bytesWrittenPerKSecond,
+			                  used.bytesWrittenPerKSecond,
 			                  req.limits.infinity,
 			                  req.isLastShard,
 			                  bytesWriteSample,
@@ -328,12 +329,12 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 
 	rep.available.bytes = sb.available;
 	rep.available.iosPerKSecond = 10e6;
-	rep.available.writeBytesPerKSecond = 100e9;
+	rep.available.bytesWrittenPerKSecond = 100e9;
 	rep.available.bytesReadPerKSecond = 100e9;
 
 	rep.capacity.bytes = sb.total;
 	rep.capacity.iosPerKSecond = 10e6;
-	rep.capacity.writeBytesPerKSecond = 100e9;
+	rep.capacity.bytesWrittenPerKSecond = 100e9;
 	rep.capacity.bytesReadPerKSecond = 100e9;
 
 	rep.bytesInputRate = bytesInputRate;

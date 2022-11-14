@@ -39,8 +39,10 @@ struct MockDDTestWorkload : public TestWorkload {
 	Reference<DDMockTxnProcessor> mock;
 
 	KeyRange getRandomRange(double offset) const;
-	MockDDTestWorkload(WorkloadContext const& wcx);
 	Future<Void> setup(Database const& cx) override;
+
+protected:
+	MockDDTestWorkload(WorkloadContext const& wcx);
 };
 
 #endif // FOUNDATIONDB_MOCKDDTEST_H

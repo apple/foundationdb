@@ -37,7 +37,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 	uint64_t mockDbSize = 0;
 	const int keySize = 16;
 
-	std::map<int, int> rsReasonCounts;
+	std::map<RelocateReason, int> rsReasonCounts;
 
 	// --- test configs ---
 
@@ -133,7 +133,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 	ACTOR static Future<Void> relocateShardReporter(MockDDTrackerShardEvaluatorWorkload* self,
 	                                                FutureStream<RelocateShard> input) {
 		loop choose {
-			when(RelocateShard rs = waitNext(input)) { ++self->rsReasonCounts[(int)rs.reason]; }
+			when(RelocateShard rs = waitNext(input)) { ++self->rsReasonCounts[rs.reason]; }
 		}
 	}
 

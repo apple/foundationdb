@@ -636,12 +636,12 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			// only split on bytes and write rate
 			state StorageMetrics splitMetrics;
 			splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-			splitMetrics.writeBytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+			splitMetrics.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 			if (writeHot) {
-				splitMetrics.writeBytesPerKSecond =
-				    std::min(splitMetrics.writeBytesPerKSecond, estimated.writeBytesPerKSecond / 2);
-				splitMetrics.writeBytesPerKSecond =
-				    std::max(splitMetrics.writeBytesPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
+				splitMetrics.bytesWrittenPerKSecond =
+				    std::min(splitMetrics.bytesWrittenPerKSecond, estimated.bytesWrittenPerKSecond / 2);
+				splitMetrics.bytesWrittenPerKSecond =
+				    std::max(splitMetrics.bytesWrittenPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
 			}
 			splitMetrics.iosPerKSecond = splitMetrics.infinity;
 			splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
@@ -2617,7 +2617,7 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 		    wait(bmData->db->getStorageMetrics(std::get<1>(candidates[i]), CLIENT_KNOBS->TOO_MANY));
 
 		if (metrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
-		    metrics.writeBytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
+		    metrics.bytesWrittenPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
 			// This granule cannot be merged with any neighbors.
 			// If current candidates up to here can be merged, merge them and skip over this one
 			attemptStartMerge(bmData, currentCandidates);

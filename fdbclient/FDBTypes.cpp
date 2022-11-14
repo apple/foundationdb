@@ -66,7 +66,7 @@ Key randomKeyBetween(const KeyRangeRef& keys) {
 			break;
 		}
 	}
-	ASSERT(pos < end.size()); // otherwise, begin >= end
+	ASSERT_LT(pos, end.size()); // otherwise, begin >= end
 
 	// find the lowest char in range begin[pos+1, begin.size()) that is not \xff (255)
 	int lowest = begin.size() - 1;

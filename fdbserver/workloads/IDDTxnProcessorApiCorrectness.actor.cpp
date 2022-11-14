@@ -300,7 +300,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				wait(self->real->testRawFinishMovement(params, emptyTssMapping));
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed)
+				if (e.code() != error_code_movekeys_conflict)
 					throw;
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				// Keep trying to get the moveKeysLock
@@ -327,12 +327,12 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		state MoveKeysLock lock = wait(takeMoveKeysLock(self->real->context(), UID()));
 
 		KeyRange keys = self->getRandomKeys();
-		std::vector<UID> destTeams = self->getRandomTeam();
-		std::sort(destTeams.begin(), destTeams.end());
+		std::vector<UID> destTeam = self->getRandomTeam();
+		std::sort(destTeam.begin(), destTeam.end());
 		return MoveKeysParams{ deterministicRandom()->randomUniqueID(),
 			                   keys,
-			                   destTeams,
-			                   destTeams,
+			                   destTeam,
+			                   destTeam,
 			                   lock,
 			                   Promise<Void>(),
 			                   nullptr,
@@ -365,7 +365,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				wait(self->real->moveKeys(params));
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed)
+				if (e.code() != error_code_movekeys_conflict)
 					throw;
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				// Keep trying to get the moveKeysLock
