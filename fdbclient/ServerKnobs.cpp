@@ -820,10 +820,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 	init( STORAGE_FEED_QUERY_HARD_LIMIT,                      100000 );
+	// Read priority definitions in the form of a list of their relative concurrency share weights
+	init( STORAGESERVER_READ_PRIORITIES,           "120,10,20,40,60" );
+	// The total concurrency which will be shared by active priorities according to their relative weights
 	init( STORAGE_SERVER_READ_CONCURRENCY,                        70 );
-	// Priorities which each ReadType maps to, in enumeration order
-	init( STORAGESERVER_READ_RANKS,                      "0,2,1,1,1" );
-	init( STORAGESERVER_READ_PRIORITIES,                   "48,32,8" );
+	// The priority number which each ReadType maps to in enumeration order
+	// This exists for flexibility but assigning each ReadType to its own unique priority number makes the most sense
+	// The enumeration is currently: eager, fetch, low, normal, high
+	init( STORAGESERVER_READTYPE_PRIORITY_MAP,           "0,1,2,3,4" );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -947,7 +951,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && BUGGIFY ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && BUGGIFY ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
-	init( REDWOOD_PRIORITY_LAUNCHS,                    "32,32,32,32" );
+	init( REDWOOD_IO_PRIORITIES,                       "32,32,32,32" );
 	init( REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT,             false );
 
 	// Server request latency measurement
