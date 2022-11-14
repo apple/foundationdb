@@ -1,3 +1,6 @@
+[configuration]
+longRunningTest = true
+
 [[test]]
 testTitle = 'CycleTestWithKills'
 
