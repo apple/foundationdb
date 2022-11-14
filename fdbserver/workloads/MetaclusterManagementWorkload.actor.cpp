@@ -415,7 +415,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					found = true;
 				}
 			}
-			ASSERT(found);
+			ASSERT(found || checkEntry2.tenantState != checkState);
 		} catch (Error& e) {
 			if (e.code() != error_code_tenant_not_found) {
 				TraceEvent(SevError, "VerifyListFilterFailure").error(e).detail("Tenant", tenant);
