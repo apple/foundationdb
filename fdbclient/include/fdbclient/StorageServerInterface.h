@@ -932,7 +932,10 @@ struct GetCheckpointRequest {
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
-	GetCheckpointRequest(const UID& dataMoveId, Version version, CheckpointFormat format)
+	GetCheckpointRequest(std::vector<KeyRange> ranges,
+	                     const Optional<UID>& dataMoveId,
+	                     Version version,
+	                     CheckpointFormat format)
 	  : version(version), ranges(ranges), format(format), dataMoveId(dataMoveId) {}
 
 	template <class Ar>
