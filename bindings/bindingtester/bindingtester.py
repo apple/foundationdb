@@ -464,7 +464,7 @@ def parse_args(argv):
     # SOMEDAY: this applies only to the scripted test. Should we invoke test files specifically (as in circus),
     # or invoke them here and allow tests to add arguments?
     parser.add_argument('--no-threads', action='store_true', help='Disables the START_THREAD instruction in the scripted test.')
-    
+
     parser.add_argument('--no-directory-snapshot-ops', action='store_true', help='Disables snapshot operations for directory instructions.')
 
     parser.add_argument('--no-tenants', action='store_true', help='Disables tenant operations.')

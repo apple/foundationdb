@@ -175,11 +175,13 @@ Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::st
 	if (usesEncryption()) {
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY);
 	}
-	f = makeReference<AsyncFileReadAheadCache>(f,
-	                                           m_bstore->knobs.read_block_size,
-	                                           m_bstore->knobs.read_ahead_blocks,
-	                                           m_bstore->knobs.concurrent_reads_per_file,
-	                                           m_bstore->knobs.read_cache_blocks_per_file);
+	if (m_bstore->knobs.enable_read_cache) {
+		f = makeReference<AsyncFileReadAheadCache>(f,
+		                                           m_bstore->knobs.read_block_size,
+		                                           m_bstore->knobs.read_ahead_blocks,
+		                                           m_bstore->knobs.concurrent_reads_per_file,
+		                                           m_bstore->knobs.read_cache_blocks_per_file);
+	}
 	return f;
 }
 
@@ -194,6 +196,10 @@ Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::
 		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 	}
 	return Future<Reference<IBackupFile>>(makeReference<BackupContainerS3BlobStoreImpl::BackupFile>(path, f));
+}
+
+Future<Void> BackupContainerS3BlobStore::writeEntireFile(const std::string& path, const std::string& fileContents) {
+	return m_bstore->writeEntireFile(m_bucket, dataPath(path), fileContents);
 }
 
 Future<Void> BackupContainerS3BlobStore::deleteFile(const std::string& path) {

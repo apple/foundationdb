@@ -4356,6 +4356,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
 	state Span span("NAPI:getRange"_loc, trState->spanContext);
+	state Optional<UID> getRangeID = Optional<UID>();
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
@@ -4440,11 +4441,14 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.spanContext = span.context;
+			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				getRangeID = nondeterministicRandom()->randomUniqueID();
+				g_traceBatch.addAttach(
+				    "TransactionAttachID", trState->readOptions.get().debugID.get().first(), getRangeID.get().first());
+			}
 			try {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Before");
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
@@ -4484,9 +4488,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					throw;
 				}
 
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
+					                      getRangeID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
 					/*TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
@@ -4520,9 +4524,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
-					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
+					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
+					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
+						// disable it on prefetch, because boundary entries serve as continuations
 						RangeResultFamily copy;
 						int newSize =
 						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
@@ -4600,11 +4606,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				}
 
 			} catch (Error& e) {
-				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getRange.Error");
-					TraceEvent("TransactionDebugError", trState->readOptions.get().debugID.get()).error(e);
+				if (getRangeID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Error");
+					TraceEvent("TransactionDebugError", getRangeID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
@@ -5835,7 +5839,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	// NOTE: The throttling cost of each clear is assumed to be one page.
 	// This makes compuation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6384,8 +6388,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
-			wait(store(req.transaction.read_snapshot, readVersion) &&
-			     store(req.commitCostEstimation, estimateCommitCosts(trState, &req.transaction)));
+			state Future<Optional<ClientTrCommitCostEstimation>> commitCostFuture =
+			    estimateCommitCosts(trState, &req.transaction);
+			// We need to wait for the read version first so that we can be notified if the database is locked
+			wait(store(req.transaction.read_snapshot, readVersion));
+			wait(store(req.commitCostEstimation, commitCostFuture));
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
@@ -6582,7 +6589,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
-			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled) {
+			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled &&
+			    e.code() != error_code_storage_quota_exceeded) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -7556,12 +7564,11 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
                                                             Optional<Reference<TransactionState>> trState);
 
 ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
+                                                 TenantInfo tenantInfo,
                                                  KeyRange keys,
                                                  Reference<LocationInfo> locationInfo,
                                                  TenantMapEntry tenantEntry,
                                                  Optional<Reference<TransactionState>> trState) {
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	try {
 		WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
@@ -7570,12 +7577,18 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
 		return m;
 	} catch (Error& e) {
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+		if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+			cx->invalidateCache(tenantEntry.prefix, keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+		           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+			wait(trState.get()->handleUnknownTenant());
+		} else if (e.code() == error_code_future_version) {
+			wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
+		} else {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
 		}
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-		cx->invalidateCache(tenantEntry.prefix, keys);
 
 		StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
 		return m;
@@ -7606,7 +7619,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
 		fx[i] = doGetStorageMetrics(
-		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
+		    cx, tenantInfo, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -7761,27 +7774,18 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
                                                                       StorageMetrics min,
                                                                       StorageMetrics max,
                                                                       StorageMetrics permittedError) {
-	try {
-		Future<StorageMetrics> fx;
-		if (locations.size() > 1) {
-			fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
-		} else {
-			WaitMetricsRequest req(tenantInfo, keys, min, max);
-			fx = loadBalance(locations[0].locations->locations(),
-			                 &StorageServerInterface::waitMetrics,
-			                 req,
-			                 TaskPriority::DataDistribution);
-		}
-		StorageMetrics x = wait(fx);
-		return x;
-	} catch (Error& e) {
-		TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-			throw;
-		}
+	Future<StorageMetrics> fx;
+	if (locations.size() > 1) {
+		fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
+	} else {
+		WaitMetricsRequest req(tenantInfo, keys, min, max);
+		fx = loadBalance(locations[0].locations->locations(),
+		                 &StorageServerInterface::waitMetrics,
+		                 req,
+		                 TaskPriority::DataDistribution);
 	}
-	return Optional<StorageMetrics>();
+	StorageMetrics x = wait(fx);
+	return x;
 }
 
 ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
@@ -7794,9 +7798,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     int expectedShardCount,
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
-	state TenantInfo tenantInfo =
-	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	loop {
+		state TenantInfo tenantInfo =
+		    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
 		                              tenantInfo,
@@ -7826,13 +7830,27 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			continue;
 		}
 
-		Optional<StorageMetrics> res =
-		    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
-		if (res.present()) {
-			return std::make_pair(res, -1);
+		try {
+			Optional<StorageMetrics> res =
+			    wait(waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+			if (res.present()) {
+				return std::make_pair(res, -1);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			} else if (e.code() == error_code_unknown_tenant && trState.present() &&
+			           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
+				wait(trState.get()->handleUnknownTenant());
+			} else if (e.code() == error_code_future_version) {
+				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
+			} else {
+				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+				throw;
+			}
 		}
-		cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
 
@@ -10897,6 +10915,37 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
                                                                                  int rangeLimit,
                                                                                  Optional<TenantName> tenantName) {
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenantName);
+}
+
+ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state Key key = blobRestoreCommandKeyFor(range);
+			Optional<Value> value = wait(tr->get(key));
+			if (value.present()) {
+				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
+				if (status.progress < 100) {
+					return false; // stop if there is in-progress restore.
+				}
+			}
+			Standalone<BlobRestoreStatus> status;
+			status.progress = 0;
+			Value newValue = blobRestoreCommandValueFor(status);
+			tr->set(key, newValue);
+			wait(tr->commit());
+			return true;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<bool> DatabaseContext::blobRestore(KeyRange range) {
+	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {

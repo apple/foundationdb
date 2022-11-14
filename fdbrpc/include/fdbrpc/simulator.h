@@ -479,6 +479,7 @@ public:
 	Optional<Standalone<StringRef>> primaryDcId;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
 	int32_t usableRegions;
+	bool quiesced = false;
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;

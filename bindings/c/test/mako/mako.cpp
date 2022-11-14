@@ -160,7 +160,7 @@ int cleanup(Database db, Arguments const& args) {
 			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
 			if (rc == FutureRC::OK) {
 				break;
-			} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
+			} else if (rc == FutureRC::RETRY) {
 				// tx already reset
 				continue;
 			} else {
@@ -458,6 +458,18 @@ int populate(Database db,
 	return 0;
 }
 
+void updateErrorStatsRunMode(ThreadStatistics& stats, fdb::Error err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else if (err.is(1031 /*timeout*/)) {
+			stats.incrTimeoutCount(op);
+		} else {
+			stats.incrErrorCount(op);
+		}
+	}
+}
+
 /* run one iteration of configured transaction */
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
@@ -484,21 +496,17 @@ transaction_begin:
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(tx, f, opTable[op].name());
+				future_rc = waitAndHandleError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
 			} else {
-				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
 			}
+			updateErrorStatsRunMode(stats, f.error(), op);
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
 			postStepFn(f, tx, args, key1, key2, val);
 		watch_step.stop();
 		if (future_rc != FutureRC::OK) {
-			if (future_rc == FutureRC::CONFLICT) {
-				stats.incrConflictCount();
-			} else if (future_rc == FutureRC::RETRY) {
-				stats.incrErrorCount(op);
-			} else {
-				// abort
+			if (future_rc == FutureRC::ABORT) {
 				return -1;
 			}
 			// retry from first op
@@ -536,7 +544,8 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.transaction_timeout > 0);
+		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
 		if (rc == FutureRC::OK) {
@@ -546,10 +555,6 @@ transaction_begin:
 			}
 			stats.incrOpCount(OP_COMMIT);
 		} else {
-			if (rc == FutureRC::CONFLICT)
-				stats.incrConflictCount();
-			else
-				stats.incrErrorCount(OP_COMMIT);
 			if (rc == FutureRC::ABORT) {
 				return -1;
 			}
@@ -616,62 +621,70 @@ int runWorkload(Database db,
 
 	/* main transaction loop */
 	while (1) {
-		Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
-		while ((thread_tps > 0) && (xacts >= current_tps)) {
+		if ((thread_tps > 0 /* iff throttling on */) && (xacts >= current_tps)) {
 			/* throttle on */
-			const auto time_now = steady_clock::now();
-			if (toDoubleSeconds(time_now - time_prev) >= 1.0) {
-				/* more than 1 second passed, no need to throttle */
-				xacts = 0;
-				time_prev = time_now;
-
-				/* update throttle rate */
-				current_tps = static_cast<int>(thread_tps * throttle_factor.load());
-			} else {
+			auto time_now = steady_clock::now();
+			while (toDoubleSeconds(time_now - time_prev) < 1.0) {
 				usleep(1000);
+				time_now = steady_clock::now();
 			}
+
+			/* more than 1 second passed*/
+			xacts = 0;
+			time_prev = time_now;
+
+			/* update throttle rate */
+			current_tps = static_cast<int>(thread_tps * throttle_factor.load());
 		}
-		/* enable transaction trace */
-		if (dotrace) {
-			const auto time_now = steady_clock::now();
-			if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
-				time_last_trace = time_now;
-				traceid.clear();
-				fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
-				logr.debug("txn tracing {}", traceid);
-				auto err = Error{};
-				err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
+
+		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
+			Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
+
+			/* enable transaction trace */
+			if (dotrace) {
+				const auto time_now = steady_clock::now();
+				if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
+					time_last_trace = time_now;
+					traceid.clear();
+					fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
+					logr.debug("txn tracing {}", traceid);
+					auto err = Error{};
+					err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
+					if (err) {
+						logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
+					}
+					err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
+					if (err) {
+						logr.error("TR_OPTION_LOG_TRANSACTION: {}", err.what());
+					}
+				}
+			}
+
+			/* enable transaction tagging */
+			if (dotagging > 0) {
+				tagstr.clear();
+				fmt::format_to(std::back_inserter(tagstr),
+				               "{}{}{:0>3d}",
+				               KEY_PREFIX,
+				               args.txntagging_prefix,
+				               urand(0, args.txntagging - 1));
+				auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
 				if (err) {
 					logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
 				}
-				err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
-				if (err) {
-					logr.error("TR_OPTION_LOG_TRANSACTION: {}", err.what());
-				}
 			}
-		}
 
-		/* enable transaction tagging */
-		if (dotagging > 0) {
-			tagstr.clear();
-			fmt::format_to(std::back_inserter(tagstr),
-			               "{}{}{:0>3d}",
-			               KEY_PREFIX,
-			               args.txntagging_prefix,
-			               urand(0, args.txntagging - 1));
-			auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
-			if (err) {
-				logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
+			rc = runOneTransaction(tx, args, stats, key1, key2, val);
+			if (rc) {
+				logr.warn("runOneTransaction failed ({})", rc);
 			}
-		}
 
-		rc = runOneTransaction(tx, args, stats, key1, key2, val);
-		if (rc) {
-			logr.warn("runOneTransaction failed ({})", rc);
+			xacts++;
+			total_xacts++;
 		}
 
 		if (thread_iters != -1) {
-			if (thread_iters >= total_xacts) {
+			if (total_xacts >= thread_iters) {
 				/* xact limit reached */
 				break;
 			}
@@ -679,8 +692,6 @@ int runWorkload(Database db,
 			/* signal turned red, target duration reached */
 			break;
 		}
-		xacts++;
-		total_xacts++;
 	}
 	return rc;
 }
@@ -763,6 +774,9 @@ void runAsyncWorkload(Arguments const& args,
 			    args.iteration == 0
 			        ? -1
 			        : computeThreadIters(args.iteration, worker_id, i, args.num_processes, args.async_xacts);
+			// argument validation should ensure max_iters > 0
+			assert(args.iteration == 0 || max_iters > 0);
+
 			auto state =
 			    std::make_shared<ResumableStateForRunWorkload>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
 			                                                   db,
@@ -810,11 +824,15 @@ void workerThread(ThreadArgs& thread_args) {
 	const auto thread_tps =
 	    args.tpsmax == 0 ? 0
 	                     : computeThreadTps(args.tpsmax, worker_id, thread_id, args.num_processes, args.num_threads);
+	// argument validation should ensure thread_tps > 0
+	assert(args.tpsmax == 0 || thread_tps > 0);
 
 	const auto thread_iters =
 	    args.iteration == 0
 	        ? -1
 	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
+	// argument validation should ensure thread_iters > 0
+	assert(args.iteration == 0 || thread_iters > 0);
 
 	/* i'm ready */
 	readycount.fetch_add(1);
@@ -984,6 +1002,9 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		if (args.disable_ryw) {
 			databases[i].setOption(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
 		}
+		if (args.transaction_timeout > 0 && args.mode == MODE_RUN) {
+			databases[i].setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, args.transaction_timeout);
+		}
 	}
 
 	if (!args.async_xacts) {
@@ -1059,7 +1080,7 @@ Arguments::Arguments() {
 	rows = 100000;
 	load_factor = 1.0;
 	row_digits = digits(rows);
-	seconds = 30;
+	seconds = 0;
 	iteration = 0;
 	tpsmax = 0;
 	tpsmin = -1;
@@ -1096,6 +1117,8 @@ Arguments::Arguments() {
 	bg_materialize_files = false;
 	bg_file_path[0] = '\0';
 	distributed_tracer_client = 0;
+	transaction_timeout = 0;
+	num_report_files = 0;
 }
 
 /* parse transaction specification */
@@ -1284,6 +1307,9 @@ void usage() {
 	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 	printf(
 	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
+	printf("%-24s %s\n",
+	       "    --transaction_timeout=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode.");
 }
 
 /* parse benchmark paramters */
@@ -1346,6 +1372,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
 			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
 			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
+			{ "transaction_timeout", required_argument, NULL, ARG_TRANSACTION_TIMEOUT },
 			{ NULL, 0, NULL, 0 }
 		};
 
@@ -1630,6 +1657,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			          args.authorization_tokens.size(),
 			          tokenFilename);
 		} break;
+		case ARG_TRANSACTION_TIMEOUT:
+			args.transaction_timeout = atoi(optarg);
+			break;
 		}
 	}
 
@@ -1707,6 +1737,36 @@ int Arguments::validate() {
 		if (txntagging < 0) {
 			logr.error("--txntagging must be a non-negative integer");
 			return -1;
+		}
+		if (iteration > 0) {
+			if (async_xacts > 0 && async_xacts * num_processes > iteration) {
+				logr.error("--async_xacts * --num_processes must be <= --iteration");
+				return -1;
+			} else if (async_xacts == 0 && num_threads * num_processes > iteration) {
+				logr.error("--num_threads * --num_processes must be <= --iteration");
+				return -1;
+			}
+		}
+		if (transaction_timeout < 0) {
+			logr.error("--transaction_timeout must be a non-negative integer");
+			return -1;
+		}
+	}
+
+	if (mode != MODE_RUN && transaction_timeout != 0) {
+		logr.error("--transaction_timeout only supported in run mode");
+		return -1;
+	}
+
+	if (mode == MODE_RUN || mode == MODE_BUILD) {
+		if (tpsmax > 0) {
+			if (async_xacts > 0) {
+				logr.error("--tpsmax|--tps must be 0 or unspecified because throttling is not supported in async mode");
+				return -1;
+			} else if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
+				logr.error("--num_threads * --num_processes must be <= --tpsmax|--tps");
+				return -1;
+			}
 		}
 	}
 
@@ -2125,6 +2185,7 @@ void printReport(Arguments const& args,
 	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TRANSACTION));
 	fmt::printf("Total Conflicts:   %8lu\n", final_stats.getConflictCount());
 	fmt::printf("Total Errors:      %8lu\n", final_stats.getTotalErrorCount());
+	fmt::printf("Total Timeouts:    %8lu\n", final_stats.getTotalTimeoutCount());
 	fmt::printf("Overall TPS:       %8lu\n\n", tps_i);
 
 	if (fp) {
@@ -2137,6 +2198,7 @@ void printReport(Arguments const& args,
 		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TRANSACTION));
 		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
 		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
+		fmt::fprintf(fp, "\"totalTimeouts\": %lu,", final_stats.getTotalTimeoutCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
 	}
 
@@ -2180,7 +2242,7 @@ void printReport(Arguments const& args,
 	putTitle("Errors");
 	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
 			putField(final_stats.getErrorCount(op));
 			if (fp) {
 				if (first_op) {
@@ -2192,6 +2254,28 @@ void printReport(Arguments const& args,
 			}
 		}
 	}
+	fmt::print("\n");
+
+	/* Timeouts */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"timeouts\": {");
+	}
+	putTitle("Timeouts");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
+			putField(final_stats.getTimeoutCount(op));
+			if (fp) {
+				if (first_op) {
+					first_op = false;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getTimeoutCount(op));
+			}
+		}
+	}
+
 	if (fp) {
 		fmt::fprintf(fp, "}, \"numSamples\": {");
 	}
@@ -2283,6 +2367,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"txntagging_prefix\": \"%s\",", args.txntagging_prefix);
 		fmt::fprintf(fp, "\"streaming_mode\": %d,", args.streaming_mode);
 		fmt::fprintf(fp, "\"disable_ryw\": %d,", args.disable_ryw);
+		fmt::fprintf(fp, "\"transaction_timeout\": %d,", args.transaction_timeout);
 		fmt::fprintf(fp, "\"json_output_path\": \"%s\"", args.json_output_path);
 		fmt::fprintf(fp, "},\"samples\": [");
 	}
@@ -2394,6 +2479,11 @@ int main(int argc, char* argv[]) {
 	// Allow specifying only the number of active tenants, in which case # active = # total
 	if (args.active_tenants > 0 && args.total_tenants == 0) {
 		args.total_tenants = args.active_tenants;
+	}
+
+	// set --seconds in case no ending condition has been set
+	if (args.seconds == 0 && args.iteration == 0) {
+		args.seconds = 30; // default value accodring to documentation
 	}
 
 	rc = args.validate();

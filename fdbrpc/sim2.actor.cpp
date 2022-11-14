@@ -1426,6 +1426,7 @@ public:
 		for (auto processInfo : getAllProcesses()) {
 			if (currentDcId != processInfo->locality.dcId() || // skip other dc
 			    processInfo->startingClass != ProcessClass::BlobWorkerClass || // skip non blob workers
+			    processInfo->failed || // if process was killed but has not yet been removed from the process list
 			    processInfo->locality.machineId() == machineId) { // skip current machine
 				continue;
 			}

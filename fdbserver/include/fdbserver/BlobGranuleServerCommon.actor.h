@@ -161,9 +161,8 @@ ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> b
 ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Reference<BlobConnectionProvider> blobConn);
-inline bool isFullRestoreMode() {
-	return SERVER_KNOBS->BLOB_FULL_RESTORE_MODE;
-};
+ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef range);
 
 #include "flow/unactorcompiler.h"
 

@@ -363,6 +363,15 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "defaultTenant") {
 				defaultTenant = value;
 			}
+			if (attrib == "longRunningTest") {
+				longRunningTest = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "simulationNormalRunTestsTimeoutSeconds") {
+				sscanf(value.c_str(), "%d", &simulationNormalRunTestsTimeoutSeconds);
+			}
+			if (attrib == "simulationBuggifyRunTestsTimeoutSeconds") {
+				sscanf(value.c_str(), "%d", &simulationBuggifyRunTestsTimeoutSeconds);
+			}
 		}
 
 		ifs.close();
@@ -419,6 +428,10 @@ public:
 	Optional<std::string> defaultTenant;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
+
+	bool longRunningTest = false;
+	int simulationNormalRunTestsTimeoutSeconds = 5400;
+	int simulationBuggifyRunTestsTimeoutSeconds = 36000;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -484,7 +497,10 @@ public:
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay)
 		    .add("tenantModes", &tenantModes)
-		    .add("defaultTenant", &defaultTenant);
+		    .add("defaultTenant", &defaultTenant)
+		    .add("longRunningTest", &longRunningTest)
+		    .add("simulationNormalRunTestsTimeoutSeconds", &simulationNormalRunTestsTimeoutSeconds)
+		    .add("simulationBuggifyRunTestsTimeoutSeconds", &simulationBuggifyRunTestsTimeoutSeconds);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1594,7 +1610,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		set_config("ssd-sharded-rocksdb");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
-		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
+		TraceEvent(SevWarnAlways, "ShardedRocksDBNonDeterminism")
 		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
 		break;
@@ -2726,18 +2742,22 @@ ACTOR void setupAndRun(std::string dataFolder,
 				}
 			}
 		}
-		wait(timeoutError(runTests(connFile,
-		                           TEST_TYPE_FROM_FILE,
-		                           TEST_ON_TESTERS,
-		                           testerCount,
-		                           testFile,
-		                           startingConfiguration,
-		                           LocalityData(),
-		                           UnitTestParameters(),
-		                           defaultTenant,
-		                           tenantsToCreate,
-		                           rebooting),
-		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
+		Future<Void> runTestsF = runTests(connFile,
+		                                  TEST_TYPE_FROM_FILE,
+		                                  TEST_ON_TESTERS,
+		                                  testerCount,
+		                                  testFile,
+		                                  startingConfiguration,
+		                                  LocalityData(),
+		                                  UnitTestParameters(),
+		                                  defaultTenant,
+		                                  tenantsToCreate,
+		                                  rebooting);
+		wait(testConfig.longRunningTest ? runTestsF
+		                                : timeoutError(runTestsF,
+		                                               isBuggifyEnabled(BuggifyType::General)
+		                                                   ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                                   : testConfig.simulationNormalRunTestsTimeoutSeconds));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
