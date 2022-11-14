@@ -219,6 +219,10 @@ public:
 	LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
 	  : name(name), id(id), sampleStart(now()), sketch(accuracy),
 		latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
+		assert(accuracy > 0);
+		if (accuracy <= 0) {
+			fmt::print(stderr, "ERROR: LatencySample {} has invalid accuracy ({})", name, accuracy);
+		}
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 

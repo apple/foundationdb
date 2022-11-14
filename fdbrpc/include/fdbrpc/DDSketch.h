@@ -89,9 +89,13 @@ public:
 		if (sample <= EPS) {
 			zeroPopulationSize++;
 		} else {
-			int index = static_cast<Impl*>(this)->getIndex(sample);
+			size_t index = static_cast<Impl*>(this)->getIndex(sample);
 			assert(index >= 0 && index < buckets.size());
-			buckets[index]++;
+			try {
+				buckets.at(index)++;
+			} catch (std::out_of_range const& e) {
+				fmt::print(stderr, "ERROR: Invalid DDSketch bucket index ({}) at {}/{} for sample: {}\n", e.what(), index, buckets.size(), sample);
+			}
 		}
 
 		populationSize++;
@@ -119,7 +123,7 @@ public:
 		if (targetPercentilePopulation < zeroPopulationSize)
 			return T(0);
 
-		int index = -1;
+		size_t index = 0;
 		[[maybe_unused]] bool found = false;
 		if (percentile <= 0.5) { // count up
 			uint64_t count = zeroPopulationSize;
@@ -152,6 +156,7 @@ public:
 			}
 		}
 		assert(found);
+		if (!found) return -1;
 		return static_cast<Impl*>(this)->getValue(index);
 	}
 
@@ -194,7 +199,7 @@ protected:
 	uint64_t populationSize, zeroPopulationSize; // we need to separately count 0s
 	std::vector<uint64_t> buckets;
 	T minValue, maxValue, sum;
-	void setBucketSize(int capacity) { buckets.resize(capacity, 0); }
+	void setBucketSize(size_t capacity) { buckets.resize(capacity, 0); }
 };
 
 // DDSketch with fast log implementation for float numbers
@@ -204,20 +209,21 @@ public:
 	explicit DDSketch(double errorGuarantee = 0.01)
 	  : DDSketchBase<DDSketch<T>, T>(errorGuarantee), gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)),
 	    multiplier(fastLogger::correctingFactor * log(2) / log(gamma)) {
+		assert(errorGuarantee > 0);
 		offset = getIndex(1.0 / DDSketchBase<DDSketch<T>, T>::EPS);
 		this->setBucketSize(2 * offset);
 	}
 
-	int getIndex(T sample) {
+	size_t getIndex(T sample) {
 		static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 		return ceil(fastLogger::fastlog(sample) * multiplier) + offset;
 	}
 
-	T getValue(int index) { return fastLogger::reverseLog((index - offset) / multiplier) * 2.0 / (1 + gamma); }
+	T getValue(size_t index) { return fastLogger::reverseLog((index - offset) / multiplier) * 2.0 / (1 + gamma); }
 
 private:
 	double gamma, multiplier;
-	int offset = 0;
+	size_t offset = 0;
 };
 
 // DDSketch with <cmath> log. Slow and only use this when others doesn't work.
@@ -231,13 +237,13 @@ public:
 		this->setBucketSize(2 * offset);
 	}
 
-	int getIndex(T sample) { return ceil(log(sample) / logGamma) + offset; }
+	size_t getIndex(T sample) { return ceil(log(sample) / logGamma) + offset; }
 
-	T getValue(int index) { return (T)(2.0 * pow(gamma, (index - offset)) / (1 + gamma)); }
+	T getValue(size_t index) { return (T)(2.0 * pow(gamma, (index - offset)) / (1 + gamma)); }
 
 private:
 	double gamma, logGamma;
-	int offset = 0;
+	size_t offset = 0;
 };
 
 // DDSketch for unsigned int. Faster than the float version. Fixed accuracy.
@@ -245,7 +251,7 @@ class DDSketchFastUnsigned : public DDSketchBase<DDSketchFastUnsigned, unsigned>
 public:
 	DDSketchFastUnsigned() : DDSketchBase<DDSketchFastUnsigned, unsigned>(errorGuarantee) { this->setBucketSize(129); }
 
-	int getIndex(unsigned sample) {
+	size_t getIndex(unsigned sample) {
 		__uint128_t v = sample;
 		v *= v;
 		v *= v; // sample^4
@@ -254,7 +260,7 @@ public:
 		return 128 - (high == 0 ? ((low == 0 ? 64 : __builtin_clzll(low)) + 64) : __builtin_clzll(high));
 	}
 
-	unsigned getValue(int index) {
+	unsigned getValue(size_t index) {
 		double r = 1, g = gamma;
 		while (index) { // quick power method for power(gamma, index)
 			if (index & 1)
