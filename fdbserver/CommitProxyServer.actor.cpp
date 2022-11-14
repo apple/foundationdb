@@ -2910,7 +2910,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
 		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
-		    "CommitProxy"_sr, "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::microseconds));
+		    "CommitProxy"_sr, "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::milliseconds));
 	}
 
 	// Initialize keyResolvers map

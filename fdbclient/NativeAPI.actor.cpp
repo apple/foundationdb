@@ -7110,11 +7110,11 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	state Reference<Histogram> batchIntervalDist =
 	    Histogram::getHistogram("GrvBatcher"_sr,
 	                            "ClientGrvBatchInterval"_sr,
-	                            Histogram::Unit::microseconds,
+	                            Histogram::Unit::milliseconds,
 	                            0,
 	                            CLIENT_KNOBS->GRV_BATCH_TIMEOUT * 1000000 * 2);
 	state Reference<Histogram> grvReplyLatencyDist =
-	    Histogram::getHistogram("GrvBatcher"_sr, "ClientGrvReplyLatency"_sr, Histogram::Unit::microseconds);
+	    Histogram::getHistogram("GrvBatcher"_sr, "ClientGrvReplyLatency"_sr, Histogram::Unit::milliseconds);
 	state double lastRequestTime = now();
 
 	state TransactionTagMap<uint32_t> tags;
