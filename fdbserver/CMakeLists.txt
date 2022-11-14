@@ -32,8 +32,6 @@ add_library(fdbserver_swift STATIC
         UID.swift
         # tests
         swift/tests/Rainbow.swift
-        swift/tests/swift_tests.swift
-        swift/tests/swift_test_task.swift
         swift/tests/swift_test_streams.swift
         )
 

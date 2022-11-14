@@ -21,8 +21,7 @@ extension Swift.Optional where Wrapped == Version {
     }
 }
 
-@_expose(Cxx)
-public func figureVersion(current: Version,
+func figureVersion(current: Version,
                    now: Double,
                    reference: Version,
                    toAdd: Int64,
