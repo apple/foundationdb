@@ -29,6 +29,9 @@
 #include <fstream>
 #include <map>
 #include <new>
+#if defined(__linux__)
+#include <pthread.h>
+#endif
 #include <string>
 #include <string_view>
 #include <thread>
@@ -990,6 +993,9 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			logr.error("network::run(): {}", err.what());
 		}
 	});
+#if defined(__linux__)
+	pthread_setname_np(network_thread.native_handle(), "mako_network");
+#endif
 
 	/*** let's party! ***/
 
@@ -1025,6 +1031,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			this_args.shm = shm;
 			this_args.database = databases[i % args.num_databases];
 			worker_threads[i] = std::thread(workerThread, std::ref(this_args));
+#if defined(__linux__)
+			const auto thread_name = "mako_worker_" + std::to_string(i);
+			pthread_setname_np(worker_threads[i].native_handle(), thread_name.c_str());
+#endif
 		}
 		/* wait for everyone to finish */
 		for (auto i = 0; i < args.num_threads; i++) {
@@ -1044,6 +1054,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 				ctx.run();
 				logr.debug("Async-mode worker thread {} finished", i + 1);
 			});
+#if defined(__linux__)
+			const auto thread_name = "mako_worker_" + std::to_string(i);
+			pthread_setname_np(worker_threads[i].native_handle(), thread_name.c_str());
+#endif
 		}
 		shm.header().readycount.fetch_add(args.num_threads);
 		runAsyncWorkload(args, pid_main, worker_id, shm, ctx, databases);
