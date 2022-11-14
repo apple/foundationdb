@@ -65,7 +65,7 @@ public:
 		return b;
 	}
 	// Returns a time interval a caller should sleep from now until the next timer.
-	double getSleepTime(double now) {
+	double getSleepTime(double now) const {
 		if (!timers.empty()) {
 			return timers.top().at - now;
 		}
@@ -98,11 +98,11 @@ public:
 		FDB_TRACE_PROBE(run_loop_thread_ready, numReady);
 	}
 
-	bool hasReadyTask() { return !ready.empty(); }
-	size_t getNumReadyTasks() { return ready.size(); }
-	TaskPriority getReadyTaskID() { return ready.top().taskID; }
-	int64_t getReadyTaskPriority() { return ready.top().priority; }
-	Task* getReadyTask() { return ready.top().task; }
+	bool hasReadyTask() const { return !ready.empty(); }
+	size_t getNumReadyTasks() const { return ready.size(); }
+	TaskPriority getReadyTaskID() const { return ready.top().taskID; }
+	int64_t getReadyTaskPriority() const { return ready.top().priority; }
+	Task* getReadyTask() const { return ready.top().task; }
 	void popReadyTask() { ready.pop(); }
 
 	void initMetrics() {

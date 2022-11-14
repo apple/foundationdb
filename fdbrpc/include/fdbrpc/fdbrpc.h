@@ -140,7 +140,7 @@ public:
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
-	bool isSet() { return sav->isSet(); }
+	bool isSet() const { return sav->isSet(); }
 	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {

@@ -157,7 +157,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 		return (1.0 * readStats.deltaBytesRead) / (writeAmp * SERVER_KNOBS->BG_RDC_READ_FACTOR);
 	}
 
-	bool isEligibleRDC() {
+	bool isEligibleRDC() const {
 		// granule should be reasonably read-hot to be eligible
 		int64_t bytesWritten = bufferedDeltaBytes + bytesInNewDeltaFiles;
 		return bytesWritten * SERVER_KNOBS->BG_RDC_READ_FACTOR < readStats.deltaBytesRead;
