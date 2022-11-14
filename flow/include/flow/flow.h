@@ -1084,7 +1084,7 @@ protected:
 template <class T>
 class FutureStream {
 public:
-	bool isValid() const { return queue != 0; }
+	bool isValid() const { return queue != nullptr; }
 	bool isReady() const { return queue->isReady(); }
 	bool isError() const {
 		// This means that the next thing to be popped is an error - it will be false if there is an error in the stream
@@ -1093,7 +1093,7 @@ public:
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
 		queue->addCallbackAndDelFutureRef(cb);
-		queue = 0;
+		queue = nullptr;
 	}
 	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
@@ -1113,14 +1113,14 @@ public:
 			if (queue)
 				queue->delFutureRef();
 			queue = rhs.queue;
-			rhs.queue = 0;
+			rhs.queue = nullptr;
 		}
 	}
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
 	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
 	T pop() { return queue->pop(); }
-	Error getError() {
+	Error getError() const {
 		ASSERT(queue->isError());
 		return queue->error;
 	}
@@ -1199,7 +1199,9 @@ public:
 		return getReply(reply);
 	}
 
-	FutureStream<T> getFuture() const {
+	// Not const, because this function gives mutable
+	// access to queue
+	FutureStream<T> getFuture() {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}
@@ -1227,6 +1229,7 @@ public:
 	}
 
 	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool isReady() const { return queue->isReady(); }
 	bool isEmpty() const { return !queue->isReady(); }
 
 	Future<Void> onEmpty() {
