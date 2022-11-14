@@ -85,7 +85,7 @@ void HistogramRegistry::clear() {
 
 #pragma region Histogram
 
-const char* const Histogram::UnitToStringMapper[] = { "microseconds", "bytes", "bytes_per_second",
+const char* const Histogram::UnitToStringMapper[] = { "milliseconds", "bytes", "bytes_per_second",
 	                                                  "percentage",   "count", "none" };
 
 void Histogram::writeToLog(double elapsed) {
@@ -111,8 +111,9 @@ void Histogram::writeToLog(double elapsed) {
 		if (buckets[i]) {
 			totalCount += buckets[i];
 			switch (unit) {
-			case Unit::microseconds:
-				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
+			case Unit::milliseconds:
+				// value stored in microseconds, so divide by 1000 before writing
+				e.detail(format("LessThan%u.%03u", int(value / 1000), int(value % 1000)), buckets[i]);
 				break;
 			case Unit::bytes:
 			case Unit::bytes_per_second:
@@ -227,7 +228,7 @@ TEST_CASE("/flow/histogram/smoke_test") {
 		h = Histogram::getHistogram("smoke_test"_sr, "counts"_sr, Histogram::Unit::bytes);
 		ASSERT(h->buckets[0] == 0);
 
-		h = Histogram::getHistogram("smoke_test"_sr, "times"_sr, Histogram::Unit::microseconds);
+		h = Histogram::getHistogram("smoke_test"_sr, "times"_sr, Histogram::Unit::milliseconds);
 
 		h->sampleSeconds(0.000000);
 		h->sampleSeconds(0.0000019);

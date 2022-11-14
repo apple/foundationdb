@@ -546,7 +546,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 					it->tlogPushDistTrackers.push_back(
 					    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
 					                            it->logServers[i]->get().interf().address().toString(),
-					                            Histogram::Unit::microseconds));
+					                            Histogram::Unit::milliseconds));
 				}
 			}
 			std::vector<Future<Void>> tLogCommitResults;
