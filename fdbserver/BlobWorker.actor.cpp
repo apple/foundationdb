@@ -3772,8 +3772,12 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
-							ASSERT(encrypted);
+						if (g_simulator && g_simulator->isSimulated() &&
+						    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) && !encrypted) {
+							ASSERT(false);
+						}
+						if (encrypted) {
+							ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
 							ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
 							CODE_PROBE(true, "fetching cipher keys from meta ref for snapshot file");
 							snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
@@ -3790,8 +3794,12 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {
-							ASSERT(encrypted);
+						if (g_simulator && g_simulator->isSimulated() &&
+						    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) && !encrypted) {
+							ASSERT(false);
+						}
+						if (encrypted) {
+							ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
 							ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
 							CODE_PROBE(true, "fetching cipher keys from meta ref for delta files");
 							deltaCipherKeysCtxs.emplace(
