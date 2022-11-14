@@ -8998,6 +8998,7 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRan
                                                                                    CheckpointFormat format,
                                                                                    Optional<UID> dataMoveId,
                                                                                    double timeout) {
+	state Span span("NAPI:GetCheckpointMetaDataForRange"_loc);
 	state int index = 0;
 	state std::vector<Future<CheckpointMetaData>> futures;
 
@@ -9038,7 +9039,7 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRan
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent("GetCheckpointError").errorUnsuppressed(e).detail("Range", rang);
+			TraceEvent("GetCheckpointError").errorUnsuppressed(e).detail("Range", range);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
 				cx->invalidateCache(KeyRef(), range);
@@ -9057,13 +9058,12 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRan
 	return res;
 }
 
-ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                           std::vector<KeyRange> ranges,
-                                                                           Version version,
-                                                                           CheckpointFormat format,
-                                                                           Optional<UID> dataMoveId,
-                                                                           double timeout) {
-	state Span span("NAPI:GetCheckpoint"_loc);
+ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
+                                                                    std::vector<KeyRange> ranges,
+                                                                    Version version,
+                                                                    CheckpointFormat format,
+                                                                    Optional<UID> dataMoveId,
+                                                                    double timeout) {
 	state std::vector<Future<std::vector<CheckpointMetaData>>> futures;
 
 	for (const auto& range : ranges) {
@@ -9075,7 +9075,7 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Datab
 	std::vector<CheckpointMetaData> rep;
 
 	for (const auto& checkpoints : results) {
-		rep.push_back(rep.end(), checkpoints.begin(), checkpoints.end());
+		rep.insert(rep.end(), checkpoints.begin(), checkpoints.end());
 	}
 
 	return rep;
