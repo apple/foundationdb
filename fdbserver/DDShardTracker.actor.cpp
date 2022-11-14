@@ -1562,7 +1562,6 @@ PhysicalShardAvailable PhysicalShardCollection::checkPhysicalShardAvailable(uint
 	ASSERT(physicalShardInstances.count(physicalShardID) > 0);
 	if (physicalShardInstances[physicalShardID].metrics.bytes + moveInMetrics.bytes >
 	    SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES) {
-		TraceEvent("ZZZZZPhysicalShardNotAvailable").detail("ID", physicalShardID).detail("Size", physicalShardInstances[physicalShardID].metrics.bytes).detail("MoveIn", moveInMetrics.bytes).detail("Max", SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES);
 		return PhysicalShardAvailable::False;
 	}
 	return PhysicalShardAvailable::True;
@@ -1622,7 +1621,6 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(S
 	ASSERT(team.servers.size() > 0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
 	if (teamPhysicalShardIDs.count(team) == 0) {
-		TraceEvent("ZZZZZNoAvailablePhysicalShard").detail("Reason", "TeamNoPhysicalShard");
 		return Optional<uint64_t>();
 	}
 	ASSERT(teamPhysicalShardIDs[team].size() >= 1);
@@ -1650,7 +1648,6 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(S
 		    .detail("MoveInBytes", moveInMetrics.bytes)
 		    .detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES)
 		    .detail("DebugID", debugID);*/
-		TraceEvent("ZZZZZNoAvailablePhysicalShard").detail("Reason", "ExistingPhysicalShardTooLarge");
 		return Optional<uint64_t>();
 	}
 	return deterministicRandom()->randomChoice(availablePhysicalShardIDs);
@@ -1781,7 +1778,6 @@ uint64_t PhysicalShardCollection::determinePhysicalShardIDGivenPrimaryTeam(
 	}
 	Optional<uint64_t> physicalShardIDFetch = trySelectAvailablePhysicalShardFor(primaryTeam, metrics, debugID);
 	if (!physicalShardIDFetch.present()) {
-		TraceEvent("WWWWWNoAvailablePhysicalShard").detail("Count", 1);
 		return generateNewPhysicalShardID(debugID);
 	}
 	return physicalShardIDFetch.get();
