@@ -1846,6 +1846,8 @@ public:
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 				state Future<RangeResult> fresultsExclude = tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> fresultsFailed = tr.getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> flocalitiesExclude =
@@ -2743,6 +2745,7 @@ public:
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> clusterId = wait(tr.get(clusterIdKey));
 				ASSERT(clusterId.present());
 				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
