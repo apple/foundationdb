@@ -75,8 +75,8 @@ struct BlobWorkerStats {
 	                         Reference<FlowLock> resnapshotLock,
 	                         Reference<FlowLock> deltaWritesLock,
 	                         double sampleLoggingInterval,
-	                         int fileOpLatencySketchAccuracy,
-	                         int requestLatencySketchAccuracy)
+	                         double fileOpLatencySketchAccuracy,
+	                         double requestLatencySketchAccuracy)
 	  : cc("BlobWorkerStats", id.toString()),
 
 	    s3PutReqs("S3PutReqs", cc), s3GetReqs("S3GetReqs", cc), s3DeleteReqs("S3DeleteReqs", cc),
