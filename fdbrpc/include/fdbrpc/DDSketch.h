@@ -79,7 +79,9 @@ class DDSketchBase {
 public:
 	explicit DDSketchBase(double errorGuarantee)
 	  : errorGuarantee(errorGuarantee), populationSize(0), zeroPopulationSize(0), minValue(defaultMin()),
-	    maxValue(defaultMax()), sum(T()) {}
+	    maxValue(defaultMax()), sum(T()) {
+		ASSERT(errorGuarantee > 0 && errorGuarantee < 1);
+	}
 
 	DDSketchBase<Impl, T>& addSample(T sample) {
 		// Call it addSample for now, while it is not a sample anymore
