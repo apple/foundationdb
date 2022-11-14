@@ -217,7 +217,7 @@ public:
 	}
 
 	size_t getIndex(T sample) {
-		static_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
+		static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 		return ceil(fastLogger::fastlog(sample) * multiplier) + offset;
 	}
 
