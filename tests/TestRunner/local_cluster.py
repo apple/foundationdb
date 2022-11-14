@@ -334,9 +334,6 @@ logdir = {logdir}
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
 
-        if self.blob_granules_enabled:
-            self.fdbcli_exec("blobrange start \\x00 \\xff")
-
     # Generate and install test certificate chains and keys
     def create_tls_cert(self):
         assert self.tls_config is not None, "TLS not enabled"

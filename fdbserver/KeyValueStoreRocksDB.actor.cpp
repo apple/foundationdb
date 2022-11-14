@@ -200,7 +200,7 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	}
 
 	options.statistics = rocksdb::CreateDBStatistics();
-	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
+	options.statistics->set_stats_level(rocksdb::StatsLevel(SERVER_KNOBS->ROCKSDB_STATS_LEVEL));
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 
@@ -391,9 +391,16 @@ struct Counters {
 	CounterCollection cc;
 	Counter immediateThrottle;
 	Counter failedToAcquire;
+	Counter deleteKeyReqs;
+	Counter deleteRangeReqs;
+	Counter convertedDeleteKeyReqs;
+	Counter convertedDeleteRangeReqs;
 
 	Counters()
-	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc) {}
+	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
+	    deleteKeyReqs("DeleteKeyRequests", cc), deleteRangeReqs("DeleteRangeRequests", cc),
+	    convertedDeleteKeyReqs("ConvertedDeleteKeyRequests", cc),
+	    convertedDeleteRangeReqs("ConvertedDeleteRangeRequests", cc) {}
 };
 
 struct ReadIterator {
@@ -893,14 +900,19 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
 	};
 
+	// To control the rocksdb::StatsLevel, use ROCKSDB_STATS_LEVEL knob.
 	state std::vector<std::pair<const char*, uint32_t>> histogramStats = {
-		{ "CompactionTime", rocksdb::COMPACTION_TIME },
-		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME },
-		{ "CompressionTimeNanos", rocksdb::COMPRESSION_TIMES_NANOS },
-		{ "DecompressionTimeNanos", rocksdb::DECOMPRESSION_TIMES_NANOS },
-		{ "HardRateLimitDelayCount", rocksdb::HARD_RATE_LIMIT_DELAY_COUNT },
-		{ "SoftRateLimitDelayCount", rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT },
-		{ "WriteStall", rocksdb::WRITE_STALL },
+		{ "CompactionTime", rocksdb::COMPACTION_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
+		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
+		{ "CompressionTimeNanos",
+		  rocksdb::COMPRESSION_TIMES_NANOS }, // enabled if rocksdb::StatsLevel > kExceptDetailedTimers(3)
+		{ "DecompressionTimeNanos",
+		  rocksdb::DECOMPRESSION_TIMES_NANOS }, // enabled if rocksdb::StatsLevel > kExceptDetailedTimers(3)
+		{ "HardRateLimitDelayCount",
+		  rocksdb::HARD_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
+		{ "SoftRateLimitDelayCount",
+		  rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
+		{ "WriteStall", rocksdb::WRITE_STALL }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
 	};
 
 	state std::vector<std::pair<const char*, std::string>> intPropertyStats = {
@@ -957,11 +969,14 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 			cum = stat;
 		}
 
-		for (auto& [name, histogram] : histogramStats) {
-			rocksdb::HistogramData histogram_data;
-			statistics->histogramData(histogram, &histogram_data);
-			e.detail(format("%s%d", name, "P95"), histogram_data.percentile95);
-			e.detail(format("%s%d", name, "P99"), histogram_data.percentile99);
+		// None of the histogramStats are enabled unless the ROCKSDB_STATS_LEVEL > kExceptHistogramOrTimers(1)
+		if (SERVER_KNOBS->ROCKSDB_STATS_LEVEL > rocksdb::kExceptHistogramOrTimers) {
+			for (auto& [name, histogram] : histogramStats) {
+				rocksdb::HistogramData histogram_data;
+				statistics->histogramData(histogram, &histogram_data);
+				e.detail(format("%s%s", name, "P95"), histogram_data.percentile95);
+				e.detail(format("%s%s", name, "P99"), histogram_data.percentile99);
+			}
 		}
 
 		for (const auto& [name, property] : intPropertyStats) {
@@ -1926,12 +1941,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
+		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
+		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
 		if (keyRange.singleKeyRange()) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
+			++counters.deleteKeyReqs;
 		} else {
+			++counters.deleteRangeReqs;
 			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
 			    storageMetrics->byteSample.getEstimate(keyRange) <
 			        SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT) {
+				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions options = sharedState->getReadOptions();
 				auto beginSlice = toSlice(keyRange.begin);
 				auto endSlice = toSlice(keyRange.end);
@@ -1941,6 +1961,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				cursor->Seek(toSlice(keyRange.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
 					writeBatch->Delete(defaultFdbCF, cursor->key());
+					++counters.convertedDeleteKeyReqs;
 					cursor->Next();
 				}
 				if (!cursor->status().ok()) {
@@ -1950,6 +1971,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					auto it = keysSet.lower_bound(keyRange.begin);
 					while (it != keysSet.end() && *it < keyRange.end) {
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
+						++counters.convertedDeleteKeyReqs;
 						it++;
 					}
 				}

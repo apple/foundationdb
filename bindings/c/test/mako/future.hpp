@@ -47,10 +47,15 @@ force_inline bool waitFuture(FutureType& f, std::string_view step) {
 }
 
 template <class FutureType>
-force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+force_inline FutureRC
+handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step, bool timeouts_expected = false) {
 	if (auto err = f.error()) {
 		assert(!(err.retryable()));
-		logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
+		logr.printWithLogLevel(err.is(1031 /*timeout*/) && timeouts_expected ? VERBOSE_WARN : VERBOSE_NONE,
+		                       "ERROR",
+		                       "Unretryable error '{}' found at on_error(), step: {}",
+		                       err.what(),
+		                       step);
 		tx.reset();
 		return FutureRC::ABORT;
 	} else {
@@ -59,17 +64,19 @@ force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std:
 }
 
 template <class FutureType>
-force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+force_inline FutureRC
+waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step, bool timeouts_expected = false) {
 	assert(f);
 	if (!waitFuture(f, step)) {
 		return FutureRC::ABORT;
 	}
-	return handleForOnError(tx, f, step);
+	return handleForOnError(tx, f, step, timeouts_expected);
 }
 
 // wait on any non-immediate tx-related step to complete. Follow up with on_error().
 template <class FutureType>
-force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+force_inline FutureRC
+waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step, bool timeouts_expected = false) {
 	assert(f);
 	if (!waitFuture(f, step)) {
 		return FutureRC::ABORT;
@@ -78,16 +85,17 @@ force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, st
 	if (!err) {
 		return FutureRC::OK;
 	}
-	if (err.retryable()) {
-		logr.warn("step {} returned '{}'", step, err.what());
-	} else {
-		logr.error("step {} returned '{}'", step, err.what());
-	}
+	logr.printWithLogLevel(((err.is(1031 /*timeout*/) && timeouts_expected) || err.retryable()) ? VERBOSE_WARN
+	                                                                                            : VERBOSE_NONE,
+	                       "ERROR",
+	                       "step {} returned '{}'",
+	                       step,
+	                       err.what());
+
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	return waitAndHandleForOnError(tx, follow_up, step);
+	return waitAndHandleForOnError(tx, follow_up, step, timeouts_expected);
 }
-
 } // namespace mako
 
 #endif /*MAKO_FUTURE_HPP*/

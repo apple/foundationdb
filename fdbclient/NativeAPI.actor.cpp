@@ -4524,9 +4524,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
-					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
+					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
+					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
+						// disable it on prefetch, because boundary entries serve as continuations
 						RangeResultFamily copy;
 						int newSize =
 						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
@@ -5837,7 +5839,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	// NOTE: The throttling cost of each clear is assumed to be one page.
 	// This makes compuation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6587,7 +6589,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
-			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled) {
+			    e.code() != error_code_tenant_not_found && e.code() != error_code_proxy_tag_throttled &&
+			    e.code() != error_code_storage_quota_exceeded) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -7580,6 +7583,8 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		} else if (e.code() == error_code_unknown_tenant && trState.present() &&
 		           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
 			wait(trState.get()->handleUnknownTenant());
+		} else if (e.code() == error_code_future_version) {
+			wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 		} else {
 			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 			throw;
@@ -7839,6 +7844,8 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			} else if (e.code() == error_code_unknown_tenant && trState.present() &&
 			           tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
 				wait(trState.get()->handleUnknownTenant());
+			} else if (e.code() == error_code_future_version) {
+				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 			} else {
 				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 				throw;
@@ -10948,6 +10955,37 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
                                                                                  int rangeLimit,
                                                                                  Optional<TenantName> tenantName) {
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenantName);
+}
+
+ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state Key key = blobRestoreCommandKeyFor(range);
+			Optional<Value> value = wait(tr->get(key));
+			if (value.present()) {
+				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
+				if (status.progress < 100) {
+					return false; // stop if there is in-progress restore.
+				}
+			}
+			Standalone<BlobRestoreStatus> status;
+			status.progress = 0;
+			Value newValue = blobRestoreCommandValueFor(status);
+			tr->set(key, newValue);
+			wait(tr->commit());
+			return true;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<bool> DatabaseContext::blobRestore(KeyRange range) {
+	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {
