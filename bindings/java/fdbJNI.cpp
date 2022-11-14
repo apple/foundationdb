@@ -492,11 +492,15 @@ public:
 };
 
 void cpBytesAndLengthInner(uint8_t*& pByte, jint*& pLength, const uint8_t* data, const int& length) {
+	fprintf(stderr, "Hfu5: cpBytesAndLengthInner start, length index %d, length %d, byte %p.\n", *pLength, length, pByte);
+	fprintf(stdout, "Hfu5: cpBytesAndLengthInner start, length index %d, length %d, byte %p.\n", *pLength, length, pByte);
 	*pLength = length;
 	pLength++;
 
 	memcpy(pByte, data, length);
 	pByte += length;
+	fprintf(stderr, "Hfu5: cpBytesAndLengthInner end, length index %d, length %d, byte %p.\n", *pLength, length, pByte);
+	fprintf(stdout, "Hfu5: cpBytesAndLengthInner end, length index %d, length %d, byte %p.\n", *pLength, length, pByte);
 }
 
 void cpBytesAndLength(uint8_t*& pByte, jint*& pLength, const FDBKey& key) {
@@ -534,12 +538,19 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 		int kvm_count = kvm.getRange.m_size;
 
 		const int totalLengths = 4 + kvm_count * 2;
+		fprintf(stderr, "Hfu5: index %d, totalLengths %d.\n", i, totalLengths);
+		fprintf(stdout, "Hfu5: index %d, totalLengths %d.\n", i, totalLengths);
 
 		int totalBytes = kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
 		                 kvm.getRange.end.key.key_length;
+
+		fprintf(stderr, "Hfu5: index %d, totalBytes %d.\n", i, totalBytes);
+		fprintf(stdout, "Hfu5: index %d, totalBytes %d.\n", i, totalBytes);
 		for (int i = 0; i < kvm_count; i++) {
 			auto kv = kvm.getRange.data[i];
 			totalBytes += kv.key_length + kv.value_length;
+			fprintf(stdout, "Hfu5: index %d, totalBytes each %d, key: %d, v: %d.\n", i, totalBytes, kv.key_length, kv.value_length);
+			fprintf(stderr, "Hfu5: index %d, totalBytes each %d, key: %d, v: %d.\n", i, totalBytes, kv.key_length, kv.value_length);
 		}
 
 		jbyteArray bytesArray = jenv->NewByteArray(totalBytes);
@@ -587,6 +598,9 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 				}
 			}
 		}
+		fprintf(stderr, "Hfu5: Finish %d.\n", totalBytes);
+		fprintf(stdout, "Hfu5: Finish %d.\n", totalBytes);
+
 		// After native arrays are released
 		jobject mkv = jenv->CallStaticObjectMethod(
 		    mapped_key_value_class, mapped_key_value_from_bytes, (jbyteArray)bytesArray, (jintArray)lengthArray);
