@@ -237,11 +237,15 @@ public:
 	int64_t
 	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
+	bool STORAGE_QUOTA_ENABLED; // Whether storage quota enforcement for tenant groups and all the relevant storage
+	                            // usage / quota monitors are enabled.
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
 	int TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL; // How often the storage bytes used by each tenant is refreshed
 	                                                 // in the TenantCache
 	int TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL; // How often the storage quota allocated to each tenant is
 	                                                 // refreshed in the TenantCache
+	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
+	                                                  // distributor to fetch the list of tenants over storage quota
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -759,6 +763,8 @@ public:
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	bool STRICTLY_ENFORCE_BYTE_LIMIT;
+	double FRACTION_INDEX_BYTELIMIT_PREFETCH;
 	int MAX_PARALLEL_QUICK_GET_VALUE;
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;

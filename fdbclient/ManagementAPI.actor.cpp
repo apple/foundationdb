@@ -2559,15 +2559,21 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
-void setStorageQuota(Transaction& tr, StringRef tenantName, int64_t quota) {
+void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota) {
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantName);
+	auto key = storageQuotaKey(tenantGroupName);
 	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
 }
 
-ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
+void clearStorageQuota(Transaction& tr, StringRef tenantGroupName) {
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto key = storageQuotaKey(tenantGroupName);
+	tr.clear(key);
+}
+
+ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
+	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantGroupName)));
 	if (!v.present()) {
 		return Optional<int64_t>();
 	}

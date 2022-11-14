@@ -6,6 +6,7 @@ enable_encryption = true
 enable_tlog_encryption = true
 enable_storage_server_encryption = false
 enable_blob_granule_encryption = true
+max_write_transaction_life_versions = 5000000
 
 [[test]]
 testTitle = 'EncryptedBackupAndRestore'
@@ -14,8 +15,8 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'BulkLoadWithTenants'
-    maxNumTenantsPerClient = 100
-    minNumTenantsPerClient = 0
+    maxNumTenants = 100
+    minNumTenants = 0
     transactionsPerSecond = 2500.0
 
     [[test.workload]]
