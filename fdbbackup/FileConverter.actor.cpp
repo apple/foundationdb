@@ -107,9 +107,9 @@ struct ConvertParams {
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
 
-	bool isValid() { return begin != invalidVersion && end != invalidVersion && !container_url.empty(); }
+	bool isValid() const { return begin != invalidVersion && end != invalidVersion && !container_url.empty(); }
 
-	std::string toString() {
+	std::string toString() const {
 		std::string s;
 		s.append("ContainerURL:");
 		s.append(container_url);

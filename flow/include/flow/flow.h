@@ -392,7 +392,7 @@ struct Callback {
 			next->unwait();
 	}
 
-	int countCallbacks() {
+	int countCallbacks() const {
 		int count = 0;
 		for (Callback* c = next; c != this; c = c->next)
 			count++;
@@ -551,12 +551,12 @@ public:
 	}
 
 	void setActorName(const char* name) { actorName_ = name; }
-	const char* actorName() { return actorName_; }
+	const char* actorName() const { return actorName_; }
 	void allocate() {
 		Reference<ActorLineage>::setPtrUnsafe(new ActorLineage());
 		allocated_ = true;
 	}
-	bool isAllocated() { return allocated_; }
+	bool isAllocated() const { return allocated_; }
 
 private:
 	// The actor name has to be a property of the LineageReference because all
