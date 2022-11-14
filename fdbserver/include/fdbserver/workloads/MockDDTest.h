@@ -1,5 +1,5 @@
 /*
- * MockDDTest.g
+ * MockDDTest.h
  *
  * This source file is part of the FoundationDB open source project
  *

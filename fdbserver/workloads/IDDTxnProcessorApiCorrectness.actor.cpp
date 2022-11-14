@@ -261,7 +261,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return Void();
 	}
 
-	void verifyServerKeyDest(MoveKeysParams& params) {
+	void verifyServerKeyDest(MoveKeysParams& params) const {
 		// check destination servers
 		for (auto& id : params.destinationTeam) {
 			ASSERT(mgs->serverIsDestForShard(id, params.keys));

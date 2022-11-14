@@ -177,8 +177,8 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
-		for (auto& p : rsReasonCounts) {
-			m.push_back(PerfMetric(RelocateReason(p.first).toString(), p.second, Averaged::False));
+		for (const auto& [reason, count] : rsReasonCounts) {
+			m.push_back(PerfMetric(RelocateReason(reason).toString(), count, Averaged::False));
 		}
 	}
 };
