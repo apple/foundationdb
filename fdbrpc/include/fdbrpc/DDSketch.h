@@ -92,7 +92,7 @@ public:
 			zeroPopulationSize++;
 		} else {
 			size_t index = static_cast<Impl*>(this)->getIndex(sample);
-			assert(index >= 0 && index < buckets.size());
+			ASSERT(index >= 0 && index < buckets.size());
 			try {
 				buckets.at(index)++;
 			} catch (std::out_of_range const& e) {
@@ -116,7 +116,7 @@ public:
 	T median() { return percentile(0.5); }
 
 	T percentile(double percentile) {
-		assert(percentile >= 0 && percentile <= 1);
+		ASSERT(percentile >= 0 && percentile <= 1);
 
 		if (populationSize == 0)
 			return T();
@@ -157,7 +157,7 @@ public:
 				count += *rit;
 			}
 		}
-		assert(found);
+		ASSERT(found);
 		if (!found) return -1;
 		return static_cast<Impl*>(this)->getValue(index);
 	}
@@ -181,7 +181,7 @@ public:
 
 	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
 		// Must have the same guarantee
-		assert(fabs(errorGuarantee - anotherSketch.errorGuarantee) < EPS &&
+		ASSERT(fabs(errorGuarantee - anotherSketch.errorGuarantee) < EPS &&
 		       anotherSketch.buckets.size() == buckets.size());
 		for (size_t i = 0; i < anotherSketch.buckets.size(); i++) {
 			buckets[i] += anotherSketch.buckets[i];
@@ -211,13 +211,13 @@ public:
 	explicit DDSketch(double errorGuarantee = 0.01)
 	  : DDSketchBase<DDSketch<T>, T>(errorGuarantee), gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)),
 	    multiplier(fastLogger::correctingFactor * log(2) / log(gamma)) {
-		assert(errorGuarantee > 0);
+		ASSERT(errorGuarantee > 0);
 		offset = getIndex(1.0 / DDSketchBase<DDSketch<T>, T>::EPS);
 		this->setBucketSize(2 * offset);
 	}
 
 	size_t getIndex(T sample) {
-		static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
+		static_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 		return ceil(fastLogger::fastlog(sample) * multiplier) + offset;
 	}
 
