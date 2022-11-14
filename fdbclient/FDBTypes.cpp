@@ -51,12 +51,17 @@ KeyRef keyBetween(const KeyRangeRef& keys) {
 }
 
 Key randomKeyBetween(const KeyRangeRef& keys) {
+	if (keys.empty() || keys.singleKeyRange()) {
+		return keys.end;
+	}
+
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 	ASSERT(begin < end);
 	if (begin.size() < end.size()) {
 		// randomly append a char
-		uint8_t newChar = deterministicRandom()->randomInt(0, end[begin.size()] + 1);
+		uint8_t maxChar = end[begin.size()] > 0 ? end[begin.size()] : end[begin.size()] + 1;
+		uint8_t newChar = deterministicRandom()->randomInt(0, maxChar);
 		return begin.withSuffix(StringRef(&newChar, 1));
 	}
 

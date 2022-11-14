@@ -191,10 +191,6 @@ protected:
 	// Update the storage metrics as if we write a k-v pair of `size` bytes.
 	void notifyWriteMetrics(KeyRef const& key, int64_t size);
 
-	// Randomly generate keys and kv size between the fetch range, updating the byte sample.
-	// Once the fetchKeys return, the shard status will become FETCHED.
-	Future<Void> fetchKeys(const FetchKeysParams&);
-
 	// Update byte sample as if set a key value pair of which the size is kvSize
 	void byteSampleApplySet(KeyRef const& key, int64_t kvSize);
 

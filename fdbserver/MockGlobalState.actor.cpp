@@ -115,36 +115,50 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> serveMockStorageServer(MockStorageServer* self) {
-		state ActorCollection actors;
-		loop choose {
-			when(MockStorageServer::FetchKeysParams params = waitNext(self->fetchKeysRequests.getFuture())) {
-				if (!self->allShardStatusEqual(params.keys, MockShardStatus::COMPLETED)) {
-					actors.add(waitFetchKeysFinish(self, params));
-				}
-			}
-			when(wait(actors.getResult())) { ASSERT(false); }
-		}
-	}
+	// Randomly generate keys and kv size between the fetch range, updating the byte sample.
+	// Once the fetchKeys return, the shard status will become FETCHED.
 	ACTOR static Future<Void> waitFetchKeysFinish(MockStorageServer* self, MockStorageServer::FetchKeysParams params) {
 		// between each chunk delay for random time, and finally set the fetchComplete signal.
 		ASSERT(params.totalRangeBytes > 0);
 		state int chunkCount = std::ceil(params.totalRangeBytes * 1.0 / SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		state int64_t currentTotal = 0;
 		state Key lastKey = params.keys.begin;
 
 		state int i = 0;
-		for (; i < chunkCount; ++i) {
+		for (; i < chunkCount && currentTotal < params.totalRangeBytes; ++i) {
 			wait(delayJittered(0.01));
-			int remainBytes = (chunkCount == 1 ? params.totalRangeBytes : SERVER_KNOBS->FETCH_BLOCK_BYTES);
+			int remainedBytes = (chunkCount == 1 ? params.totalRangeBytes : SERVER_KNOBS->FETCH_BLOCK_BYTES);
 
-			while (remainBytes >= lastKey.size()) {
-				int maxSize = std::min(remainBytes, 130000) + 1;
+			while (remainedBytes >= lastKey.size()) {
+				Key nextKey;
+				// try 10 times
+				for (int j = 0; j < 10; j++) {
+					nextKey = randomKeyBetween(KeyRangeRef(lastKey, params.keys.end));
+					if (nextKey < params.keys.end)
+						break;
+				}
+
+				// NOTE: in this case, we accumulate the bytes on lastKey on purpose (shall we?)
+				if (nextKey == params.keys.end) {
+					auto bytes = params.totalRangeBytes - currentTotal;
+					self->byteSampleApplySet(lastKey, bytes);
+					self->usedDiskSpace += bytes;
+					currentTotal = params.totalRangeBytes;
+					TraceEvent(SevWarn, "MockFetchKeysInaccurateSample")
+					    .detail("Range", params.keys)
+					    .detail("LastKey", lastKey)
+					    .detail("Size", bytes);
+					break; // break the most outside loop
+				}
+
+				int maxSize = std::min(remainedBytes, 130000) + 1;
 				int randomSize = deterministicRandom()->randomInt(lastKey.size(), maxSize);
-
 				self->usedDiskSpace += randomSize;
+				currentTotal += randomSize;
+
 				self->byteSampleApplySet(lastKey, randomSize);
-				remainBytes -= randomSize;
-				lastKey = randomKeyBetween(KeyRangeRef(lastKey, params.keys.end));
+				remainedBytes -= randomSize;
+				lastKey = nextKey;
 			}
 		}
 
@@ -214,16 +228,15 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 		auto oldStatus = it.value().status;
 		if (isStatusTransitionValid(oldStatus, status)) {
 			it.value() = ShardInfo{ status, newSize };
-		} else if (oldStatus == MockShardStatus::COMPLETED &&
+		} else if ((oldStatus == MockShardStatus::COMPLETED || oldStatus == MockShardStatus::FETCHED) &&
 		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
 			CODE_PROBE(true, "Shard already on server");
 		} else {
-			TraceEvent(SevError, "MockShardStatusTransitionError")
+			TraceEvent(SevError, "MockShardStatusTransitionError", id)
 			    .detail("From", oldStatus)
 			    .detail("To", status)
-			    .detail("ID", id)
-			    .detail("KeyBegin", range.begin.toHexString())
-			    .detail("KeyEnd", range.begin.toHexString());
+			    .detail("KeyBegin", range.begin)
+			    .detail("KeyEnd", range.begin);
 		}
 	}
 	serverKeys.coalesce(range);
@@ -320,7 +333,6 @@ Future<Void> MockStorageServer::run() {
 
 	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
 	addActor(serveStorageMetricsRequests(this, ssi));
-	// addActor(MockStorageServerImpl::serveMockStorageServer(this));
 	return actors.getResult();
 }
 
@@ -420,10 +432,6 @@ void MockStorageServer::signalFetchKeys(const KeyRangeRef& range, int64_t rangeT
 	if (!allShardStatusEqual(range, MockShardStatus::COMPLETED)) {
 		actors.add(MockStorageServerImpl::waitFetchKeysFinish(this, { range, rangeTotalBytes }));
 	}
-}
-
-Future<Void> MockStorageServer::fetchKeys(const MockStorageServer::FetchKeysParams& param) {
-	return MockStorageServerImpl::waitFetchKeysFinish(this, param);
 }
 
 void MockStorageServer::byteSampleApplySet(KeyRef const& key, int64_t kvSize) {
