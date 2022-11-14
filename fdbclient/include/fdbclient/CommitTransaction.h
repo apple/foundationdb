@@ -262,8 +262,8 @@ struct CommitTransactionRef {
 	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
 	  : read_conflict_ranges(a, from.read_conflict_ranges), write_conflict_ranges(a, from.write_conflict_ranges),
 	    mutations(a, from.mutations), read_snapshot(from.read_snapshot),
-	    bypass_storage_quota(from.bypass_storage_quota), report_conflicting_keys(from.report_conflicting_keys),
-	    lock_aware(from.lock_aware), spanContext(from.spanContext) {}
+	    report_conflicting_keys(from.report_conflicting_keys), lock_aware(from.lock_aware),
+	    spanContext(from.spanContext) {}
 
 	VectorRef<KeyRangeRef> read_conflict_ranges;
 	VectorRef<KeyRangeRef> write_conflict_ranges;
@@ -274,7 +274,6 @@ struct CommitTransactionRef {
 	// usual commit path. It is currently only used during backup mutation log restores.
 	VectorRef<Optional<MutationRef>> encryptedMutations;
 	Version read_snapshot = 0;
-	bool bypass_storage_quota = false;
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present
 	Optional<SpanContext> spanContext;
@@ -287,12 +286,11 @@ struct CommitTransactionRef {
 			           write_conflict_ranges,
 			           mutations,
 			           read_snapshot,
-			           bypass_storage_quota,
 			           report_conflicting_keys,
 			           lock_aware,
 			           spanContext);
 		} else {
-			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot, bypass_storage_quota);
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 			if (ar.protocolVersion().hasReportConflictingKeys()) {
 				serializer(ar, report_conflicting_keys);
 			}

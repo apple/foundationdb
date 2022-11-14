@@ -6694,11 +6694,11 @@ Future<Void> Transaction::commitMutations() {
 		if (trState->options.firstInBatch) {
 			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
 		}
+		if (trState->options.bypassStorageQuota) {
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_BYPASS_STORAGE_QUOTA;
+		}
 		if (trState->options.reportConflictingKeys) {
 			tr.transaction.report_conflicting_keys = true;
-		}
-		if (trState->options.bypassStorageQuota) {
-			tr.transaction.bypass_storage_quota = true;
 		}
 
 		Future<Void> commitResult = tryCommit(trState, tr, readVersion);
