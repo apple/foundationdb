@@ -388,6 +388,8 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 
 	Promise<Void> iAmReplaced;
 
+	bool isFullRestoreMode = false;
+
 	BlobManagerData(UID id,
 	                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	                Database db,
@@ -3540,7 +3542,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bmData->startRecruiting.trigger();
 
 	bmData->initBStore();
-	if (isFullRestoreMode()) {
+
+	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
+	bmData->isFullRestoreMode = isFullRestore;
+	if (bmData->isFullRestoreMode) {
 		wait(loadManifest(bmData->db, bmData->bstore));
 
 		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
@@ -5300,11 +5305,8 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 
 	bmData->initBStore();
 	loop {
-		bool pendingSplit = wait(hasPendingSplit(bmData));
-		if (!pendingSplit) {
-			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
-			bmData->manifestDumperSeqNo++;
-		}
+		wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
+		bmData->manifestDumperSeqNo++;
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }
@@ -5373,7 +5375,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
 			self->addActor.send(granuleMergeChecker(self));
 		}
-		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
+		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !self->isFullRestoreMode) {
 			self->addActor.send(backupManifest(self));
 		}
 

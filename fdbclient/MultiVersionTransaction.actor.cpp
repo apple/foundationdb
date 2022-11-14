@@ -807,7 +807,7 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 	*(void**)(fp) = loadFunction(lib, functionName);
 	if (*fp == nullptr && requireFunction) {
 		TraceEvent(SevError, "ErrorLoadingFunction").detail("LibraryPath", libPath).detail("Function", functionName);
-		throw platform_error();
+		throw api_function_missing();
 	}
 }
 
@@ -2322,16 +2322,18 @@ void MultiVersionDatabase::LegacyVersionMonitor::close() {
 
 // MultiVersionApi
 void MultiVersionApi::runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)> func,
-                                                     bool runOnFailedClients) {
+                                                     bool runOnFailedClients,
+                                                     bool failOnError) {
 	for (int i = 0; i < threadCount; i++) {
-		runOnExternalClients(i, func, runOnFailedClients);
+		runOnExternalClients(i, func, runOnFailedClients, failOnError);
 	}
 }
 
 // runOnFailedClients should be used cautiously. Some failed clients may not have successfully loaded all symbols.
 void MultiVersionApi::runOnExternalClients(int threadIdx,
                                            std::function<void(Reference<ClientInfo>)> func,
-                                           bool runOnFailedClients) {
+                                           bool runOnFailedClients,
+                                           bool failOnError) {
 	bool newFailure = false;
 
 	auto c = externalClients.begin();
@@ -2350,6 +2352,9 @@ void MultiVersionApi::runOnExternalClients(int threadIdx,
 				TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->first);
 				client->failed = true;
 				newFailure = true;
+				if (failOnError) {
+					throw e;
+				}
 			}
 		}
 
@@ -2359,6 +2364,16 @@ void MultiVersionApi::runOnExternalClients(int threadIdx,
 	if (newFailure) {
 		updateSupportedVersions();
 	}
+}
+
+bool MultiVersionApi::hasNonFailedExternalClients() {
+	bool validClientFound = false;
+	runOnExternalClientsAllThreads([&validClientFound](auto client) {
+		if (!client->failed) {
+			validClientFound = true;
+		}
+	});
+	return validClientFound;
 }
 
 Reference<ClientInfo> MultiVersionApi::getLocalClient() {
@@ -2649,6 +2664,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::TRACE_SHARE_AMONG_CLIENT_THREADS) {
 		validateOption(value, false, true);
 		traceShareBaseNameAmongThreads = true;
+	} else if (option == FDBNetworkOptions::IGNORE_EXTERNAL_CLIENT_FAILURES) {
+		validateOption(value, false, true);
+		ignoreExternalClientFailures = true;
 	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
 		validateOption(value, false, true);
 		retainClientLibCopies = true;
@@ -2687,6 +2705,10 @@ void MultiVersionApi::setupNetwork() {
 			disableLocalClient();
 		}
 
+		if (!apiVersion.hasFailOnExternalClientErrors()) {
+			ignoreExternalClientFailures = true;
+		}
+
 		for (auto i : externalClientDescriptions) {
 			std::string path = i.second.libPath;
 			std::string filename = basename(path);
@@ -2708,15 +2730,10 @@ void MultiVersionApi::setupNetwork() {
 		}
 
 		if (externalClients.empty() && localClientDisabled) {
-			// SOMEDAY: this should be allowed when it's possible to add external clients after the
-			// network is setup.
-			//
-			// Typically we would create a more specific error for this case, but since we expect
-			// this case to go away soon, we can use a trace event and a generic error.
 			TraceEvent(SevWarn, "CannotSetupNetwork")
 			    .detail("Reason", "Local client is disabled and no external clients configured");
 
-			throw client_invalid_operation();
+			throw no_external_client_provided();
 		}
 
 		networkStartSetup = true;
@@ -2738,15 +2755,20 @@ void MultiVersionApi::setupNetwork() {
 
 	localClient->loadVersion();
 
-	if (!bypassMultiClientApi) {
-		runOnExternalClientsAllThreads([this](Reference<ClientInfo> client) {
-			TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
-			client->api->selectApiVersion(apiVersion.version());
-			if (client->useFutureVersion) {
-				client->api->useFutureProtocolVersion();
-			}
-			client->loadVersion();
-		});
+	if (bypassMultiClientApi) {
+		networkSetup = true;
+	} else {
+		runOnExternalClientsAllThreads(
+		    [this](Reference<ClientInfo> client) {
+			    TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
+			    client->api->selectApiVersion(apiVersion.version());
+			    if (client->useFutureVersion) {
+				    client->api->useFutureProtocolVersion();
+			    }
+			    client->loadVersion();
+		    },
+		    false,
+		    !ignoreExternalClientFailures);
 
 		std::string baseTraceFileId;
 		if (apiVersion.hasTraceFileIdentifier()) {
@@ -2755,22 +2777,32 @@ void MultiVersionApi::setupNetwork() {
 		}
 
 		MutexHolder holder(lock);
-		runOnExternalClientsAllThreads([this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
-			for (auto option : options) {
-				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
-			}
-			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
-			if (!baseTraceFileId.empty()) {
-				client->api->setNetworkOption(
-				    FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
-				    traceShareBaseNameAmongThreads ? baseTraceFileId : client->getTraceFileIdentifier(baseTraceFileId));
-			}
-			client->api->setupNetwork();
-		});
+		runOnExternalClientsAllThreads(
+		    [this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
+			    for (auto option : options) {
+				    client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
+			    }
+			    client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID,
+			                                  std::to_string(transportId));
+			    if (!baseTraceFileId.empty()) {
+				    client->api->setNetworkOption(FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
+				                                  traceShareBaseNameAmongThreads
+				                                      ? baseTraceFileId
+				                                      : client->getTraceFileIdentifier(baseTraceFileId));
+			    }
+			    client->api->setupNetwork();
+		    },
+		    false,
+		    !ignoreExternalClientFailures);
+
+		if (localClientDisabled && !hasNonFailedExternalClients()) {
+			TraceEvent(SevWarn, "CannotSetupNetwork")
+			    .detail("Reason", "Local client is disabled and all external clients failed");
+
+			throw all_external_clients_failed();
+		}
 
 		networkSetup = true; // Needs to be guarded by mutex
-	} else {
-		networkSetup = true;
 	}
 
 	options.clear();
@@ -3110,8 +3142,9 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    disableBypass(false), bypassMultiClientApi(false), externalClient(false), retainClientLibCopies(false),
-    apiVersion(0), threadCount(0), tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
+    disableBypass(false), bypassMultiClientApi(false), externalClient(false), ignoreExternalClientFailures(false),
+    retainClientLibCopies(false), apiVersion(0), threadCount(0), tmpDir("/tmp"), traceShareBaseNameAmongThreads(false),
+    envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
