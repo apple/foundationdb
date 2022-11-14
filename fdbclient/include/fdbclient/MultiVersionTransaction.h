@@ -984,6 +984,16 @@ public:
 
 	struct LegacyVersionMonitor;
 
+	// Database initialization state
+	enum class InitializationState {
+		INITIALIZING,
+		CREATED,
+		INCOMPATIBLE,
+		FAILED_TO_GET_PROTOCOL_VERSION,
+		FAILED_TO_CREATE_DATABASE,
+		CLOSED
+	};
+
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
@@ -1007,6 +1017,9 @@ public:
 		// Must be called from the main thread
 		void startLegacyVersionMonitors();
 
+		// Set a new database connnection
+		void setDatabase(Reference<IDatabase> db);
+
 		// Cleans up state for the legacy version monitors to break reference cycles
 		void close();
 
@@ -1020,7 +1033,8 @@ public:
 		// this will be a specially created local db.
 		Reference<IDatabase> versionMonitorDb;
 
-		bool closed;
+		// The current database initialization state
+		InitializationState initializationState;
 
 		ThreadFuture<Void> changed;
 		ThreadFuture<Void> dbReady;

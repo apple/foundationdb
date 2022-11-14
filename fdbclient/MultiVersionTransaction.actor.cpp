@@ -1806,8 +1806,7 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            Reference<IDatabase> versionMonitorDb,
                                            bool openConnectors)
   : dbState(new DatabaseState(connectionRecord, versionMonitorDb)) {
-	dbState->db = db;
-	dbState->dbVar->set(db);
+	dbState->setDatabase(db);
 	if (openConnectors) {
 		if (!api->localClientDisabled) {
 			dbState->addClient(api->getLocalClient());
@@ -1998,7 +1997,16 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord const& connectionRecord,
                                                    Reference<IDatabase> versionMonitorDb)
   : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))),
-    connectionRecord(connectionRecord), versionMonitorDb(versionMonitorDb), closed(false), isConfigDB(false) {}
+    connectionRecord(connectionRecord), versionMonitorDb(versionMonitorDb),
+    initializationState(InitializationState::INITIALIZING), isConfigDB(false) {}
+
+void MultiVersionDatabase::DatabaseState::setDatabase(Reference<IDatabase> db) {
+	if (db.isValid()) {
+		initializationState = InitializationState::CREATED;
+	}
+	this->db = db;
+	dbVar->set(db);
+}
 
 // Adds a client (local or externally loaded) that can be used to connect to the cluster
 void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client) {
@@ -2042,6 +2050,11 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 
 	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 	return mapThreadFuture<ProtocolVersion, Void>(f, [self, expected](ErrorOr<ProtocolVersion> cv) {
+		if (self->initializationState == InitializationState::CLOSED) {
+			return ErrorOr<Void>(Void());
+		}
+
+		ProtocolVersion clusterVersion;
 		if (cv.isError()) {
 			if (cv.getError().code() == error_code_operation_cancelled) {
 				return ErrorOr<Void>(cv.getError());
@@ -2050,10 +2063,15 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 			TraceEvent("ErrorGettingClusterProtocolVersion")
 			    .error(cv.getError())
 			    .detail("ExpectedProtocolVersion", expected);
+
+			if (self->initializationState == InitializationState::INITIALIZING) {
+				self->initializationState = InitializationState::FAILED_TO_GET_PROTOCOL_VERSION;
+			}
+			clusterVersion = self->dbProtocolVersion.orDefault(currentProtocolVersion());
+		} else {
+			clusterVersion = cv.get();
 		}
 
-		ProtocolVersion clusterVersion =
-		    !cv.isError() ? cv.get() : self->dbProtocolVersion.orDefault(currentProtocolVersion());
 		onMainThreadVoid([self, clusterVersion]() { self->protocolVersionChanged(clusterVersion); });
 		return ErrorOr<Void>(Void());
 	});
@@ -2062,86 +2080,89 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 // Called when a change to the protocol version of the cluster has been detected.
 // Must be called from the main thread
 void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion protocolVersion) {
-	if (closed) {
+	if (initializationState == InitializationState::CLOSED) {
 		return;
 	}
 
-	// If the protocol version changed but is still compatible, update our local version but keep the same connection
+	// If the protocol version changed but is still compatible, update our local version but keep the
+	// same connection
 	if (dbProtocolVersion.present() &&
 	    protocolVersion.normalizedVersion() == dbProtocolVersion.get().normalizedVersion()) {
 		dbProtocolVersion = protocolVersion;
-
-		ASSERT(protocolVersionMonitor.isValid());
-		protocolVersionMonitor.cancel();
 		protocolVersionMonitor = monitorProtocolVersion();
+		return;
 	}
 
 	// The protocol version has changed to a different, incompatible version
-	else {
-		TraceEvent("ProtocolVersionChanged")
-		    .detail("NewProtocolVersion", protocolVersion)
-		    .detail("OldProtocolVersion", dbProtocolVersion);
-		// When the protocol version changes, clear the corresponding entry in the shared state map
-		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
-		if (dbProtocolVersion.present() && MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap()) {
-			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterId, dbProtocolVersion.get());
-		}
+	TraceEvent("ProtocolVersionChanged")
+	    .detail("NewProtocolVersion", protocolVersion)
+	    .detail("OldProtocolVersion", dbProtocolVersion);
+	// When the protocol version changes, clear the corresponding entry in the shared state map
+	// so it can be re-initialized. Only do so if there was a valid previous protocol version.
+	if (dbProtocolVersion.present() && MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap()) {
+		MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterId, dbProtocolVersion.get());
+	}
 
-		dbProtocolVersion = protocolVersion;
+	dbProtocolVersion = protocolVersion;
 
-		auto itr = clients.find(protocolVersion.normalizedVersion());
-		if (itr != clients.end()) {
-			auto& client = itr->second;
-			TraceEvent("CreatingDatabaseOnClient")
-			    .detail("LibraryPath", client->libPath)
-			    .detail("Failed", client->failed)
-			    .detail("External", client->external);
+	auto itr = clients.find(protocolVersion.normalizedVersion());
+	if (itr == clients.end()) {
+		// We don't have a client matching the current protocol
+		initializationState = InitializationState::INCOMPATIBLE;
+		updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
+		return;
+	}
 
-			Reference<IDatabase> newDb;
-			try {
-				newDb = connectionRecord.createDatabase(client->api);
-			} catch (Error& e) {
-				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
-				    .error(e)
-				    .detail("LibraryPath", client->libPath)
-				    .detail("External", client->external)
-				    .detail("ConnectionRecord", connectionRecord);
+	// A compatible client found, use it for creating a new database connection
+	auto& client = itr->second;
+	TraceEvent("CreatingDatabaseOnClient")
+	    .detail("LibraryPath", client->libPath)
+	    .detail("Failed", client->failed)
+	    .detail("External", client->external);
 
-				// Put the client in a disconnected state until the version changes again
-				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
-				return;
-			}
+	Reference<IDatabase> newDb;
+	try {
+		newDb = connectionRecord.createDatabase(client->api);
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
+		    .error(e)
+		    .detail("LibraryPath", client->libPath)
+		    .detail("External", client->external)
+		    .detail("ConnectionRecord", connectionRecord);
 
-			if (client->external && !MultiVersionApi::api->getApiVersion().hasInlineUpdateDatabase()) {
-				// Old API versions return a future when creating the database, so we need to wait for it
-				Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
-				dbReady = mapThreadFuture<Void, Void>(
-				    newDb.castTo<DLDatabase>()->onReady(), [self, newDb, client](ErrorOr<Void> ready) {
-					    if (!ready.isError()) {
-						    onMainThreadVoid([self, newDb, client]() { self->updateDatabase(newDb, client); });
-					    } else {
-						    onMainThreadVoid(
-						        [self, client]() { self->updateDatabase(Reference<IDatabase>(), client); });
-					    }
+		// Put the client in a disconnected state until the version changes again
+		initializationState = InitializationState::FAILED_TO_CREATE_DATABASE;
+		updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
+		return;
+	}
 
-					    return ready;
-				    });
-			} else {
-				updateDatabase(newDb, client);
-			}
-		} else {
-			// We don't have a client matching the current protocol
-			updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
-		}
+	if (client->external && !MultiVersionApi::api->getApiVersion().hasInlineUpdateDatabase()) {
+		// Old API versions return a future when creating the database, so we need to wait for it
+		Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
+		dbReady = mapThreadFuture<Void, Void>(
+		    newDb.castTo<DLDatabase>()->onReady(), [self, newDb, client](ErrorOr<Void> ready) {
+			    if (!ready.isError()) {
+				    onMainThreadVoid([self, newDb, client]() { self->updateDatabase(newDb, client); });
+			    } else {
+				    self->initializationState = InitializationState::FAILED_TO_CREATE_DATABASE;
+				    onMainThreadVoid(
+				        [self, client]() { self->updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>()); });
+			    }
+
+			    return ready;
+		    });
+	} else {
+		updateDatabase(newDb, client);
 	}
 }
 
 // Replaces the active database connection with a new one. Must be called from the main thread.
 void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client) {
-	if (closed) {
+	if (initializationState == InitializationState::CLOSED) {
 		return;
 	}
 
+	// Reapply database options on the new database
 	if (newDb) {
 		optionLock.enter();
 		for (auto option : options) {
@@ -2164,47 +2185,34 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 				break;
 			}
 		}
-
-		db = newDb;
-
 		optionLock.leave();
+	}
 
-		if (dbProtocolVersion.get().hasStableInterfaces() && db) {
-			versionMonitorDb = db;
-		} else {
-			// For older clients that don't have an API to get the protocol version, we have to monitor it locally
-			try {
-				versionMonitorDb = connectionRecord.createDatabase(MultiVersionApi::api->getLocalClient()->api);
-			} catch (Error& e) {
-				// We can't create a new database to monitor the cluster version. This means we will continue using the
-				// previous one, which should hopefully continue to work.
-				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
-				    .error(e)
-				    .detail("ConnectionRecord", connectionRecord);
-			}
-		}
+	// Use the new database for monitoring the version changes, if it supports version monitoring
+	if (newDb && dbProtocolVersion.get().hasStableInterfaces()) {
+		versionMonitorDb = newDb;
 	} else {
 		// We don't have a database connection, so use the local client to monitor the protocol version
-		db = Reference<IDatabase>();
+		// Also for older clients that don't have an API to get the protocol version, we have to monitor it locally
 		try {
 			versionMonitorDb = connectionRecord.createDatabase(MultiVersionApi::api->getLocalClient()->api);
 		} catch (Error& e) {
-			// We can't create a new database to monitor the cluster version. This means we will continue using the
-			// previous one, which should hopefully continue to work.
+			// We can't create a new database to monitor the cluster version. This means we will continue using
+			// the previous one, which should hopefully continue to work.
 			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
 			    .error(e)
 			    .detail("ConnectionRecord", connectionRecord);
 		}
 	}
+
 	// Verify the database has the necessary functionality to update the shared
 	// state. Avoid updating the shared state if the database is a
 	// configuration database, because a configuration database does not have
 	// access to typical system keys and does not need to be updated.
-	if (db.isValid() && dbProtocolVersion.present() &&
-	    MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap() && !isConfigDB) {
+	if (newDb && MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap() && !isConfigDB) {
 		Future<std::string> updateResult =
-		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), db);
-		sharedStateUpdater = map(errorOr(updateResult), [this](ErrorOr<std::string> result) {
+		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), newDb);
+		sharedStateUpdater = map(errorOr(updateResult), [this, newDb](ErrorOr<std::string> result) {
 			if (result.present()) {
 				clusterId = result.get();
 				TraceEvent("ClusterSharedStateUpdated")
@@ -2216,11 +2224,11 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 				    .detail("ConnectionRecord", connectionRecord)
 				    .detail("ProtocolVersion", dbProtocolVersion.get());
 			}
-			dbVar->set(db);
+			setDatabase(newDb);
 			return Void();
 		});
 	} else {
-		dbVar->set(db);
+		setDatabase(newDb);
 	}
 
 	ASSERT(protocolVersionMonitor.isValid());
@@ -2247,7 +2255,7 @@ void MultiVersionDatabase::DatabaseState::startLegacyVersionMonitors() {
 void MultiVersionDatabase::DatabaseState::close() {
 	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 	onMainThreadVoid([self]() {
-		self->closed = true;
+		self->initializationState = InitializationState::CLOSED;
 		if (self->protocolVersionMonitor.isValid()) {
 			self->protocolVersionMonitor.cancel();
 		}
@@ -2404,7 +2412,6 @@ void MultiVersionApi::useFutureProtocolVersion() {
 }
 
 namespace {
-
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty = true) {
 	ASSERT(canBePresent || canBeAbsent);
 
@@ -2448,7 +2455,8 @@ void MultiVersionApi::addExternalLibrary(std::string path, bool useFutureVersion
 		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup
 	}
 
-	// external libraries always run on their own thread; ensure we allocate at least one thread to run this library.
+	// external libraries always run on their own thread; ensure we allocate at least one thread to run this
+	// library.
 	threadCount = std::max(threadCount, 1);
 
 	if (externalClientDescriptions.count(filename) == 0) {
@@ -2466,7 +2474,8 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup
 	}
 
-	// external libraries always run on their own thread; ensure we allocate at least one thread to run this library.
+	// external libraries always run on their own thread; ensure we allocate at least one thread to run this
+	// library.
 	threadCount = std::max(threadCount, 1);
 
 	for (auto filename : files) {
@@ -2570,8 +2579,8 @@ void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions)
 	MutexHolder holder(lock);
 	ASSERT(networkSetup);
 
-	// This option must be set on the main thread because it modifies structures that can be used concurrently by the
-	// main thread
+	// This option must be set on the main thread because it modifies structures that can be used concurrently by
+	// the main thread
 	onMainThreadVoid([this, versions]() {
 		localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
 	});
@@ -2739,8 +2748,8 @@ void MultiVersionApi::setupNetwork() {
 		networkStartSetup = true;
 
 		if (externalClients.empty() && !disableBypass) {
-			bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to add
-			                             // clients after setupNetwork is called
+			bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to
+			                             // add clients after setupNetwork is called
 		}
 
 		if (!bypassMultiClientApi) {
