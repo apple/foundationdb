@@ -414,7 +414,8 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
-					if (tenantName.present() && commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && tenantName.present() &&
+					    commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
 						req.reply.sendError(storage_quota_exceeded());
 						continue;
 					}
@@ -2971,7 +2972,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                         proxy.expireIdempotencyId,
 	                                         commitData.expectedIdempotencyIdCountForKey,
 	                                         &commitData.idempotencyClears));
-	addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
+	if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
+		addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
+	}
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
