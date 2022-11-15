@@ -24,7 +24,7 @@
 #include <boost/intrusive/list.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct Runner : public boost::intrusive::list_base_hook<>, FastAllocated<Runner> {
+struct Runner : public boost::intrusive::list_base_hook<>, FastAllocated<Runner>, NonCopyable {
 	Future<Void> handler;
 };
 
@@ -33,7 +33,7 @@ typedef boost::intrusive::list<Runner, boost::intrusive::constant_time_size<fals
 
 // The runners list in the ActorCollection must be destroyed when the actor is destructed rather
 // than before returning or throwing
-struct RunnerListDestroyer {
+struct RunnerListDestroyer : NonCopyable {
 	RunnerListDestroyer(RunnerList* list) : list(list) {}
 
 	~RunnerListDestroyer() {
@@ -74,15 +74,15 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 
 	loop choose {
 		when(Future<Void> f = waitNext(addActor)) {
-			// Insert new Runner at the front of the instrusive list and get an iterator to it
-			auto i = runners.insert(runners.begin(), *new Runner());
+			// Insert new Runner at the end of the instrusive list and get an iterator to it
+			auto i = runners.insert(runners.end(), *new Runner());
 
 			// Start the handler for completions or errors from f, sending runner to complete stream
 			Future<Void> handler = runnerHandler(complete, errors, f, i);
 
-			// If the list begin is still the same as i, then handler did not cause the actor collection
-			// to be destroyed so store the handler future in i's value
-			if (runners.begin() == i) {
+			// If the list reverse begin is still i, which is what it would be after the insertion above,
+			// then f did not complete or error so store the handler future in the list item to keep it alive.
+			if (std::next(runners.rbegin()).base() == i) {
 				i->handler = handler;
 			}
 
