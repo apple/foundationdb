@@ -130,7 +130,7 @@ public:
 			state double fetchStartTime = now();
 
 			state bool toTrace = false;
-			if (fetchStartTime - lastTraceTime > 300) {
+			if (fetchStartTime - lastTraceTime > SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL) {
 				toTrace = true;
 				lastTraceTime = fetchStartTime;
 			}
@@ -170,7 +170,6 @@ public:
 
 				if (toTrace) {
 					// Trace the storage used by all tenant groups for visibility.
-					// Do so every 5 minutes to avoid spamming the logs.
 					TraceEvent(SevInfo, "StorageUsageUpdated", tenantCache->id())
 					    .detail("TenantGroup", group)
 					    .detail("Quota", tenantCache->tenantStorageMap[group].quota)
