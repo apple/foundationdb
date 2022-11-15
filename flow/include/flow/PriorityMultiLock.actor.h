@@ -144,7 +144,6 @@ public:
 		available = 0;
 
 		waitingPriorities.clear();
-		priorities.clear();
 	}
 
 	std::string toString() const {
