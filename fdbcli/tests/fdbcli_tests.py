@@ -793,7 +793,7 @@ def tenant_list(logger):
     assert output == 'ERROR: invalid offset `13y\''
 
     output = run_fdbcli_command_and_get_error('tenant list a b state=14z')
-    assert output == 'ERROR: unrecognized tenant state(s) `14z\''
+    assert output == 'ERROR: unrecognized tenant state(s) `14z\'.'
 
 @enable_logging()
 def tenant_get(logger):
