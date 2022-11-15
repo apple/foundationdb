@@ -1,32 +1,47 @@
-pipeline {
-    agent { label 'regular-memory-node-c7' }
-
-    options {
-        timestamps()
+timestamps {
+  node('regular-memory-node-c7') {
+    scmInfo = null
+    stage('checkout') {
+      scmInfo = checkout scm
+      println("${scmInfo}")
     }
 
-    stages {
-        stage('checkout') {
-            steps {
-                checkout scm
-            }
+    stage('build and test') {
+      println("*** Starting FDB_Precommit Job **** ")
+      println("${scmInfo}")
+
+      def trigger_comment = "@fdb-ci precommit start"
+      
+      def build_trigger_cause = "${currentBuild.getBuildCauses()[0].shortDescription}"
+      println("Build Trigger Cause : ${build_trigger_cause}")
+
+      currentBuild.result = 'FAILURE'
+
+      if ("${build_trigger_cause}" == "GitHub pull request comment") {
+        def pr_comment = "${currentBuild.getBuildCauses()[0].commentBody}"
+        println("Latest Comment on PR : ${pr_comment}")
+        if ("${pr_comment}".contains("${trigger_comment}")) {
+          def j = build job: "FDB_BuildAndTest/FDB_Precommit",
+            parameters: [
+              string(name: 'ARCH', value: "x86_64"),
+	      string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
+              string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}"),
+              string(name: 'BUILD_TEST_PROFILE', value: 'precommit.yml')
+            ],
+            propagate: false,
+            wait: true
+
+          if ("${j.result}" == "SUCCESS") {
+            currentBuild.result = 'SUCCESS'
+          }
+
+          println("FDB_Precommit build job status: ${j.result}")
+        } else {
+            println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}.")
         }
-        stage('build and test') {
-            steps {
-                println("test step 1")
-            }
-        }
+      } else {
+          println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}.")
+      }
     }
-    post {
-        failure {
-            script {
-                println("Failure handler")
-            }
-        }
-        always {
-            script {
-                println("Always handler")
-            }
-        }
-    }
+  }
 }
