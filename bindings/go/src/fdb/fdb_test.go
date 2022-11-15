@@ -24,6 +24,7 @@ package fdb_test
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
@@ -345,18 +346,18 @@ func TestDatabaseCloseRemovesResources(t *testing.T) {
 }
 
 func ExampleOpenWithConnectionString() {
-	var e error
+	fdb.MustAPIVersion(API_VERSION)
 
-	e = fdb.APIVersion(API_VERSION)
-	if e != nil {
-		fmt.Printf("Unable to set API version: %v\n", e)
+	clusterFileContent, err := os.ReadFile(os.Getenv("FDB_CLUSTER_FILE"))
+	if err != nil {
+		fmt.Errorf("Unable to read cluster file: %v\n", err)
 		return
 	}
 
 	// OpenWithConnectionString opens the database described by the connection string
-	db, e := fdb.OpenWithConnectionString("")
-	if e != nil {
-		fmt.Printf("Unable to open database: %v\n", e)
+	db, err := fdb.OpenWithConnectionString(string(clusterFileContent))
+	if err != nil {
+		fmt.Errorf("Unable to open database: %v\n", err)
 		return
 	}
 
