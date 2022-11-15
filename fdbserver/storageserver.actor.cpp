@@ -2748,6 +2748,28 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 	}
 }
 
+// The normal read case for a change feed stream query is that it will first read the disk portion, which is at a lower
+// version than the memory portion, and then will effectively switch to reading only the memory portion. The complexity
+// lies in the fact that the feed does not know the switchover point ahead of time before reading from disk, and the
+// switchover point is constantly changing as the SS persists the in-memory data to disk. As a result, the
+// implementation first reads from memory, then reads from disk if necessary, then merges the result and potentially
+// discards the in-memory read data if the disk data is large and behind the in-memory data. The goal of
+// FeedDiskReadState is that we want to skip doing the full memory read if we still have a lot of disk reads to catch up
+// on. In the DISK_CATCHUP phase, the feed query will read only the first row from memory, to
+// determine if it's hit the switchover point, instead of reading (potentially) both in the normal phase.  We also want
+// to default to the normal behavior at the start in case there is not a lot of disk data. This guarantees that if we
+// somehow incorrectly went into DISK_CATCHUP when there wasn't much more data on disk, we only have one cycle of
+// getChangeFeedMutations in the incorrect mode that returns a smaller result before switching to NORMAL mode.
+//
+// Put another way, the state transitions are:
+//
+// STARTING ->
+//   DISK_CATCHUP (if after the first read, there is more disk data to read before the first memory data)
+//   NORMAL (otherwise)
+// DISK_CATCHUP ->
+//   still DISK_CATCHUP (if there is still more disk data to read before the first memory data)
+//   NORMAL (otherwise)
+// NORMAL -> NORMAL (always)
 enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
 
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
