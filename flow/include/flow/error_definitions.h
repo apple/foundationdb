@@ -236,6 +236,7 @@ ERROR( client_lib_not_available, 2121, "Client library exists, but is not availa
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 ERROR( no_external_client_provided, 2123, "No external client library provided." )
 ERROR( all_external_clients_failed, 2124, "All external clients have failed." )
+ERROR( incompatible_client, 2125, "None of the available clients match the protocol version of the cluster." )
 
 ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )

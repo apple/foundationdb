@@ -44,6 +44,7 @@ class TestCluster(LocalCluster):
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
+        print("Creating temp dir {}".format(self.tmp_dir), file=sys.stderr)
         self.tmp_dir.mkdir(parents=True)
         self.version = version
         super().__init__(
@@ -222,6 +223,17 @@ class ClientConfigTests(unittest.TestCase):
         test.ignore_external_client_failures = True
         test.exec()
 
+    def test_external_client_not_matching_cluster_version(self):
+        # Trying to connect to a cluster having only
+        # an external client with not matching protocol version
+        test = ClientConfigTest(self)
+        test.create_external_lib_path(PREV_RELEASE_VERSION)
+        test.disable_local_client = True
+        test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
+        test.transaction_timeout = 5000
+        test.expected_error = 1031  # Timeout
+        test.exec()
+
 
 # Client configuration tests using a cluster of previous release version
 class ClientConfigPrevVersionTests(unittest.TestCase):
@@ -241,14 +253,14 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.exec()
 
-    def test_prev_release_with_ext_client_unsupported_api(self):
+    def test_external_client_unsupported_api(self):
         # Leaving an unsupported API version
         test = ClientConfigTest(self)
         test.create_external_lib_path(PREV_RELEASE_VERSION)
         test.expected_error = 2204  # API function missing
         test.exec()
 
-    def test_prev_release_with_ext_client_unsupported_api_ignore(self):
+    def test_external_client_unsupported_api_ignore(self):
         # Leaving an unsupported API version, ignore failures
         test = ClientConfigTest(self)
         test.create_external_lib_path(PREV_RELEASE_VERSION)

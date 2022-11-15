@@ -758,6 +758,7 @@ private:
 	struct TransactionInfo {
 		Reference<ITransaction> transaction;
 		ThreadFuture<Void> onChange;
+		ErrorOr<Void> dbError = ErrorOr<Void>(Void());
 	};
 
 	// Timeout related variables for MultiVersionTransaction objects that do not have an underlying ITransaction
@@ -792,8 +793,11 @@ private:
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
-	void updateTransaction();
+	ErrorOr<Void> updateTransaction();
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
+
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITransaction::*func)(Args...), Args&&... args);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
 };
@@ -985,14 +989,7 @@ public:
 	struct LegacyVersionMonitor;
 
 	// Database initialization state
-	enum class InitializationState {
-		INITIALIZING,
-		CREATED,
-		INCOMPATIBLE,
-		FAILED_TO_GET_PROTOCOL_VERSION,
-		FAILED_TO_CREATE_DATABASE,
-		CLOSED
-	};
+	enum class InitializationState { INITIALIZING, CREATED, INCOMPATIBLE, FAILED_TO_GET_PROTOCOL_VERSION, CLOSED };
 
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
@@ -1020,6 +1017,9 @@ public:
 		// Set a new database connnection
 		void setDatabase(Reference<IDatabase> db);
 
+		// Get database intialization error if initialization failed
+		ErrorOr<Void> getInitializationError();
+
 		// Cleans up state for the legacy version monitors to break reference cycles
 		void close();
 
@@ -1034,7 +1034,10 @@ public:
 		Reference<IDatabase> versionMonitorDb;
 
 		// The current database initialization state
-		InitializationState initializationState;
+		std::atomic<InitializationState> initializationState;
+
+		// Last error received during database initialization
+		std::atomic<Error> initializationError;
 
 		ThreadFuture<Void> changed;
 		ThreadFuture<Void> dbReady;
