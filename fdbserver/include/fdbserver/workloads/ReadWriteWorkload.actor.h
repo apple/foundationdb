@@ -47,7 +47,7 @@ DESCR struct ReadMetric {
 
 // Common ReadWrite test settings
 struct ReadWriteCommon : KVWorkload {
-	static constexpr int sampleSize = 10000;
+	static constexpr double sampleError = 0.01;
 	friend struct ReadWriteCommonImpl;
 
 	// general test setting
@@ -88,9 +88,9 @@ struct ReadWriteCommon : KVWorkload {
 
 	explicit ReadWriteCommon(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), totalReadsMetric("ReadWrite.TotalReads"_sr), totalRetriesMetric("ReadWrite.TotalRetries"_sr),
-	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize),
-	    readLatencies(sampleSize), commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize),
-	    readLatencyTotal(0), readLatencyCount(0), loadTime(0.0), clientBegin(0) {
+	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"), latencies(sampleError),
+	    readLatencies(sampleError), commitLatencies(sampleError), GRVLatencies(sampleError),
+	    fullReadLatencies(sampleError), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0), clientBegin(0) {
 
 		transactionSuccessMetric.init("ReadWrite.SuccessfulTransaction"_sr);
 		transactionFailureMetric.init("ReadWrite.FailedTransaction"_sr);

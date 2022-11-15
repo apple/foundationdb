@@ -105,9 +105,9 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	TSSMetrics()
 	  : cc("TSSClientMetrics"), requests("Requests", cc), streamComparisons("StreamComparisons", cc),
 	    ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc), tssTimeouts("TSSTimeouts", cc),
-	    mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000), SSgetKeyValuesLatency(1000),
-	    SSgetMappedKeyValuesLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000),
-	    TSSgetKeyValuesLatency(1000), TSSgetMappedKeyValuesLatency(1000) {}
+	    mismatches("Mismatches", cc), SSgetValueLatency(), SSgetKeyLatency(), SSgetKeyValuesLatency(),
+	    SSgetMappedKeyValuesLatency(), TSSgetValueLatency(), TSSgetKeyLatency(), TSSgetKeyValuesLatency(),
+	    TSSgetMappedKeyValuesLatency() {}
 };
 
 template <class Rep>

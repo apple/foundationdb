@@ -96,7 +96,12 @@ public:
 			try {
 				buckets.at(index)++;
 			} catch (std::out_of_range const& e) {
-				fmt::print(stderr, "ERROR: Invalid DDSketch bucket index ({}) at {}/{} for sample: {}\n", e.what(), index, buckets.size(), sample);
+				fmt::print(stderr,
+				           "ERROR: Invalid DDSketch bucket index ({}) at {}/{} for sample: {}\n",
+				           e.what(),
+				           index,
+				           buckets.size(),
+				           sample);
 			}
 		}
 
@@ -158,7 +163,8 @@ public:
 			}
 		}
 		ASSERT(found);
-		if (!found) return -1;
+		if (!found)
+			return -1;
 		return static_cast<Impl*>(this)->getValue(index);
 	}
 
@@ -213,6 +219,7 @@ public:
 	    multiplier(fastLogger::correctingFactor * log(2) / log(gamma)) {
 		ASSERT(errorGuarantee > 0);
 		offset = getIndex(1.0 / DDSketchBase<DDSketch<T>, T>::EPS);
+		ASSERT(offset > 0);
 		this->setBucketSize(2 * offset);
 	}
 
