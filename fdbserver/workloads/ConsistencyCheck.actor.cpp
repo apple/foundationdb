@@ -1486,7 +1486,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		// Check version indexer
+		// Check version indexer XXX(dadkins): doesn't work with optional version indexer.
 		// ProcessClass::Fitness bestVersionIndexerFitness =
 		//     getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::VersionIndexer);
 		// for (const auto& versionIndexer : db.versionIndexers) {
