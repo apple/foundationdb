@@ -144,6 +144,9 @@ public:
 		available = 0;
 
 		waitingPriorities.clear();
+		for (auto& p : priorities) {
+			p.queue.clear();
+		}
 	}
 
 	std::string toString() const {
