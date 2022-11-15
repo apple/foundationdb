@@ -3928,7 +3928,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// since we always read the index, so always consider the index size
 			int indexSize = sizeof(KeyValueRef) + input.data[i + offset].expectedSize();
 			int size = indexSize + getMappedKeyValueSize(kvms[i]);
-			TraceEvent("Hfu5Add").detail("IndexSize", indexSize).detail("Index", i).detail("RecordSize", getMappedKeyValueSize(kvms[i]));
 			*remainingLimitBytes -= size;
 			result.data.push_back(result.arena, kvms[i]);
 			if (SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT && *remainingLimitBytes <= 0) {
