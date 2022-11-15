@@ -38,11 +38,33 @@ ACTOR Future<bool> configureStorageEngineCommandActor(Reference<IDatabase> db,
                                                       LineNoise* linenoise,
                                                       Future<Void> warn) {
 	bool result = true;
-    if (tokens.size() == 1) {
-        printf("\nTesting configure-storage-engine command\n");
-    } else {
+    if (tokens.size() < 3) {
         printUsage(tokens[0]);
 		return false;
+    } else {
+        auto storage_engine = tokens[1];
+        // valid storage engine string
+        if (storage_engine != "redwood"_sr) {
+            printf("Invalid storage engine name: %s\n", storage_engine.toString().c_str());
+            return false;
+        }
+        std::map<std::string, std::string> storageEngineParams;
+        for (int i = 2; i < tokens.size(); i++) {
+            auto kv = tokens[i].toString();
+            auto pos = kv.find("=");
+            if (pos == kv.size()) {
+                printf("Invalid key-value pair:%s\n", kv.c_str());
+                return false;
+            }
+            std::string key = kv.substr(0, pos);
+            std::string value = kv.substr(pos + 1);
+            storageEngineParams[key] = value;
+        }
+
+        // Debugging: print out all parameters
+        for (const auto& [k, v] : storageEngineParams) {
+            printf("Key: %s, Value: %s\n", k.c_str(), v.c_str());
+        }
     }
 	return result;
 }
