@@ -172,7 +172,7 @@ private:
 
 			Standalone<StringRef> e = wait(self->queue->readNext(payloadSize + 1));
 			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload");
+				CODE_PROBE(true, "Zero fill within payload", probe::decoration::rare);
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -188,7 +188,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}
@@ -1262,7 +1262,7 @@ ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData
 		TraceEvent("PlayIgnoredPop", logData->logId).detail("Tag", tag.toString()).detail("Version", version);
 		ignoredPops.push_back(tLogPopCore(self, tag, version, logData));
 		if (++ignoredPopsPlayed % SERVER_KNOBS->TLOG_POP_BATCH_SIZE == 0) {
-			CODE_PROBE(true, "Yielding while processing pop requests");
+			CODE_PROBE(true, "Yielding while processing pop requests", probe::decoration::rare);
 			wait(yield());
 		}
 	}
@@ -1857,7 +1857,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				}
 				if (sequenceData.isSet()) {
 					if (sequenceData.getFuture().get().first != rep.end) {
-						CODE_PROBE(true, "tlog peek second attempt ended at a different version");
+						CODE_PROBE(
+						    true, "tlog peek second attempt ended at a different version", probe::decoration::rare);
 						replyPromise.sendError(operation_obsolete());
 						return Void();
 					}

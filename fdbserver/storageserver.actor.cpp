@@ -567,6 +567,8 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	// back, we can avoid notifying other SS of change feeds that don't durably exist
 	Version metadataCreateVersion = invalidVersion;
 
+	FlowLock fetchLock = FlowLock(1);
+
 	bool removing = false;
 	bool destroyed = false;
 
@@ -1110,15 +1112,13 @@ public:
 
 	FlowLock serveFetchCheckpointParallelismLock;
 
-	PriorityMultiLock ssLock;
+	Reference<PriorityMultiLock> ssLock;
 	std::vector<int> readPriorityRanks;
 
 	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
-		// TODO:  Fix perf regression in 100% cache read case where taking this lock adds too much overhead
-		return PriorityMultiLock::Lock();
-		// int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
-		// readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
-		// return ssLock.lock(readPriorityRanks[readType]);
+		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
+		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
+		return ssLock->lock(readPriorityRanks[readType]);
 	}
 
 	FlowLock serveAuditStorageParallelismLock;
@@ -1407,7 +1407,8 @@ public:
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
-	    ssLock(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY, SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
+	    ssLock(makeReference<PriorityMultiLock>(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY,
+	                                            SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES)),
 	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
@@ -1415,7 +1416,7 @@ public:
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
-		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READ_RANKS, ',');
+		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READTYPE_PRIORITY_MAP, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
 		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.getId());
@@ -6322,6 +6323,15 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              Version beginVersion,
                                              Version endVersion,
                                              ReadOptions readOptions) {
+	state FlowLock::Releaser feedFetchReleaser;
+
+	// avoid fetching the same version range of the same change feed multiple times.
+	choose {
+		when(wait(changeFeedInfo->fetchLock.take())) {
+			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
+		}
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
+	}
 
 	state Version startVersion = beginVersion;
 	startVersion = std::max(startVersion, emptyVersion + 1);
@@ -6341,6 +6351,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		return invalidVersion;
 	}
 
+	// FIXME: if this feed range is not wholly contained within the shard, set cache to true on reading
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
 	state Future<Void> feed = data->cx->getChangeFeedStream(feedResults,
 	                                                        rangeId,
@@ -6856,6 +6867,16 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	return feedIds;
 }
 
+ReadOptions readOptionsForFeedFetch(const ReadOptions& options, const KeyRangeRef& keys, const KeyRangeRef& feedRange) {
+	if (!feedRange.contains(keys)) {
+		return options;
+	}
+	// If feed range wholly contains shard range, cache on fetch because other shards will likely also fetch it
+	ReadOptions newOptions = options;
+	newOptions.cacheResult = true;
+	return newOptions;
+}
+
 // returns max version fetched for each feed
 // newFeedIds is used for the second fetch to get data for new feeds that weren't there for the first fetch
 ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer* data,
@@ -6880,8 +6901,9 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			auto feedIt = data->uidChangeFeed.find(feedId);
 			// feed may have been moved away or deleted after move was scheduled, do nothing in that case
 			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
+				ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
 				feedFetches[feedIt->second->id] =
-				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, readOptions);
+				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, fetchReadOptions);
 			}
 		}
 		for (auto& feedId : newFeedIds) {
@@ -6889,7 +6911,8 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			// we just read the change feed data map earlier in fetchKeys without yielding, so these feeds must exist
 			ASSERT(feedIt != data->uidChangeFeed.end());
 			ASSERT(!feedIt->second->removing);
-			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, readOptions);
+			ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
+			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, fetchReadOptions);
 		}
 
 		loop {
@@ -10444,20 +10467,20 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;
-		    te.detail("ReadsActive", self->ssLock.totalRunners());
-		    te.detail("ReadsWaiting", self->ssLock.totalWaiters());
+		    te.detail("ReadsTotalActive", self->ssLock->getRunnersCount());
+		    te.detail("ReadsTotalWaiting", self->ssLock->getWaitersCount());
 		    int type = (int)ReadType::FETCH;
-		    te.detail("ReadFetchActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadFetchWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadFetchActive", self->ssLock->getRunnersCount(rpr[type]));
+		    te.detail("ReadFetchWaiting", self->ssLock->getWaitersCount(rpr[type]));
 		    type = (int)ReadType::LOW;
-		    te.detail("ReadLowActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadLowWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadLowActive", self->ssLock->getRunnersCount(rpr[type]));
+		    te.detail("ReadLowWaiting", self->ssLock->getWaitersCount(rpr[type]));
 		    type = (int)ReadType::NORMAL;
-		    te.detail("ReadNormalActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadNormalWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadNormalActive", self->ssLock->getRunnersCount(rpr[type]));
+		    te.detail("ReadNormalWaiting", self->ssLock->getWaitersCount(rpr[type]));
 		    type = (int)ReadType::HIGH;
-		    te.detail("ReadHighActive", self->ssLock.numRunners(rpr[type]));
-		    te.detail("ReadHighWaiting", self->ssLock.numWaiters(rpr[type]));
+		    te.detail("ReadHighActive", self->ssLock->getRunnersCount(rpr[type]));
+		    te.detail("ReadHighWaiting", self->ssLock->getWaitersCount(rpr[type]));
 		    StorageBytes sb = self->storage.getStorageBytes();
 		    te.detail("KvstoreBytesUsed", sb.used);
 		    te.detail("KvstoreBytesFree", sb.free);
@@ -11273,7 +11296,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 
-		self.ssLock.kill();
+		self.ssLock->kill();
 
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
@@ -11371,7 +11394,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		throw internal_error();
 	} catch (Error& e) {
 
-		self.ssLock.kill();
+		self.ssLock->kill();
 
 		if (self.byteSampleRecovery.isValid()) {
 			self.byteSampleRecovery.cancel();
