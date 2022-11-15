@@ -5953,6 +5953,7 @@ void TransactionOptions::clear() {
 	useGrvCache = false;
 	skipGrvCache = false;
 	rawAccess = false;
+	bypassStorageQuota = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -6694,6 +6695,9 @@ Future<Void> Transaction::commitMutations() {
 		if (trState->options.firstInBatch) {
 			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
 		}
+		if (trState->options.bypassStorageQuota) {
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_BYPASS_STORAGE_QUOTA;
+		}
 		if (trState->options.reportConflictingKeys) {
 			tr.transaction.report_conflicting_keys = true;
 		}
@@ -6970,6 +6974,10 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		trState->options.rawAccess = true;
+		break;
+
+	case FDBTransactionOptions::BYPASS_STORAGE_QUOTA:
+		trState->options.bypassStorageQuota = true;
 		break;
 
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
