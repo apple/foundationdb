@@ -21,7 +21,42 @@
 #include "flow/ActorCollection.h"
 #include "flow/IndexedSet.h"
 #include "flow/UnitTest.h"
+#include <boost/intrusive/list.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+struct Runner : public boost::intrusive::list_base_hook<>, FastAllocated<Runner> {
+	Future<Void> handler;
+};
+
+// An intrusive list of Runners, which are FastAllocated.  Each runner holds a handler future
+typedef boost::intrusive::list<Runner, boost::intrusive::constant_time_size<false>> RunnerList;
+
+// The runners list in the ActorCollection must be destroyed when the actor is destructed rather
+// than before returning or throwing
+struct RunnerListDestroyer {
+	RunnerListDestroyer(RunnerList* list) : list(list) {}
+
+	~RunnerListDestroyer() {
+		list->clear_and_dispose([](Runner* r) { delete r; });
+	}
+
+	RunnerList* list;
+};
+
+ACTOR Future<Void> runnerHandler(PromiseStream<RunnerList::iterator> output,
+                                 PromiseStream<Error> errors,
+                                 Future<Void> task,
+                                 RunnerList::iterator runner) {
+	try {
+		wait(task);
+		output.send(runner);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		errors.send(e);
+	}
+	return Void();
+}
 
 ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
                                    int* pCount,
@@ -29,9 +64,9 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
                                    double* idleTime,
                                    double* allTime,
                                    bool returnWhenEmptied) {
-	state int64_t nextTag = 0;
-	state Map<int64_t, Future<Void>> tag_streamHelper;
-	state PromiseStream<int64_t> complete;
+	state RunnerList runners;
+	state RunnerListDestroyer runnersDestroyer(&runners);
+	state PromiseStream<RunnerList::iterator> complete;
 	state PromiseStream<Error> errors;
 	state int count = 0;
 	if (!pCount)
@@ -39,8 +74,18 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 
 	loop choose {
 		when(Future<Void> f = waitNext(addActor)) {
-			int64_t t = nextTag++;
-			tag_streamHelper[t] = streamHelper(complete, errors, tag(f, t));
+			// Insert new Runner at the front of the instrusive list and get an iterator to it
+			auto i = runners.insert(runners.begin(), *new Runner());
+
+			// Start the handler for completions or errors from f, sending runner to complete stream
+			Future<Void> handler = runnerHandler(complete, errors, f, i);
+
+			// If the list begin is still the same as i, then handler did not cause the actor collection
+			// to be destroyed so store the handler future in i's value
+			if (runners.begin() == i) {
+				i->handler = handler;
+			}
+
 			++*pCount;
 			if (*pCount == 1 && lastChangeTime && idleTime && allTime) {
 				double currentTime = now();
@@ -49,7 +94,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 				*lastChangeTime = currentTime;
 			}
 		}
-		when(int64_t t = waitNext(complete.getFuture())) {
+		when(RunnerList::iterator i = waitNext(complete.getFuture())) {
 			if (!--*pCount) {
 				if (lastChangeTime && idleTime && allTime) {
 					double currentTime = now();
@@ -59,7 +104,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 				if (returnWhenEmptied)
 					return Void();
 			}
-			tag_streamHelper.erase(t);
+			runners.erase_and_dispose(i, [](Runner* r) { delete r; });
 		}
 		when(Error e = waitNext(errors.getFuture())) { throw e; }
 	}
