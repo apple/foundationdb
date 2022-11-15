@@ -261,8 +261,7 @@ public:
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
-	int64_t WRITE_COST_BYTE_FACTOR; // Used to round up the cost of write operations
-	int64_t READ_COST_BYTE_FACTOR; // Used to round up the cost of read operations
+	int64_t TAG_THROTTLING_PAGE_SIZE; // Used to round up the cost of operations
 	// Cost multiplier for writes (because write operations are more expensive than reads):
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 

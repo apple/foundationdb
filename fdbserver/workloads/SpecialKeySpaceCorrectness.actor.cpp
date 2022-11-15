@@ -69,7 +69,16 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("RandomMoveKeys");
+
+		// Rollback interferes with the
+		// \xff\xff/worker_interfaces test, since it can
+		// trigger a cluster recvoery, causing the worker
+		// interface for a machine to be updated in the middle
+		// of the test.
+		out.insert("RollbackWorkload");
+	}
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();

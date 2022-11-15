@@ -144,6 +144,7 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		AsyncVar<bool> blobGranulesEnabled;
+		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
@@ -159,7 +160,7 @@ public:
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
 		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
-		    blobGranulesEnabled(config.blobGranulesEnabled) {
+		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
 			clientCounter = countClients(this);
 		}
 

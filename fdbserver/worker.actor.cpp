@@ -2342,6 +2342,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.haltBlobMigrator);
+					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.ssi.getValue);
 					DUMPTOKEN(recruited.ssi.getKey);
 					DUMPTOKEN(recruited.ssi.getKeyValues);
@@ -2352,7 +2353,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.ssi.getReadHotRanges);
 					DUMPTOKEN(recruited.ssi.getRangeSplitPoints);
 					DUMPTOKEN(recruited.ssi.getStorageMetrics);
-					DUMPTOKEN(recruited.ssi.waitFailure);
 					DUMPTOKEN(recruited.ssi.getQueuingMetrics);
 					DUMPTOKEN(recruited.ssi.getKeyValueStoreType);
 					DUMPTOKEN(recruited.ssi.watchValue);

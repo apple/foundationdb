@@ -22,6 +22,7 @@
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once
 
+// The function at present is only called through "fdbserver -r simulation"
 void setupAndRun(std::string const& dataFolder,
                  const char* const& testFile,
                  bool const& rebooting,
