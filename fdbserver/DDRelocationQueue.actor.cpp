@@ -697,6 +697,9 @@ struct DDQueue : public IDDRelocationQueue {
 		RemoteTeamIsFull,
 		RemoteTeamIsNotHealthy,
 		NoAvailablePhysicalShard,
+		UnknownForceNew,
+		NoAnyHealthy,
+		DstOverloaded,
 		NumberOfTypes,
 	};
 	std::vector<int> retryFindDstReasonCount;
@@ -1626,6 +1629,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								ASSERT(foundTeams);
 								ShardsAffectedByTeamFailure::Team primaryTeam =
 								    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
+								if (forceToUseNewPhysicalShard &&
+								    retryFindDstReason == DDQueue::RetryFindDstReason::None) {
+									// This is an abnormally state where we try to create new physical shard, but we
+									// don't know why. This state is to track unknown reason for force creating new
+									// physical shard.
+									retryFindDstReason = DDQueue::RetryFindDstReason::UnknownForceNew;
+								}
 								physicalShardIDCandidate =
 								    self->physicalShardCollection->determinePhysicalShardIDGivenPrimaryTeam(
 								        primaryTeam, metrics, forceToUseNewPhysicalShard, debugID);
@@ -1646,6 +1656,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				if (foundTeams && anyHealthy && !anyDestOverloaded) {
 					ASSERT(rd.completeDests.empty());
 					break;
+				}
+
+				if (retryFindDstReason == DDQueue::RetryFindDstReason::None && foundTeams) {
+					if (!anyHealthy) {
+						retryFindDstReason = DDQueue::RetryFindDstReason::NoAnyHealthy;
+					} else if (anyDestOverloaded) {
+						retryFindDstReason = DDQueue::RetryFindDstReason::DstOverloaded;
+					}
 				}
 
 				if (anyDestOverloaded) {
@@ -2519,6 +2537,12 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsFull])
 						    .detail("RemoteTeamIsNotHealthy",
 						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy])
+						    .detail("UnknownForceNew",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::UnknownForceNew])
+						    .detail("NoAnyHealthy",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAnyHealthy])
+						    .detail("DstOverloaded",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::DstOverloaded])
 						    .detail(
 						        "NoAvailablePhysicalShard",
 						        self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]);
