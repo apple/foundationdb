@@ -106,14 +106,18 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 		}
 		value = token;
 		if (tokencmp(param, "limit")) {
-			limit = std::stoi(value.get().toString());
-			if (limit <= 0) {
+			int limit = 0;
+			int n = 0;
+			if (sscanf(value.get().toString().c_str(), "%d%n", &limit, &n) != 1 || n != value.get().size() ||
+			    limit <= 0) {
 				fmt::print(stderr, "ERROR: invalid limit `{}'\n", token.toString().c_str());
 				return false;
 			}
 		} else if (tokencmp(param, "offset")) {
-			offset = std::stoi(value.get().toString());
-			if (offset < 0) {
+			int offset = 0;
+			int n = 0;
+			if (sscanf(value.get().toString().c_str(), "%d%n", &offset, &n) != 1 || n != value.get().size() ||
+			    offset < 0) {
 				fmt::print(stderr, "ERROR: invalid offset `{}'\n", token.toString().c_str());
 				return false;
 			}
