@@ -2565,6 +2565,12 @@ void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota) 
 	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
 }
 
+void clearStorageQuota(Transaction& tr, StringRef tenantGroupName) {
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto key = storageQuotaKey(tenantGroupName);
+	tr.clear(key);
+}
+
 ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantGroupName)));

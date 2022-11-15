@@ -87,7 +87,7 @@ struct StorageQuotaWorkload : TestWorkload {
 		state Optional<int64_t> quotaRead = wait(getStorageQuotaHelper(cx, self->group));
 		ASSERT(quotaRead.present() && quotaRead.get() == quota);
 
-		if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+		if (!SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 			return Void();
 		}
 
@@ -97,9 +97,13 @@ struct StorageQuotaWorkload : TestWorkload {
 		state bool rejected2 = wait(tryWrite(self, cx, self->emptyTenant, /*expectOk=*/false));
 		ASSERT(rejected2);
 
-		// Increase the quota. Check that writes to both the tenants are now able to commit.
-		quota = size * 2;
-		wait(setStorageQuotaHelper(cx, self->group, quota));
+		// Increase the quota or clear the quota. Check that writes to both the tenants are now able to commit.
+		if (deterministicRandom()->coinflip()) {
+			quota = size * 2;
+			wait(setStorageQuotaHelper(cx, self->group, quota));
+		} else {
+			wait(clearStorageQuotaHelper(cx, self->group));
+		}
 		state bool committed1 = wait(tryWrite(self, cx, self->tenant, /*expectOk=*/true));
 		ASSERT(committed1);
 		state bool committed2 = wait(tryWrite(self, cx, self->emptyTenant, /*expectOk=*/true));
@@ -144,12 +148,24 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> clearStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				clearStorageQuota(tr, tenantGroupName);
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<Optional<int64_t>> getStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
 		state Transaction tr(cx);
 		loop {
 			try {
 				state Optional<int64_t> quota = wait(getStorageQuota(&tr, tenantGroupName));
-				wait(tr.commit());
 				return quota;
 			} catch (Error& e) {
 				wait(tr.onError(e));
