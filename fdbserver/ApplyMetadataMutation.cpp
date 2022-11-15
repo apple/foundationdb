@@ -593,19 +593,21 @@ private:
 		}
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-			Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(checkpoint.ssID)).get().get());
-			MutationRef privatized = m;
-			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
-			    .detail("Original", m)
-			    .detail("Privatized", privatized)
-			    .detail("Server", checkpoint.ssID)
-			    .detail("TagKey", serverTagKeyFor(checkpoint.ssID))
-			    .detail("Tag", tag.toString())
-			    .detail("Checkpoint", checkpoint.toString());
+			for (const auto& ssID : checkpoint.src) {
+				Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
+				MutationRef privatized = m;
+				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+				    .detail("Original", m)
+				    .detail("Privatized", privatized)
+				    .detail("Server", ssID)
+				    .detail("TagKey", serverTagKeyFor(ssID))
+				    .detail("Tag", tag.toString())
+				    .detail("Checkpoint", checkpoint.toString());
 
-			toCommit->addTag(tag);
-			writeMutation(privatized);
+				toCommit->addTag(tag);
+				writeMutation(privatized);
+			}
 		}
 	}
 

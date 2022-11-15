@@ -47,11 +47,9 @@ struct CheckpointMetaData {
 	Version version;
 	std::vector<KeyRange> ranges;
 	int16_t format; // CheckpointFormat.
-	UID ssID; // Storage server ID on which this checkpoint is created.
+	std::vector<UID> src; // Storage server(s) on which this checkpoint is created.
 	UID checkpointID; // A unique id for this checkpoint.
 	int16_t state; // CheckpointState.
-	int referenceCount; // A reference count on the checkpoint, it can only be deleted when this is 0.
-	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
@@ -59,22 +57,22 @@ struct CheckpointMetaData {
 	UID dataMoveId;
 
 	CheckpointMetaData() = default;
-	CheckpointMetaData(const std::vector<KeyRange>& ranges, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
-	  : version(invalidVersion), ranges(ranges), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {}
-	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
-	  : version(invalidVersion), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {
+	CheckpointMetaData(const std::vector<KeyRange>& ranges,
+	                   CheckpointFormat format,
+	                   const std::vector<UID>& src,
+	                   UID const& checkpointID)
+	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending) {
+	}
+	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, const std::vector<UID>& src, UID const& checkpointID)
+	  : version(invalidVersion), format(format), src(src), checkpointID(checkpointID), state(Pending) {
 		this->ranges.push_back(range);
 	}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(version), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending), referenceCount(0),
-	    gcTime(0) {
+	  : version(version), format(format), checkpointID(checkpointID), state(Pending) {
 		this->ranges.push_back(range);
 	}
 	CheckpointMetaData(Version version, CheckpointFormat format, UID checkpointID)
-	  : version(version), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending), referenceCount(0),
-	    gcTime(0) {}
+	  : version(version), format(format), checkpointID(checkpointID), state(Pending) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 
@@ -84,10 +82,43 @@ struct CheckpointMetaData {
 
 	void setFormat(CheckpointFormat format) { this->format = static_cast<int16_t>(format); }
 
+	bool hasRange(const KeyRangeRef range) const {
+		for (const auto& checkpointRange : ranges) {
+			if (checkpointRange.contains(range)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// bool operator==(const CheckpointMetaData& r) const {
+	// 	return dataMoveId == r.dataMoveId && version == r.version && format == r.format &&
+	// 	       std::equal(ranges.begin(), ranges.end(), r.ranges.begin());
+	// }
+
+	// bool operator<(const CheckpointMetaData& r) const {
+	// 	if (dataMoveId != r.dataMoveId) {
+	// 		return dataMoveId < r.dataMoveId;
+	// 	}
+	// 	if (version != r.version) {
+	// 		return version < r.version;
+	// 	}
+	// 	if (format != r.format) {
+	// 		return format < r.format;
+	// 	}
+	// 	if (ranges.empty()) {
+	// 		return true;
+	// 	}
+	// 	if (r.ranges.empty()) {
+	// 		return false;
+	// 	}
+	// 	return ranges[0].begin < r.ranges[0].begin;
+	// }
+
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +
 		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
-		                  " [Server]: " + ssID.toString() + " [ID]: " + checkpointID.toString() +
+		                  " [Server]: " + describe(src) + " [ID]: " + checkpointID.toString() +
 		                  " [State]: " + std::to_string(static_cast<int>(state)) +
 		                  " [DataMove ID]: " + dataMoveId.toString();
 		return res;
@@ -95,7 +126,7 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, ranges, format, state, checkpointID, ssID, gcTime, serializedCheckpoint, dataMoveId);
+		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, dataMoveId);
 	}
 };
 

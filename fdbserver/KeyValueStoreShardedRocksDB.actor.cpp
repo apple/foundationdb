@@ -830,7 +830,8 @@ public:
 			ASSERT(handles.size() == 1);
 
 			// Add SpecialKeys range. This range should not be modified.
-			std::shared_ptr<PhysicalShard> defaultShard = std::make_shared<PhysicalShard>(db, SPECIAL_KEYS_SHARD_ID, handles[0]);
+			std::shared_ptr<PhysicalShard> defaultShard =
+			    std::make_shared<PhysicalShard>(db, SPECIAL_KEYS_SHARD_ID, handles[0]);
 			columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
 			std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(specialKeys, defaultShard.get());
 			dataShardMap.insert(specialKeys, dataShard.get());

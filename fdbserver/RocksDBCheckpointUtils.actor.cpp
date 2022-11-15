@@ -507,7 +507,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 
 	state std::string remoteFile = rocksCF.sstFiles[idx].name;
 	state std::string localFile = dir + rocksCF.sstFiles[idx].name;
-	state UID ssID = metaData->ssID;
+	ASSERT(!metaData->src.empty());
+	state UID ssID = metaData->src.front();
 
 	state Transaction tr(cx);
 	state StorageServerInterface ssi;
@@ -611,7 +612,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		ASSERT(!file.range.intersects(range));
 	}
 
-	state UID ssID = metaData->ssID;
+	ASSERT(!metaData->src.empty());
+	state UID ssID = metaData->src.front();
 	state Transaction tr(cx);
 	state StorageServerInterface ssi;
 	loop {
@@ -767,7 +769,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 			fs.push_back(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 			TraceEvent(SevDebug, "GetCheckpointFetchingFile")
 			    .detail("FileName", rocksCF.sstFiles[i].name)
-			    .detail("Server", metaData->ssID.toString());
+			    .detail("Server", describe(metaData->src));
 		}
 		wait(waitForAll(fs));
 	} else if (metaData->format == RocksDB) {

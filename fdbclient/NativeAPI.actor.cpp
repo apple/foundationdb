@@ -8904,12 +8904,12 @@ static Future<Void> createCheckpointImpl(T tr,
 		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
 		// An alternative is to choose a healthy replica.
 		const UID checkpointID = UID(srcId.first(), deterministicRandom()->randomUInt64());
-		for (int idx = 0; idx < src.size(); ++idx) {
-			CheckpointMetaData checkpoint(ranges, format, src[idx], checkpointID);
+		// for (int idx = 0; idx < src.size(); ++idx) {
+			CheckpointMetaData checkpoint(ranges, format, src, checkpointID);
 			checkpoint.dataMoveId = dataMoveId.get();
 			checkpoint.setState(CheckpointMetaData::Pending);
 			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
-		}
+		// }
 
 		TraceEvent(SevDebug, "CreateCheckpointTransactionShard")
 		    .detail("Ranges", describe(ranges))
