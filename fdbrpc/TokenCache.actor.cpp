@@ -216,7 +216,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 	Arena arena;
 	authz::jwt::TokenRef t;
 	if (!authz::jwt::parseToken(arena, t, token)) {
-		CODE_PROBE(true, "Token can't be parsed");
+		CODE_PROBE(true, "Token can't be parsed", probe::decoration::rare);
 		TraceEvent(SevWarn, "InvalidToken")
 		    .detail("From", peer)
 		    .detail("Reason", "ParseError")
@@ -225,35 +225,35 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 	}
 	auto key = FlowTransport::transport().getPublicKeyByName(t.keyId);
 	if (!key.present()) {
-		CODE_PROBE(true, "Token referencing non-existing key");
+		CODE_PROBE(true, "Token referencing non-existing key", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("UnknownKey", t);
 		return false;
 	} else if (!t.issuedAtUnixTime.present()) {
-		CODE_PROBE(true, "Token has no issued-at field");
+		CODE_PROBE(true, "Token has no issued-at field", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoIssuedAt", t);
 		return false;
 	} else if (!t.expiresAtUnixTime.present()) {
-		CODE_PROBE(true, "Token has no expiration time");
+		CODE_PROBE(true, "Token has no expiration time", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
 		return false;
 	} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
-		CODE_PROBE(true, "Expired token");
+		CODE_PROBE(true, "Expired token", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("Expired", t);
 		return false;
 	} else if (!t.notBeforeUnixTime.present()) {
-		CODE_PROBE(true, "Token has no not-before field");
+		CODE_PROBE(true, "Token has no not-before field", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoNotBefore", t);
 		return false;
 	} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
-		CODE_PROBE(true, "Tokens not-before is in the future");
+		CODE_PROBE(true, "Tokens not-before is in the future", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("TokenNotYetValid", t);
 		return false;
 	} else if (!t.tenants.present()) {
-		CODE_PROBE(true, "Token with no tenants");
+		CODE_PROBE(true, "Token with no tenants", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoTenants", t);
 		return false;
 	} else if (!authz::jwt::verifyToken(token, key.get())) {
-		CODE_PROBE(true, "Token with invalid signature");
+		CODE_PROBE(true, "Token with invalid signature", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("InvalidSignature", t);
 		return false;
 	} else {
@@ -300,7 +300,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		}
 	}
 	if (!tenantFound) {
-		CODE_PROBE(true, "Valid token doesn't reference tenant");
+		CODE_PROBE(true, "Valid token doesn't reference tenant", probe::decoration::rare);
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
 	}

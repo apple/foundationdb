@@ -70,10 +70,13 @@ void ApiWorkload::start() {
 	schedule([this]() {
 		// 1. Clear data
 		clearData([this]() {
-			// 2. Populate initial data
-			populateData([this]() {
-				// 3. Generate random workload
-				runTests();
+			// 2. Workload setup
+			setup([this]() {
+				// 3. Populate initial data
+				populateData([this]() {
+					// 4. Generate random workload
+					runTests();
+				});
 			});
 		});
 	});
@@ -249,6 +252,10 @@ void ApiWorkload::populateData(TTaskFct cont) {
 	}
 }
 
+void ApiWorkload::setup(TTaskFct cont) {
+	schedule(cont);
+}
+
 void ApiWorkload::randomInsertOp(TTaskFct cont, std::optional<int> tenantId) {
 	int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 	auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
@@ -320,6 +327,87 @@ std::optional<fdb::BytesRef> ApiWorkload::getTenant(std::optional<int> tenantId)
 	} else {
 		return {};
 	}
+}
+
+std::string ApiWorkload::debugTenantStr(std::optional<int> tenantId) {
+	return tenantId.has_value() ? fmt::format("(tenant {0})", tenantId.value()) : "()";
+}
+
+// BlobGranule setup.
+// This blobbifies ['\x00', '\xff') per tenant or for the whole database if there are no tenants.
+void ApiWorkload::setupBlobGranules(TTaskFct cont) {
+	// This count is used to synchronize the # of tenant blobbifyRange() calls to ensure
+	// we only start the workload once blobbification has fully finished.
+	auto blobbifiedCount = std::make_shared<std::atomic<int>>(1);
+
+	if (tenants.empty()) {
+		blobbifiedCount->store(1);
+		blobbifyTenant({}, blobbifiedCount, cont);
+	} else {
+		blobbifiedCount->store(tenants.size());
+		for (int i = 0; i < tenants.size(); i++) {
+			schedule([=]() { blobbifyTenant(i, blobbifiedCount, cont); });
+		}
+	}
+}
+
+void ApiWorkload::blobbifyTenant(std::optional<int> tenantId,
+                                 std::shared_ptr<std::atomic<int>> blobbifiedCount,
+                                 TTaskFct cont) {
+	auto retBlobbifyRange = std::make_shared<bool>(false);
+	execOperation(
+	    [=](auto ctx) {
+		    fdb::Key begin(1, '\x00');
+		    fdb::Key end(1, '\xff');
+
+		    info(fmt::format("setup: blobbifying {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
+
+		    fdb::Future f = ctx->dbOps()->blobbifyRange(begin, end).eraseType();
+		    ctx->continueAfter(f, [ctx, retBlobbifyRange, f]() {
+			    *retBlobbifyRange = f.get<fdb::future_var::Bool>();
+			    ctx->done();
+		    });
+	    },
+	    [=]() {
+		    if (!*retBlobbifyRange) {
+			    schedule([=]() { blobbifyTenant(tenantId, blobbifiedCount, cont); });
+		    } else {
+			    schedule([=]() { verifyTenant(tenantId, blobbifiedCount, cont); });
+		    }
+	    },
+	    /*tenant=*/getTenant(tenantId),
+	    /* failOnError = */ false);
+}
+
+void ApiWorkload::verifyTenant(std::optional<int> tenantId,
+                               std::shared_ptr<std::atomic<int>> blobbifiedCount,
+                               TTaskFct cont) {
+	auto retVerifyVersion = std::make_shared<int64_t>(-1);
+
+	execOperation(
+	    [=](auto ctx) {
+		    fdb::Key begin(1, '\x00');
+		    fdb::Key end(1, '\xff');
+
+		    info(fmt::format("setup: verifying {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
+
+		    fdb::Future f = ctx->dbOps()->verifyBlobRange(begin, end, /*latest_version*/ -2).eraseType();
+		    ctx->continueAfter(f, [ctx, retVerifyVersion, f]() {
+			    *retVerifyVersion = f.get<fdb::future_var::Int64>();
+			    ctx->done();
+		    });
+	    },
+	    [=]() {
+		    if (*retVerifyVersion == -1) {
+			    schedule([=]() { verifyTenant(tenantId, blobbifiedCount, cont); });
+		    } else {
+			    if (blobbifiedCount->fetch_sub(1) == 1) {
+				    schedule(cont);
+			    }
+		    }
+	    },
+	    /*tenant=*/getTenant(tenantId),
+	    /* failOnError = */ false);
 }
 
 } // namespace FdbApiTester

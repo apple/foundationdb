@@ -192,7 +192,7 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 		choose {
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				if (!req.tenantInfo.present() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
+					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()", probe::decoration::rare);
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->addActor(self->waitMetricsTenantAware(req));

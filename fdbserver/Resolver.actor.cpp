@@ -289,11 +289,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
-		Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
-			newOldestVersion = req.version - std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND,
-			                                          SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS);
-		}
+		const Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 		for (int t = 0; t < req.transactions.size(); t++) {
 			conflictBatch.addTransaction(req.transactions[t], newOldestVersion);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
@@ -372,7 +368,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				                       isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys
 				                                                                                      : nullptr);
 			}
-			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
+			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery", probe::decoration::rare);
 		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();

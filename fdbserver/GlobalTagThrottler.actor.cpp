@@ -475,7 +475,7 @@ public:
 			if (targetTps.present()) {
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
 				te.detail("SmoothedTargetTps", smoothedTargetTps).detail("NumProxies", numProxies);
-				result[tag] = smoothedTargetTps / numProxies;
+				result[tag] = std::max(1.0, smoothedTargetTps / numProxies);
 			} else {
 				te.disable();
 			}

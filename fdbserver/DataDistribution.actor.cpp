@@ -588,7 +588,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
-	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
 		trackerCancelled = false;
 		self->initialized = Promise<Void>();
@@ -610,7 +609,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
-			if (ddIsTenantAware) {
+			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED || SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 				self->ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
 				wait(self->ddTenantCache.get()->build());
 			}
@@ -684,6 +683,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    "DDTenantCacheMonitor",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
+			}
+			if (self->ddTenantCache.present() && SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorStorageQuota(),
 				                                    "StorageQuotaTracker",
 				                                    self->ddId,
@@ -1320,7 +1321,7 @@ GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributor> s
 
 TenantsOverStorageQuotaReply getTenantsOverStorageQuota(Reference<DataDistributor> self) {
 	TenantsOverStorageQuotaReply reply;
-	if (self->ddTenantCache.present()) {
+	if (self->ddTenantCache.present() && SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 		reply.tenants = self->ddTenantCache.get()->getTenantsOverQuota();
 	}
 	return reply;
@@ -1537,14 +1538,18 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.count(snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate finished snapshot request");
+					CODE_PROBE(true,
+					           "Data distributor received a duplicate finished snapshot request",
+					           probe::decoration::rare);
 					auto result = ddSnapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedDistributorSnapRequest")
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
+					CODE_PROBE(true,
+					           "Data distributor received a duplicate ongoing snapshot request",
+					           probe::decoration::rare);
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;

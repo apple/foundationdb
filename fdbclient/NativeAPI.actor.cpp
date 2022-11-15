@@ -4524,9 +4524,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
-					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
+					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
+					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
+						// disable it on prefetch, because boundary entries serve as continuations
 						RangeResultFamily copy;
 						int newSize =
 						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
@@ -4769,7 +4771,8 @@ static Future<Void> tssStreamComparison(Request request,
 					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get());
 
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-					           "Tracing Full TSS Mismatch in stream comparison");
+					           "Tracing Full TSS Mismatch in stream comparison",
+					           probe::decoration::rare);
 					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
 					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB");
 
@@ -4811,7 +4814,7 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 
 		if (tssData.present()) {
-			CODE_PROBE(true, "duplicating stream to TSS");
+			CODE_PROBE(true, "duplicating stream to TSS", probe::decoration::rare);
 			resetReply(req);
 			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream duplication
 			RequestStream<Request> tssRequestStream(tssData.get().endpoint);
@@ -9404,7 +9407,8 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 		mismatchEvent.detail("TSSVersion", tssVersion);
 
 		CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-		           "Tracing Full TSS Feed Mismatch in stream comparison");
+		           "Tracing Full TSS Feed Mismatch in stream comparison",
+		           probe::decoration::rare);
 		CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
 		           "Tracing Partial TSS Feed Mismatch in stream comparison and storing the rest in FDB");
 
@@ -10913,6 +10917,37 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
                                                                                  int rangeLimit,
                                                                                  Optional<TenantName> tenantName) {
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenantName);
+}
+
+ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state Key key = blobRestoreCommandKeyFor(range);
+			Optional<Value> value = wait(tr->get(key));
+			if (value.present()) {
+				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
+				if (status.progress < 100) {
+					return false; // stop if there is in-progress restore.
+				}
+			}
+			Standalone<BlobRestoreStatus> status;
+			status.progress = 0;
+			Value newValue = blobRestoreCommandValueFor(status);
+			tr->set(key, newValue);
+			wait(tr->commit());
+			return true;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<bool> DatabaseContext::blobRestore(KeyRange range) {
+	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {

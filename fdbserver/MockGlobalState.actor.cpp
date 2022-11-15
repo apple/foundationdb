@@ -180,7 +180,6 @@ bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardS
 
 bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) {
 	auto ranges = serverKeys.intersectingRanges(range);
-	TraceEvent("AllShardStatusIn", id).detail("RangesEmpty", ranges.empty()).detail("Range", range);
 	ASSERT(!ranges.empty()); // at least the range is allKeys
 
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
@@ -192,7 +191,6 @@ bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::se
 
 void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus status, bool restrictSize) {
 	auto ranges = serverKeys.intersectingRanges(range);
-	TraceEvent("SetShardStatus", id).detail("KeyRange", range).detail("Status", status);
 
 	if (ranges.empty()) {
 		CODE_PROBE(true, "new shard is adding to server");
@@ -202,15 +200,15 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 
 	// change the old status
 	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
-		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
+		CODE_PROBE(true, "Implicitly split single shard to 3 pieces", probe::decoration::rare);
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
 	} else {
 		if (ranges.begin().begin() < range.begin) {
-			CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
+			CODE_PROBE(true, "Implicitly split begin range to 2 pieces", probe::decoration::rare);
 			twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
 		}
 		if (ranges.end().begin() > range.end) {
-			CODE_PROBE(true, "Implicitly split end range to 2 pieces");
+			CODE_PROBE(true, "Implicitly split end range to 2 pieces", probe::decoration::rare);
 			auto lastRange = ranges.end();
 			--lastRange;
 			twoWayShardSplitting(lastRange.range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
@@ -230,7 +228,7 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 			it.value() = ShardInfo{ status, newSize };
 		} else if ((oldStatus == MockShardStatus::COMPLETED || oldStatus == MockShardStatus::FETCHED) &&
 		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
-			CODE_PROBE(true, "Shard already on server");
+			CODE_PROBE(true, "Shard already on server", probe::decoration::rare);
 		} else {
 			TraceEvent(SevError, "MockShardStatusTransitionError", id)
 			    .detail("From", oldStatus)
@@ -620,7 +618,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 		ASSERT_EQ(srcTeam.size(), 1);
 		rep.results.emplace_back(it->range(), extractStorageServerInterfaces(srcTeam.front().servers));
 	}
-	CODE_PROBE(it != ranges.end(), "getKeyRangeLocations is limited", probe::decoration::rare);
+	CODE_PROBE(it != ranges.end(), "getKeyRangeLocations is limited");
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
