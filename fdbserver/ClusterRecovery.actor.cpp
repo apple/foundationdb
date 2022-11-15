@@ -48,6 +48,7 @@ static std::set<int> const& normalClusterRecoveryErrors() {
 		s.insert(error_code_commit_proxy_failed);
 		s.insert(error_code_grv_proxy_failed);
 		s.insert(error_code_resolver_failed);
+		s.insert(error_code_version_indexer_failed);
 		s.insert(error_code_backup_worker_failed);
 		s.insert(error_code_recruitment_failed);
 		s.insert(error_code_no_more_servers);
@@ -259,6 +260,25 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 	return Void();
 }
 
+ACTOR Future<Void> newVersionIndexers(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
+	std::vector<Future<VersionIndexerInterface>> initializationReplies;
+	for (int i = 0; i < recr.versionIndexers.size(); i++) {
+		InitializeVersionIndexerRequest req;
+		req.epochEnd = self->lastEpochEnd;
+		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
+		TraceEvent("VersionIndexerReplies", self->dbgid).detail("WorkerID", recr.versionIndexers[i].id());
+		initializationReplies.push_back(
+		    transformErrors(throwErrorOr(recr.versionIndexers[i].versionIndexer.getReplyUnlessFailedFor(
+		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+		                    version_indexer_failed()));
+	}
+
+	std::vector<VersionIndexerInterface> newRecruits = wait(getAll(initializationReplies));
+	self->versionIndexers = newRecruits;
+
+	return Void();
+}
+
 ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
                                   RecruitFromConfigurationReply recr,
                                   Reference<ILogSystem> oldLogSystem,
@@ -431,6 +451,19 @@ Future<Void> waitResolverFailure(std::vector<ResolverInterface> const& resolvers
 	}
 	ASSERT(failed.size() >= 1);
 	return tagError<Void>(quorum(failed, 1), resolver_failed());
+}
+
+Future<Void> waitVersionIndexerFailure(std::vector<VersionIndexerInterface> const& versionIndexers) {
+	std::vector<Future<Void>> failed;
+	failed.reserve(versionIndexers.size());
+	for (auto const& versionIndexer : versionIndexers) {
+		failed.push_back(waitFailureClient(versionIndexer.waitFailure,
+		                                   SERVER_KNOBS->TLOG_TIMEOUT,
+		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                                   /*trace=*/true));
+	}
+	ASSERT(failed.size() >= 1);
+	return tagError<Void>(quorum(failed, 1), version_indexer_failed());
 }
 
 ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
@@ -780,6 +813,7 @@ Future<Void> sendMasterRegistration(ClusterRecoveryData* self,
                                     std::vector<CommitProxyInterface> commitProxies,
                                     std::vector<GrvProxyInterface> grvProxies,
                                     std::vector<ResolverInterface> resolvers,
+                                    std::vector<VersionIndexerInterface> versionIndexers,
                                     DBRecoveryCount recoveryCount,
                                     std::vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
@@ -789,6 +823,7 @@ Future<Void> sendMasterRegistration(ClusterRecoveryData* self,
 	masterReq.commitProxies = commitProxies;
 	masterReq.grvProxies = grvProxies;
 	masterReq.resolvers = resolvers;
+	masterReq.versionIndexers = versionIndexers;
 	masterReq.recoveryCount = recoveryCount;
 	if (self->hasConfiguration)
 		masterReq.configuration = self->configuration;
@@ -825,6 +860,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 			                            self->provisionalCommitProxies,
 			                            self->provisionalGrvProxies,
 			                            self->resolvers,
+			                            self->versionIndexers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
 
@@ -835,6 +871,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 			                            self->commitProxies,
 			                            self->grvProxies,
 			                            self->resolvers,
+			                            self->versionIndexers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            std::vector<UID>()));
 		} else {
@@ -1010,6 +1047,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    .detail("GrvProxies", recruits.grvProxies.size())
 	    .detail("TLogs", recruits.tLogs.size())
 	    .detail("Resolvers", recruits.resolvers.size())
+	    .detail("VersionIndexers", recruits.versionIndexers.size())
 	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
 	    .detail("OldLogRouters", recruits.oldLogRouters.size())
 	    .detail("StorageServers", recruits.storageServers.size())
@@ -1024,7 +1062,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	wait(newSeedServers(self, recruits, seedServers));
 	state std::vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+	     newVersionIndexers(self, recruits) && newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
 	wait(brokenPromiseToNever(
@@ -1605,6 +1643,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	ASSERT_GE(self->grvProxies.size(), 1);
 	ASSERT_LE(self->resolvers.size(), self->configuration.getDesiredResolvers());
 	ASSERT_GE(self->resolvers.size(), 1);
+	ASSERT_LE(self->versionIndexers.size(), self->configuration.getDesiredVersionIndexers());
+	ASSERT_GE(self->versionIndexers.size(), 0);
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
@@ -1715,6 +1755,9 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
+	if (!self->versionIndexers.empty()) {
+		self->addActor.send(waitVersionIndexerFailure(self->versionIndexers));
+	}
 	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send(waitGrvProxyFailure(self->grvProxies));
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));

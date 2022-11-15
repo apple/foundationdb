@@ -494,6 +494,7 @@ public:
 		    .add("commitProxyCount", &commitProxyCount)
 		    .add("grvProxyCount", &grvProxyCount)
 		    .add("resolverCount", &resolverCount)
+		    .add("versionIndexerCount", &versionIndexerCount)
 		    .add("storageEngineType", &storageEngineType)
 		    .add("config", &config)
 		    .add("buggify", &buggify)
@@ -1507,6 +1508,9 @@ void SimulationConfig::setRandomConfig() {
 	if (deterministicRandom()->random01() < 0.25) {
 		db.resolverCount = deterministicRandom()->randomInt(1, 7);
 	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.versionIndexerCount = deterministicRandom()->randomInt(1, 4);
+	}
 	// TraceEvent("SimulatedConfigRandom")
 	// 	.detail("DesiredTLogCount", db.desiredTLogCount)
 	// 	.detail("CommitProxyCount", db.commitProxyCount)
@@ -1547,6 +1551,9 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 	}
 	if (testConfig.resolverCount.present()) {
 		db.resolverCount = testConfig.resolverCount.get();
+	}
+	if (testConfig.versionIndexerCount.present()) {
+		db.versionIndexerCount = testConfig.versionIndexerCount.get();
 	}
 	db.blobGranulesEnabled = testConfig.blobGranulesEnabled;
 }

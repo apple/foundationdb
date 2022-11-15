@@ -83,13 +83,15 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 			                 conf.get().old_commit_proxies == conf.get().auto_commit_proxies &&
 			                 conf.get().old_grv_proxies == conf.get().auto_grv_proxies &&
 			                 conf.get().old_resolvers == conf.get().auto_resolvers &&
+			                 conf.get().old_version_indexers == conf.get().auto_version_indexers &&
 			                 conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
 			                 conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
 
 			bool noDesiredChanges = noChanges && conf.get().old_logs == conf.get().desired_logs &&
 			                        conf.get().old_commit_proxies == conf.get().desired_commit_proxies &&
 			                        conf.get().old_grv_proxies == conf.get().desired_grv_proxies &&
-			                        conf.get().old_resolvers == conf.get().desired_resolvers;
+			                        conf.get().old_resolvers == conf.get().desired_resolvers &&
+			                        conf.get().old_version_indexers == conf.get().desired_version_indexers;
 
 			std::string outputString;
 
@@ -131,6 +133,12 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 			    "| resolvers                   | %16d | %16d |", conf.get().old_resolvers, conf.get().auto_resolvers);
 			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers
 			                    ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers)
+			                    : "\n";
+			outputString += format("| version_indexers            | %16d | %16d |",
+			                       conf.get().old_version_indexers,
+			                       conf.get().auto_version_indexers);
+			outputString += conf.get().auto_version_indexers != conf.get().desired_version_indexers
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_version_indexers)
 			                    : "\n";
 			outputString += format("| transaction-class processes | %16d | %16d |\n",
 			                       conf.get().old_processes_with_transaction,
@@ -307,6 +315,7 @@ void configureGenerator(const char* text,
 		                   "grv_proxies=",
 		                   "logs=",
 		                   "resolvers=",
+		                   "version_indexers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
 		                   "storage_migration_type=",
@@ -322,7 +331,8 @@ CommandFactory configureFactory(
     CommandHelp(
         "configure [new|tss]"
         "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
-        "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
+        "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>|version_indexers=<"
+        "VERSION_INDEXERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
         "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
@@ -351,6 +361,8 @@ CommandFactory configureFactory(
         "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
         "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
         "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\n"
+        "version_indexers=<VERSION_INDEXERS>: Sets the desired number of version indexers in the cluster. "
+        "Must be at least 0, or set to -1 which restores the number of version indexers to the default value.\n\n"
         "perpetual_storage_wiggle=<WIGGLE_SPEED>: Set the value speed (a.k.a., the number of processes that the Data "
         "Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the "
         "perpetual storage wiggle.\n\n"

@@ -209,6 +209,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<GrvProxyInterface> provisionalGrvProxies;
 	std::vector<ResolverInterface> resolvers;
+	std::vector<VersionIndexerInterface> versionIndexers;
 
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 

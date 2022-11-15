@@ -221,6 +221,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Terminated due to commit proxy failure");
 			CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Terminated due to GRV proxy failure");
 			CODE_PROBE(err.code() == error_code_resolver_failed, "Terminated due to resolver failure");
+			CODE_PROBE(err.code() == error_code_version_indexer_failed, "Terminated due to version indexer failure");
 			CODE_PROBE(err.code() == error_code_backup_worker_failed, "Terminated due to backup worker failure");
 			CODE_PROBE(err.code() == error_code_operation_failed,
 			           "Terminated due to failed operation",
@@ -882,6 +883,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    .detail("Master", req.mi.toString())
 	    .detail("Tlogs", describe(req.logSystemConfig.tLogs))
 	    .detail("Resolvers", req.resolvers.size())
+	    .detail("VersionIndexers", req.versionIndexers.size())
 	    .detail("RecoveryState", (int)req.recoveryState)
 	    .detail("RegistrationCount", req.registrationCount)
 	    .detail("CommitProxies", req.commitProxies.size())
@@ -989,6 +991,11 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (dbInfo.resolvers != req.resolvers) {
 		isChanged = true;
 		dbInfo.resolvers = req.resolvers;
+	}
+
+	if (dbInfo.versionIndexers != req.versionIndexers) {
+		isChanged = true;
+		dbInfo.versionIndexers = req.versionIndexers;
 	}
 
 	if (dbInfo.recoveryCount != req.recoveryCount) {
@@ -3468,7 +3475,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	NetworkAddress backup(IPAddress(0x06060606), 1);
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress resolver(IPAddress(0x08080808), 1);
-	NetworkAddress clusterController(IPAddress(0x09090909), 1);
+	NetworkAddress versionIndexer(IPAddress(0x09090909), 1);
+	NetworkAddress clusterController(IPAddress(0x10101010), 1);
 	UID testUID(1, 2);
 
 	// Create a ServerDBInfo using above addresses.
@@ -3516,6 +3524,11 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	ResolverInterface resolverInterf;
 	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
 	testDbInfo.resolvers.push_back(resolverInterf);
+
+	VersionIndexerInterface versionIndexerInterf;
+	versionIndexerInterf.commit =
+	    RequestStream<struct VersionIndexerCommitRequest>(Endpoint({ versionIndexer }, testUID));
+	testDbInfo.versionIndexers.push_back(versionIndexerInterf);
 
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 
@@ -3589,6 +3602,10 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.disconnectedServers.clear();
 
+	// Trigger recovery when version indexers is degraded.
+	data.degradationInfo.degradedServers.insert(versionIndexer);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+
 	return Void();
 }
 
@@ -3608,6 +3625,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress proxy2(IPAddress(0x08080808), 1);
 	NetworkAddress resolver(IPAddress(0x09090909), 1);
+	NetworkAddress versionIndexer(IPAddress(0x09090909), 1);
 	NetworkAddress clusterController(IPAddress(0x10101010), 1);
 	UID testUID(1, 2);
 
@@ -3658,6 +3676,11 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	ResolverInterface resolverInterf;
 	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
 	testDbInfo.resolvers.push_back(resolverInterf);
+
+	VersionIndexerInterface versionIndexerInterf;
+	versionIndexerInterf.commit =
+	    RequestStream<struct VersionIndexerCommitRequest>(Endpoint({ versionIndexer }, testUID));
+	testDbInfo.versionIndexers.push_back(versionIndexerInterf);
 
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 
