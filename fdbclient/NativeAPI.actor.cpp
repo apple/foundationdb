@@ -3916,7 +3916,7 @@ public:
 
 	WatchRefCountUpdater& operator=(WatchRefCountUpdater&& other) {
 		if (cx.getReference()) {
-			cx->decreaseWatchRefCount(tenantID, key,version);
+			cx->decreaseWatchRefCount(tenantID, key, version);
 		}
 
 		// Since this class is only used by watchValueMap, and it is used *AFTER* a wait statement, this class is first
