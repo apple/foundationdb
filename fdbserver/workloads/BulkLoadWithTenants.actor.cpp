@@ -33,8 +33,8 @@ struct BulkSetupWorkload : TestWorkload {
 	int nodeCount;
 	double transactionsPerSecond;
 	Key keyPrefix;
-	double maxNumTenantsPerClient;
-	double minNumTenantsPerClient;
+	double maxNumTenants;
+	double minNumTenants;
 	std::vector<TenantName> tenantNames;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -42,9 +42,9 @@ struct BulkSetupWorkload : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		// maximum and minimum number of tenants per client
-		maxNumTenantsPerClient = getOption(options, "maxNumTenantsPerClient"_sr, 0);
-		minNumTenantsPerClient = getOption(options, "minNumTenantsPerClient"_sr, 0);
-		ASSERT(minNumTenantsPerClient <= maxNumTenantsPerClient);
+		maxNumTenants = getOption(options, "maxNumTenants"_sr, 0);
+		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
+		ASSERT(minNumTenants <= maxNumTenants);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -58,14 +58,14 @@ struct BulkSetupWorkload : TestWorkload {
 	ACTOR static Future<Void> _setup(BulkSetupWorkload* workload, Database cx) {
 		// create a bunch of tenants (between min and max tenants)
 		state int numTenantsToCreate =
-		    deterministicRandom()->randomInt(workload->minNumTenantsPerClient, workload->maxNumTenantsPerClient + 1);
+		    deterministicRandom()->randomInt(workload->minNumTenants, workload->maxNumTenants + 1);
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
 		if (numTenantsToCreate > 0) {
 			std::vector<Future<Void>> tenantFutures;
 			for (int i = 0; i < numTenantsToCreate; i++) {
 				TenantMapEntry entry;
 				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
-				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d_%04d", workload->clientId, i)));
+				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
 				TraceEvent("CreatingTenant")
 				    .detail("Tenant", workload->tenantNames.back())
 				    .detail("TenantGroup", entry.tenantGroup);
@@ -78,23 +78,31 @@ struct BulkSetupWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		return bulkSetup(cx,
-		                 this,
-		                 nodeCount,
-		                 Promise<double>(),
-		                 false,
-		                 0.0,
-		                 1e12,
-		                 std::vector<uint64_t>(),
-		                 Promise<std::vector<std::pair<uint64_t, double>>>(),
-		                 0,
-		                 0.1,
-		                 0,
-		                 0,
-		                 tenantNames);
+		if (clientId == 0) {
+			return bulkSetup(cx,
+			                 this,
+			                 nodeCount,
+			                 Promise<double>(),
+			                 false,
+			                 0.0,
+			                 1e12,
+			                 std::vector<uint64_t>(),
+			                 Promise<std::vector<std::pair<uint64_t, double>>>(),
+			                 0,
+			                 0.1,
+			                 0,
+			                 0,
+			                 tenantNames);
+		}
+		return Void();
 	}
 
-	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0) {
+			return _setup(this, cx);
+		}
+		return Void();
+	}
 
 	Future<bool> check(Database const& cx) override { return true; }
 };

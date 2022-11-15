@@ -125,27 +125,17 @@ repeat_immediate_steps:
 				postStepFn(f, tx, args, key1, key2, val);
 			if (iter.stepKind() != StepKind::ON_ERROR) {
 				if (auto err = f.error()) {
-					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+					logr.printWithLogLevel(isExpectedError(err) ? VERBOSE_WARN : VERBOSE_NONE,
 					                       "ERROR",
 					                       "{}:{} returned '{}'",
 					                       iter.opName(),
 					                       iter.step,
 					                       err.what());
+					updateErrorStats(err, iter.op);
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						const auto rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
-						if (rc == FutureRC::RETRY) {
-							stats.incrErrorCount(iter.op);
-						} else if (rc == FutureRC::CONFLICT) {
-							stats.incrConflictCount();
-						} else if (rc == FutureRC::ABORT) {
-							tx.reset();
-							signalEnd();
-							return;
-						}
-						// restart this iteration from beginning
-						iter = getOpBegin(args);
-						needs_commit = false;
-						postNextTick();
+						const auto rc = handleForOnError(
+						    tx, f, fmt::format("{}:{}", iter.opName(), iter.step), args.transaction_timeout > 0);
+						onIterationEnd(rc);
 					});
 				} else {
 					// async step succeeded
@@ -159,20 +149,9 @@ repeat_immediate_steps:
 				}
 			} else {
 				// blob granules op error
-				auto rc = handleForOnError(tx, f, "BG_ON_ERROR");
-				if (rc == FutureRC::RETRY) {
-					stats.incrErrorCount(iter.op);
-				} else if (rc == FutureRC::CONFLICT) {
-					stats.incrConflictCount();
-				} else if (rc == FutureRC::ABORT) {
-					tx.reset();
-					stopcount.fetch_add(1);
-					return;
-				}
-				iter = getOpBegin(args);
-				needs_commit = false;
-				// restart this iteration from beginning
-				postNextTick();
+				updateErrorStats(f.error(), iter.op);
+				FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR", args.transaction_timeout > 0);
+				onIterationEnd(rc);
 			}
 		});
 	}
@@ -213,27 +192,14 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		tx.commit().then([this, state = shared_from_this()](Future f) {
 			if (auto err = f.error()) {
 				// commit had errors
-				logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+				logr.printWithLogLevel(isExpectedError(err) ? VERBOSE_WARN : VERBOSE_NONE,
 				                       "ERROR",
 				                       "Post-iteration commit returned error: {}",
 				                       err.what());
+				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
-					const auto rc = handleForOnError(tx, f, "ON_ERROR");
-					if (rc == FutureRC::CONFLICT)
-						stats.incrConflictCount();
-					else
-						stats.incrErrorCount(OP_COMMIT);
-					if (rc == FutureRC::ABORT) {
-						signalEnd();
-						return;
-					}
-					if (ended()) {
-						signalEnd();
-					} else {
-						iter = getOpBegin(args);
-						needs_commit = false;
-						postNextTick();
-					}
+					const auto rc = handleForOnError(tx, f, "ON_ERROR", args.transaction_timeout > 0);
+					onIterationEnd(rc);
 				});
 			} else {
 				// commit successful
@@ -249,13 +215,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				stats.incrOpCount(OP_TRANSACTION);
 				tx.reset();
 				watch_tx.startFromStop();
-				if (ended()) {
-					signalEnd();
-				} else {
-					// start next iteration
-					iter = getOpBegin(args);
-					postNextTick();
-				}
+				onIterationEnd(FutureRC::OK);
 			}
 		});
 	} else {
@@ -268,14 +228,36 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		stats.incrOpCount(OP_TRANSACTION);
 		watch_tx.startFromStop();
 		tx.reset();
-		if (ended()) {
-			signalEnd();
+		onIterationEnd(FutureRC::OK);
+	}
+}
+void ResumableStateForRunWorkload::onIterationEnd(FutureRC rc) {
+	// restart current iteration from beginning unless ended
+	if (rc == FutureRC::OK || rc == FutureRC::ABORT) {
+		total_xacts++;
+	}
+	if (ended()) {
+		signalEnd();
+	} else {
+		iter = getOpBegin(args);
+		needs_commit = false;
+		postNextTick();
+	}
+}
+
+void ResumableStateForRunWorkload::updateErrorStats(fdb::Error err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else if (err.is(1031 /*timeout*/)) {
+			stats.incrTimeoutCount(op);
 		} else {
-			iter = getOpBegin(args);
-			// start next iteration
-			postNextTick();
+			stats.incrErrorCount(op);
 		}
 	}
+}
+bool ResumableStateForRunWorkload::isExpectedError(fdb::Error err) {
+	return err.retryable() || (args.transaction_timeout > 0 && err.is(1031 /*timeout*/));
 }
 
 } // namespace mako

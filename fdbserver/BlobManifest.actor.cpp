@@ -60,7 +60,7 @@ struct BlobManifestFile {
 	int64_t seqNo{ 0 };
 
 	BlobManifestFile(const std::string& path) {
-		if (sscanf(path.c_str(), MANIFEST_FOLDER "/manifest.%" SCNd64 ".%" SCNd64, &epoch, &seqNo) == 2) {
+		if (sscanf(path.c_str(), MANIFEST_FOLDER "/" MANIFEST_FOLDER ".%" SCNd64 ".%" SCNd64, &epoch, &seqNo) == 2) {
 			fileName = path;
 		}
 	}
@@ -76,7 +76,7 @@ struct BlobManifestFile {
 			BlobManifestFile file(path);
 			return file.epoch > 0 && file.seqNo > 0;
 		};
-		BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(reader->listFiles(MANIFEST_FOLDER, filter));
+		BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(reader->listFiles(MANIFEST_FOLDER "/", filter));
 
 		std::vector<BlobManifestFile> result;
 		for (auto& f : filesAndSizes) {
@@ -107,6 +107,9 @@ public:
 		try {
 			state Standalone<BlobManifest> manifest;
 			Standalone<VectorRef<KeyValueRef>> rows = wait(getSystemKeys(self));
+			if (rows.size() == 0) {
+				return Void();
+			}
 			manifest.rows = rows;
 			Value data = encode(manifest);
 			wait(writeToFile(self, data));
@@ -153,7 +156,8 @@ private:
 		state std::string fullPath;
 
 		std::tie(writer, fullPath) = self->blobConn_->createForWrite(MANIFEST_FOLDER);
-		state std::string fileName = format(MANIFEST_FOLDER "/manifest.%lld.%lld", self->epoch_, self->seqNo_);
+		state std::string fileName =
+		    format(MANIFEST_FOLDER "/" MANIFEST_FOLDER ".%lld.%lld", self->epoch_, self->seqNo_);
 		state Reference<IBackupFile> file = wait(writer->writeFile(fileName));
 		wait(file->append(data.begin(), data.size()));
 		wait(file->finish());
@@ -261,6 +265,14 @@ public:
 			wait(checkGranuleFiles(self, granule));
 		}
 		return Void();
+	}
+
+	// Return max epoch from all manifest files
+	ACTOR static Future<int64_t> lastBlobEpoc(Reference<BlobManifestLoader> self) {
+		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead(MANIFEST_FOLDER);
+		std::vector<BlobManifestFile> files = wait(BlobManifestFile::list(container));
+		ASSERT(!files.empty());
+		return files.front().epoch;
 	}
 
 private:
@@ -437,4 +449,34 @@ ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db,
 	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
 	BlobGranuleRestoreVersionVector result = wait(BlobManifestLoader::listGranules(loader));
 	return result;
+}
+
+// API to get max blob manager epoc from manifest files
+ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn) {
+	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
+	int64_t epoc = wait(BlobManifestLoader::lastBlobEpoc(loader));
+	return epoc;
+}
+
+// Return true if the given key range is restoring
+ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
+	state Transaction tr(db);
+	loop {
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult ranges = wait(tr.getRange(blobRestoreCommandKeys, CLIENT_KNOBS->TOO_MANY));
+			for (auto& r : ranges) {
+				KeyRange keyRange = decodeBlobRestoreCommandKeyFor(r.key);
+				if (keyRange.contains(keys)) {
+					Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(r.value);
+					return status.progress < 100; // progress is less than 100
+				}
+			}
+			return false;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }

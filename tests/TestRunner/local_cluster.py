@@ -275,6 +275,7 @@ logdir = {logdir}
         assert self.running, "Server is not running"
         if self.process.poll() is None:
             self.process.terminate()
+            self.process.communicate(timeout=10)
         self.running = False
 
     def ensure_ports_released(self, timeout_sec=5):
@@ -332,9 +333,6 @@ logdir = {logdir}
         if self.blob_granules_enabled:
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
-
-        if self.blob_granules_enabled:
-            self.fdbcli_exec("blobrange start \\x00 \\xff")
 
     # Generate and install test certificate chains and keys
     def create_tls_cert(self):
