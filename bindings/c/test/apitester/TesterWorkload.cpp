@@ -117,8 +117,11 @@ void WorkloadBase::execTransaction(TOpStartFct startFct,
 }
 
 // Execute a non-transactional database operation within the workload
-void WorkloadBase::execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError) {
-	doExecute(startFct, cont, {}, failOnError, false);
+void WorkloadBase::execOperation(TOpStartFct startFct,
+                                 TTaskFct cont,
+                                 std::optional<fdb::BytesRef> tenant,
+                                 bool failOnError) {
+	doExecute(startFct, cont, tenant, failOnError, false);
 }
 
 void WorkloadBase::doExecute(TOpStartFct startFct,

@@ -18,9 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/TenantName.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantName.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -31,12 +32,16 @@
 
 struct StorageQuotaWorkload : TestWorkload {
 	static constexpr auto NAME = "StorageQuota";
+	TenantGroupName group;
 	TenantName tenant;
 	int nodeCount;
+	TenantName emptyTenant;
 
 	StorageQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		nodeCount = getOption(options, "nodeCount"_sr, 10000);
+		group = getOption(options, "group"_sr, "DefaultGroup"_sr);
 		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
+		nodeCount = getOption(options, "nodeCount"_sr, 10000);
+		emptyTenant = getOption(options, "emptyTenant"_sr, "DefaultTenant"_sr);
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -67,27 +72,42 @@ struct StorageQuotaWorkload : TestWorkload {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(keyForIndex(n), value((n + 1) % nodeCount)); }
 
 	ACTOR Future<Void> _start(StorageQuotaWorkload* self, Database cx) {
-		// Check that the quota set/get functions work as expected.
-		// Set the quota to just below the current size.
+		state TenantMapEntry entry1 = wait(TenantAPI::getTenant(cx.getReference(), self->tenant));
+		state TenantMapEntry entry2 = wait(TenantAPI::getTenant(cx.getReference(), self->emptyTenant));
+		ASSERT(entry1.tenantGroup.present() && entry1.tenantGroup.get() == self->group &&
+		       entry2.tenantGroup.present() && entry2.tenantGroup.get() == self->group);
+
+		// Get the size of the non-empty tenant. We will set the quota of the tenant group
+		// to just below the current size of this tenant.
 		state int64_t size = wait(getSize(cx, self->tenant));
 		state int64_t quota = size - 1;
-		wait(setStorageQuotaHelper(cx, self->tenant, quota));
-		state Optional<int64_t> quotaRead = wait(getStorageQuotaHelper(cx, self->tenant));
+
+		// Check that the quota set/get functions work as expected.
+		wait(setStorageQuotaHelper(cx, self->group, quota));
+		state Optional<int64_t> quotaRead = wait(getStorageQuotaHelper(cx, self->group));
 		ASSERT(quotaRead.present() && quotaRead.get() == quota);
 
-		if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+		if (!SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 			return Void();
 		}
 
-		// Check that writes are rejected when the tenant is over quota.
-		state bool rejected = wait(tryWrite(self, cx, /*expectOk=*/false));
-		ASSERT(rejected);
+		// Check that writes to both the tenants are rejected when the group is over quota.
+		state bool rejected1 = wait(tryWrite(self, cx, self->tenant, /*expectOk=*/false));
+		ASSERT(rejected1);
+		state bool rejected2 = wait(tryWrite(self, cx, self->emptyTenant, /*expectOk=*/false));
+		ASSERT(rejected2);
 
-		// Increase the quota. Check that writes are now able to commit.
-		quota = size * 2;
-		wait(setStorageQuotaHelper(cx, self->tenant, quota));
-		state bool committed = wait(tryWrite(self, cx, /*expectOk=*/true));
-		ASSERT(committed);
+		// Increase the quota or clear the quota. Check that writes to both the tenants are now able to commit.
+		if (deterministicRandom()->coinflip()) {
+			quota = size * 2;
+			wait(setStorageQuotaHelper(cx, self->group, quota));
+		} else {
+			wait(clearStorageQuotaHelper(cx, self->group));
+		}
+		state bool committed1 = wait(tryWrite(self, cx, self->tenant, /*expectOk=*/true));
+		ASSERT(committed1);
+		state bool committed2 = wait(tryWrite(self, cx, self->emptyTenant, /*expectOk=*/true));
+		ASSERT(committed2);
 
 		return Void();
 	}
@@ -115,11 +135,11 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> setStorageQuotaHelper(Database cx, TenantName tenantName, int64_t quota) {
+	ACTOR static Future<Void> setStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName, int64_t quota) {
 		state Transaction tr(cx);
 		loop {
 			try {
-				setStorageQuota(tr, tenantName, quota);
+				setStorageQuota(tr, tenantGroupName, quota);
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
@@ -128,12 +148,24 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Optional<int64_t>> getStorageQuotaHelper(Database cx, TenantName tenantName) {
+	ACTOR static Future<Void> clearStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
 		state Transaction tr(cx);
 		loop {
 			try {
-				state Optional<int64_t> quota = wait(getStorageQuota(&tr, tenantName));
+				clearStorageQuota(tr, tenantGroupName);
 				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Optional<int64_t>> getStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				state Optional<int64_t> quota = wait(getStorageQuota(&tr, tenantGroupName));
 				return quota;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -141,13 +173,13 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self, Database cx, bool expectOk) {
+	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self, Database cx, TenantName tenant, bool expectOk) {
 		state int i;
 		// Retry the transaction a few times if needed; this allows us wait for a while for all
 		// the storage usage and quota related monitors to fetch and propagate the latest information
 		// about the tenants that are over storage quota.
 		for (i = 0; i < 10; i++) {
-			state Transaction tr(cx, self->tenant);
+			state Transaction tr(cx, tenant);
 			loop {
 				try {
 					Standalone<KeyValueRef> kv =

@@ -35,8 +35,9 @@ typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 struct Storage {
 	int64_t quota = std::numeric_limits<int64_t>::max();
 	int64_t usage = 0;
+	std::unordered_set<TenantName> tenants;
 };
-typedef std::unordered_map<TenantName, Storage> TenantStorageMap;
+typedef std::unordered_map<TenantGroupName, Storage> TenantStorageMap;
 
 struct TenantCacheTenantCreated {
 	KeyRange keys;
@@ -56,7 +57,8 @@ private:
 	uint64_t generation;
 	TenantMapByPrefix tenantCache;
 
-	// Map from tenant names to storage quota and usage
+	// Map from tenant group names to the list of tenants, cumumlative storage used by
+	// all the tenants in the group, and its storage quota.
 	TenantStorageMap tenantStorageMap;
 
 	// mark the start of a new sweep of the tenant cache

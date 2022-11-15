@@ -237,6 +237,8 @@ public:
 	int64_t
 	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
+	bool STORAGE_QUOTA_ENABLED; // Whether storage quota enforcement for tenant groups and all the relevant storage
+	                            // usage / quota monitors are enabled.
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
 	int TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL; // How often the storage bytes used by each tenant is refreshed
 	                                                 // in the TenantCache
@@ -761,14 +763,16 @@ public:
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	bool STRICTLY_ENFORCE_BYTE_LIMIT;
+	double FRACTION_INDEX_BYTELIMIT_PREFETCH;
 	int MAX_PARALLEL_QUICK_GET_VALUE;
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 	int STORAGE_FEED_QUERY_HARD_LIMIT;
-	int STORAGE_SERVER_READ_CONCURRENCY;
-	std::string STORAGESERVER_READ_RANKS;
 	std::string STORAGESERVER_READ_PRIORITIES;
+	int STORAGE_SERVER_READ_CONCURRENCY;
+	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -917,7 +921,7 @@ public:
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 	bool REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; // Whether to split pages by tenant if encryption is enabled
 
-	std::string REDWOOD_PRIORITY_LAUNCHS;
+	std::string REDWOOD_IO_PRIORITIES;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -992,6 +996,7 @@ public:
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	bool BLOB_FULL_RESTORE_MODE;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
+	int BLOB_MANIFEST_RW_ROWS;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
