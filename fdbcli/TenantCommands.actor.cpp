@@ -106,7 +106,6 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 		}
 		value = token;
 		if (tokencmp(param, "limit")) {
-			int limit = 0;
 			int n = 0;
 			if (sscanf(value.get().toString().c_str(), "%d%n", &limit, &n) != 1 || n != value.get().size() ||
 			    limit <= 0) {
@@ -114,7 +113,6 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 				return false;
 			}
 		} else if (tokencmp(param, "offset")) {
-			int offset = 0;
 			int n = 0;
 			if (sscanf(value.get().toString().c_str(), "%d%n", &offset, &n) != 1 || n != value.get().size() ||
 			    offset < 0) {
