@@ -3543,10 +3543,16 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
+		BlobRestoreStatus initStatus(BlobRestorePhase::LOAD_MANIFEST);
+		wait(updateRestoreStatus(bmData->db, normalKeys, initStatus));
+
 		wait(loadManifest(bmData->db, bmData->bstore));
 
 		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
 		wait(updateEpoch(bmData, epoc + 1));
+
+		BlobRestoreStatus completedStatus(BlobRestorePhase::MANIFEST_DONE);
+		wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus));
 	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);

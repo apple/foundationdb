@@ -10932,8 +10932,7 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 					return false; // stop if there is in-progress restore.
 				}
 			}
-			Standalone<BlobRestoreStatus> status;
-			status.progress = 0;
+			BlobRestoreStatus status(BlobRestorePhase::INIT);
 			Value newValue = blobRestoreCommandValueFor(status);
 			tr->set(key, newValue);
 			wait(tr->commit());
