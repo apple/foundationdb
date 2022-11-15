@@ -1310,7 +1310,7 @@ ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContex
 	    wait(getLatestEncryptCipherKey(self->pProxyCommitData->db, domainId, p.first, BlobCipherMetrics::TLOG));
 	self->cipherKeys[domainId] = cipherKey;
 
-	CODE_PROBE(true, "Raw access mutation encryption");
+	CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
 	ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 	encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
 	self->toCommit.writeTypedMessage(encryptedMutation);

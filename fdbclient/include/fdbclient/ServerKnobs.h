@@ -770,9 +770,9 @@ public:
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 	int STORAGE_FEED_QUERY_HARD_LIMIT;
-	int STORAGE_SERVER_READ_CONCURRENCY;
-	std::string STORAGESERVER_READ_RANKS;
 	std::string STORAGESERVER_READ_PRIORITIES;
+	int STORAGE_SERVER_READ_CONCURRENCY;
+	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -921,7 +921,7 @@ public:
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 	bool REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; // Whether to split pages by tenant if encryption is enabled
 
-	std::string REDWOOD_PRIORITY_LAUNCHS;
+	std::string REDWOOD_IO_PRIORITIES;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -996,6 +996,7 @@ public:
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	bool BLOB_FULL_RESTORE_MODE;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
+	int BLOB_MANIFEST_RW_ROWS;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

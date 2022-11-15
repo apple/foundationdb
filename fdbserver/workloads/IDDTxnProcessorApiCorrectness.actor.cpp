@@ -228,7 +228,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		// test finish or started but cancelled movement
 		if (deterministicRandom()->coinflip()) {
-			CODE_PROBE(true, "RawMovementApi partial started");
+			CODE_PROBE(true, "RawMovementApi partial started", probe::decoration::rare);
 			return Void();
 		}
 
