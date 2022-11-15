@@ -8,11 +8,12 @@ import socket
 import time
 import fcntl
 import sys
+import tempfile
 
 CLUSTER_UPDATE_TIMEOUT_SEC = 10
 EXCLUDE_SERVERS_TIMEOUT_SEC = 120
 RETRY_INTERVAL_SEC = 0.5
-PORT_LOCK_DIR = Path("/tmp/fdb_local_cluster_port_locks")
+PORT_LOCK_DIR = Path(tempfile.gettempdir()).joinpath("fdb_local_cluster_port_locks")
 MAX_PORT_ACQUIRE_ATTEMPTS = 1000
 
 
