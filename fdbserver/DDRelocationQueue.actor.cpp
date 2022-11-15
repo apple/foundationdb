@@ -128,7 +128,7 @@ struct RelocateData {
 	RelocateReason reason;
 
 	double startTime;
-	UID randomId; // inherit from RelocateShard.traceId
+	UID randomId;
 	UID dataMoveId;
 	int workFactor;
 	std::vector<UID> src;
@@ -136,7 +136,7 @@ struct RelocateData {
 	std::vector<UID> completeDests;
 	bool wantsNewServers;
 	bool cancellable;
-	TraceInterval interval;
+	TraceInterval interval; // the interval.id inherit from RelocateShard.traceId
 	std::shared_ptr<DataMove> dataMove;
 
 	RelocateData()
@@ -146,12 +146,12 @@ struct RelocateData {
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-	    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
-	    dataMoveId(rs.dataMoveId), workFactor(0), wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) ||
-	                                                              isDataMovementForValleyFiller(rs.moveReason) ||
-	                                                              rs.moveReason == DataMovementReason::SPLIT_SHARD ||
-	                                                              rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
-	    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
+	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
+	    wantsNewServers(
+	        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
+	        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
+	    cancellable(true), interval("QueuedRelocation", rs.traceId.isValid() ? rs.traceId : randomId),
+	    dataMove(rs.dataMove) {
 		if (dataMove != nullptr) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
 		}
@@ -906,12 +906,12 @@ struct DDQueue : public IDDRelocationQueue {
 			std::set<RelocateData, std::greater<RelocateData>> queuedRelocationsMatch;
 			for (auto it = queue.begin(); it != queue.end(); ++it)
 				queuedRelocationsMatch.insert(it->second.begin(), it->second.end());
-			ASSERT(queuedRelocations == queuedRelocationsMatch.size() + fetchingSourcesQueue.size());
+			ASSERT_EQ(queuedRelocations, queuedRelocationsMatch.size() + fetchingSourcesQueue.size());
 
 			int testActive = 0;
 			for (auto it = priority_relocations.begin(); it != priority_relocations.end(); ++it)
 				testActive += it->second;
-			ASSERT(activeRelocations + queuedRelocations == testActive);
+			ASSERT_EQ(activeRelocations + queuedRelocations, testActive);
 		}
 	}
 
