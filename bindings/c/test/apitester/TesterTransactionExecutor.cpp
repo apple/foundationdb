@@ -91,13 +91,15 @@ public:
 			fdbDb = executor->selectDatabase();
 		}
 
+		if (tenantName) {
+			fdbTenant = fdbDb.openTenant(*tenantName);
+			fdbDbOps = std::make_shared<fdb::Tenant>(fdbTenant);
+		} else {
+			fdbDbOps = std::make_shared<fdb::Database>(fdbDb);
+		}
+
 		if (transactional) {
-			if (tenantName) {
-				fdb::Tenant tenant = fdbDb.openTenant(*tenantName);
-				fdbTx = tenant.createTransaction();
-			} else {
-				fdbTx = fdbDb.createTransaction();
-			}
+			fdbTx = fdbDbOps->createTransaction();
 		}
 	}
 
@@ -108,6 +110,10 @@ public:
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
 	fdb::Database db() override { return fdbDb.atomic_load(); }
+
+	fdb::Tenant tenant() override { return fdbTenant.atomic_load(); }
+
+	std::shared_ptr<fdb::IDatabaseOps> dbOps() override { return std::atomic_load(&fdbDbOps); }
 
 	fdb::Transaction tx() override { return fdbTx.atomic_load(); }
 
@@ -272,13 +278,17 @@ protected:
 		scheduler->schedule([thisRef]() {
 			fdb::Database db = thisRef->executor->selectDatabase();
 			thisRef->fdbDb.atomic_store(db);
+			if (thisRef->tenantName) {
+				fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
+				thisRef->fdbTenant.atomic_store(tenant);
+				std::atomic_store(&thisRef->fdbDbOps,
+				                  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Tenant>(tenant)));
+			} else {
+				std::atomic_store(&thisRef->fdbDbOps,
+				                  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Database>(db)));
+			}
 			if (thisRef->transactional) {
-				if (thisRef->tenantName) {
-					fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
-					thisRef->fdbTx.atomic_store(tenant.createTransaction());
-				} else {
-					thisRef->fdbTx.atomic_store(db.createTransaction());
-				}
+				thisRef->fdbTx.atomic_store(thisRef->fdbDbOps->createTransaction());
 			}
 			thisRef->restartTransaction();
 		});
@@ -316,6 +326,14 @@ protected:
 	// FDB database
 	// Provides a thread safe interface by itself (no need for mutex)
 	fdb::Database fdbDb;
+
+	// FDB tenant
+	// Provides a thread safe interface by itself (no need for mutex)
+	fdb::Tenant fdbTenant;
+
+	// FDB IDatabaseOps to hide database/tenant accordingly.
+	// Provides a shared pointer to database functions based on if db or tenant.
+	std::shared_ptr<fdb::IDatabaseOps> fdbDbOps;
 
 	// FDB transaction
 	// Provides a thread safe interface by itself (no need for mutex)
