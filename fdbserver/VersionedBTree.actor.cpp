@@ -2025,7 +2025,8 @@ public:
 	          bool memoryOnly,
 	          Reference<IPageEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCHS),
+	  : keyProvider(keyProvider),
+	    ioLock(makeReference<PriorityMultiLock>(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_IO_PRIORITIES)),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
@@ -2037,7 +2038,7 @@ public:
 		// This sets the page cache size for all PageCacheT instances using the same evictor
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
-		g_redwoodMetrics.ioLock = &ioLock;
+		g_redwoodMetrics.ioLock = ioLock.getPtr();
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
@@ -2499,7 +2500,7 @@ public:
 	                                                           unsigned int level,
 	                                                           bool header) {
 
-		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
+		state PriorityMultiLock::Lock lock = wait(self->ioLock->lock(header ? ioMaxPriority : ioMinPriority));
 		++g_redwoodMetrics.metric.pagerDiskWrite;
 		g_redwoodMetrics.level(level).metrics.events.addEventReason(PagerEvents::PageWrite, reason);
 		if (self->memoryOnly) {
@@ -2779,7 +2780,7 @@ public:
 	                                                         int blockSize,
 	                                                         int64_t offset,
 	                                                         int priority) {
-		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(std::min(priority, ioMaxPriority)));
+		state PriorityMultiLock::Lock lock = wait(self->ioLock->lock(std::min(priority, ioMaxPriority)));
 		++g_redwoodMetrics.metric.pagerDiskRead;
 		int bytes = wait(self->pageFile->read(pageBuffer->rawData() + pageOffset, blockSize, offset));
 		return bytes;
@@ -3593,7 +3594,7 @@ public:
 
 		// The next section explicitly cancels all pending operations held in the pager
 		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
-		self->ioLock.kill();
+		self->ioLock->kill();
 
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
@@ -3802,7 +3803,7 @@ private:
 
 	Reference<IPageEncryptionKeyProvider> keyProvider;
 
-	PriorityMultiLock ioLock;
+	Reference<PriorityMultiLock> ioLock;
 
 	int64_t pageCacheBytes;
 
@@ -8894,32 +8895,25 @@ void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
 	int maxPriority = ioLock->maxPriority();
 
 	if (e != nullptr) {
-		e->detail("ActiveReads", ioLock->totalRunners());
-		e->detail("AwaitReads", ioLock->totalWaiters());
+		e->detail("IOActiveTotal", ioLock->getRunnersCount());
+		e->detail("IOWaitingTotal", ioLock->getWaitersCount());
 
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			e->detail(format("ActiveP%d", priority), ioLock->numRunners(priority));
-			e->detail(format("AwaitP%d", priority), ioLock->numWaiters(priority));
+			e->detail(format("IOActiveP%d", priority), ioLock->getRunnersCount(priority));
+			e->detail(format("IOWaitingP%d", priority), ioLock->getWaitersCount(priority));
 		}
 	}
 
 	if (s != nullptr) {
-		std::string active = "Active";
-		std::string await = "Await";
-
 		*s += "\n";
-		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalRunners());
-		*s += format("%-15s %-8u  ", "AwaitReads", ioLock->totalWaiters());
-		*s += "\n";
-
+		*s += format("%-15s %-8u    ", "IOActiveTotal", ioLock->getRunnersCount());
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			*s +=
-			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numRunners(priority));
+			*s += format("IOActiveP%-6d %-8u    ", priority, ioLock->getRunnersCount(priority));
 		}
 		*s += "\n";
+		*s += format("%-15s %-8u    ", "IOWaitingTotal", ioLock->getWaitersCount());
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			*s +=
-			    format("%-15s %-8u  ", (await + 'P' + std::to_string(priority)).c_str(), ioLock->numWaiters(priority));
+			*s += format("IOWaitingP%-5d %-8u    ", priority, ioLock->getWaitersCount(priority));
 		}
 	}
 }
@@ -11405,59 +11399,5 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
-	return Void();
-}
-
-ACTOR Future<Void> waitLockIncrement(PriorityMultiLock* pml, int priority, int* pout) {
-	state PriorityMultiLock::Lock lock = wait(pml->lock(priority));
-	wait(delay(deterministicRandom()->random01() * .1));
-	++*pout;
-	return Void();
-}
-
-TEST_CASE("/redwood/PriorityMultiLock") {
-	state std::vector<int> priorities = { 10, 20, 40 };
-	state int concurrency = 25;
-	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
-	state std::vector<int> counts;
-	counts.resize(priorities.size(), 0);
-
-	// Clog the lock buy taking concurrency locks at each level
-	state std::vector<Future<PriorityMultiLock::Lock>> lockFutures;
-	for (int i = 0; i < priorities.size(); ++i) {
-		for (int j = 0; j < concurrency; ++j) {
-			lockFutures.push_back(pml->lock(i));
-		}
-	}
-
-	// Wait for n = concurrency locks to be acquired
-	wait(quorum(lockFutures, concurrency));
-
-	state std::vector<Future<Void>> futures;
-	for (int i = 0; i < 10e3; ++i) {
-		int p = i % priorities.size();
-		futures.push_back(waitLockIncrement(pml, p, &counts[p]));
-	}
-
-	state Future<Void> f = waitForAll(futures);
-
-	// Release the locks
-	lockFutures.clear();
-
-	// Print stats and wait for all futures to be ready
-	loop {
-		choose {
-			when(wait(delay(1))) {
-				printf("counts: ");
-				for (auto c : counts) {
-					printf("%d ", c);
-				}
-				printf("   pml: %s\n", pml->toString().c_str());
-			}
-			when(wait(f)) { break; }
-		}
-	}
-
-	delete pml;
 	return Void();
 }
