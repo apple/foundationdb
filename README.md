@@ -6,6 +6,10 @@ FoundationDB is a distributed database designed to handle large volumes of struc
 
 To learn more about FoundationDB, visit [foundationdb.org](https://www.foundationdb.org/)
 
+## Swift
+
+**Read the [SWIFT_GUIDE.md](SWIFT_GUIDE.md) to learn about how to use Swift in FoundationDB.** 
+
 ## Documentation
 
 Documentation can be found online at <https://apple.github.io/foundationdb/>. The documentation covers details of API usage, background information on design philosophy, and extensive usage examples. Docs are built from the [source in this repo](documentation/sphinx/source).
