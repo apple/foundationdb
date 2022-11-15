@@ -49,12 +49,20 @@ bool GrvProxyTagThrottler::TagQueue::isMaxThrottled(double maxThrottleDuration) 
 }
 
 void GrvProxyTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& latencyBandsMap) {
-	CODE_PROBE(true, "GrvProxyTagThrottler rejecting requests");
+	CODE_PROBE(true, "GrvProxyTagThrottler rejecting requests", probe::decoration::rare);
 	while (!requests.empty()) {
 		auto& delayedReq = requests.front();
 		delayedReq.updateProxyTagThrottledDuration(latencyBandsMap);
 		delayedReq.req.reply.sendError(proxy_tag_throttled());
 		requests.pop_front();
+	}
+}
+
+void GrvProxyTagThrottler::TagQueue::endReleaseWindow(int64_t numStarted, double elapsed) {
+	if (rateInfo.present()) {
+		CODE_PROBE(requests.empty(), "Tag queue ending release window with empty request queue");
+		CODE_PROBE(!requests.empty(), "Tag queue ending release window with requests still queued");
+		rateInfo.get().endReleaseWindow(numStarted, requests.empty(), elapsed);
 	}
 }
 
@@ -202,16 +210,14 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 		}
 	}
 
-	// End release windows for queues with valid rateInfo
+	// End release windows for all tag queues
 	{
 		TransactionTagMap<uint32_t> transactionsReleasedMap;
 		for (const auto& [tag, count] : transactionsReleased) {
 			transactionsReleasedMap[tag] = count;
 		}
 		for (auto& [tag, queue] : queues) {
-			if (queue.rateInfo.present()) {
-				queue.rateInfo.get().endReleaseWindow(transactionsReleasedMap[tag], false, elapsed);
-			}
+			queue.endReleaseWindow(transactionsReleasedMap[tag], elapsed);
 		}
 	}
 	// If the capacity is increased, that means the vector has been illegally resized, potentially
@@ -436,5 +442,35 @@ TEST_CASE("/GrvProxyTagThrottler/Fifo") {
 	state GrvProxyTagThrottler throttler(5.0);
 	state Future<Void> server = mockServer(&throttler);
 	wait(mockFifoClient(&throttler));
+	return Void();
+}
+
+// Tests that while throughput is low, the tag throttler
+// does not accumulate too much budget.
+//
+// A server is setup to server 10 transactions per second,
+// then runs idly for 60 seconds. Then a client starts
+// and attempts 20 transactions per second for 60 seconds.
+// The server throttles the client to only achieve
+// 10 transactions per second during this 60 second window.
+// If the throttler is allowed to accumulate budget indefinitely
+// during the idle 60 seconds, this test will fail.
+TEST_CASE("/GrvProxyTagThrottler/LimitedIdleBudget") {
+	state GrvProxyTagThrottler throttler(5.0);
+	state TagSet tagSet;
+	state TransactionTagMap<uint32_t> counters;
+	{
+		TransactionTagMap<double> rates;
+		rates["sampleTag"_sr] = 10.0;
+		throttler.updateRates(rates);
+	}
+	tagSet.addTag("sampleTag"_sr);
+
+	state Future<Void> server = mockServer(&throttler);
+	wait(delay(60.0));
+	state Future<Void> client = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
+	wait(timeout(client && server, 60.0, Void()));
+	TraceEvent("TagQuotaTest_LimitedIdleBudget").detail("Counter", counters["sampleTag"_sr]);
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
 	return Void();
 }

@@ -296,10 +296,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_PAUSE_THRESHOLD,                      10 ); if( randomize && BUGGIFY ) DD_STORAGE_WIGGLE_PAUSE_THRESHOLD = 1000;
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
 	init( DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,   isSimulated ? 2 : 21 * 60 * 60 * 24 ); if(randomize && BUGGIFY) DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC = isSimulated ? 0: 120;
-	init( DD_TENANT_AWARENESS_ENABLED,                         false ); if(isSimulated) DD_TENANT_AWARENESS_ENABLED = deterministicRandom()->coinflip();
+	init( DD_TENANT_AWARENESS_ENABLED,                         false );
+	init( STORAGE_QUOTA_ENABLED,                               false ); if(isSimulated) STORAGE_QUOTA_ENABLED = deterministicRandom()->coinflip();
 	init( TENANT_CACHE_LIST_REFRESH_INTERVAL,                      2 ); if( randomize && BUGGIFY ) TENANT_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL,             2 ); if( randomize && BUGGIFY ) TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL,            10 ); if( randomize && BUGGIFY ) TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
+	init( CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL,            5 ); if( randomize && BUGGIFY ) CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL = deterministicRandom()->randomInt(1, 10);
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -386,7 +388,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
 	init( ROCKSDB_READ_PARALLELISM,                                4 );
 	// If true, do not process and store RocksDB logs
-	init( ROCKSDB_MUTE_LOGS,                                   false );
+	init( ROCKSDB_MUTE_LOGS,                                    true );
 	// Use a smaller memtable in simulation to avoid OOMs.
 	int64_t memtableBytes = isSimulated ? 32 * 1024 : 512 * 1024 * 1024;
 	init( ROCKSDB_MEMTABLE_BYTES,                      memtableBytes );
@@ -739,7 +741,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING,                               false ); if(isSimulated) GLOBAL_TAG_THROTTLING = deterministicRandom()->coinflip();
 	init( ENFORCE_TAG_THROTTLING_ON_PROXIES,   GLOBAL_TAG_THROTTLING );
 	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
-	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   10.0 );
+	// 60 seconds was chosen as a default value to ensure that
+	// the global tag throttler does not react too drastically to
+	// changes in workload. To make the global tag throttler more reactive,
+	// lower this knob. To make global tag throttler more smooth, raise this knob.
+	// Setting this knob lower than TAG_MEASUREMENT_INTERVAL can cause erratic
+	// behaviour and is not recommended.
+	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   60.0 );
 	init( GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED,                 10 );
 	init( GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER,              240.0 );
 	init( PROXY_MAX_TAG_THROTTLE_DURATION,          5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE_DURATION = 0.5;
@@ -802,18 +810,24 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( RANGESTREAM_LIMIT_BYTES,                               2e6 ); if( randomize && BUGGIFY ) RANGESTREAM_LIMIT_BYTES = 1;
 	init( CHANGEFEEDSTREAM_LIMIT_BYTES,                          1e6 ); if( randomize && BUGGIFY ) CHANGEFEEDSTREAM_LIMIT_BYTES = 1;
 	init( BLOBWORKERSTATUSSTREAM_LIMIT_BYTES,                    1e4 ); if( randomize && BUGGIFY ) BLOBWORKERSTATUSSTREAM_LIMIT_BYTES = 1;
-	init( ENABLE_CLEAR_RANGE_EAGER_READS,                       true ); if( randomize && BUGGIFY ) ENABLE_CLEAR_RANGE_EAGER_READS = deterministicRandom()->coinflip() ? false : true;
+	init( ENABLE_CLEAR_RANGE_EAGER_READS,                       true ); if( randomize && BUGGIFY ) ENABLE_CLEAR_RANGE_EAGER_READS = deterministicRandom()->coinflip();
 	init( CHECKPOINT_TRANSFER_BLOCK_BYTES,                      40e6 );
 	init( QUICK_GET_VALUE_FALLBACK,                             true );
 	init( QUICK_GET_KEY_VALUES_FALLBACK,                        true );
-	init( MAX_PARALLEL_QUICK_GET_VALUE,                           50 ); if ( randomize && BUGGIFY ) MAX_PARALLEL_QUICK_GET_VALUE = deterministicRandom()->randomInt(1, 100);
+	init( STRICTLY_ENFORCE_BYTE_LIMIT,                          false); if( randomize && BUGGIFY ) STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
+	init( FRACTION_INDEX_BYTELIMIT_PREFETCH,                      0.2); if( randomize && BUGGIFY ) FRACTION_INDEX_BYTELIMIT_PREFETCH = 0.01 + deterministicRandom()->random01();
+	init( MAX_PARALLEL_QUICK_GET_VALUE,                           10 ); if ( randomize && BUGGIFY ) MAX_PARALLEL_QUICK_GET_VALUE = deterministicRandom()->randomInt(1, 100);
 	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 	init( STORAGE_FEED_QUERY_HARD_LIMIT,                      100000 );
+	// Read priority definitions in the form of a list of their relative concurrency share weights
+	init( STORAGESERVER_READ_PRIORITIES,           "120,10,20,40,60" );
+	// The total concurrency which will be shared by active priorities according to their relative weights
 	init( STORAGE_SERVER_READ_CONCURRENCY,                        70 );
-	// Priorities which each ReadType maps to, in enumeration order
-	init( STORAGESERVER_READ_RANKS,                      "0,2,1,1,1" );
-	init( STORAGESERVER_READ_PRIORITIES,                   "48,32,8" );
+	// The priority number which each ReadType maps to in enumeration order
+	// This exists for flexibility but assigning each ReadType to its own unique priority number makes the most sense
+	// The enumeration is currently: eager, fetch, low, normal, high
+	init( STORAGESERVER_READTYPE_PRIORITY_MAP,           "0,1,2,3,4" );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -937,11 +951,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && BUGGIFY ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && BUGGIFY ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
-	init( REDWOOD_PRIORITY_LAUNCHS,                    "32,32,32,32" );
+	init( REDWOOD_IO_PRIORITIES,                       "32,32,32,32" );
 	init( REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT,             false );
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
+	init( FILE_LATENCY_SAMPLE_SIZE,                            10000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// Cluster recovery
@@ -983,6 +998,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BG_ENABLE_READ_DRIVEN_COMPACTION,                     true ); if (randomize && BUGGIFY) BG_ENABLE_READ_DRIVEN_COMPACTION = false;
 	init( BG_RDC_BYTES_FACTOR,                                     2 ); if (randomize && BUGGIFY) BG_RDC_BYTES_FACTOR = deterministicRandom()->randomInt(1, 10);
 	init( BG_RDC_READ_FACTOR,                                      3 ); if (randomize && BUGGIFY) BG_RDC_READ_FACTOR = deterministicRandom()->randomInt(1, 10);
+	init( BG_WRITE_MULTIPART,                                  false ); if (randomize && BUGGIFY) BG_WRITE_MULTIPART = true;
 
 	init( BG_ENABLE_MERGING,                                    true ); if (randomize && BUGGIFY) BG_ENABLE_MERGING = false;
 	init( BG_MERGE_CANDIDATE_THRESHOLD_SECONDS, isSimulated ? 20.0 : 30 * 60 ); if (randomize && BUGGIFY) BG_MERGE_CANDIDATE_THRESHOLD_SECONDS = 5.0;
@@ -1009,6 +1025,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANIFEST_BACKUP_INTERVAL,   isSimulated ?  5.0 : 30.0 );
 	init( BLOB_FULL_RESTORE_MODE,                              false );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,      isSimulated ?  1.0 : 5.0);
+	init( BLOB_MANIFEST_RW_ROWS,             isSimulated ?  10 : 1000);
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );

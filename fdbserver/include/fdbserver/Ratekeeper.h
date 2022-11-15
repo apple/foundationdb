@@ -208,7 +208,7 @@ class Ratekeeper {
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	Optional<Key> remoteDC;
 
-	double getRecoveryDuration(Version ver) {
+	double getRecoveryDuration(Version ver) const {
 		auto it = version_recovery.lower_bound(ver);
 		double recoveryDuration = 0;
 		while (it != version_recovery.end()) {

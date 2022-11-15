@@ -56,6 +56,8 @@ struct CheckpointMetaData {
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
 
+	UID dataMoveId;
+
 	CheckpointMetaData() = default;
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
 	  : version(invalidVersion), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
@@ -67,6 +69,9 @@ struct CheckpointMetaData {
 	    gcTime(0) {
 		this->ranges.push_back(range);
 	}
+	CheckpointMetaData(Version version, CheckpointFormat format, UID checkpointID)
+	  : version(version), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending), referenceCount(0),
+	    gcTime(0) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 
@@ -77,16 +82,17 @@ struct CheckpointMetaData {
 	void setFormat(CheckpointFormat format) { this->format = static_cast<int16_t>(format); }
 
 	std::string toString() const {
-		std::string res = "Checkpoint MetaData:\nRange: " + describe(ranges) + "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + std::to_string(format) + "\nServer: " + ssID.toString() +
-		                  "\nID: " + checkpointID.toString() + "\nState: " + std::to_string(static_cast<int>(state)) +
-		                  "\n";
+		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +
+		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
+		                  " [Server]: " + ssID.toString() + " [ID]: " + checkpointID.toString() +
+		                  " [State]: " + std::to_string(static_cast<int>(state)) +
+		                  " [DataMove ID]: " + dataMoveId.toString();
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, ranges, format, state, checkpointID, ssID, gcTime, serializedCheckpoint);
+		serializer(ar, version, ranges, format, state, checkpointID, ssID, gcTime, serializedCheckpoint, dataMoveId);
 	}
 };
 

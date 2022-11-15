@@ -2361,7 +2361,7 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	NetworkAddress _localAddress;
 	bool randomDropPacket() {
 		auto res = deterministicRandom()->random01() < .000001;
-		CODE_PROBE(res, "UDP packet drop", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(res, "UDP packet drop", probe::context::sim2, probe::assert::simOnly, probe::decoration::rare);
 		return res;
 	}
 

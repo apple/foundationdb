@@ -196,7 +196,7 @@ private:
 
 			Standalone<StringRef> e = wait(self->queue->readNext(payloadSize + 1));
 			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload");
+				CODE_PROBE(true, "Zero fill within payload", probe::decoration::rare);
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -210,7 +210,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}

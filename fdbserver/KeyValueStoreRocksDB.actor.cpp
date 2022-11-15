@@ -391,9 +391,16 @@ struct Counters {
 	CounterCollection cc;
 	Counter immediateThrottle;
 	Counter failedToAcquire;
+	Counter deleteKeyReqs;
+	Counter deleteRangeReqs;
+	Counter convertedDeleteKeyReqs;
+	Counter convertedDeleteRangeReqs;
 
 	Counters()
-	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc) {}
+	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
+	    deleteKeyReqs("DeleteKeyRequests", cc), deleteRangeReqs("DeleteRangeRequests", cc),
+	    convertedDeleteKeyReqs("ConvertedDeleteKeyRequests", cc),
+	    convertedDeleteRangeReqs("ConvertedDeleteRangeRequests", cc) {}
 };
 
 struct ReadIterator {
@@ -1934,12 +1941,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
+		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
+		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
 		if (keyRange.singleKeyRange()) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
+			++counters.deleteKeyReqs;
 		} else {
+			++counters.deleteRangeReqs;
 			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
 			    storageMetrics->byteSample.getEstimate(keyRange) <
 			        SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT) {
+				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions options = sharedState->getReadOptions();
 				auto beginSlice = toSlice(keyRange.begin);
 				auto endSlice = toSlice(keyRange.end);
@@ -1949,6 +1961,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				cursor->Seek(toSlice(keyRange.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
 					writeBatch->Delete(defaultFdbCF, cursor->key());
+					++counters.convertedDeleteKeyReqs;
 					cursor->Next();
 				}
 				if (!cursor->status().ok()) {
@@ -1958,6 +1971,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					auto it = keysSet.lower_bound(keyRange.begin);
 					while (it != keysSet.end() && *it < keyRange.end) {
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
+						++counters.convertedDeleteKeyReqs;
 						it++;
 					}
 				}
@@ -2205,7 +2219,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	TraceEvent("RocksDBServeCheckpointBegin", id)
 	    .detail("MinVersion", a.request.version)
-	    .detail("Range", a.request.range.toString())
+	    .detail("Ranges", describe(a.request.ranges))
 	    .detail("Format", static_cast<int>(a.request.format))
 	    .detail("CheckpointDir", a.request.checkpointDir);
 
@@ -2236,7 +2250,8 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	    .detail("PersistVersion", version);
 
 	// TODO: set the range as the actual shard range.
-	CheckpointMetaData res(version, a.request.range, a.request.format, a.request.checkpointID);
+	CheckpointMetaData res(version, a.request.format, a.request.checkpointID);
+	res.ranges = a.request.ranges;
 	const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
 	if (a.request.format == RocksDBColumnFamily) {
@@ -2519,7 +2534,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	state std::string checkpointDir = cwd + "checkpoint";
 
 	CheckpointRequest request(
-	    latestVersion, allKeys, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
+	    latestVersion, { allKeys }, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	std::vector<CheckpointMetaData> checkpoints;
@@ -2559,7 +2574,8 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	platform::eraseDirectoryRecursive("checkpoint");
 	std::string checkpointDir = cwd + "checkpoint";
 
-	CheckpointRequest request(latestVersion, allKeys, RocksDB, deterministicRandom()->randomUniqueID(), checkpointDir);
+	CheckpointRequest request(
+	    latestVersion, { allKeys }, RocksDB, deterministicRandom()->randomUniqueID(), checkpointDir);
 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	state ICheckpointReader* cpReader = newCheckpointReader(metaData, deterministicRandom()->randomUniqueID());

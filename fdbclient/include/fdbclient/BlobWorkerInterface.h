@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/TimedRequest.h"
 #include "fdbclient/StorageServerInterface.h" // for TenantInfo - should we refactor that elsewhere?
 
 struct BlobWorkerInterface {
@@ -105,7 +106,7 @@ struct BlobGranuleFileReply {
 
 // TODO could do a reply promise stream of file mutations to bound memory requirements?
 // Have to load whole snapshot file into memory though so it doesn't actually matter too much
-struct BlobGranuleFileRequest {
+struct BlobGranuleFileRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 4150141;
 	Arena arena;
 	KeyRangeRef keyRange;
