@@ -172,6 +172,8 @@ struct RelocateData {
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 
+	// Note: standard library set  expect a Compare operator here, and equiv(a,b) is equivalent to !comp(a, b) &&
+	// !comp(b, a). So the operators == and != below is not used by set!
 	bool operator>(const RelocateData& rhs) const {
 		return priority != rhs.priority
 		           ? priority > rhs.priority
@@ -2575,5 +2577,29 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/RelocateData") {
+	std::set<RelocateData, std::greater<>> rsSet;
+	uint8_t buffer[16];
+	for (int i = 1; i <= 5; ++i) {
+		deterministicRandom()->randomBytes(buffer, 16);
+		KeyRange range1 = singleKeyRange(KeyRef(buffer, 16));
+
+		deterministicRandom()->randomBytes(buffer, 16);
+		KeyRange range2 = singleKeyRange(KeyRef(buffer, 16));
+
+		RelocateShard rd1(range1, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER, UID(i, i));
+		RelocateShard rd2(range2, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER, UID(i, i));
+
+		RelocateData rs1(rd1), rs2(rd2);
+		rsSet.insert(rs1);
+		rsSet.insert(rs2);
+		ASSERT_EQ(rsSet.size(), i + 1);
+
+		rsSet.erase(rs1);
+		ASSERT_EQ(rsSet.size(), i);
+	}
 	return Void();
 }
