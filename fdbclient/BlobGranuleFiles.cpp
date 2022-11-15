@@ -650,12 +650,12 @@ struct IndexedBlobGranuleFile {
 		IndexBlobGranuleFileChunkRef chunkRef =
 		    IndexBlobGranuleFileChunkRef::fromBytes(cipherKeysCtx, childData, childArena);
 
-		ChildType child;
-		ObjectReader dataReader(chunkRef.chunkBytes.get().begin(), IncludeVersion());
-		dataReader.deserialize(FileIdentifierFor<ChildType>::value, child, childArena);
-
 		// TODO implement some sort of decrypted+decompressed+deserialized cache, if this object gets reused?
-		return Standalone<ChildType>(child, childArena);
+
+		BinaryReader br(chunkRef.chunkBytes.get(), IncludeVersion());
+		Standalone<ChildType> child;
+		br >> child;
+		return child;
 	}
 
 	template <class Ar>
@@ -751,7 +751,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 
 		if (currentChunkBytesEstimate >= targetChunkBytes || i == snapshot.size() - 1) {
 			Value serialized =
-			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
@@ -971,6 +971,11 @@ void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
 	// clearVersion as previous guy)
 }
 
+void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange) {
+	SortedDeltasT deltasByKey;
+	sortDeltasByKey(deltasByVersion, fileRange, deltasByKey);
+}
+
 // FIXME: Could maybe reduce duplicated code between this and chunkedSnapshot for chunking
 Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
                                 const Standalone<GranuleDeltas>& deltas,
@@ -1020,7 +1025,7 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
 
 		if (currentChunkBytesEstimate >= chunkSize || i == boundaries.size() - 1) {
 			Value serialized =
-			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);

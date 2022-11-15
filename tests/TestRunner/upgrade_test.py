@@ -11,7 +11,7 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader, SUPPORTED_VERSIONS, CURRENT_VERSION, FUTURE_VERSION
+from binary_download import FdbBinaryDownloader, CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster, random_secret_string
 
 TENANT_API_VERSION = 720
@@ -55,8 +55,6 @@ class UpgradeTest:
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
-        for version in self.used_versions:
-            assert version in SUPPORTED_VERSIONS, "Unsupported version or cluster action {}".format(version)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.downloader = FdbBinaryDownloader(args.build_dir)
@@ -207,6 +205,7 @@ class UpgradeTest:
                 str(TRANSACTION_RETRY_LIMIT),
                 "--stats-interval",
                 str(TESTER_STATS_INTERVAL_SEC * 1000),
+                "--retain-client-lib-copies",
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
@@ -415,7 +414,6 @@ if __name__ == "__main__":
         print("Testing with {} processes".format(args.process_number))
 
     assert len(args.upgrade_path) > 0, "Upgrade path must be specified"
-    assert args.upgrade_path[0] in SUPPORTED_VERSIONS, "Upgrade path begin with a valid version number"
 
     if args.run_with_gdb:
         RUN_WITH_GDB = True

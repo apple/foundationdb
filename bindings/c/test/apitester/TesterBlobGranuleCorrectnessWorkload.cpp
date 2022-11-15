@@ -52,26 +52,23 @@ private:
 	};
 	std::vector<OpType> excludedOpTypes;
 
+	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
+
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	// FIXME: should still guarantee a read succeeds eventually somehow
-	// FIXME: this needs to be per tenant if tenant ids are set
 	std::unordered_set<std::optional<int>> tenantsWithReadSuccess;
 
 	inline void setReadSuccess(std::optional<int> tenantId) { tenantsWithReadSuccess.insert(tenantId); }
 
 	inline bool seenReadSuccess(std::optional<int> tenantId) { return tenantsWithReadSuccess.count(tenantId); }
 
-	std::string tenantDebugString(std::optional<int> tenantId) {
-		return tenantId.has_value() ? fmt::format(" (tenant {0})", tenantId.value()) : "";
-	}
-
 	void debugOp(std::string opName, fdb::Key begin, fdb::Key end, std::optional<int> tenantId, std::string message) {
 		if (BG_API_DEBUG_VERBOSE) {
-			info(fmt::format("{0}: [{1} - {2}){3}: {4}",
+			info(fmt::format("{0}: [{1} - {2}) {3}: {4}",
 			                 opName,
 			                 fdb::toCharsRef(begin),
 			                 fdb::toCharsRef(end),
-			                 tenantDebugString(tenantId),
+			                 debugTenantStr(tenantId),
 			                 message));
 		}
 	}
@@ -117,7 +114,7 @@ private:
 				    results.get()->assign(resVector.begin(), resVector.end());
 				    bool previousSuccess = seenReadSuccess(tenantId);
 				    if (!previousSuccess) {
-					    info(fmt::format("Read{0}: first success\n", tenantDebugString(tenantId)));
+					    info(fmt::format("Read {0}: first success\n", debugTenantStr(tenantId)));
 					    setReadSuccess(tenantId);
 				    } else {
 					    debugOp("Read", begin, end, tenantId, "complete");
@@ -289,20 +286,19 @@ private:
 	}
 
 	// TODO: tenant support
-	void randomGetBlobRangesOp(TTaskFct cont) {
+	void randomGetBlobRangesOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		std::optional<int> tenantId = {};
 
 		debugOp("GetBlobRanges", begin, end, tenantId, "starting");
 
 		execOperation(
 		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->db().listBlobbifiedRanges(begin, end, 1000).eraseType();
+			    fdb::Future f = ctx->dbOps()->listBlobbifiedRanges(begin, end, 1000).eraseType();
 			    ctx->continueAfter(f, [ctx, f, results]() {
 				    *results = copyKeyRangeArray(f.get<fdb::future_var::KeyRangeRefArray>());
 				    ctx->done();
@@ -314,25 +310,24 @@ private:
 			    this->validateRanges(results, begin, end, seenReadSuccess(tenantId));
 			    schedule(cont);
 		    },
+		    getTenant(tenantId),
 		    /* failOnError = */ false);
 	}
 
 	// TODO: tenant support
-	void randomVerifyOp(TTaskFct cont) {
+	void randomVerifyOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
-		std::optional<int> tenantId;
 		if (begin > end) {
 			std::swap(begin, end);
 		}
 
-		auto verifyVersion = std::make_shared<int64_t>(false);
-
 		debugOp("Verify", begin, end, tenantId, "starting");
 
+		auto verifyVersion = std::make_shared<int64_t>(-1);
 		execOperation(
 		    [begin, end, verifyVersion](auto ctx) {
-			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
+			    fdb::Future f = ctx->dbOps()->verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
 			    ctx->continueAfter(f, [ctx, verifyVersion, f]() {
 				    *verifyVersion = f.get<fdb::future_var::Int64>();
 				    ctx->done();
@@ -344,15 +339,16 @@ private:
 			    if (*verifyVersion == -1) {
 				    ASSERT(!previousSuccess);
 			    } else if (!previousSuccess) {
-				    info(fmt::format("Verify{0}: first success\n", tenantDebugString(tenantId)));
+				    info(fmt::format("Verify {0}: first success\n", debugTenantStr(tenantId)));
 				    setReadSuccess(tenantId);
 			    }
 			    schedule(cont);
 		    },
+		    getTenant(tenantId),
 		    /* failOnError = */ false);
 	}
 
-	void randomOperation(TTaskFct cont) {
+	void randomOperation(TTaskFct cont) override {
 		std::optional<int> tenantId = randomTenant();
 
 		OpType txType = (stores[tenantId].size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
@@ -380,10 +376,10 @@ private:
 			randomSummarizeOp(cont, tenantId);
 			break;
 		case OP_GET_BLOB_RANGES:
-			randomGetBlobRangesOp(cont);
+			randomGetBlobRangesOp(cont, tenantId);
 			break;
 		case OP_VERIFY:
-			randomVerifyOp(cont);
+			randomVerifyOp(cont, tenantId);
 			break;
 		}
 	}

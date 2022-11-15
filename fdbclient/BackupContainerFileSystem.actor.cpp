@@ -1131,6 +1131,16 @@ public:
 		return false;
 	}
 
+	// fallback for using existing write api if the underlying blob store doesn't support efficient writeEntireFile
+	ACTOR static Future<Void> writeEntireFileFallback(Reference<BackupContainerFileSystem> bc,
+	                                                  std::string fileName,
+	                                                  std::string fileContents) {
+		state Reference<IBackupFile> objectFile = wait(bc->writeFile(fileName));
+		wait(objectFile->append(&fileContents[0], fileContents.size()));
+		wait(objectFile->finish());
+		return Void();
+	}
+
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
@@ -1482,6 +1492,12 @@ bool BackupContainerFileSystem::usesEncryption() const {
 }
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 	return encryptionSetupFuture;
+}
+
+Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::string& fileName,
+                                                                const std::string& fileContents) {
+	return BackupContainerFileSystemImpl::writeEntireFileFallback(
+	    Reference<BackupContainerFileSystem>::addRef(this), fileName, fileContents);
 }
 
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
