@@ -158,7 +158,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 		return (1.0 * readStats.deltaBytesRead) / (writeAmp * SERVER_KNOBS->BG_RDC_READ_FACTOR);
 	}
 
-	bool isEligibleRDC() {
+	bool isEligibleRDC() const {
 		// granule should be reasonably read-hot to be eligible
 		int64_t bytesWritten = bufferedDeltaBytes + bytesInNewDeltaFiles;
 		return bytesWritten * SERVER_KNOBS->BG_RDC_READ_FACTOR < readStats.deltaBytesRead;
@@ -292,6 +292,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	    (int64_t)(SERVER_KNOBS->BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD * SERVER_KNOBS->SERVER_MEM_LIMIT);
 	int64_t lastResidentMemory = 0;
 	double lastResidentMemoryCheckTime = -100.0;
+
+	bool isFullRestoreMode = false;
 
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
@@ -2158,7 +2160,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		// No need to start Change Feed in full restore mode
-		if (isFullRestoreMode())
+		if (bwData->isFullRestoreMode)
 			return Void();
 
 		checkMergeCandidate = granuleCheckMergeCandidate(bwData,
@@ -2183,13 +2185,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// will get an exception if we try to read any popped data, killing this actor
 			readOldChangeFeed = true;
 
+			// because several feeds will be reading the same version range of this change feed at the same time, set
+			// cache result to true
 			oldChangeFeedFuture = bwData->db->getChangeFeedStream(cfData,
 			                                                      oldCFKey.get(),
 			                                                      startVersion + 1,
 			                                                      startState.changeFeedStartVersion,
 			                                                      metadata->keyRange,
 			                                                      bwData->changeFeedStreamReplyBufferSize,
-			                                                      false);
+			                                                      false,
+			                                                      { ReadType::NORMAL, CacheResult::True });
 
 		} else {
 			readOldChangeFeed = false;
@@ -2293,7 +2298,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						// popped up to V+1 is ok. Or in other words, if the last delta @ V, we only missed data
 						// at V+1 onward if popVersion >= V+2
 						if (metadata->bufferedDeltaVersion < metadata->activeCFData.get()->popVersion - 1) {
-							CODE_PROBE(true, "Blob Worker detected popped");
+							CODE_PROBE(true, "Blob Worker detected popped", probe::decoration::rare);
 							TraceEvent("BlobWorkerChangeFeedPopped", bwData->id)
 							    .detail("Granule", metadata->keyRange)
 							    .detail("GranuleID", startState.granuleID)
@@ -2472,6 +2477,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									if (readOldChangeFeed) {
 										ASSERT(cfRollbackVersion + 1 < startState.changeFeedStartVersion);
 										ASSERT(oldCFKey.present());
+										// because several feeds will be reading the same version range of this change
+										// feed at the same time, set cache result to true
 										oldChangeFeedFuture =
 										    bwData->db->getChangeFeedStream(cfData,
 										                                    oldCFKey.get(),
@@ -2479,7 +2486,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    startState.changeFeedStartVersion,
 										                                    metadata->keyRange,
 										                                    bwData->changeFeedStreamReplyBufferSize,
-										                                    false);
+										                                    false,
+										                                    { ReadType::NORMAL, CacheResult::True });
 
 									} else {
 										if (cfRollbackVersion + 1 < startState.changeFeedStartVersion) {
@@ -3600,7 +3608,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			state Reference<GranuleMetadata> metadata = m;
 			// state Version granuleBeginVersion = req.beginVersion;
 			// skip waiting for CF ready for recovery mode
-			if (!isFullRestoreMode()) {
+			if (!bwData->isFullRestoreMode) {
 				choose {
 					when(wait(metadata->readable.getFuture())) {}
 					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
@@ -3658,7 +3666,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// this is an active granule query
 				loop {
 					// skip check since CF doesn't start for bare metal recovery mode
-					if (isFullRestoreMode()) {
+					if (bwData->isFullRestoreMode) {
 						break;
 					}
 					if (!metadata->activeCFData.get().isValid() || !metadata->cancelled.canBeSet()) {
@@ -3701,7 +3709,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// if feed was popped by another worker and BW only got empty versions, it wouldn't itself see that it
 				// got popped, but we can still reject the in theory this should never happen with other protections but
 				// it's a useful and inexpensive sanity check
-				if (!isFullRestoreMode()) {
+				if (!bwData->isFullRestoreMode) {
 					Version emptyVersion = metadata->activeCFData.get()->popVersion - 1;
 					if (req.readVersion > metadata->durableDeltaVersion.get() &&
 					    emptyVersion > metadata->bufferedDeltaVersion) {
@@ -4005,7 +4013,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 
 			ForcedPurgeState purgeState = wait(fForcedPurgeState);
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Worker trying to open force purged granule");
+				CODE_PROBE(true, "Worker trying to open force purged granule", probe::decoration::rare);
 				if (BW_DEBUG) {
 					fmt::print("Granule [{0} - {1}) is force purged on BW {2}, abandoning\n",
 					           req.keyRange.begin.printable(),
@@ -4014,6 +4022,9 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 				throw granule_assignment_conflict();
 			}
+
+			bool isFullRestore = wait(isFullRestoreMode(bwData->db, req.keyRange));
+			bwData->isFullRestoreMode = isFullRestore;
 
 			Optional<Value> prevLockValue = wait(fLockValue);
 			state bool hasPrevOwner = prevLockValue.present();
@@ -4089,7 +4100,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 
 				// for recovery mode - don't create change feed, don't create snapshot
-				if (isFullRestoreMode()) {
+				if (bwData->isFullRestoreMode) {
 					createChangeFeed = false;
 					info.doSnapshot = false;
 					GranuleFiles granuleFiles = wait(loadPreviousFiles(&tr, info.granuleID));
@@ -4111,7 +4122,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 			}
 
-			if (createChangeFeed && !isFullRestoreMode()) {
+			if (createChangeFeed && !bwData->isFullRestoreMode) {
 				// create new change feed for new version of granule
 				wait(updateChangeFeed(
 				    &tr, granuleIDToCFKey(info.granuleID), ChangeFeedStatus::CHANGE_FEED_CREATE, req.keyRange));
@@ -4123,7 +4134,8 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			// If anything in previousGranules, need to do the handoff logic and set
 			// ret.previousChangeFeedId, and the previous durable version will come from the previous
 			// granules
-			if (info.history.present() && info.history.get().value.parentVersions.size() > 0 && !isFullRestoreMode()) {
+			if (info.history.present() && info.history.get().value.parentVersions.size() > 0 &&
+			    !bwData->isFullRestoreMode) {
 				CODE_PROBE(true, "Granule open found parent");
 				if (info.history.get().value.parentVersions.size() == 1) { // split
 					state KeyRangeRef parentRange(info.history.get().value.parentBoundaries[0],

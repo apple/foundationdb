@@ -972,6 +972,11 @@ void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
 	// clearVersion as previous guy)
 }
 
+void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange) {
+	SortedDeltasT deltasByKey;
+	sortDeltasByKey(deltasByVersion, fileRange, deltasByKey);
+}
+
 // FIXME: Could maybe reduce duplicated code between this and chunkedSnapshot for chunking
 Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
                                 const Standalone<GranuleDeltas>& deltas,

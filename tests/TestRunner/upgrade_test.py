@@ -168,6 +168,7 @@ class UpgradeTest:
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.cluster.stop_cluster()
+        self.cluster.release_ports()
         if CLEANUP_ON_EXIT:
             shutil.rmtree(self.tmp_dir)
 

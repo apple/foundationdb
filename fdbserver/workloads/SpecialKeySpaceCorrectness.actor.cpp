@@ -68,7 +68,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("RandomMoveKeys");
+
+		// Rollback interferes with the
+		// \xff\xff/worker_interfaces test, since it can
+		// trigger a cluster recvoery, causing the worker
+		// interface for a machine to be updated in the middle
+		// of the test.
+		out.insert("RollbackWorkload");
+	}
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
@@ -1133,6 +1143,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			state KeyRange coordinators_key_range =
 			    KeyRangeRef("process/"_sr, "process0"_sr)
 			        .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
+			state unsigned retries = 0;
+			state bool changeCoordinatorsSucceeded = true;
 			loop {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -1212,11 +1224,18 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 							    .detail("ErrorMessage", valueObj["message"].get_str());
 							ASSERT(valueObj["command"].get_str() == "coordinators");
 							if (valueObj["retriable"].get_bool()) { // coordinators not reachable, retry
+								if (++retries >= 10) {
+									CODE_PROBE(true, "ChangeCoordinators Exceeded retry limit");
+									changeCoordinatorsSucceeded = false;
+									tx->reset();
+									break;
+								}
 								tx->reset();
 							} else {
 								ASSERT(valueObj["message"].get_str() ==
 								       "No change (existing configuration satisfies request)");
 								tx->reset();
+								CODE_PROBE(true, "Successfully changed coordinators");
 								break;
 							}
 						} else {
@@ -1232,8 +1251,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString csNew(res.get().toString());
 					// verify the cluster decription
-					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
-					ASSERT(csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
+					ASSERT(!changeCoordinatorsSucceeded ||
+					       new_cluster_description == csNew.clusterKeyName().toString());
+					ASSERT(!changeCoordinatorsSucceeded ||
+					       csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
 					std::vector<NetworkAddress> newCoordinators = wait(csNew.tryResolveHostnames());
 					// verify the coordinators' addresses
 					for (const auto& network_address : newCoordinators) {
@@ -1249,7 +1270,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				}
 				// change back to original settings
-				loop {
+				while (changeCoordinatorsSucceeded) {
 					try {
 						std::string new_processes_key;
 						tx->setOption(FDBTransactionOptions::RAW_ACCESS);

@@ -414,7 +414,8 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
-					if (tenantName.present() && commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() && tenantName.present() &&
+					    commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
 						req.reply.sendError(storage_quota_exceeded());
 						continue;
 					}
@@ -829,7 +830,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		CODE_PROBE(true, "Reject transactions in the batch");
-		TraceEvent(SevWarnAlways, "ProxyReject", pProxyCommitData->dbgid)
+		TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "ProxyReject", pProxyCommitData->dbgid)
 		    .suppressFor(0.1)
 		    .detail("QDelay", queuingDelay)
 		    .detail("Transactions", trs.size())
@@ -1309,7 +1310,7 @@ ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContex
 	    wait(getLatestEncryptCipherKey(self->pProxyCommitData->db, domainId, p.first, BlobCipherMetrics::TLOG));
 	self->cipherKeys[domainId] = cipherKey;
 
-	CODE_PROBE(true, "Raw access mutation encryption");
+	CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
 	ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 	encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
 	self->toCommit.writeTypedMessage(encryptedMutation);
@@ -1435,11 +1436,13 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					double prob = mul * cost / totalCosts;
 
 					if (deterministicRandom()->random01() < prob) {
-						for (const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
+						const auto& storageServers = pProxyCommitData->keyInfo[m.param1].src_info;
+						for (const auto& ssInfo : storageServers) {
 							auto id = ssInfo->interf.id();
 							// scale cost
 							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, cost);
+							pProxyCommitData->updateSSTagCost(
+							    id, trs[self->transactionNum].tagSet.get(), m, cost / storageServers.size());
 						}
 					}
 				}
@@ -2971,7 +2974,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                         proxy.expireIdempotencyId,
 	                                         commitData.expectedIdempotencyIdCountForKey,
 	                                         &commitData.idempotencyClears));
-	addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
+	if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
+		addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
+	}
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

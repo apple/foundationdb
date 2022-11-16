@@ -2331,10 +2331,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				recruited.initEndpoints();
 				if (blobMigratorInterf->get().present()) {
 					recruited = blobMigratorInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a blob migrator.");
+					CODE_PROBE(true, "Recruited while already a blob migrator.", probe::decoration::rare);
 				} else {
 					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.haltBlobMigrator);
+					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.ssi.getValue);
 					DUMPTOKEN(recruited.ssi.getKey);
 					DUMPTOKEN(recruited.ssi.getKeyValues);
@@ -2345,7 +2346,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.ssi.getReadHotRanges);
 					DUMPTOKEN(recruited.ssi.getRangeSplitPoints);
 					DUMPTOKEN(recruited.ssi.getStorageMetrics);
-					DUMPTOKEN(recruited.ssi.waitFailure);
 					DUMPTOKEN(recruited.ssi.getQueuingMetrics);
 					DUMPTOKEN(recruited.ssi.getKeyValueStoreType);
 					DUMPTOKEN(recruited.ssi.watchValue);
@@ -2796,7 +2796,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate finished snapshot request");
+					CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
 					auto result = snapReqResultMap[snapReqKey];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
@@ -2804,7 +2804,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : success().code());
 				} else if (snapReqMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request");
+					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request", probe::decoration::rare);
 					TraceEvent("RetryOngoingWorkerSnapRequest")
 					    .detail("SnapUID", snapReq.snapUID.toString())
 					    .detail("Role", snapReq.role);

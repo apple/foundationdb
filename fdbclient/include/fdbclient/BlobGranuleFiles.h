@@ -56,4 +56,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 
 std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix);
 
+// For benchmark testing only. It should never be called in prod.
+void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange);
+
 #endif
