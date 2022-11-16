@@ -1951,56 +1951,34 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<double> loadBytesBalanceRatio(DDTeamCollection* self) {
-		wait(delayJittered(SERVER_KNOBS->CHECK_LOAD_BYTES_BALANCE_DELAY)); // at most 3 min simulation
-		double minLoadBytes = std::numeric_limits<double>::max();
-		double avgLoadBytes = 0;
-		int count = 0;
-		for (auto& [id, s] : self->server_info) {
-			// If a healthy SS don't have storage metrics, skip this round
-			if (self->server_status.get(s->getId()).isUnhealthy()) {
-				continue;
-			} else if (!s->metricsPresent()) {
-				return 0;
-			}
-
-			double load = s->loadBytes();
-			avgLoadBytes += load;
-			++count;
-			minLoadBytes = std::min(minLoadBytes, load);
-		}
-		avgLoadBytes /= count;
-		return minLoadBytes / avgLoadBytes;
-	}
-
 	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
-		state Future<Void> maxDelay = delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY);
+		wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
 		state bool takeRest = true;
 		while (takeRest) {
-			choose {
-				when(wait(maxDelay)) { break; }
-				when(double balance = wait(loadBytesBalanceRatio(self))) {
-					// there must not have other teams to place wiggled data
-					takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
-					           self->machine_info.size() < self->configuration.storageTeamSize ||
-					           balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE;
+			bool balance = self->loadBytesBalanceRatio();
+			// there must not have other teams to place wiggled data
+			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
+			           self->machine_info.size() < self->configuration.storageTeamSize ||
+			           balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO;
 
-					CODE_PROBE(balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE,
-					           "Perpetual Wiggle pause because cluster is imbalance.");
+			if (takeRest) {
+				CODE_PROBE(balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO,
+				           "Perpetual Wiggle pause because cluster is imbalance.");
 
-					if (takeRest) {
-						self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
-						if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-							TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
-							    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-							    .detail("BytesBalance", balance)
-							    .detail("ServerSize", self->server_info.size())
-							    .detail("MachineSize", self->machine_info.size())
-							    .detail("StorageTeamSize", self->configuration.storageTeamSize);
-						}
-					}
+				self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
+				if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+					TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
+					    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+					    .detail("BytesBalance", balance)
+					    .detail("ServerSize", self->server_info.size())
+					    .detail("MachineSize", self->machine_info.size())
+					    .detail("StorageTeamSize", self->configuration.storageTeamSize);
 				}
+			} else {
+				break;
 			}
+
+			wait(delayJittered(SERVER_KNOBS->CHECK_LOAD_BYTES_BALANCE_DELAY)); // avoid busy spin
 		}
 		return Void();
 	}
@@ -3418,6 +3396,33 @@ bool DDTeamCollection::isCorrectDC(TCServerInfo const& server) const {
 
 Future<Void> DDTeamCollection::removeBadTeams() {
 	return DDTeamCollectionImpl::removeBadTeams(this);
+}
+
+double DDTeamCollection::loadBytesBalanceRatio() const {
+	double minLoadBytes = std::numeric_limits<double>::max();
+	double avgLoadBytes = 0;
+	int count = 0;
+	for (auto& [id, s] : server_info) {
+		// If a healthy SS don't have storage metrics, skip this round
+		if (server_status.get(s->getId()).isUnhealthy()) {
+			continue;
+		} else if (!s->metricsPresent()) {
+			return 0;
+		}
+
+		double load = s->loadBytes();
+		avgLoadBytes += load;
+		++count;
+		minLoadBytes = std::min(minLoadBytes, load);
+	}
+
+	// skip to next check
+	if (count == 0 || avgLoadBytes == 0) {
+		return 0;
+	}
+
+	avgLoadBytes /= count;
+	return minLoadBytes / avgLoadBytes;
 }
 
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
