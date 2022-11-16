@@ -549,6 +549,16 @@ struct PhysicalShard {
 		this->readIterPool->refreshIterators();
 	}
 
+	std::vector<KeyRange> getAllRanges() const {
+		std::vector<KeyRange> res;
+		for (const auto& [key, shard] : dataShards) {
+			if (shard != nullptr) {
+				res.push_back(shard->range);
+			}
+		}
+		return res;
+	}
+
 	std::string toString() {
 		std::string ret = "[ID]: " + this->id + ", [CF]: ";
 		if (initialized()) {
@@ -2127,8 +2137,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(a.request.version == version || a.request.version == latestVersion);
 
 			// TODO: set the range as the actual shard range.
-			CheckpointMetaData res(version, a.request.format, a.request.checkpointID);
-			res.ranges = a.request.ranges;
+			CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
+			TraceEvent(SevDebug, "CreatedResHL", logId);
 			const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
 			if (a.request.format == DataMoveRocksCF) {
