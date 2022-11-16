@@ -2548,14 +2548,14 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 			nextRequestTimer = Never();
 			if (db->get().ratekeeper.present()) {
 				nextReply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
-				    ReportCommitCostEstimationRequest(*ssTrTagCommitCost)));
+				    ReportCommitCostEstimationRequest(std::move(*ssTrTagCommitCost))));
+				ssTrTagCommitCost->clear();
 			} else {
 				nextReply = Never();
 			}
 		}
 		when(wait(nextReply)) {
 			nextReply = Never();
-			ssTrTagCommitCost->clear();
 			nextRequestTimer = delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY);
 		}
 	}
