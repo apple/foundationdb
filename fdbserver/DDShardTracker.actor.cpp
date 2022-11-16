@@ -1600,9 +1600,11 @@ void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange
 // At beginning of the transition from the initial state without physical shard notion
 // to the physical shard aware state, the physicalShard set only contains one element which is anonymousShardId[0]
 // After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
-Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
-                                                                               StorageMetrics const& moveInMetrics,
-                                                                               uint64_t debugID) {
+Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
+    ShardsAffectedByTeamFailure::Team team,
+    StorageMetrics const& moveInMetrics,
+    const std::unordered_set<uint64_t>& excludedPhysicalShards,
+    uint64_t debugID) {
 	ASSERT(team.servers.size() > 0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
 	if (teamPhysicalShardIDs.count(team) == 0) {
@@ -1622,6 +1624,9 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(S
 		    .detail("Bytes", physicalShardInstances[physicalShardID].metrics.bytes)
 		    .detail("BelongTeam", team.toString())
 		    .detail("DebugID", debugID);*/
+		if (excludedPhysicalShards.find(physicalShardID) != excludedPhysicalShards.end()) {
+			continue;
+		}
 		if (!checkPhysicalShardAvailable(physicalShardID, moveInMetrics)) {
 			continue;
 		}
@@ -1748,24 +1753,6 @@ InOverSizePhysicalShard PhysicalShardCollection::isInOverSizePhysicalShard(KeyRa
 		return InOverSizePhysicalShard::True;
 	}
 	return InOverSizePhysicalShard::False;
-}
-
-uint64_t PhysicalShardCollection::determinePhysicalShardIDGivenPrimaryTeam(
-    ShardsAffectedByTeamFailure::Team primaryTeam,
-    StorageMetrics const& metrics,
-    bool forceToUseNewPhysicalShard,
-    uint64_t debugID) {
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
-	ASSERT(primaryTeam.primary == true);
-	if (forceToUseNewPhysicalShard) {
-		return generateNewPhysicalShardID(debugID);
-	}
-	Optional<uint64_t> physicalShardIDFetch = trySelectAvailablePhysicalShardFor(primaryTeam, metrics, debugID);
-	if (!physicalShardIDFetch.present()) {
-		return generateNewPhysicalShardID(debugID);
-	}
-	return physicalShardIDFetch.get();
 }
 
 // May return a problematic remote team
