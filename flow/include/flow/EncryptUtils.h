@@ -34,8 +34,6 @@ constexpr const int AUTH_TOKEN_AES_CMAC_SIZE = 16;
 constexpr const int AUTH_TOKEN_MAX_SIZE = AUTH_TOKEN_HMAC_SHA_SIZE;
 
 using EncryptCipherDomainId = int64_t;
-using EncryptCipherDomainNameRef = StringRef;
-using EncryptCipherDomainName = Standalone<EncryptCipherDomainNameRef>;
 using EncryptCipherBaseKeyId = uint64_t;
 using EncryptCipherRandomSalt = uint64_t;
 
@@ -47,10 +45,6 @@ constexpr const EncryptCipherDomainId FDB_DEFAULT_ENCRYPT_DOMAIN_ID = -4;
 constexpr const EncryptCipherBaseKeyId INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
 
 constexpr const EncryptCipherRandomSalt INVALID_ENCRYPT_RANDOM_SALT = 0;
-
-extern const EncryptCipherDomainName FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME;
-extern const EncryptCipherDomainName FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
-extern const EncryptCipherDomainName FDB_ENCRYPT_HEADER_DOMAIN_NAME;
 
 typedef enum {
 	ENCRYPT_CIPHER_MODE_NONE = 0,
@@ -104,12 +98,10 @@ constexpr std::string_view ENCRYPT_DBG_TRACE_RESULT_PREFIX = "Res";
 // Utility interface to construct TraceEvent key for debugging
 std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
-                                  StringRef domainName,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId = Optional<EncryptCipherBaseKeyId>());
 
 std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
                                         EncryptCipherDomainId domainId,
-                                        StringRef domainName,
                                         EncryptCipherBaseKeyId baseCipherId,
                                         int64_t refAfterTS,
                                         int64_t expAfterTS);

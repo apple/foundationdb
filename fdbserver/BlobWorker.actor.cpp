@@ -459,10 +459,10 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 
 	ASSERT(tenantData.isValid());
 
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
-	domains.emplace(tenantData->entry.id, tenantData->name);
+	std::unordered_set<EncryptCipherDomainId> domainIds;
+	domainIds.emplace(tenantData->entry.id);
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
-	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domains, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
 
 	auto domainKeyItr = domainKeyMap.find(tenantData->entry.id);
 	ASSERT(domainKeyItr != domainKeyMap.end());
