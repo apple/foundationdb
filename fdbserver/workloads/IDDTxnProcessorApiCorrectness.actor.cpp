@@ -25,8 +25,8 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "fdbclient/VersionedMap.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
 	// Mock DD just care about the server<->key mapping in DDShardInfo
