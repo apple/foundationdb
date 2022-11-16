@@ -2538,11 +2538,14 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 	}
 }
 
+enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
+
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
                                                                             bool atLatest,
-                                                                            UID streamUID /* for debugging */) {
+                                                                            UID streamUID, /* for debugging */
+                                                                            FeedDiskReadState* feedDiskReadState) {
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -2611,7 +2614,13 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (req.end > emptyVersion + 1) {
 		auto it = searchChangeFeedStart(feedInfo->mutations, req.begin, atLatest);
 		while (it != feedInfo->mutations.end()) {
+			// If DISK_CATCHUP, only read 1 mutation from the memory queue
 			if (it->version >= req.end || it->version > dequeVersion || remainingLimitBytes <= 0) {
+				break;
+			}
+			if ((*feedDiskReadState) == FeedDiskReadState::DISK_CATCHUP && !memoryReply.mutations.empty()) {
+				// so we don't add an empty mutation at the end
+				remainingLimitBytes = -1;
 				break;
 			}
 			MutationsAndVersionRef m = *it;
@@ -2768,6 +2777,28 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			lastVersion = version;
 			lastKnownCommitted = knownCommittedVersion;
 		}
+
+		if ((*feedDiskReadState) == FeedDiskReadState::STARTING ||
+		    (*feedDiskReadState) == FeedDiskReadState::DISK_CATCHUP) {
+			if (!memoryReply.mutations.empty() && !reply.mutations.empty() &&
+			    reply.mutations.back().version < memoryReply.mutations.front().version && remainingDurableBytes <= 0) {
+				// if we read a full batch from disk and the entire disk read was still less than the first memory
+				// mutation, switch to disk_catchup mode
+				*feedDiskReadState = FeedDiskReadState::DISK_CATCHUP;
+				CODE_PROBE(true, "Feed switching to disk_catchup mode");
+			} else {
+				// for testing
+				if ((*feedDiskReadState) == FeedDiskReadState::STARTING && BUGGIFY_WITH_PROB(0.001)) {
+					*feedDiskReadState = FeedDiskReadState::DISK_CATCHUP;
+					CODE_PROBE(true, "Feed forcing disk_catchup mode");
+				} else {
+					// else switch to normal mode
+					CODE_PROBE(true, "Feed switching to normal mode");
+					*feedDiskReadState = FeedDiskReadState::NORMAL;
+				}
+			}
+		}
+
 		if (remainingDurableBytes > 0) {
 			reply.arena.dependsOn(memoryReply.arena);
 			auto it = memoryReply.mutations.begin();
@@ -2789,6 +2820,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	} else {
 		reply = memoryReply;
+		*feedDiskReadState = FeedDiskReadState::NORMAL;
 	}
 
 	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
@@ -2946,6 +2978,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state Span span("SS:getChangeFeedStream"_loc, req.spanContext);
 	state bool atLatest = false;
 	state bool removeUID = false;
+	state FeedDiskReadState feedDiskReadState = STARTING;
 	state Optional<Version> blockedVersion;
 
 	try {
@@ -3030,7 +3063,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			wait(onReady);
 			// keep this as not state variable so it is freed after sending to reduce memory
 			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, req, false, atLatest, streamUID);
+			    getChangeFeedMutations(data, req, false, atLatest, streamUID, &feedDiskReadState);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
