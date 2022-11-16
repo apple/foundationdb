@@ -54,25 +54,21 @@ struct CheckpointMetaData {
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
 
-	UID dataMoveId;
+	Optional<UID> actionId;
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
 	                   CheckpointFormat format,
 	                   const std::vector<UID>& src,
+	                   UID const& checkpointID,
+	                   UID const& actionId)
+	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending),
+	    actionId(actionId) {}
+	CheckpointMetaData(const std::vector<KeyRange>& ranges,
+	                   Version version,
+	                   CheckpointFormat format,
 	                   UID const& checkpointID)
 	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending) {}
-	CheckpointMetaData(KeyRange const& range,
-	                   CheckpointFormat format,
-	                   const std::vector<UID>& src,
-	                   UID const& checkpointID)
-	  : version(invalidVersion), format(format), src(src), checkpointID(checkpointID), state(Pending) {
-		this->ranges.push_back(range);
-	}
-	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(version), format(format), checkpointID(checkpointID), state(Pending) {
-		this->ranges.push_back(range);
-	}
 	CheckpointMetaData(Version version, CheckpointFormat format, UID checkpointID)
 	  : version(version), format(format), checkpointID(checkpointID), state(Pending) {}
 
@@ -100,13 +96,14 @@ struct CheckpointMetaData {
 		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
 		                  " [Server]: " + describe(src) + " [ID]: " + checkpointID.toString() +
 		                  " [State]: " + std::to_string(static_cast<int>(state)) +
-		                  " [DataMove ID]: " + dataMoveId.toString();
+		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "");
+		;
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, dataMoveId);
+		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId);
 	}
 };
 

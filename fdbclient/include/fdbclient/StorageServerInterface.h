@@ -928,19 +928,19 @@ struct GetCheckpointRequest {
 	Version version; // The FDB version at which the checkpoint is created.
 	std::vector<KeyRange> ranges;
 	int16_t format; // CheckpointFormat.
-	Optional<UID> dataMoveId;
+	Optional<UID> actionId;
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
 	GetCheckpointRequest(std::vector<KeyRange> ranges,
-	                     const Optional<UID>& dataMoveId,
 	                     Version version,
-	                     CheckpointFormat format)
-	  : version(version), ranges(ranges), format(format), dataMoveId(dataMoveId) {}
+	                     CheckpointFormat format,
+	                     const Optional<UID>& actionId)
+	  : version(version), ranges(ranges), format(format), actionId(actionId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, ranges, format, dataMoveId, reply);
+		serializer(ar, version, ranges, format, actionId, reply);
 	}
 };
 
