@@ -23,25 +23,8 @@ import flow_swift
 import FlowFutureSupport
 import flow_swift_future
 
-@_expose(Cxx)
-public func swiftyTestRunner(p: PromiseVoid) {
-    print("[swift] \(#function), go!".green)
-
-    Task {
-        do {
-            await swift_flow_trivial_promisestreams()
-            try await swift_flow_trivial_promisestreams_asyncSequence()
-        } catch {
-            print("[swift][\(#function)] TEST THREW: \(error)")
-        }
-
-        var void = Flow.Void()
-        p.send(&void)
-    }
-}
-
 /// Corresponds to FlowTests.actor.cpp "/flow/flow/trivial promisestreams"
-func swift_flow_trivial_promisestreams() async {
+func swift_flow_trivial_promisestreams() async throws {
     print("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
     defer { print("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
 
