@@ -488,6 +488,9 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 			}
 			if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && tenantMode != TenantMode::REQUIRED) {
 				// For domain aware encryption only the required tenant mode is currently supported
+				TraceEvent(SevError, "InvalidEncryptAndTenantConfiguration")
+				    .detail("EncryptMode", encryptMode.toString())
+				    .detail("TenantMode", tenantMode.toString());
 				return false;
 			}
 			return true;
@@ -510,12 +513,20 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 			    .detail("NewTenantMode", newTenantMode.toString());
 			if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && newTenantMode != TenantMode::REQUIRED) {
 				// For domain aware encryption only the required tenant mode is currently supported
+				TraceEvent(SevError, "InvalidEncryptAndTenantConfiguration")
+				    .detail("EncryptMode", encryptMode.toString())
+				    .detail("OldTenantMode", oldTenantMode.toString())
+				    .detail("NewTenantMode", newTenantMode.toString());
 				return false;
 			}
 			if ((oldTenantMode == TenantMode::OPTIONAL_TENANT || oldTenantMode == TenantMode::DISABLED) &&
 			    newTenantMode == TenantMode::REQUIRED) {
 				// TODO: Switching from optional/disabled tenant mode to required should be allowed if there is no
 				// non-tenant data
+				TraceEvent(SevError, "InvalidEncryptAndTenantConfiguration")
+				    .detail("EncryptMode", encryptMode.toString())
+				    .detail("OldTenantMode", oldTenantMode.toString())
+				    .detail("NewTenantMode", newTenantMode.toString());
 				return false;
 			}
 			return true;
