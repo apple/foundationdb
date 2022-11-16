@@ -475,6 +475,12 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 			// If the encrypt mode is being set compare it to the tenant mode being set
 			EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromValueRef(
 			    ValueRef(newConfig.find(encryptionAtRestModeConfKey.toString())->second));
+			if (encryptMode.mode == EncryptionAtRestMode::DISABLED ||
+			    encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
+				// In these cases the tenantMode does not matter
+				return true;
+			}
+
 			TenantMode tenantMode = TenantMode::DISABLED;
 			if (newConfig.count(tenantModeConfKey.toString()) != 0) {
 				tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
@@ -482,13 +488,9 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 			TraceEvent(SevDebug, "EncryptAndTenantModes")
 			    .detail("EncryptMode", encryptMode.toString())
 			    .detail("TenantMode", tenantMode.toString());
-			if (encryptMode.mode == EncryptionAtRestMode::DISABLED) {
-				// In this case the tenantMode does not matter
-				return true;
-			}
-			if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && tenantMode != TenantMode::REQUIRED) {
+			if (tenantMode != TenantMode::REQUIRED) {
 				// For domain aware encryption only the required tenant mode is currently supported
-				TraceEvent(SevError, "InvalidEncryptAndTenantConfiguration")
+				TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
 				    .detail("EncryptMode", encryptMode.toString())
 				    .detail("TenantMode", tenantMode.toString());
 				return false;
@@ -513,7 +515,7 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 			    .detail("NewTenantMode", newTenantMode.toString());
 			if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && newTenantMode != TenantMode::REQUIRED) {
 				// For domain aware encryption only the required tenant mode is currently supported
-				TraceEvent(SevError, "InvalidEncryptAndTenantConfiguration")
+				TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
 				    .detail("EncryptMode", encryptMode.toString())
 				    .detail("OldTenantMode", oldTenantMode.toString())
 				    .detail("NewTenantMode", newTenantMode.toString());
@@ -523,7 +525,7 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 			    newTenantMode == TenantMode::REQUIRED) {
 				// TODO: Switching from optional/disabled tenant mode to required should be allowed if there is no
 				// non-tenant data
-				TraceEvent(SevError, "InvalidEncryptAndTenantConfiguration")
+				TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
 				    .detail("EncryptMode", encryptMode.toString())
 				    .detail("OldTenantMode", oldTenantMode.toString())
 				    .detail("NewTenantMode", newTenantMode.toString());
