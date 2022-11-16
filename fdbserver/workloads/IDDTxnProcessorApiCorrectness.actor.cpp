@@ -25,8 +25,8 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "fdbclient/VersionedMap.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 std::string describe(const DDShardInfo& a) {
 	std::string res = "key: " + a.key.toString() + "\n";
