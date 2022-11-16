@@ -58,6 +58,7 @@
 #include "utils.hpp"
 #include "shm.hpp"
 #include "stats.hpp"
+#include "tenant.hpp"
 #include "time.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -91,25 +92,24 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 	// Create Tenant Transaction
 	int tenant_id = (id == -1) ? urand(0, args.active_tenants - 1) : id;
 	Transaction tr;
-	std::string tenantStr;
+	std::string tenant_name;
 	// If provided tenants array, use it
 	if (tenants) {
 		tr = tenants[tenant_id].createTransaction();
 	} else {
-		tenantStr = "tenant" + std::to_string(tenant_id);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		Tenant t = db.openTenant(tenant_name);
+		tenant_name = getTenantNameByIndex(tenant_id);
+		Tenant t = db.openTenant(toBytesRef(tenant_name));
 		tr = t.createTransaction();
 	}
 	if (!args.authorization_tokens.empty()) {
 		// lookup token based on tenant name and, if found, set authz token to transaction
-		if (tenantStr.empty())
-			tenantStr = "tenant" + std::to_string(tenant_id);
-		auto tokenMapItr = args.authorization_tokens.find(tenantStr);
-		if (tokenMapItr != args.authorization_tokens.end()) {
-			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, tokenMapItr->second);
+		if (tenant_name.empty())
+			tenant_name = getTenantNameByIndex(tenant_id);
+		auto token_map_iter = args.authorization_tokens.find(tenant_name);
+		if (token_map_iter != args.authorization_tokens.end()) {
+			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, token_map_iter->second);
 		} else {
-			logr.warn("Authorization token map is not empty, but could not find token for tenant '{}'", tenantStr);
+			logr.warn("Authorization token map is not empty, but could not find token for tenant '{}'", tenant_name);
 		}
 	}
 	return tr;
@@ -122,7 +122,6 @@ uint64_t byteswapHelper(uint64_t input) {
 		output += input & 0xFF;
 		input >>= 8;
 	}
-
 	return output;
 }
 
@@ -176,13 +175,13 @@ int cleanup(Database db, Arguments const& args) {
 			// Issue all tenant reads first
 			Transaction getTx = db.createTransaction();
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
+				std::string tenant_name = getTenantNameByIndex(i);
 				tenantResults[i - (batch * batch_size)] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
 			}
 			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
 			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
+				std::string tenant_name = getTenantNameByIndex(i);
 				while (true) {
 					const auto rc = waitAndHandleError(getTx, tenantResults[i - (batch * batch_size)], "GET_TENANT");
 					if (rc == FutureRC::OK) {
@@ -233,7 +232,7 @@ int cleanup(Database db, Arguments const& args) {
 		tx.reset();
 		for (int batch = 0; batch < batches; ++batch) {
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
+				std::string tenant_name = getTenantNameByIndex(i);
 				Tenant::deleteTenant(tx, toBytesRef(tenant_name));
 			}
 			auto future_commit = tx.commit();
@@ -285,7 +284,7 @@ int populate(Database db,
 			for (int batch = 0; batch < batches; ++batch) {
 				while (1) {
 					for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-						std::string tenant_str = "tenant" + std::to_string(i);
+						std::string tenant_str = getTenantNameByIndex(i);
 						Tenant::createTenant(systemTx, toBytesRef(tenant_str));
 					}
 					auto future_commit = systemTx.commit();
@@ -308,7 +307,7 @@ int populate(Database db,
 				// blobbify tenant ranges explicitly
 				// FIXME: skip if database not configured for blob granules?
 				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-					std::string tenant_str = "tenant" + std::to_string(i);
+					std::string tenant_str = getTenantNameByIndex(i);
 					BytesRef tenant_name = toBytesRef(tenant_str);
 					tenants[i] = db.openTenant(tenant_name);
 					std::string rangeEnd = "\xff";
@@ -339,7 +338,7 @@ int populate(Database db,
 				systemTx.reset();
 			}
 		} else {
-			std::string last_tenant_name = "tenant" + std::to_string(args.total_tenants - 1);
+			std::string last_tenant_name = getTenantNameByIndex(args.total_tenants - 1);
 			while (true) {
 				auto result = Tenant::getTenant(systemTx, toBytesRef(last_tenant_name));
 				const auto rc = waitAndHandleError(systemTx, result, "GET_TENANT");
@@ -363,7 +362,7 @@ int populate(Database db,
 	// and create transactions as needed
 	Tenant tenants[args.active_tenants];
 	for (int i = 0; i < args.active_tenants; ++i) {
-		std::string tenantStr = "tenant" + std::to_string(i);
+		std::string tenantStr = getTenantNameByIndex(i);
 		BytesRef tenant_name = toBytesRef(tenantStr);
 		tenants[i] = db.openTenant(tenant_name);
 	}
@@ -614,9 +613,7 @@ int runWorkload(Database db,
 	// and create transactions as needed
 	Tenant tenants[args.active_tenants];
 	for (int i = 0; i < args.active_tenants; ++i) {
-		std::string tenantStr = "tenant" + std::to_string(i);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		tenants[i] = db.openTenant(tenant_name);
+		tenants[i] = db.openTenant(toBytesRef(getTenantNameByIndex(i)));
 	}
 
 	/* main transaction loop */
@@ -1371,7 +1368,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "tls_certificate_file", required_argument, NULL, ARG_TLS_CERTIFICATE_FILE },
 			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
 			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
-			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
+			{ "authorization_public_key_id", required_argument, NULL, ARG_AUTHORIZATION_PUBLIC_KEY_ID },
+			{ "authorization_private_key_pem_file", required_argument, NULL, ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE },
 			{ "transaction_timeout", required_argument, NULL, ARG_TRANSACTION_TIMEOUT },
 			{ NULL, 0, NULL, 0 }
 		};
@@ -1627,35 +1625,15 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_TLS_CA_FILE:
 			args.tls_ca_file = std::string(optarg);
 			break;
-		case ARG_AUTHORIZATION_TOKEN_FILE: {
-			std::string tokenFilename(optarg);
-			std::ifstream ifs(tokenFilename);
+		case ARG_AUTHORIZATION_PUBLIC_KEY_ID:
+			args.public_key_id = optarg;
+			break;
+		case ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE: {
+			std::string pem_filename(optarg);
+			std::ifstream ifs(pem_filename);
 			std::ostringstream oss;
 			oss << ifs.rdbuf();
-			rapidjson::Document d;
-			d.Parse(oss.str().c_str());
-			if (d.HasParseError()) {
-				logr.error("Failed to parse authorization token JSON file '{}': {} at offset {}",
-				           tokenFilename,
-				           GetParseError_En(d.GetParseError()),
-				           d.GetErrorOffset());
-				return -1;
-			} else if (!d.IsObject()) {
-				logr.error("Authorization token JSON file '{}' must contain a JSON object", tokenFilename);
-				return -1;
-			}
-			for (auto itr = d.MemberBegin(); itr != d.MemberEnd(); ++itr) {
-				if (!itr->value.IsString()) {
-					logr.error("Token '{}' is not a string", itr->name.GetString());
-					return -1;
-				}
-				args.authorization_tokens.insert_or_assign(
-				    std::string(itr->name.GetString(), itr->name.GetStringLength()),
-				    std::string(itr->value.GetString(), itr->value.GetStringLength()));
-			}
-			logr.info("Added {} tenant authorization tokens to map from file '{}'",
-			          args.authorization_tokens.size(),
-			          tokenFilename);
+			args.private_key_pem = oss.str();
 		} break;
 		case ARG_TRANSACTION_TIMEOUT:
 			args.transaction_timeout = atoi(optarg);
@@ -1788,10 +1766,38 @@ int Arguments::validate() {
 		return -1;
 	}
 
-	if (!authorization_tokens.empty() && !tls_ca_file.has_value()) {
+	if (private_key_pem.has_value() && (tls_certificate_file.has_value() || tls_key_file.has_value())) {
+		logr.error(
+		    "--authorization_private_key_pem_file shall not be used with --tls_certificate_file and/or --tls_key_file, "
+		    "valid use of which would make the client trusted and therefore have full database access without tokens");
+		return -1;
+	}
+
+	if (private_key_pem.has_value() != public_key_id.has_value()) {
+		logr.error("--authorization_private_key_pem and --authorization_public_key_id must be both set or both unset");
+		return -1;
+	}
+
+	if (private_key_pem.has_value() && !tls_ca_file.has_value()) {
 		logr.warn("Authorization tokens are being used without explicit TLS CA file configured");
 	}
 	return 0;
+}
+
+bool Arguments::isAuthorizationEnabled() const noexcept {
+	return active_tenants > 0 && tls_ca_file.has_value() && private_key_pem.has_value();
+}
+
+void Arguments::generateAuthorizationTokens() {
+	assert(active_tenants > 0);
+	assert(public_key_id.has_value());
+	assert(private_key_pem.has_value());
+	authorization_tokens.clear();
+	auto stopwatch = Stopwatch(StartAtCtor{});
+	authorization_tokens =
+	    generateAuthorizationTokenMap(active_tenants, public_key_id.value(), private_key_pem.value());
+	assert(authorization_tokens.size() == active_tenants);
+	logr.info("Generated {} tokens in {:6.3f} seconds", active_tenants, toDoubleSeconds(stopwatch.stop().diff()));
 }
 
 void printStats(Arguments const& args, ThreadStatistics const* stats, double const duration_sec, FILE* fp) {
@@ -2487,8 +2493,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	rc = args.validate();
+
 	if (rc < 0)
 		return -1;
+
+	if (args.isAuthorizationEnabled()) {
+		args.generateAuthorizationTokens();
+	}
+
 	logr.setVerbosity(args.verbose);
 
 	if (args.mode == MODE_CLEAN) {

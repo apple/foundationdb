@@ -109,6 +109,8 @@ if(NOT WIN32)
     test/mako/process.hpp
     test/mako/shm.hpp
     test/mako/stats.hpp
+    test/mako/tenant.cpp
+    test/mako/tenant.hpp
     test/mako/time.hpp
     test/mako/utils.cpp
     test/mako/utils.hpp)
@@ -218,7 +220,7 @@ if(NOT WIN32)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
+  target_link_libraries(mako PRIVATE fdb_c tokensign fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90

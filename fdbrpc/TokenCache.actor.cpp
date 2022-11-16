@@ -216,7 +216,7 @@ bool TokenCache::validate(TenantNameRef name, StringRef token) {
 	    .detail("From", peer)                                                                                          \
 	    .detail("Reason", reason)                                                                                      \
 	    .detail("CurrentTime", currentTime)                                                                            \
-	    .detail("Token", token.toStringRef(arena).toStringView())
+	    .detail("Token", toStringRef(arena, token).toStringView())
 
 bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer) {
 	Arena arena;
@@ -406,7 +406,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
 					fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
 					           mutationDesc,
-					           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
+					           toStringRef(tmpArena, mutatedTokenSpec).toStringView());
 					ASSERT(false);
 				}
 			} else if (i == numBadMutations) {
@@ -475,7 +475,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
 	if (!TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print("Unexpected failed token validation, token spec: {}, now: {}\n",
-		           tokenSpec.toStringRef(arena).toStringView(),
+		           toStringRef(arena, tokenSpec).toStringView(),
 		           g_network->timer());
 		ASSERT(false);
 	}
@@ -483,7 +483,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	if (TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print(
 		    "Unexpected successful token validation after supposedly expiring in cache, token spec: {}, now: {}\n",
-		    tokenSpec.toStringRef(arena).toStringView(),
+		    toStringRef(arena, tokenSpec).toStringView(),
 		    g_network->timer());
 		ASSERT(false);
 	}

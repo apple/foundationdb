@@ -222,17 +222,20 @@ void appendField(fmt::memory_buffer& b, char const (&name)[NameLen], Optional<Fi
 	}
 }
 
-StringRef TokenRef::toStringRef(Arena& arena) {
+StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec) {
 	auto buf = fmt::memory_buffer();
-	fmt::format_to(std::back_inserter(buf), "alg={} kid={}", getAlgorithmName(algorithm), keyId.toStringView());
-	appendField(buf, "iss", issuer);
-	appendField(buf, "sub", subject);
-	appendField(buf, "aud", audience);
-	appendField(buf, "iat", issuedAtUnixTime);
-	appendField(buf, "exp", expiresAtUnixTime);
-	appendField(buf, "nbf", notBeforeUnixTime);
-	appendField(buf, "jti", tokenId);
-	appendField(buf, "tenants", tenants);
+	fmt::format_to(std::back_inserter(buf),
+	               "alg={} kid={}",
+	               getAlgorithmName(tokenSpec.algorithm),
+	               tokenSpec.keyId.toStringView());
+	appendField(buf, "iss", tokenSpec.issuer);
+	appendField(buf, "sub", tokenSpec.subject);
+	appendField(buf, "aud", tokenSpec.audience);
+	appendField(buf, "iat", tokenSpec.issuedAtUnixTime);
+	appendField(buf, "exp", tokenSpec.expiresAtUnixTime);
+	appendField(buf, "nbf", tokenSpec.notBeforeUnixTime);
+	appendField(buf, "jti", tokenSpec.tokenId);
+	appendField(buf, "tenants", tokenSpec.tenants);
 	auto str = new (arena) uint8_t[buf.size()];
 	memcpy(str, buf.data(), buf.size());
 	return StringRef(str, buf.size());
@@ -670,7 +673,7 @@ TEST_CASE("/fdbrpc/TokenSign/JWT/ToStringRef") {
 	StringRef tenants[2]{ "tenant1"_sr, "tenant2"_sr };
 	t.tenants = VectorRef<StringRef>(tenants, 2);
 	auto arena = Arena();
-	auto tokenStr = t.toStringRef(arena);
+	auto tokenStr = toStringRef(arena, t);
 	auto tokenStrExpected =
 	    "alg=ES256 kid=keyId iss=issuer sub=subject aud=[aud1,aud2,aud3] iat=123 exp=456 nbf=789 jti=tokenId tenants=[tenant1,tenant2]"_sr;
 	if (tokenStr != tokenStrExpected) {

@@ -24,10 +24,10 @@
 
 #include "flow/network.h"
 #include "flow/Arena.h"
-#include "flow/FastRef.h"
 #include "flow/FileIdentifier.h"
-#include "fdbrpc/TenantInfo.h"
 #include "flow/PKey.h"
+#include <string>
+#include <vector>
 
 namespace authz {
 
@@ -81,26 +81,34 @@ namespace authz::jwt {
 // Below we refer to S as "sign input"
 
 // This struct is not meant to be flatbuffer-serialized
-// This is a parsed, flattened view of T and signature
-struct TokenRef {
+// This is a parsed, flattened view of S and signature
+template <bool IsArenaBased>
+struct BasicTokenSpec {
+	using StringType = std::conditional_t<IsArenaBased, StringRef, std::string>;
+	template <class T>
+	using VectorType = std::conditional_t<IsArenaBased, VectorRef<T>, std::vector<T>>;
+	template <class T>
+	using OptionalType = std::conditional_t<IsArenaBased, Optional<T>, std::optional<T>>;
 	// header part ("typ": "JWT" implicitly enforced)
 	Algorithm algorithm; // alg
-	StringRef keyId; // kid
+	StringType keyId; // kid
 	// payload part
-	Optional<StringRef> issuer; // iss
-	Optional<StringRef> subject; // sub
-	Optional<VectorRef<StringRef>> audience; // aud
-	Optional<uint64_t> issuedAtUnixTime; // iat
-	Optional<uint64_t> expiresAtUnixTime; // exp
-	Optional<uint64_t> notBeforeUnixTime; // nbf
-	Optional<StringRef> tokenId; // jti
-	Optional<VectorRef<StringRef>> tenants; // tenants
+	OptionalType<StringType> issuer; // iss
+	OptionalType<StringType> subject; // sub
+	OptionalType<VectorType<StringType>> audience; // aud
+	OptionalType<uint64_t> issuedAtUnixTime; // iat
+	OptionalType<uint64_t> expiresAtUnixTime; // exp
+	OptionalType<uint64_t> notBeforeUnixTime; // nbf
+	OptionalType<StringType> tokenId; // jti
+	OptionalType<VectorType<StringType>> tenants; // tenants
 	// signature part
-	StringRef signature;
-
-	// print each non-signature field in non-JSON, human-readable format e.g. for trace
-	StringRef toStringRef(Arena& arena);
+	StringType signature;
 };
+
+using TokenRef = BasicTokenSpec<true>;
+
+// print each non-signature field in non-JSON, human-readable format e.g. for trace
+StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec);
 
 StringRef makeSignInput(Arena& arena, const TokenRef& tokenSpec);
 
