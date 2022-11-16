@@ -18,10 +18,7 @@
  * limitations under the License.
  */
 
-#include <cstdint>
-#include <limits>
 #include <algorithm>
-#include "fdbrpc/simulator.h"
 #include "fdbclient/MutationLogReader.actor.h"
 #include "fdbclient/Tuple.h"
 #include "fdbserver/workloads/ApiWorkload.h"
@@ -54,6 +51,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
+
+	// TODO: Currently this workload doesn't play well with MachineAttrition, but it probably should
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> start(Database const& cx) override {
 		// This workload is generated different from typical ApiWorkload. So don't use ApiWorkload::_start.

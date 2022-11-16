@@ -253,6 +253,8 @@ description is not currently required but encouraged.
             description="Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access."/>
     <Option name="raw_access" code="303"
             description="Allows this transaction to access the raw key-space when tenant mode is on."/>
+    <Option name="bypass_storage_quota" code="304"
+            description="Allows this transaction to bypass storage quota enforcement. Should only be used for transactions that directly or indirectly decrease the size of the tenant group's data."/>
     <Option name="debug_dump" code="400" 
             hidden="true" />
     <Option name="debug_retry_logging" code="401" paramType="String" paramDescription="Optional transaction name" />

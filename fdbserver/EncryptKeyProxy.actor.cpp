@@ -184,7 +184,7 @@ struct BlobMetadataCacheEntry {
 	explicit BlobMetadataCacheEntry(Standalone<BlobMetadataDetailsRef> metadataDetails)
 	  : metadataDetails(metadataDetails), creationTimeSec(now()) {}
 
-	bool isValid() { return (now() - creationTimeSec) < SERVER_KNOBS->BLOB_METADATA_CACHE_TTL; }
+	bool isValid() const { return (now() - creationTimeSec) < SERVER_KNOBS->BLOB_METADATA_CACHE_TTL; }
 };
 
 // TODO: Bound the size of the cache (implement LRU/LFU...)

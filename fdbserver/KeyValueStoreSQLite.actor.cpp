@@ -149,7 +149,22 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				auto firstBlock = pageNumber == 1 ? 0 : ((pageNumber - 1) * pageLen) / 4096,
+				     lastBlock = (pageNumber * pageLen) / 4096;
+				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, firstBlock));
+				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename && iter->second < lastBlock) {
+					severity = SevWarnAlways;
+				}
+				TraceEvent("CheckCorruption")
+				    .detail("Filename", filename)
+				    .detail("NextFile", iter->first)
+				    .detail("FirstBlock", firstBlock)
+				    .detail("LastBlock", lastBlock)
+				    .detail("NextBlock", iter->second);
+			}
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)

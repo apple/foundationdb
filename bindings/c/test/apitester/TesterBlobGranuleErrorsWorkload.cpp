@@ -47,6 +47,8 @@ private:
 		OP_LAST = OP_CANCEL_PURGE
 	};
 
+	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
+
 	// could add summarize too old and verify too old as ops if desired but those are lower value
 
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
