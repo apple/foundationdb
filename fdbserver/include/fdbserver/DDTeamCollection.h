@@ -459,6 +459,9 @@ protected:
 
 	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
 
+	// calculate minLoadBytes / avgLoadBytes among all healthy servers
+	double loadBytesBalanceRatio() const;
+
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.
 	Future<Void> updateNextWigglingStorageID();
