@@ -132,6 +132,10 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
+bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfiguration,
+                                        std::map<std::string, std::string> newConfig,
+                                        bool creating);
+
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
 
@@ -275,6 +279,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
+		if (!validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), m, creating)) {
+			return ConfigurationResult::INVALID_CONFIGURATION;
+		}
 	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
 		// Encryption data at-rest mode can be set only at the time of database creation
 		return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
@@ -315,6 +322,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						newConfig.set(kv.first, kv.second);
 					}
 					if (!newConfig.isValid()) {
+						return ConfigurationResult::INVALID_CONFIGURATION;
+					}
+					if (!validTenantAndEncryptionAtRestMode(oldConfig, m, creating)) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 

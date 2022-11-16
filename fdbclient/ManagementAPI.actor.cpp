@@ -206,10 +206,12 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			EncryptionAtRestMode mode;
 			if (value == "disabled") {
 				mode = EncryptionAtRestMode::DISABLED;
-			} else if (value == "aes_256_ctr") {
-				mode = EncryptionAtRestMode::AES_256_CTR;
+			} else if (value == "domain_aware") {
+				mode = EncryptionAtRestMode::DOMAIN_AWARE;
+			} else if (value == "cluster_aware") {
+				mode = EncryptionAtRestMode::CLUSTER_AWARE;
 			} else {
-				printf("Error: Only disabled|aes_256_ctr are valid for encryption_at_rest_mode.\n");
+				printf("Error: Only disabled|domain_aware|cluster_aware are valid for encryption_at_rest_mode.\n");
 				return out;
 			}
 			out[p + key] = format("%d", mode);
@@ -463,6 +465,146 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	return options.count(p + "log_replicas") == 1 && options.count(p + "log_anti_quorum") == 1 &&
 	       options.count(p + "storage_replicas") == 1 && options.count(p + "log_engine") == 1 &&
 	       options.count(p + "storage_engine") == 1;
+}
+
+bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfiguration,
+                                        std::map<std::string, std::string> newConfig,
+                                        bool creating) {
+	if (creating) {
+		if (newConfig.count(encryptionAtRestModeConfKey.toString()) != 0) {
+			// If the encrypt mode is being set compare it to the tenant mode being set
+			EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromValueRef(
+			    ValueRef(newConfig.find(encryptionAtRestModeConfKey.toString())->second));
+			TenantMode tenantMode = TenantMode::DISABLED;
+			if (newConfig.count(tenantModeConfKey.toString()) != 0) {
+				tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
+			}
+			TraceEvent(SevDebug, "EncryptAndTenantModes")
+			    .detail("EncryptMode", encryptMode.toString())
+			    .detail("TenantMode", tenantMode.toString());
+			if (encryptMode.mode == EncryptionAtRestMode::DISABLED) {
+				// In this case the tenantMode does not matter
+				return true;
+			}
+			if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && tenantMode != TenantMode::REQUIRED) {
+				// For domain aware encryption only the required tenant mode is currently supported
+				return false;
+			}
+			return true;
+		}
+	} else {
+		if (newConfig.count(tenantModeConfKey.toString()) != 0) {
+			ASSERT(oldConfiguration.present());
+			// If the tenant mode is being changed then make sure it obeys the current cluster encryption state
+			EncryptionAtRestMode encryptMode = oldConfiguration.get().encryptionAtRestMode;
+
+			if (encryptMode.mode == EncryptionAtRestMode::DISABLED) {
+				// In this case the tenantMode does not matter
+				return true;
+			}
+			TenantMode oldTenantMode = oldConfiguration.get().tenantMode;
+			TenantMode newTenantMode = TenantMode::fromValue(newConfig.find(tenantModeConfKey.toString())->second);
+			TraceEvent(SevDebug, "EncryptAndTenantModes")
+			    .detail("EncryptMode", encryptMode.toString())
+			    .detail("OldTenantMode", oldTenantMode.toString())
+			    .detail("NewTenantMode", newTenantMode.toString());
+			if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && newTenantMode != TenantMode::REQUIRED) {
+				// For domain aware encryption only the required tenant mode is currently supported
+				return false;
+			}
+			if ((oldTenantMode == TenantMode::OPTIONAL_TENANT || oldTenantMode == TenantMode::DISABLED) &&
+			    newTenantMode == TenantMode::REQUIRED) {
+				// TODO: Switching from optional/disabled tenant mode to required should be allowed if there is no
+				// non-tenant data
+				return false;
+			}
+			return true;
+		}
+	}
+	return true;
+}
+
+// unit test for changing encryption/tenant mode config options
+TEST_CASE("/ManagementAPI/ChangeConfig/TenantAndEncryptMode") {
+	std::map<std::string, std::string> newConfig;
+	std::string encryptModeKey = encryptionAtRestModeConfKey.toString();
+	std::string tenantModeKey = tenantModeConfKey.toString();
+	std::vector<TenantMode> tenantModes = { TenantMode::DISABLED, TenantMode::OPTIONAL_TENANT, TenantMode::REQUIRED };
+	std::vector<EncryptionAtRestMode> encryptionModes = { EncryptionAtRestMode::DISABLED,
+		                                                  EncryptionAtRestMode::CLUSTER_AWARE,
+		                                                  EncryptionAtRestMode::DOMAIN_AWARE };
+	// configure new test cases
+
+	// encryption disabled checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DISABLED);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// cluster aware encryption checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::CLUSTER_AWARE);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// domain aware encryption checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DOMAIN_AWARE);
+	newConfig[tenantModeKey] =
+	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
+	ASSERT(!validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), newConfig, true));
+	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
+	ASSERT(validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// no encrypt mode present
+	newConfig.erase(encryptModeKey);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// no tenant mode present
+	newConfig.erase(tenantModeKey);
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DOMAIN_AWARE);
+	ASSERT(!validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), newConfig, true));
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::CLUSTER_AWARE);
+	ASSERT(validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// change config test cases
+	DatabaseConfiguration oldConfig;
+
+	// encryption disabled checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
+
+	// domain aware encryption checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
+	oldConfig.tenantMode = TenantMode::REQUIRED;
+	newConfig[tenantModeKey] =
+	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
+	ASSERT(!validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
+	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
+	ASSERT(validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
+
+	// cluster aware encryption checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
+	// required tenant mode can switch to any other tenant mode with cluster aware encryption
+	oldConfig.tenantMode = TenantMode::REQUIRED;
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
+	// optional/disabled tenant mode can switch to optional/disabled tenant mode with cluster aware encryption
+	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	newConfig[tenantModeKey] =
+	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
+	ASSERT(validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
+	// optional/disabled tenant mode cannot switch to required tenant mode unless there is no non-tenant data
+	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
+	ASSERT(!validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
+
+	// no tenant mode present
+	newConfig.erase(tenantModeKey);
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	oldConfig.encryptionAtRestMode = deterministicRandom()->randomChoice(encryptionModes);
+	ASSERT(validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
+
+	return Void();
 }
 
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {

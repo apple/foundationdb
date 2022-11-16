@@ -1,5 +1,6 @@
 [configuration]
 tenantModes = ['required']
+encryptModes = ['domain_aware']
 
 [[knobs]]
 enable_encryption = true
