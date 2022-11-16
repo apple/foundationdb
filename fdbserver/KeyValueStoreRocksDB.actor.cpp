@@ -901,6 +901,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 	};
 
 	// To control the rocksdb::StatsLevel, use ROCKSDB_STATS_LEVEL knob.
+	// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
 	state std::vector<std::pair<const char*, uint32_t>> histogramStats = {
 		{ "CompactionTime", rocksdb::COMPACTION_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
 		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
@@ -970,6 +971,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		}
 
 		// None of the histogramStats are enabled unless the ROCKSDB_STATS_LEVEL > kExceptHistogramOrTimers(1)
+		// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
 		if (SERVER_KNOBS->ROCKSDB_STATS_LEVEL > rocksdb::kExceptHistogramOrTimers) {
 			for (auto& [name, histogram] : histogramStats) {
 				rocksdb::HistogramData histogram_data;
@@ -1253,15 +1255,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    std::make_pair(ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM.toString(), commitBeginTime - a.startTime));
 			}
 			Standalone<VectorRef<KeyRangeRef>> deletes;
-			DeleteVisitor dv(deletes, deletes.arena());
-			rocksdb::Status s = a.batchToCommit->Iterate(&dv);
-			if (!s.ok()) {
-				logRocksDBError(id, s, "CommitDeleteVisitor");
-				a.done.sendError(statusToError(s));
-				return;
+			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+				DeleteVisitor dv(deletes, deletes.arena());
+				rocksdb::Status s = a.batchToCommit->Iterate(&dv);
+				if (!s.ok()) {
+					logRocksDBError(id, s, "CommitDeleteVisitor");
+					a.done.sendError(statusToError(s));
+					return;
+				}
+				// If there are any range deletes, we should have added them to be deleted.
+				ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			}
-			// If there are any range deletes, we should have added them to be deleted.
-			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
+
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			if (SERVER_KNOBS->ROCKSDB_DISABLE_WAL_EXPERIMENTAL) {
@@ -1275,7 +1280,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// Request for batchToCommit bytes. If this request cannot be satisfied, the call is blocked.
 				rateLimiter->Request(a.batchToCommit->GetDataSize() /* bytes */, rocksdb::Env::IO_HIGH);
 			}
-			s = db->Write(options, a.batchToCommit.get());
+			rocksdb::Status s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			double currTime = timer_monotonic();
 			sharedState->dbWriteLatency.addMeasurement(currTime - writeBeginTime);

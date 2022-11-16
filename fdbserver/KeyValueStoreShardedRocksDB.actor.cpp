@@ -1886,21 +1886,23 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		                         rocksdb::DB* db,
 		                         std::vector<std::pair<uint32_t, KeyRange>>* deletes,
 		                         bool sample) {
-			DeleteVisitor dv(deletes);
-			rocksdb::Status s = batch->Iterate(&dv);
-			if (!s.ok()) {
-				logRocksDBError(s, "CommitDeleteVisitor");
-				return s;
-			}
+			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+				DeleteVisitor dv(deletes);
+				rocksdb::Status s = batch->Iterate(&dv);
+				if (!s.ok()) {
+					logRocksDBError(s, "CommitDeleteVisitor");
+					return s;
+				}
 
-			// If there are any range deletes, we should have added them to be deleted.
-			ASSERT(!deletes->empty() || !batch->HasDeleteRange());
+				// If there are any range deletes, we should have added them to be deleted.
+				ASSERT(!deletes->empty() || !batch->HasDeleteRange());
+			}
 
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
 			double writeBeginTime = sample ? timer_monotonic() : 0;
-			s = db->Write(options, batch);
+			rocksdb::Status s = db->Write(options, batch);
 			if (sample) {
 				rocksDBMetrics->getWriteHistogram()->sampleSeconds(timer_monotonic() - writeBeginTime);
 			}
