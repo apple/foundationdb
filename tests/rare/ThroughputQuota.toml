@@ -4,15 +4,10 @@ testTitle='ThroughputQuotaTest'
   [[test.workload]]
   testName='ThroughputQuota'
   transactionTag='a'
-  totalQuota=1.0
-
-  [[test.workload]]
-  testName='Status'
-  enableLatencyBands = true
-  testDuration = 60.0
+  totalQuota=16384
 
   [[test.workload]]
   testName = 'Cycle'
-  transactionsPerSecond = 2500.0
-  testDuration = 60.0
+  transactionsPerSecond = 250.0
+  testDuration = 30.0
   expectedRate = 0

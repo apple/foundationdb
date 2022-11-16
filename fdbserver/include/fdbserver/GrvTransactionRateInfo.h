@@ -55,7 +55,7 @@ public:
 
 	// Updates the budget to accumulate any extra capacity available or remove any excess that was used.
 	// Call at the end of a release window.
-	void endReleaseWindow(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed);
+	void endReleaseWindow(int64_t numStarted, bool queueEmpty, double elapsed);
 
 	// Smoothly sets rate. If currently disabled, reenable
 	void setRate(double rate);

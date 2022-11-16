@@ -43,6 +43,12 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// This test asserts that watches fire within a certain version range. Attrition will make this assertion fail
+		// since it can cause recoveries which will bump the cluster version significantly
+		out.emplace("Attrition");
+	}
+
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0)
 			return _setup(cx, this);
