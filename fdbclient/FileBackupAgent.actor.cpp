@@ -1152,7 +1152,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
 			state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
-			if (g_network && g_simulator->isSimulated()) {
+			if (g_network && g_network->isSimulated()) {
 				tenantCache = makeReference<TenantEntryCache<Void>>(cx.get(), TenantEntryCacheRefreshMode::WATCH);
 				wait(tenantCache.get()->init());
 			}

@@ -357,7 +357,7 @@ struct IndexBlockRef {
 			// Compressing indexBlock will need offset recalculation (circular depedency). IndexBlock size is bounded by
 			// number of chunks and sizeof(KeyPrefix), 'not' compressing IndexBlock shouldn't cause significant file
 			// size bloat.
-
+			CODE_PROBE(true, "encrypting index block");
 			ASSERT(cipherKeysCtx.present());
 			encrypt(cipherKeysCtx.get(), arena);
 		} else {
@@ -497,6 +497,7 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		if (cipherKeysCtx.present()) {
+			CODE_PROBE(true, "encrypting granule chunk");
 			IndexBlobGranuleFileChunkRef::encrypt(cipherKeysCtx.get(), chunkRef, arena);
 		}
 
