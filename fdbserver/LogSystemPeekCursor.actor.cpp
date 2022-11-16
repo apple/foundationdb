@@ -451,7 +451,7 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor* self) {
+ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor const* self) {
 	loop {
 		choose {
 			when(wait(self->interf->get().present()
@@ -471,7 +471,7 @@ ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor* self) {
 	}
 }
 
-Future<Void> ILogSystem::ServerPeekCursor::onFailed() {
+Future<Void> ILogSystem::ServerPeekCursor::onFailed() const {
 	return serverPeekOnFailed(this);
 }
 
@@ -757,7 +757,7 @@ Future<Void> ILogSystem::MergedPeekCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> ILogSystem::MergedPeekCursor::onFailed() {
+Future<Void> ILogSystem::MergedPeekCursor::onFailed() const {
 	ASSERT(false);
 	return Never();
 }
@@ -1114,7 +1114,7 @@ Future<Void> ILogSystem::SetPeekCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> ILogSystem::SetPeekCursor::onFailed() {
+Future<Void> ILogSystem::SetPeekCursor::onFailed() const {
 	ASSERT(false);
 	return Never();
 }
@@ -1226,7 +1226,7 @@ Future<Void> ILogSystem::MultiCursor::getMore(TaskPriority taskID) {
 	return cursors.back()->getMore(taskID);
 }
 
-Future<Void> ILogSystem::MultiCursor::onFailed() {
+Future<Void> ILogSystem::MultiCursor::onFailed() const {
 	return cursors.back()->onFailed();
 }
 
@@ -1503,7 +1503,7 @@ Future<Void> ILogSystem::BufferedCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> ILogSystem::BufferedCursor::onFailed() {
+Future<Void> ILogSystem::BufferedCursor::onFailed() const {
 	ASSERT(false);
 	return Never();
 }

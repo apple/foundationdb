@@ -2175,7 +2175,7 @@ void DatabaseContext::removeWatch() {
 	ASSERT(outstandingWatches >= 0);
 }
 
-Future<Void> DatabaseContext::onConnected() {
+Future<Void> DatabaseContext::onConnected() const {
 	return connected;
 }
 
@@ -2802,26 +2802,26 @@ void GetRangeLimits::decrement(MappedKeyValueRef const& data) {
 }
 
 // True if either the row or byte limit has been reached
-bool GetRangeLimits::isReached() {
+bool GetRangeLimits::isReached() const {
 	return rows == 0 || (bytes == 0 && minRows == 0);
 }
 
 // True if data would cause the row or byte limit to be reached
-bool GetRangeLimits::reachedBy(VectorRef<KeyValueRef> const& data) {
+bool GetRangeLimits::reachedBy(VectorRef<KeyValueRef> const& data) const {
 	return (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED && data.size() >= rows) ||
 	       (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
 	        (int)data.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * data.size() >= bytes && data.size() >= minRows);
 }
 
-bool GetRangeLimits::hasByteLimit() {
+bool GetRangeLimits::hasByteLimit() const {
 	return bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 }
 
-bool GetRangeLimits::hasRowLimit() {
+bool GetRangeLimits::hasRowLimit() const {
 	return rows != GetRangeLimits::ROW_LIMIT_UNLIMITED;
 }
 
-bool GetRangeLimits::hasSatisfiedMinRows() {
+bool GetRangeLimits::hasSatisfiedMinRows() const {
 	return hasByteLimit() && minRows == 0;
 }
 
@@ -5953,6 +5953,7 @@ void TransactionOptions::clear() {
 	useGrvCache = false;
 	skipGrvCache = false;
 	rawAccess = false;
+	bypassStorageQuota = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -6694,6 +6695,9 @@ Future<Void> Transaction::commitMutations() {
 		if (trState->options.firstInBatch) {
 			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
 		}
+		if (trState->options.bypassStorageQuota) {
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_BYPASS_STORAGE_QUOTA;
+		}
 		if (trState->options.reportConflictingKeys) {
 			tr.transaction.report_conflicting_keys = true;
 		}
@@ -6970,6 +6974,10 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		trState->options.rawAccess = true;
+		break;
+
+	case FDBTransactionOptions::BYPASS_STORAGE_QUOTA:
+		trState->options.bypassStorageQuota = true;
 		break;
 
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:

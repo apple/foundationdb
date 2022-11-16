@@ -1005,7 +1005,7 @@ public:
 	// investigate, but preventing a new storage process from replacing the TSS on the worker. It will still get removed
 	// from the cluster if it falls behind on the mutation stream, or if its tss pair gets removed and its tag is no
 	// longer valid.
-	bool isTSSInQuarantine() { return tssPairID.present() && tssInQuarantine; }
+	bool isTSSInQuarantine() const { return tssPairID.present() && tssInQuarantine; }
 
 	void startTssQuarantine() {
 		if (!tssInQuarantine) {
@@ -1055,6 +1055,11 @@ public:
 	                                      // when the disk permits
 	NotifiedVersion oldestVersion; // See also storageVersion()
 	NotifiedVersion durableVersion; // At least this version will be readable from storage after a power failure
+	// In the event of the disk corruption, sqlite and redwood will either not recover, recover to durableVersion
+	// but be unable to read some data, or they could lose the last commit. If we lose the last commit, the storage
+	// might not be able to peek from the tlog (depending on when it sent the last pop). So this version just keeps
+	// track of the version we committed to the storage engine before we did commit durableVersion.
+	Version storageMinRecoverVersion = 0;
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
 	NotifiedVersion knownCommittedVersion;
@@ -1509,6 +1514,7 @@ public:
 		desiredOldestVersion = ver;
 		oldestVersion = ver;
 		durableVersion = ver;
+		storageMinRecoverVersion = ver;
 		lastVersionWithData = ver;
 		restoredVersion = ver;
 
@@ -5687,6 +5693,7 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 	data->freeable.erase(data->freeable.begin(), data->freeable.lower_bound(nextDurableVersion));
 
 	Future<Void> checkFatalError = data->otherError.getFuture();
+	data->storageMinRecoverVersion = data->durableVersion.get();
 	data->durableVersion.set(nextDurableVersion);
 	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
 	if (checkFatalError.isReady())
@@ -9449,7 +9456,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
-		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
+		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
 
 		if (removeKVSRanges) {
 			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
@@ -9591,7 +9598,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		// loaded.
 		state double beforeSSDurableVersionUpdate = now();
 		wait(data->durableVersionLock.take());
-		data->popVersion(data->durableVersion.get() + 1);
+		data->popVersion(data->storageMinRecoverVersion + 1);
 
 		while (!changeDurableVersion(data, newOldestVersion)) {
 			if (g_network->check_yield(TaskPriority::UpdateStorage)) {
@@ -10846,7 +10853,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						}
 						self->logCursor = self->logSystem->peekSingle(
 						    self->thisServerID, self->version.get() + 1, self->tag, self->history);
-						self->popVersion(self->durableVersion.get() + 1, true);
+						self->popVersion(self->storageMinRecoverVersion + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
 					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys

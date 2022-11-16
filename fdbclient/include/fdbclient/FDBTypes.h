@@ -709,15 +709,15 @@ struct GetRangeLimits {
 	void decrement(MappedKeyValueRef const& data);
 
 	// True if either the row or byte limit has been reached
-	bool isReached();
+	bool isReached() const;
 
 	// True if data would cause the row or byte limit to be reached
-	bool reachedBy(VectorRef<KeyValueRef> const& data);
+	bool reachedBy(VectorRef<KeyValueRef> const& data) const;
 
-	bool hasByteLimit();
-	bool hasRowLimit();
+	bool hasByteLimit() const;
+	bool hasRowLimit() const;
 
-	bool hasSatisfiedMinRows();
+	bool hasSatisfiedMinRows() const;
 	bool isValid() const {
 		return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED) && (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED) &&
 		       minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED);
