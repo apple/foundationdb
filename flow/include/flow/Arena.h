@@ -639,6 +639,16 @@ public:
 		return eatAny(StringRef((const uint8_t*)sep, strlen(sep)), foundSeparator);
 	}
 
+	uint8_t back() {
+		UNSTOPPABLE_ASSERT(!empty());
+		return data[length - 1];
+	}
+
+	void popBack() {
+		UNSTOPPABLE_ASSERT(!empty());
+		--length;
+	}
+
 	// Copies string contents to dst and returns a pointer to the next byte after
 	uint8_t* copyTo(uint8_t* dst) const {
 		if (length > 0) {

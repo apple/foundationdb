@@ -51,25 +51,26 @@ Those fields are marked as **NOT required**.
    :align: left
    :widths: auto
 
-   =============== =========== ======== ==================================================== ================================================================================
-   Containing Part Field Name  Required Purpose                                              Reference
-   =============== =========== ======== ==================================================== ================================================================================
-   Header          ``typ``     Yes      Type of JSON Web Signature. Must be ``JWT``.         `RFC7519 Section 5.1 <https://www.rfc-editor.org/rfc/rfc7519#section-5.1>`_
-   Header          ``alg``     Yes      Algorithm used to generate the signature. Only       `RFC7515 Section 4.1.1 <https://www.rfc-editor.org/rfc/rfc7515#section-4.1.1>`_
+   =============== =========== ======== ======================================================= ================================================================================
+   Containing Part Field Name  Required Purpose                                                 Reference
+   =============== =========== ======== ======================================================= ================================================================================
+   Header          ``typ``     Yes      Type of JSON Web Signature. Must be ``JWT``.            `RFC7519 Section 5.1 <https://www.rfc-editor.org/rfc/rfc7519#section-5.1>`_
+   Header          ``alg``     Yes      Algorithm used to generate the signature. Only          `RFC7515 Section 4.1.1 <https://www.rfc-editor.org/rfc/rfc7515#section-4.1.1>`_
                                         ``ES256`` and ``RS256`` are supported.
                                         Must match the ``alg`` attribute of public key.
-   Header          ``kid``     Yes      Name of public key with which to verify the token.   `RFC7515 Section 4.1.4 <https://www.rfc-editor.org/rfc/rfc7515#section-4.1.4>`_
+   Header          ``kid``     Yes      Name of public key with which to verify the token.      `RFC7515 Section 4.1.4 <https://www.rfc-editor.org/rfc/rfc7515#section-4.1.4>`_
                                         Must match the ``kid`` attribute of public key.
-   Claim           ``exp``     Yes      Timestamp after which token is not accepted.         `RFC7519 Section 4.1.4 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.4>`_
-   Claim           ``nbf``     Yes      Timestamp before which token is not accepted.        `RFC7519 Section 4.1.5 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.5>`_
-   Claim           ``iat``     Yes      Timestamp at which token was issued.                 `RFC7519 Section 4.1.6 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.6>`_
-   Claim           ``tenants`` Yes      Tenants names for which token holder is authorized.  N/A
-                                        Must be an array.
-   Claim           ``iss``     No       Issuer of the token.                                 `RFC7519 Section 4.1.1 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.1>`_
-   Claim           ``sub``     No       Subject of the token.                                `RFC7519 Section 4.1.2 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.2>`_
-   Claim           ``aud``     No       Intended recipients of the token. Must be an array.  `RFC7519 Section 4.1.3 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.3>`_
-   Claim           ``jti``     No       String that uniquely identifies a token.             `RFC7519 Section 4.1.7 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.7>`_
-   =============== =========== ======== ==================================================== ================================================================================
+   Claim           ``exp``     Yes      Timestamp after which token is not accepted.            `RFC7519 Section 4.1.4 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.4>`_
+   Claim           ``nbf``     Yes      Timestamp before which token is not accepted.           `RFC7519 Section 4.1.5 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.5>`_
+   Claim           ``iat``     Yes      Timestamp at which token was issued.                    `RFC7519 Section 4.1.6 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.6>`_
+   Claim           ``tenants`` Yes      One or more ``Base64``-encoded (cf. ``base64url``)      N/A
+                                        tenant name byte strings for which the token holder is
+                                        authorized. Must be an array.
+   Claim           ``iss``     No       Issuer of the token.                                    `RFC7519 Section 4.1.1 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.1>`_
+   Claim           ``sub``     No       Subject of the token.                                   `RFC7519 Section 4.1.2 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.2>`_
+   Claim           ``aud``     No       Intended recipients of the token. Must be an array.     `RFC7519 Section 4.1.3 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.3>`_
+   Claim           ``jti``     No       String that uniquely identifies a token.                `RFC7519 Section 4.1.7 <https://www.rfc-editor.org/rfc/rfc7519#section-4.1.7>`_
+   =============== =========== ======== ======================================================= ================================================================================
 
 Public keys with which to verify the token must be serialized in `JWK Set <https://www.rfc-editor.org/rfc/rfc7517#section-5>`_ format and stored in a file.
 The location of the key set file must be passed as command line argument ``--authorization-public-key-file`` to the ``fdbserver`` executable.
