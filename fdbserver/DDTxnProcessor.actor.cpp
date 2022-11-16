@@ -984,6 +984,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	// remove destination servers from source servers
 	ASSERT_EQ(srcTeams.size(), 0);
 	for (auto& id : srcTeams.front().servers) {
+		// the only caller moveKeys will always make sure the UID are sorted
 		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
 			mgs->allServers.at(id).removeShard(params.keys);
 		}

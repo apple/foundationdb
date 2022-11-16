@@ -167,7 +167,7 @@ public:
 	}
 };
 
-bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardStatus status) {
+bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardStatus status) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty()); // at least the range is allKeys
 
@@ -178,7 +178,7 @@ bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardS
 	return true;
 }
 
-bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) {
+bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty()); // at least the range is allKeys
 

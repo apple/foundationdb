@@ -319,7 +319,10 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 		TraceEvent(SevDebug, relocateShardInterval.end(), relocateShardInterval.pairID);
-		self->mock->setupMockGlobalState(self->realInitDD); // in case SS remove or recruit
+		// The simulator have chances generating a scenario when after the first setupMockGlobalState call, there is a
+		// new storage server join the cluster, there's no way for mock DD to know the new storage server without
+		// calling setupMockGlobalState again.
+		self->mock->setupMockGlobalState(self->realInitDD);
 		return Void();
 	}
 

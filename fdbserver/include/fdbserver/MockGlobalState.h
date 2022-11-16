@@ -107,8 +107,8 @@ public:
 
 	decltype(serverKeys)::Ranges getAllRanges() { return serverKeys.ranges(); }
 
-	bool allShardStatusEqual(const KeyRangeRef& range, MockShardStatus status);
-	bool allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status);
+	bool allShardStatusEqual(const KeyRangeRef& range, MockShardStatus status) const;
+	bool allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) const;
 
 	// change the status of range. This function may result in split to make the shard boundary align with range.begin
 	// and range.end. In this case, if restrictSize==true, the sum of the split shard size is strictly equal to the old
