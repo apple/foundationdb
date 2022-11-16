@@ -8823,7 +8823,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
-					if (g_simulator && g_simulator->isSimulated() &&
+					if (g_network && g_network->isSimulated() &&
 					    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
 					    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
 					      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
@@ -8982,7 +8982,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else {
 				MutationRef msg;
 				rd >> msg;
-				if (g_simulator && g_simulator->isSimulated() &&
+				if (g_network && g_network->isSimulated() &&
 				    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
 				    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
 				      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {

@@ -36,7 +36,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 
-#include "fdbrpc/simulator.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
@@ -1282,7 +1281,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		ASSERT(snapshotVersion < version);
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
-		if (g_simulator && g_simulator->isSimulated() &&
+		if (g_network && g_network->isSimulated() &&
 		    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) &&
 		    !snapshotF.cipherKeysMeta.present()) {
 			ASSERT(false);
@@ -1315,7 +1314,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 			deltaF = files.deltaFiles[deltaIdx];
 
-			if (g_simulator && g_simulator->isSimulated() &&
+			if (g_network && g_network->isSimulated() &&
 			    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) &&
 			    !deltaF.cipherKeysMeta.present()) {
 				ASSERT(false);
@@ -3780,7 +3779,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (g_simulator && g_simulator->isSimulated() &&
+						if (g_network && g_network->isSimulated() &&
 						    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) && !encrypted) {
 							ASSERT(false);
 						}
@@ -3802,7 +3801,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (g_simulator && g_simulator->isSimulated() &&
+						if (g_network && g_network->isSimulated() &&
 						    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) && !encrypted) {
 							ASSERT(false);
 						}
