@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/network.h"
 #include <utility>
@@ -1357,6 +1358,7 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 //   lock.release();  // Next waiter will get the lock, OR
 //   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
 //   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
+
 struct FlowMutex {
 	FlowMutex() { lastPromise.send(Void()); }
 
@@ -1373,13 +1375,25 @@ struct FlowMutex {
 
 	Future<Lock> take() {
 		Lock newLock;
-		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
+		Future<Lock> f = lastPromise.isSet() ? newLock : tagAndRelease(lastPromise.getFuture(), newLock);
 		lastPromise = newLock.promise;
 		return f;
 	}
 
 private:
 	Promise<Void> lastPromise;
+
+	ACTOR static Future<FlowMutex::Lock> tagAndRelease(Future<Void> future, FlowMutex::Lock lock) {
+		try {
+			wait(future);
+			return lock;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				lock.release();
+			}
+			throw;
+		}
+	}
 };
 
 ACTOR template <class T, class V>
