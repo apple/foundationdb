@@ -533,14 +533,19 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 				// kills logRouterPeekStream actor, otherwise that actor becomes stuck
 				throw operation_obsolete();
 			}
-			replyPromise.send(Never());
-			if (reqSequence.present()) {
-				auto& trackerData = self->peekTracker[peekId];
-				auto& sequenceData = trackerData.sequence_version[sequence + 1];
-				if (!sequenceData.isSet()) {
-					sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
-				}
+			if (std::is_same<PromiseType, ReplyPromise<TLogPeekReply>>::value) {
+				replyPromise.sendError(operation_obsolete());
+			} else {
+				replyPromise.send(Never());
 			}
+
+			/*if (reqSequence.present()) {
+			    auto& trackerData = self->peekTracker[peekId];
+			    auto& sequenceData = trackerData.sequence_version[sequence + 1];
+			    if (!sequenceData.isSet()) {
+			        sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
+			    }
+			}*/
 			return Void();
 		}
 
