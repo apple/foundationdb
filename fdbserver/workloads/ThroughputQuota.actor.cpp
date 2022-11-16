@@ -26,8 +26,8 @@
 // This workload sets the throughput quota of a tag during the setup phase
 class ThroughputQuotaWorkload : public TestWorkload {
 	TransactionTag transactionTag;
-	double reservedQuota{ 0.0 };
-	double totalQuota{ 0.0 };
+	int64_t reservedQuota{ 0 };
+	int64_t totalQuota{ 0 };
 
 	ACTOR static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);

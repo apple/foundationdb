@@ -353,8 +353,9 @@ public:
 
 	int apiVersionAtLeast(int minVersion) const { return apiVersion.version() >= minVersion; }
 
-	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
-	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
+	Future<Void> onConnected()
+	    const; // Returns after a majority of coordination servers are available and have reported a
+	           // leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<IClusterConnectionRecord> getConnectionRecord();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.

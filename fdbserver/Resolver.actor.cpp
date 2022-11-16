@@ -368,7 +368,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				                       isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys
 				                                                                                      : nullptr);
 			}
-			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
+			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery", probe::decoration::rare);
 		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();

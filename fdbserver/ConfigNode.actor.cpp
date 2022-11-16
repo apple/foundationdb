@@ -316,7 +316,7 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getConfigClasses(ConfigNodeImpl* self, ConfigTransactionGetConfigClassesRequest req) {
 		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
-			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode");
+			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode", probe::decoration::rare);
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -360,7 +360,7 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getKnobs(ConfigNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
 		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
-			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode");
+			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode", probe::decoration::rare);
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}

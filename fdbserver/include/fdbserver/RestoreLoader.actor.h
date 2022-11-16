@@ -56,7 +56,7 @@ public:
 
 	void operator=(int newState) override { vbState = newState; }
 
-	int get() override { return vbState; }
+	int get() const override { return vbState; }
 };
 
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
@@ -193,15 +193,15 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	~RestoreLoaderData() override = default;
 
-	std::string describeNode() override {
+	std::string describeNode() const override {
 		std::stringstream ss;
 		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str() << "] [NodeIndex:" << std::to_string(nodeIndex)
 		   << "]";
 		return ss.str();
 	}
 
-	int getVersionBatchState(int batchIndex) final {
-		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
+	int getVersionBatchState(int batchIndex) const final {
+		auto item = batch.find(batchIndex);
 		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return LoaderVersionBatchState::INVALID;
 		} else {
