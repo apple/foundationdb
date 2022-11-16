@@ -199,7 +199,6 @@ struct EKPGetBaseCipherKeysRequestInfo_Hash {
 
 struct EKPGetLatestBaseCipherKeysRequest {
 	constexpr static FileIdentifier file_identifier = 1910123;
-	Arena arena;
 	std::vector<EncryptCipherDomainId> encryptDomainIds;
 	Optional<UID> debugId;
 	ReplyPromise<EKPGetLatestBaseCipherKeysReply> reply;
@@ -209,7 +208,7 @@ struct EKPGetLatestBaseCipherKeysRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainIds, debugId, reply, arena);
+		serializer(ar, encryptDomainIds, debugId, reply);
 	}
 };
 

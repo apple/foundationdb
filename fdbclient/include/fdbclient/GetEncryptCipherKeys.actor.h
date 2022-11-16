@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 #pragma once
+#include "flow/EncryptUtils.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H)
 #define FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H
 #include "fdbclient/GetEncryptCipherKeys.actor.g.h"
@@ -280,9 +281,7 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
                                                                     BlobCipherMetrics::UsageType usageType) {
-	std::unordered_set<EncryptCipherDomainId> domainIds;
-	domainIds.emplace(domainId);
-	domainIds.emplace(ENCRYPT_HEADER_DOMAIN_ID);
+	std::unordered_set<EncryptCipherDomainId> domainIds = { domainId, ENCRYPT_HEADER_DOMAIN_ID };
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getLatestEncryptCipherKeys(db, domainIds, usageType));
 	ASSERT(cipherKeys.count(domainId) > 0);
