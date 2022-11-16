@@ -328,6 +328,6 @@ Reference<TransactionWrapper> ApiWorkload::createTransaction() {
 	return transactionFactory->createTransaction();
 }
 
-bool ApiWorkload::hasFailed() {
+bool ApiWorkload::hasFailed() const {
 	return !success;
 }

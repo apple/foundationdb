@@ -39,7 +39,6 @@ template <>
 struct CycleMembers<true> {
 	Arena arena;
 	TenantName tenant;
-	authz::jwt::TokenRef token;
 	Standalone<StringRef> signedToken;
 	bool useToken;
 };

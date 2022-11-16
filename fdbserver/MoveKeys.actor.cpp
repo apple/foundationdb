@@ -802,11 +802,13 @@ ACTOR Future<Void> waitForShardReady(StorageServerInterface server,
 		try {
 			GetShardStateReply rep =
 			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
+			TraceEvent("GetShardStateReadyDD").detail("RepVersion", rep.first).detail("MinVersion", rep.second).log();
 			if (rep.first >= minVersion) {
 				return Void();
 			}
 			wait(delayJittered(SERVER_KNOBS->SHARD_READY_DELAY, TaskPriority::MoveKeys));
 		} catch (Error& e) {
+			TraceEvent("GetShardStateReadyError").error(e).log();
 			if (e.code() != error_code_timed_out) {
 				if (e.code() != error_code_broken_promise)
 					throw e;
@@ -1699,7 +1701,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				state std::vector<UID> newDestinations;
 				std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 				for (const UID& id : destServers) {
-					newDestinations.push_back(id);
+					if (!hasRemote || !completeSrcSet.count(id)) {
+						newDestinations.push_back(id);
+					}
 				}
 
 				state std::vector<StorageServerInterface> storageServerInterfaces;
@@ -1743,7 +1747,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				TraceEvent(SevVerbose, "FinishMoveShardsWaitedServers", relocationIntervalId)
 				    .detail("DataMoveID", dataMoveId)
-				    .detail("ReadyServers", describe(readyServers));
+				    .detail("ReadyServers", describe(readyServers))
+				    .detail("NewDestinations", describe(newDestinations));
 
 				if (readyServers.size() == newDestinations.size()) {
 
