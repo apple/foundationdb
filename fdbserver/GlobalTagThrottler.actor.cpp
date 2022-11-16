@@ -704,7 +704,10 @@ public:
 	             std::vector<int> const& storageServerIndices,
 	             OpType opType) {
 		if (storageServerIndices.empty()) {
-			auto const costPerSS = CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE * (pagesPerSecond / storageServers.size());
+			auto costPerSS = CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE * (pagesPerSecond / storageServers.size());
+			if (opType == OpType::WRITE) {
+				costPerSS *= CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+			}
 			for (auto& storageServer : storageServers) {
 				if (opType == OpType::READ) {
 					storageServer.addReadCost(tag, costPerSS);
