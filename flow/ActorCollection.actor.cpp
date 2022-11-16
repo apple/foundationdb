@@ -122,3 +122,19 @@ struct Traceable<std::pair<T, U>> {
 		return result;
 	}
 };
+
+void forceLinkActorCollectionTests() {}
+
+// The above implementation relies on the behavior that fulfilling a promise
+// that another when clause in the same choose block is waiting on is not fired synchronously.
+TEST_CASE("/flow/actorCollection/chooseWhen") {
+	state Promise<Void> promise;
+	choose {
+		when(wait(delay(0))) { promise.send(Void()); }
+		when(wait(promise.getFuture())) {
+			// Should be cancelled, since another when clause in this choose block has executed
+			ASSERT(false);
+		}
+	}
+	return Void();
+}
