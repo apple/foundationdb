@@ -19,13 +19,40 @@
  */
 
 import Flow
-import FDBServer
 import flow_swift
+import FlowFutureSupport
+import flow_swift_future
+import FDBClient
+import fdbclient_swift
+
+func swift_flow_voidFuture_await() async throws {
+    pprint("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
+    defer { pprint("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
+
+    let p = PromiseVoid()
+    var voidF = p.__getFutureUnsafe()
+
+    var void = Flow.Void()
+    p.send(&void)
+    try await voidF.waitValue
+}
+
+func swift_flow_cIntFuture_await() async throws {
+    pprint("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
+    defer { pprint("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
+
+    let p = PromiseCInt()
+    var intF = p.__getFutureUnsafe()
+
+    var value: CInt = 42
+    p.send(&value)
+    let got = try await intF.waitValue
+    precondition(got == value, "\(got) did not equal \(value)")
+}
 
 func swift_flow_task_await() async throws {
     pprint("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
     defer { pprint("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
-
 
     let p: PromiseCInt = PromiseCInt()
     var f: FutureCInt = p.__getFutureUnsafe() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
@@ -40,16 +67,16 @@ func swift_flow_task_await() async throws {
     pprint("without wait, f.get(): \(f.__getUnsafe().pointee)")
 
     pprint("wait...")
-    let value: CInt? = try? await f.waitValue
+    let value: CInt = try await f.waitValue
     assertOnNet2EventLoop() // hopped back to the right executor, yay
     precondition(f.isReady(), "Future should be ready by now")
 
-    pprint("await value = \(value ?? -1)")
+    pprint("await value = \(value)")
     precondition((value ?? -1) == num, "Value obtained from await did not match \(num), was: \(String(describing: value))!")
 
     pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
     let p2 = PromiseCInt()
-    var f2 = p2.__getFutureUnsafe() // FIXME: Make these not unsafe...
+    var f2: FutureCInt = p2.__getFutureUnsafe() // FIXME: Make these not unsafe...
     let num2 = 2222
     Task { [num2] in
         assertOnNet2EventLoop()

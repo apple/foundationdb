@@ -47,7 +47,7 @@ public func figureVersion(current: Version,
 
 extension NotifiedVersionValue {
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
-        var f = self.whenAtLeast(limit)
+        var f: FutureVoid = self.whenAtLeast(limit)
         let _ = try await f.waitValue
     }
 }

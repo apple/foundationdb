@@ -25,7 +25,7 @@ extension FutureCInt: _FlowFutureOps {
     public typealias _T = CInt
 
     // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
-    public var waitValue: _T {
+    public var waitValue: CInt {
         mutating get async throws {
             guard !self.isReady() else {
                 // FIXME(flow): handle isError and cancellation
@@ -57,7 +57,7 @@ extension FutureVoid: _FlowFutureOps {
     public typealias _T = Void
 
     // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
-    public var waitValue: _T {
+    public var waitValue: Void {
         mutating get async throws {
             guard !self.isReady() else {
                 // FIXME(flow): handle isError and cancellation
@@ -82,6 +82,3 @@ extension FutureVoid: _FlowFutureOps {
         }
     }
 }
-
-// ==== ---------------------------------------------------------------------------------------------------------------
-

@@ -67,6 +67,7 @@ include(SwiftToCXXInterop)
 generate_cxx_compat_header(fdbserver_swift "FDBServer")
 
 add_dependencies(fdbserver_swift flow_swift)
+add_dependencies(fdbserver_swift flow_actors)
 add_dependencies(fdbserver_swift flow_swift_future)
 add_dependencies(fdbserver_swift fdbclient_swift)
 add_dependencies(fdbserver_swift fdbserver_actors)

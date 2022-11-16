@@ -20,6 +20,10 @@
 
 import Flow
 import flow_swift
+import FlowFutureSupport
+import flow_swift_future
+import FDBClient
+import fdbclient_swift
 
 // Don't do this at home;
 // We assume we run single-threadedly in Net2 in these tests,
@@ -32,8 +36,9 @@ public func swiftyTestRunner(p: PromiseVoid) {
 
     Task {
         do {
-            try await swift_flow_task_await()
-            try await swift_flow_task_priority()
+            try await swift_flow_voidFuture_await()
+//            try await swift_flow_task_await()
+//            try await swift_flow_task_priority()
 
             try await swift_flow_trivial_promisestreams()
             try await swift_flow_trivial_promisestreams_asyncSequence()
