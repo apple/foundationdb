@@ -214,6 +214,37 @@ typedef struct readgranulecontext {
 	int granuleParallelism;
 } FDBReadBlobGranuleContext;
 
+typedef struct bgfilepointer {
+	const uint8_t* filename_ptr;
+	int filename_length;
+	int64_t file_offset;
+	int64_t file_length;
+	int64_t full_file_length;
+	// encryption keys would go here
+} FDBBGFilePointer;
+
+#pragma pack(push, 4)
+typedef struct bgmutation {
+	uint8_t type;
+	int64_t version;
+	const uint8_t* param1_ptr;
+	int param1_length;
+	const uint8_t* param2_ptr;
+	int param2_length;
+} FDBBGMutation;
+
+typedef struct bgfiledescription {
+	FDBKeyRange key_range;
+	fdb_bool_t snapshot_present;
+	FDBBGFilePointer snapshot_file_pointer;
+	int delta_file_count;
+	FDBBGFilePointer* delta_files;
+	int memory_mutation_count;
+	FDBBGMutation* memory_mutations;
+
+} FDBBGFileDescription;
+#pragma pack(pop)
+
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 
 DLLEXPORT void fdb_future_release_memory(FDBFuture* f);
@@ -275,6 +306,15 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FD
                                                                               FDBGranuleSummary const** out_summaries,
                                                                               int* out_count);
 
+// all for using future result from read_blob_granules_description
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
+                                                                            FDBBGFileDescription** out,
+                                                                            int* desc_count);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data, int file_len);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_delta_file(const uint8_t* file_data, int file_len);
+
 /* FDBResult is a synchronous computation result, as opposed to a future that is asynchronous. */
 DLLEXPORT void fdb_result_destroy(FDBResult* r);
 
@@ -282,6 +322,10 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_keyvalue_array(FDBResult
                                                                        FDBKeyValue const** out_kv,
                                                                        int* out_count,
                                                                        fdb_bool_t* out_more);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_bg_mutations_array(FDBResult* r,
+                                                                           FDBBGMutation const** out_mutations,
+                                                                           int* out_count);
 
 /* TODO: add other return types as we need them */
 
@@ -577,6 +621,15 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_summarize_blob_granules(
                                                                                 int end_key_name_length,
                                                                                 int64_t summaryVersion,
                                                                                 int rangeLimit);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_description(FDBTransaction* tr,
+                                                                                       uint8_t const* begin_key_name,
+                                                                                       int begin_key_name_length,
+                                                                                       uint8_t const* end_key_name,
+                                                                                       int end_key_name_length,
+                                                                                       int64_t beginVersion,
+                                                                                       int64_t readVersion,
+                                                                                       int64_t* readVersionOut);
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

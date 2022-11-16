@@ -21,6 +21,7 @@
 #include "TesterBlobGranuleUtil.h"
 #include "TesterUtil.h"
 #include <unordered_set>
+#include "fdb_api.hpp"
 #include <memory>
 #include <fmt/format.h>
 
@@ -35,10 +36,14 @@ public:
 		if (Random::get().randomInt(0, 1) == 0) {
 			excludedOpTypes.push_back(OP_CLEAR_RANGE);
 		}
+
+		// FIXME: re-enable test after increasing granule size and fixing bugs!
+		excludedOpTypes.push_back(OP_READ_DESC);
 	}
 
 private:
 	// FIXME: add tenant support for DB operations
+	// FIXME: use other new blob granule apis!
 	enum OpType {
 		OP_INSERT,
 		OP_CLEAR,
@@ -48,15 +53,17 @@ private:
 		OP_SUMMARIZE,
 		OP_GET_BLOB_RANGES,
 		OP_VERIFY,
-		OP_LAST = OP_VERIFY
+		OP_READ_DESC,
+		OP_LAST = OP_READ_DESC
 	};
 	std::vector<OpType> excludedOpTypes;
 
 	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
 
+	// FIXME: get rid of readSuccess* in this test now that setup is verify()-ing
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
-	// FIXME: should still guarantee a read succeeds eventually somehow
 	std::unordered_set<std::optional<int>> tenantsWithReadSuccess;
+	std::unordered_set<fdb::ByteString> validatedFiles;
 
 	inline void setReadSuccess(std::optional<int> tenantId) { tenantsWithReadSuccess.insert(tenantId); }
 
@@ -298,6 +305,7 @@ private:
 
 		execOperation(
 		    [begin, end, results](auto ctx) {
+			    // FIXME: add tenant!
 			    fdb::Future f = ctx->dbOps()->listBlobbifiedRanges(begin, end, 1000).eraseType();
 			    ctx->continueAfter(f, [ctx, f, results]() {
 				    *results = copyKeyRangeArray(f.get<fdb::future_var::KeyRangeRefArray>());
@@ -327,6 +335,7 @@ private:
 		auto verifyVersion = std::make_shared<int64_t>(-1);
 		execOperation(
 		    [begin, end, verifyVersion](auto ctx) {
+			    // FIXME: add tenant!!
 			    fdb::Future f = ctx->dbOps()->verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
 			    ctx->continueAfter(f, [ctx, verifyVersion, f]() {
 				    *verifyVersion = f.get<fdb::future_var::Int64>();
@@ -346,6 +355,199 @@ private:
 		    },
 		    getTenant(tenantId),
 		    /* failOnError = */ false);
+	}
+
+	void validateSnapshotData(std::shared_ptr<ITransactionContext> ctx,
+	                          fdb::native::FDBReadBlobGranuleContext& bgCtx,
+	                          fdb::GranuleFilePointer snapshotFile,
+	                          fdb::KeyRange keyRange) {
+		if (validatedFiles.contains(snapshotFile.filename)) {
+			return;
+		}
+		validatedFiles.insert(snapshotFile.filename);
+
+		int64_t snapshotLoadId = bgCtx.start_load_f((const char*)(snapshotFile.filename.data()),
+		                                            snapshotFile.filename.size(),
+		                                            snapshotFile.offset,
+		                                            snapshotFile.length,
+		                                            snapshotFile.fullFileLength,
+		                                            bgCtx.userContext);
+		fdb::BytesRef snapshotData(bgCtx.get_load_f(snapshotLoadId, bgCtx.userContext), snapshotFile.length);
+		fdb::Result snapshotRes = ctx->tx().parseSnapshotFile(snapshotData);
+		auto out = fdb::Result::KeyValueRefArray{};
+		fdb::Error err = snapshotRes.getKeyValueArrayNothrow(out);
+		ASSERT(err.code() == error_code_success);
+		auto res = copyKeyValueArray(out);
+		bgCtx.free_load_f(snapshotLoadId, bgCtx.userContext);
+		ASSERT(res.second == false);
+
+		for (int i = 0; i < res.first.size(); i++) {
+			ASSERT(res.first[i].key >= keyRange.beginKey);
+			ASSERT(res.first[i].key < keyRange.endKey);
+			if (i > 0) {
+				ASSERT(res.first[i - 1].key < res.first[i].key);
+			}
+			// TODO add snapshot rows to map
+		}
+	}
+
+	void validateDeltaData(std::shared_ptr<ITransactionContext> ctx,
+	                       fdb::native::FDBReadBlobGranuleContext& bgCtx,
+	                       fdb::GranuleFilePointer deltaFile,
+	                       fdb::KeyRange keyRange,
+	                       int64_t& lastDFMaxVersion) {
+		if (validatedFiles.contains(deltaFile.filename)) {
+			return;
+		}
+		validatedFiles.insert(deltaFile.filename);
+		int64_t deltaLoadId = bgCtx.start_load_f((const char*)(deltaFile.filename.data()),
+		                                         deltaFile.filename.size(),
+		                                         deltaFile.offset,
+		                                         deltaFile.length,
+		                                         deltaFile.fullFileLength,
+		                                         bgCtx.userContext);
+
+		fdb::BytesRef deltaData(bgCtx.get_load_f(deltaLoadId, bgCtx.userContext), deltaFile.length);
+
+		fdb::Result deltaRes = ctx->tx().parseDeltaFile(deltaData);
+		auto out = fdb::Result::GranuleMutationRefArray{};
+		fdb::Error err = deltaRes.getGranuleMutationArrayNothrow(out);
+		ASSERT(err.code() == error_code_success);
+		auto res = copyGranuleMutationArray(out);
+		bgCtx.free_load_f(deltaLoadId, bgCtx.userContext);
+
+		int64_t thisDFMaxVersion = 0;
+		for (int j = 0; j < res.size(); j++) {
+			fdb::GranuleMutation& m = res[j];
+			ASSERT(m.version > 0);
+			ASSERT(m.version > lastDFMaxVersion);
+			// mutations in delta files aren't necessarily in version order, so just validate ordering w.r.t
+			// previous file(s)
+			thisDFMaxVersion = std::max(thisDFMaxVersion, m.version);
+
+			ASSERT(m.type == 0 || m.type == 1);
+			ASSERT(keyRange.beginKey <= m.param1);
+			ASSERT(m.param1 < keyRange.endKey);
+			if (m.type == 1) {
+				ASSERT(keyRange.beginKey <= m.param2);
+				ASSERT(m.param2 <= keyRange.endKey);
+			}
+		}
+		lastDFMaxVersion = std::max(lastDFMaxVersion, thisDFMaxVersion);
+
+		// TODO have delta mutations update map
+	}
+
+	void validateBGDescriptionData(std::shared_ptr<ITransactionContext> ctx,
+	                               fdb::native::FDBReadBlobGranuleContext& bgCtx,
+	                               fdb::GranuleDescription desc,
+	                               fdb::Key begin,
+	                               fdb::Key end,
+	                               int64_t readVersion) {
+		ASSERT(desc.keyRange.beginKey < desc.keyRange.endKey);
+		// beginVersion of zero means snapshot present
+
+		// validate snapshot file
+		ASSERT(desc.snapshotFile.has_value());
+		if (BG_API_DEBUG_VERBOSE) {
+			info(fmt::format("Loading snapshot file {0}\n", fdb::toCharsRef(desc.snapshotFile->filename)));
+		}
+		validateSnapshotData(ctx, bgCtx, *desc.snapshotFile, desc.keyRange);
+
+		// validate delta files
+		int64_t lastDFMaxVersion = 0;
+		for (int i = 0; i < desc.deltaFiles.size(); i++) {
+			validateDeltaData(ctx, bgCtx, desc.deltaFiles[i], desc.keyRange, lastDFMaxVersion);
+		}
+
+		// validate memory mutations
+		int64_t lastVersion = 0;
+		for (int i = 0; i < desc.memoryMutations.size(); i++) {
+			fdb::GranuleMutation& m = desc.memoryMutations[i];
+			ASSERT(m.type == 0 || m.type == 1);
+			ASSERT(m.version > 0);
+			ASSERT(m.version >= lastVersion);
+			ASSERT(m.version <= readVersion);
+			lastVersion = m.version;
+
+			ASSERT(m.type == 0 || m.type == 1);
+			ASSERT(desc.keyRange.beginKey <= m.param1);
+			ASSERT(m.param1 < desc.keyRange.endKey);
+			if (m.type == 1) {
+				ASSERT(desc.keyRange.beginKey <= m.param2);
+				ASSERT(m.param2 <= desc.keyRange.endKey);
+			}
+
+			// TODO have delta mutations update map
+		}
+
+		// TODO: validate map against data store
+	}
+
+	void validateBlobGranuleDescriptions(std::shared_ptr<ITransactionContext> ctx,
+	                                     std::vector<fdb::GranuleDescription> results,
+	                                     fdb::Key begin,
+	                                     fdb::Key end,
+	                                     std::optional<int> tenantId,
+	                                     int64_t readVersion) {
+		ASSERT(!results.empty());
+		ASSERT(results.front().keyRange.beginKey <= begin);
+		ASSERT(end <= results.back().keyRange.endKey);
+		for (int i = 0; i < results.size() - 1; i++) {
+			ASSERT(results[i].keyRange.endKey == results[i + 1].keyRange.beginKey);
+		}
+
+		if (tenantId) {
+			// FIXME: support tenants!!
+			info("Skipping validation because of tenant.");
+			return;
+		}
+
+		TesterGranuleContext testerContext(ctx->getBGBasePath());
+		fdb::native::FDBReadBlobGranuleContext bgCtx = createGranuleContext(&testerContext);
+		for (int i = 0; i < results.size(); i++) {
+			validateBGDescriptionData(ctx, bgCtx, results[i], begin, end, readVersion);
+		}
+	}
+
+	void randomReadDescription(TTaskFct cont, std::optional<int> tenantId) {
+		if (!seenReadSuccess(tenantId)) {
+			return;
+		}
+		fdb::Key begin = randomKeyName();
+		fdb::Key end = randomKeyName();
+		if (begin > end) {
+			std::swap(begin, end);
+		}
+		auto results = std::make_shared<std::vector<fdb::GranuleDescription>>();
+		auto readVersionOut = std::make_shared<int64_t>();
+
+		debugOp("ReadDesc", begin, end, tenantId, "starting");
+
+		execTransaction(
+		    [this, begin, end, tenantId, results, readVersionOut](auto ctx) {
+			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
+
+			    int64_t* rvo = (int64_t*)readVersionOut.get();
+			    fdb::Future f = ctx->tx().readBlobGranulesDescription(begin, end, 0, -2, rvo).eraseType();
+			    ctx->continueAfter(
+			        f,
+			        [this, ctx, begin, end, tenantId, results, readVersionOut, f]() {
+				        *results = copyGranuleDescriptionArray(f.get<fdb::future_var::GranuleDescriptionRefArray>());
+				        this->validateBlobGranuleDescriptions(ctx, *results, begin, end, tenantId, *readVersionOut);
+				        ctx->done();
+			        },
+			        true);
+		    },
+		    [this, begin, end, tenantId, results, readVersionOut, cont]() {
+			    debugOp("ReadDesc",
+			            begin,
+			            end,
+			            tenantId,
+			            fmt::format("complete @ {0} with {1} granules", *readVersionOut, results->size()));
+			    schedule(cont);
+		    },
+		    getTenant(tenantId));
 	}
 
 	void randomOperation(TTaskFct cont) override {
@@ -380,6 +582,9 @@ private:
 			break;
 		case OP_VERIFY:
 			randomVerifyOp(cont, tenantId);
+			break;
+		case OP_READ_DESC:
+			randomReadDescription(cont, tenantId);
 			break;
 		}
 	}

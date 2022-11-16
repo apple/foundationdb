@@ -24,6 +24,7 @@
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/CommitTransaction.h"
 #include "flow/CompressionUtils.h"
 
 Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
@@ -58,5 +59,9 @@ std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, s
 
 // For benchmark testing only. It should never be called in prod.
 void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange);
+
+// just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
+RangeResult bgReadSnapshotFile(const StringRef& data);
+Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& data);
 
 #endif

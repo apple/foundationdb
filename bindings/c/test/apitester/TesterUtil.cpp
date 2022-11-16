@@ -112,6 +112,30 @@ GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefAr
 	return out;
 };
 
+GranuleDescriptionArray copyGranuleDescriptionArray(fdb::future_var::GranuleDescriptionRefArray::Type array) {
+	auto& [in_desc, in_count] = array;
+
+	GranuleDescriptionArray out;
+
+	for (int i = 0; i < in_count; ++i) {
+		fdb::native::FDBBGFileDescription nativeDesc = *in_desc++;
+		out.emplace_back(nativeDesc);
+	}
+	return out;
+};
+
+GranuleMutationArray copyGranuleMutationArray(fdb::future_var::GranuleMutationRefArray::Type array) {
+	auto& [in_mutations, in_count] = array;
+
+	GranuleMutationArray out;
+
+	for (int i = 0; i < in_count; ++i) {
+		fdb::native::FDBBGMutation nativeMutation = *in_mutations++;
+		out.emplace_back(nativeMutation);
+	}
+	return out;
+};
+
 TmpFile::~TmpFile() {
 	if (!filename.empty()) {
 		remove();
