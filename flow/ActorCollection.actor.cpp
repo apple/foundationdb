@@ -79,12 +79,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 
 			// Start the handler for completions or errors from f, sending runner to complete stream
 			Future<Void> handler = runnerHandler(complete, errors, f, i);
-
-			// If the list reverse begin is still i, which is what it would be after the insertion above,
-			// then f did not complete or error so store the handler future in the list item to keep it alive.
-			if (std::next(runners.rbegin()).base() == i) {
-				i->handler = handler;
-			}
+			i->handler = handler;
 
 			++*pCount;
 			if (*pCount == 1 && lastChangeTime && idleTime && allTime) {
@@ -104,6 +99,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 				if (returnWhenEmptied)
 					return Void();
 			}
+			// If we didn't return then the entire list wasn't destroyed so erase/destroy i
 			runners.erase_and_dispose(i, [](Runner* r) { delete r; });
 		}
 		when(Error e = waitNext(errors.getFuture())) { throw e; }
