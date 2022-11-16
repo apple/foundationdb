@@ -61,9 +61,11 @@ struct CheckpointMetaData {
 	                   CheckpointFormat format,
 	                   const std::vector<UID>& src,
 	                   UID const& checkpointID)
-	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending) {
-	}
-	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, const std::vector<UID>& src, UID const& checkpointID)
+	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending) {}
+	CheckpointMetaData(KeyRange const& range,
+	                   CheckpointFormat format,
+	                   const std::vector<UID>& src,
+	                   UID const& checkpointID)
 	  : version(invalidVersion), format(format), src(src), checkpointID(checkpointID), state(Pending) {
 		this->ranges.push_back(range);
 	}
@@ -91,29 +93,7 @@ struct CheckpointMetaData {
 		return false;
 	}
 
-	// bool operator==(const CheckpointMetaData& r) const {
-	// 	return dataMoveId == r.dataMoveId && version == r.version && format == r.format &&
-	// 	       std::equal(ranges.begin(), ranges.end(), r.ranges.begin());
-	// }
-
-	// bool operator<(const CheckpointMetaData& r) const {
-	// 	if (dataMoveId != r.dataMoveId) {
-	// 		return dataMoveId < r.dataMoveId;
-	// 	}
-	// 	if (version != r.version) {
-	// 		return version < r.version;
-	// 	}
-	// 	if (format != r.format) {
-	// 		return format < r.format;
-	// 	}
-	// 	if (ranges.empty()) {
-	// 		return true;
-	// 	}
-	// 	if (r.ranges.empty()) {
-	// 		return false;
-	// 	}
-	// 	return ranges[0].begin < r.ranges[0].begin;
-	// }
+	bool operator==(const CheckpointMetaData& r) const { return checkpointID == r.checkpointID; }
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +
@@ -129,6 +109,14 @@ struct CheckpointMetaData {
 		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, dataMoveId);
 	}
 };
+
+namespace std {
+template <>
+class hash<CheckpointMetaData> {
+public:
+	size_t operator()(CheckpointMetaData const& checkpoint) const { return checkpoint.checkpointID.hash(); }
+};
+} // namespace std
 
 // A DataMoveMetaData object corresponds to a single data move.
 struct DataMoveMetaData {

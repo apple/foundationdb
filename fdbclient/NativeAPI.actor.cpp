@@ -8905,10 +8905,10 @@ static Future<Void> createCheckpointImpl(T tr,
 		// An alternative is to choose a healthy replica.
 		const UID checkpointID = UID(srcId.first(), deterministicRandom()->randomUInt64());
 		// for (int idx = 0; idx < src.size(); ++idx) {
-			CheckpointMetaData checkpoint(ranges, format, src, checkpointID);
-			checkpoint.dataMoveId = dataMoveId.get();
-			checkpoint.setState(CheckpointMetaData::Pending);
-			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
+		CheckpointMetaData checkpoint(ranges, format, src, checkpointID);
+		checkpoint.dataMoveId = dataMoveId.get();
+		checkpoint.setState(CheckpointMetaData::Pending);
+		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
 		// }
 
 		TraceEvent(SevDebug, "CreateCheckpointTransactionShard")
@@ -9072,13 +9072,13 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 
 	std::vector<std::vector<CheckpointMetaData>> results = wait(getAll(futures));
 
-	std::vector<CheckpointMetaData> rep;
+	std::unordered_set<CheckpointMetaData> checkpoints;
 
-	for (const auto& checkpoints : results) {
-		rep.insert(rep.end(), checkpoints.begin(), checkpoints.end());
+	for (const auto& r : results) {
+		checkpoints.insert(r.begin(), r.end());
 	}
 
-	return rep;
+	return std::vector<CheckpointMetaData>(checkpoints.begin(), checkpoints.end());
 }
 
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {

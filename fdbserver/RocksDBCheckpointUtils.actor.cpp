@@ -489,7 +489,7 @@ Future<Void> RocksDBCFCheckpointReader::close() {
 	return doClose(this);
 }
 
-// Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
+// Fetch a single sst file from storage server. The progress is checkpointed via cFun.
 ACTOR Future<Void> fetchCheckpointFile(Database cx,
                                        std::shared_ptr<CheckpointMetaData> metaData,
                                        int idx,
