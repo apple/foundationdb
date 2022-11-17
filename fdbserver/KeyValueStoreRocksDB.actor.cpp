@@ -111,15 +111,15 @@ SharedRocksDBState::SharedRocksDBState(UID id)
     readOptions(initialReadOptions()), commitLatency(LatencySample("RocksDBCommitLatency",
                                                                    id,
                                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+                                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
     commitQueueLatency(LatencySample("RocksDBCommitQueueLatency",
                                      id,
                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+                                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
     dbWriteLatency(LatencySample("RocksDBWriteLatency",
                                  id,
                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                 SERVER_KNOBS->LATENCY_SAMPLE_SIZE)) {}
+                                 SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {}
 
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;

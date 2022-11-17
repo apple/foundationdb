@@ -112,8 +112,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
 	init( PING_LOGGING_INTERVAL,                               3.0 );
-	init( PING_SAMPLE_AMOUNT,                                  100 );
-	init( NETWORK_CONNECT_SAMPLE_AMOUNT,                       100 );
+	init( PING_SKETCH_ACCURACY,                                0.1 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
@@ -168,7 +167,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_SUBMIT,                                           10 );
 	init( SQLITE_DISK_METRIC_LOGGING_INTERVAL,                 5.0 );
 	init( KAIO_LATENCY_LOGGING_INTERVAL,                      30.0 );
-	init( KAIO_LATENCY_SAMPLE_SIZE,                          30000 );
+	init( KAIO_LATENCY_SKETCH_ACCURACY,                       0.01 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
@@ -303,7 +302,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
 	init( TOKEN_CACHE_SIZE,                                    100 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
-	init( ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE,              1000 );
+	init( ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY,          0.01 );
 	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                  true ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        1 ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }

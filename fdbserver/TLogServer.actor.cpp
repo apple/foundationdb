@@ -1824,8 +1824,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
 				UID ssID = nondeterministicRandom()->randomUniqueID();
 				std::string s = "BlockingPeekLatencies-" + reqTag.toString();
-				logData->blockingPeekLatencies.try_emplace(
-				    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+				logData->blockingPeekLatencies.try_emplace(reqTag,
+				                                           s,
+				                                           ssID,
+				                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+				                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 			}
 			LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
 			sample.addMeasurement(latency);
@@ -2184,6 +2187,9 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	if (logData->logSystem->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
+		DebugLogTraceEvent("LogPop", self->dbgid)
+		    .detail("Tag", logData->remoteTag.toString())
+		    .detail("Version", knownCommittedVersion);
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 

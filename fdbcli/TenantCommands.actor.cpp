@@ -87,6 +87,56 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, b
 	return configParams;
 }
 
+bool parseTenantListOptions(std::vector<StringRef> const& tokens,
+                            int startIndex,
+                            int& limit,
+                            int& offset,
+                            std::vector<TenantState>& filters) {
+	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+		Optional<Value> value;
+		StringRef token = tokens[tokenNum];
+		StringRef param;
+		bool foundEquals;
+		param = token.eat("=", &foundEquals);
+		if (!foundEquals) {
+			fmt::print(stderr,
+			           "ERROR: invalid option string `{}'. String must specify a value using `='.\n",
+			           param.toString().c_str());
+			return false;
+		}
+		value = token;
+		if (tokencmp(param, "limit")) {
+			int n = 0;
+			if (sscanf(value.get().toString().c_str(), "%d%n", &limit, &n) != 1 || n != value.get().size() ||
+			    limit <= 0) {
+				fmt::print(stderr, "ERROR: invalid limit `{}'\n", token.toString().c_str());
+				return false;
+			}
+		} else if (tokencmp(param, "offset")) {
+			int n = 0;
+			if (sscanf(value.get().toString().c_str(), "%d%n", &offset, &n) != 1 || n != value.get().size() ||
+			    offset < 0) {
+				fmt::print(stderr, "ERROR: invalid offset `{}'\n", token.toString().c_str());
+				return false;
+			}
+		} else if (tokencmp(param, "state")) {
+			auto filterStrings = value.get().splitAny(","_sr);
+			try {
+				for (auto sref : filterStrings) {
+					filters.push_back(TenantMapEntry::stringToTenantState(sref.toString()));
+				}
+			} catch (Error& e) {
+				fmt::print(stderr, "ERROR: unrecognized tenant state(s) `{}'.\n", value.get().toString());
+				return false;
+			}
+		} else {
+			fmt::print(stderr, "ERROR: unrecognized parameter `{}'.\n", param.toString().c_str());
+			return false;
+		}
+	}
+	return true;
+}
+
 Key makeConfigKey(TenantNameRef tenantName, StringRef configName) {
 	return tenantConfigSpecialKeyRange.begin.withSuffix(Tuple().append(tenantName).append(configName).pack());
 }
@@ -225,17 +275,21 @@ ACTOR Future<bool> tenantDeleteCommand(Reference<IDatabase> db, std::vector<Stri
 
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 5) {
-		fmt::print("Usage: tenant list [BEGIN] [END] [LIMIT]\n\n");
+	if (tokens.size() > 7) {
+		fmt::print("Usage: tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
+		fmt::print("Optionally skip over the first OFFSET results (default 0).\n");
+		fmt::print("Optional comma-separated tenant state(s) can be provided to filter the list.\n");
 		return false;
 	}
 
 	state StringRef beginTenant = ""_sr;
 	state StringRef endTenant = "\xff\xff"_sr;
 	state int limit = 100;
+	state int offset = 0;
+	state std::vector<TenantState> filters;
 
 	if (tokens.size() >= 3) {
 		beginTenant = tokens[2];
@@ -243,14 +297,12 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	if (tokens.size() >= 4) {
 		endTenant = tokens[3];
 		if (endTenant <= beginTenant) {
-			fmt::print(stderr, "ERROR: end must be larger than begin");
+			fmt::print(stderr, "ERROR: end must be larger than begin\n");
 			return false;
 		}
 	}
-	if (tokens.size() == 5) {
-		int n = 0;
-		if (sscanf(tokens[4].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[4].size() || limit <= 0) {
-			fmt::print(stderr, "ERROR: invalid limit `{}'\n", tokens[4].toString().c_str());
+	if (tokens.size() >= 5) {
+		if (!parseTenantListOptions(tokens, 4, limit, offset, filters)) {
 			return false;
 		}
 	}
@@ -266,7 +318,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			state std::vector<TenantName> tenantNames;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(MetaclusterAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
+				    wait(MetaclusterAPI::listTenants(db, beginTenant, endTenant, limit, offset, filters));
 				for (auto tenant : tenants) {
 					tenantNames.push_back(tenant.first);
 				}
@@ -613,8 +665,10 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	} else if (tokencmp(tokens[1], "delete") && tokens.size() < 3) {
 		static std::vector<const char*> opts = { "<NAME>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
-		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]" };
+	} else if (tokencmp(tokens[1], "list") && tokens.size() < 7) {
+		static std::vector<const char*> opts = {
+			"[BEGIN]", "[END]", "[limit=LIMIT]", "[offset=OFFSET]", "[state=<STATE1>,<STATE2>,...]"
+		};
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "get") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<NAME>", "[JSON]" };
