@@ -449,7 +449,8 @@ struct DataShard {
 // PhysicalShard represent a collection of logical shards. A PhysicalShard could have one or more DataShards. A
 // PhysicalShard is stored as a column family in rocksdb. Each PhysicalShard has its own iterator pool.
 struct PhysicalShard {
-	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id), isInitialized(false) {}
+	PhysicalShard(rocksdb::DB* db, std::string id, const rocksdb::ColumnFamilyOptions& options)
+	  : db(db), id(id), cfOptions(options), isInitialized(false) {}
 	PhysicalShard(rocksdb::DB* db, std::string id, rocksdb::ColumnFamilyHandle* handle)
 	  : db(db), id(id), cf(handle), isInitialized(true) {
 		ASSERT(cf);
@@ -460,7 +461,7 @@ struct PhysicalShard {
 		if (cf) {
 			return rocksdb::Status::OK();
 		}
-		auto status = db->CreateColumnFamily(getCFOptions(), id, &cf);
+		auto status = db->CreateColumnFamily(cfOptions, id, &cf);
 		if (!status.ok()) {
 			logRocksDBError(status, "AddCF");
 			return status;
@@ -516,6 +517,7 @@ struct PhysicalShard {
 
 	rocksdb::DB* db;
 	std::string id;
+	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::ColumnFamilyHandle* cf = nullptr;
 	std::unordered_map<std::string, std::unique_ptr<DataShard>> dataShards;
 	std::shared_ptr<ReadIteratorPool> readIterPool;
@@ -586,7 +588,8 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
-	ShardManager(std::string path, UID logId) : path(path), logId(logId), dataShardMap(nullptr, specialKeys.end) {}
+	ShardManager(std::string path, UID logId)
+	  : path(path), logId(logId), cfOptions(getCFOptions()), dataShardMap(nullptr, specialKeys.end) {}
 
 	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
 	                                             Future<Void> openFuture,
@@ -643,7 +646,6 @@ public:
 		std::vector<std::string> columnFamilies;
 		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
 
-		rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
 		std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
 		bool foundMetadata = false;
 		for (const auto& name : columnFamilies) {
@@ -766,7 +768,7 @@ public:
 			physicalShards[defaultShard->id] = defaultShard;
 
 			// Create metadata shard.
-			auto metadataShard = std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID);
+			auto metadataShard = std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, cfOptions);
 			metadataShard->init();
 			columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
 			physicalShards[METADATA_SHARD_ID] = metadataShard;
@@ -832,7 +834,7 @@ public:
 			}
 		}
 
-		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id));
+		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, cfOptions));
 		std::shared_ptr<PhysicalShard>& shard = it->second;
 
 		activePhysicalShardIds.emplace(id);
@@ -1146,6 +1148,7 @@ public:
 private:
 	const std::string path;
 	const UID logId;
+	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
 	std::unordered_set<std::string> activePhysicalShardIds;
