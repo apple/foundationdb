@@ -793,7 +793,7 @@ private:
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
-	ErrorOr<Void> updateTransaction();
+	void updateTransaction();
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
 
 	template <class T, class... Args>
@@ -846,6 +846,9 @@ public:
 	~MultiVersionTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
+
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITenant::*func)(Args...), Args&&... args);
 
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
@@ -968,6 +971,9 @@ public:
 	// For internal use in testing
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (IDatabase::*func)(Args...), Args&&... args);
+
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
@@ -989,7 +995,7 @@ public:
 	struct LegacyVersionMonitor;
 
 	// Database initialization state
-	enum class InitializationState { INITIALIZING, CREATED, INCOMPATIBLE, FAILED_TO_GET_PROTOCOL_VERSION, CLOSED };
+	enum class InitializationState { INITIALIZING, INITIALIZATION_FAILED, CREATED, INCOMPATIBLE, CLOSED };
 
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
