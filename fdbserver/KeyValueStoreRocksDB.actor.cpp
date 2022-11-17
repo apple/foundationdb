@@ -391,9 +391,16 @@ struct Counters {
 	CounterCollection cc;
 	Counter immediateThrottle;
 	Counter failedToAcquire;
+	Counter deleteKeyReqs;
+	Counter deleteRangeReqs;
+	Counter convertedDeleteKeyReqs;
+	Counter convertedDeleteRangeReqs;
 
 	Counters()
-	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc) {}
+	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
+	    deleteKeyReqs("DeleteKeyRequests", cc), deleteRangeReqs("DeleteRangeRequests", cc),
+	    convertedDeleteKeyReqs("ConvertedDeleteKeyRequests", cc),
+	    convertedDeleteRangeReqs("ConvertedDeleteRangeRequests", cc) {}
 };
 
 struct ReadIterator {
@@ -1395,17 +1402,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream)
 		  : id(id), db(db), cf(cf), sharedState(sharedState), readIterPool(readIterPool),
 		    perfContextMetrics(perfContextMetrics), metricPromiseStream(metricPromiseStream), threadIndex(threadIndex) {
-			if (g_network->isSimulated()) {
-				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
-				// very high load and single read thread cannot process all the load within the timeouts.
-				readValueTimeout = 5 * 60;
-				readValuePrefixTimeout = 5 * 60;
-				readRangeTimeout = 5 * 60;
-			} else {
-				readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
-				readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
-				readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
-			}
+
+			readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
+			readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+			readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
+
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
 				// Enable perf context on the same thread with the db thread
 				rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
@@ -1934,12 +1935,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
+		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
+		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
 		if (keyRange.singleKeyRange()) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
+			++counters.deleteKeyReqs;
 		} else {
+			++counters.deleteRangeReqs;
 			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
 			    storageMetrics->byteSample.getEstimate(keyRange) <
 			        SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT) {
+				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions options = sharedState->getReadOptions();
 				auto beginSlice = toSlice(keyRange.begin);
 				auto endSlice = toSlice(keyRange.end);
@@ -1949,6 +1955,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				cursor->Seek(toSlice(keyRange.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
 					writeBatch->Delete(defaultFdbCF, cursor->key());
+					++counters.convertedDeleteKeyReqs;
 					cursor->Next();
 				}
 				if (!cursor->status().ok()) {
@@ -1958,6 +1965,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					auto it = keysSet.lower_bound(keyRange.begin);
 					while (it != keysSet.end() && *it < keyRange.end) {
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
+						++counters.convertedDeleteKeyReqs;
 						it++;
 					}
 				}
