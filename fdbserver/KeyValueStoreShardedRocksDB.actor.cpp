@@ -2223,25 +2223,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ASSERT(!a.checkpoints.empty());
 
-			const CheckpointMetaData& checkpoint = a.checkpoints[0];
-
-			if (a.ranges.empty() || checkpoint.ranges.empty() || a.ranges.size() > checkpoint.ranges.size() ||
-			    a.ranges.front().begin != checkpoint.ranges.front().begin) {
-				TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
-				    .detail("Path", a.path)
-				    .detail("Ranges", describe(a.ranges))
-				    .detail("Checkpoints", describe(a.checkpoints));
-				a.done.sendError(failed_to_restore_checkpoint());
-			}
-
-			for (int i = 0; i < a.ranges.size(); ++i) {
-				if (a.ranges[i] != checkpoint.ranges[i] && i != a.ranges.size() - 1) {
-					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
-					    .detail("Path", a.path)
-					    .detail("Ranges", describe(a.ranges))
-					    .detail("Checkpoints", describe(a.checkpoints));
-					a.done.sendError(failed_to_restore_checkpoint());
-				}
+			PhysicalShard* ps = nullptr;
+			for (const KeyRange& range : a.ranges) {
+				ps = a.shardManager->addRange(range, a.shardId);
 			}
 
 			const CheckpointFormat format = a.checkpoints[0].getFormat();
@@ -2251,13 +2235,29 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
-			PhysicalShard* ps = nullptr;
-			for (const KeyRange& range : a.ranges) {
-				ps = a.shardManager->addRange(range, a.shardId);
-			}
-
 			rocksdb::Status status;
+			rocksdb::WriteBatch writeBatch;
 			if (format == DataMoveRocksCF) {
+				const CheckpointMetaData& checkpoint = a.checkpoints.front();
+				if (a.ranges.empty() || checkpoint.ranges.empty() || a.ranges.size() > checkpoint.ranges.size() ||
+				    a.ranges.front().begin != checkpoint.ranges.front().begin) {
+					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
+					    .detail("Path", a.path)
+					    .detail("Ranges", describe(a.ranges))
+					    .detail("Checkpoints", describe(a.checkpoints));
+					a.done.sendError(failed_to_restore_checkpoint());
+				}
+
+				for (int i = 0; i < a.ranges.size(); ++i) {
+					if (a.ranges[i] != checkpoint.ranges[i] && i != a.ranges.size() - 1) {
+						TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
+						    .detail("Path", a.path)
+						    .detail("Ranges", describe(a.ranges))
+						    .detail("Checkpoints", describe(a.checkpoints));
+						a.done.sendError(failed_to_restore_checkpoint());
+					}
+				}
+
 				ASSERT(!ps->initialized());
 				TraceEvent("RocksDBServeRestoreCF", logId)
 				    .detail("Path", a.path)
@@ -2274,21 +2274,21 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Path", a.path)
 					    .detail("Checkpoint", a.checkpoints[0].toString());
 					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
+
+					// Remove the extra data.
+					KeyRangeRef cRange(a.ranges.back().end, checkpoint.ranges.back().end);
+					if (!cRange.empty()) {
+						writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
+					}
 				}
 			} else if (format == RocksDB) {
 				throw not_implemented();
 			}
 
-			rocksdb::WriteBatch writeBatch;
-
 			for (const KeyRange& range : a.ranges) {
 				a.shardManager->populateRangeMappingMutations(&writeBatch, range, /*isAdd=*/true);
 			}
 
-			KeyRangeRef cRange(a.ranges.back().end, checkpoint.ranges.back().end);
-			if (!cRange.empty()) {
-				writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
-			}
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 

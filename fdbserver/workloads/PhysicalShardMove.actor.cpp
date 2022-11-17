@@ -77,7 +77,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::vector<UID> teamA;
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                                 { "TestKeyAB"_sr, "TestValueAB"_sr },
-		                                 { "TestKeyAC"_sr, "TestValueAC"_sr },
+		                                 { "TestKeyAD"_sr, "TestValueAD"_sr },
 		                                 { "TestKeyB"_sr, "TestValueB"_sr },
 		                                 { "TestKeyC"_sr, "TestValueC"_sr },
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
@@ -116,7 +116,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                           excludes)));
 
 		// Create checkpoint.
-		state KeyRange testRange = KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr);
+		state KeyRange testRange = KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr);
 		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);
 		state Transaction tr(cx);
 		state CheckpointFormat format = DataMoveRocksCF;
@@ -201,9 +201,20 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		TraceEvent("TestCheckpointRestored").detail("Checkpoint", describe(fetchedCheckpoints));
 
-		RangeResult kvRange = wait(kvStore->readRange(testRange));
+		RangeResult kvRange = wait(kvStore->readRange(normalKeys));
+		std::unordered_map<Key, Value> kvsKvs;
 		for (int i = 0; i < kvRange.size(); ++i) {
-			ASSERT(kvs[kvRange[i].key] == kvRange[i].value);
+			kvsKvs[kvRange[i].key] = kvRange[i].value;
+		}
+		for (const auto& [key, value] : kvs) {
+			auto it = kvsKvs.find(key);
+			if (testRange.contains(key)) {
+				TraceEvent(SevVerbose, "TestExpectKeyValueMatch").detail("Key", key).detail("Value", value);
+				ASSERT(it->second == value);
+			} else {
+				TraceEvent(SevVerbose, "TestExpectKeyNotExist").detail("Key", key);
+				ASSERT(it == kvsKvs.end());
+			}
 		}
 
 		TraceEvent("TestCheckpointVerified").detail("Checkpoint", describe(fetchedCheckpoints));
