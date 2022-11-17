@@ -12,7 +12,7 @@ sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "tests
 
 # fmt: off
 from binary_download import FdbBinaryDownloader, CURRENT_VERSION
-from local_cluster import LocalCluster, random_secret_string
+from local_cluster import LocalCluster, PortProvider, random_secret_string
 # fmt: on
 
 PREV_RELEASE_VERSION = "7.1.5"
@@ -83,6 +83,8 @@ class ClientConfigTest:
         self.api_version = None
         self.expected_error = None
         self.transaction_timeout = None
+        self.test_cluster_file = self.cluster.cluster_file
+        self.port_provider = PortProvider()
 
     def create_external_lib_dir(self, versions):
         self.external_lib_dir = self.test_dir.joinpath("extclients")
@@ -101,6 +103,18 @@ class ClientConfigTest:
         shutil.copyfile(src_file_path, self.external_lib_path)
         self.tc.assertTrue(self.external_lib_path.exists(), "{} does not exist".format(self.external_lib_path))
 
+    def create_cluster_file_with_wrong_port(self):
+        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_secret_string(16)))
+        port = self.cluster.port_provider.get_free_port()
+        with open(self.test_cluster_file, "w") as file:
+            file.write("abcde:fghijk@127.0.0.1:{}".format(port))
+
+    def create_invalid_cluster_file(self):
+        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_secret_string(16)))
+        port = self.cluster.port_provider.get_free_port()
+        with open(self.test_cluster_file, "w") as file:
+            file.write("abcde:fghijk@")
+
     def dump_client_logs(self):
         for log_file in glob.glob(os.path.join(self.log_dir, "*")):
             print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file), file=sys.stderr)
@@ -109,7 +123,7 @@ class ClientConfigTest:
             print(">>>>>>>>>>>>>>>>>>>> End of {}:".format(log_file), file=sys.stderr)
 
     def exec(self):
-        cmd_args = [self.cluster.client_config_tester_bin, "--cluster-file", self.cluster.cluster_file]
+        cmd_args = [self.cluster.client_config_tester_bin, "--cluster-file", self.test_cluster_file]
 
         if self.tmp_dir is not None:
             cmd_args += ["--tmp-dir", self.tmp_dir]
@@ -231,7 +245,29 @@ class ClientConfigTests(unittest.TestCase):
         test.disable_local_client = True
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.transaction_timeout = 5000
+        test.expected_error = 2125  # Incompatible client
+        test.exec()
+
+    def test_cannot_connect_to_coordinator(self):
+        # Testing a cluster file with a valid address, but server behind it
+        test = ClientConfigTest(self)
+        test.create_external_lib_path(CURRENT_VERSION)
+        test.disable_local_client = True
+        test.api_version = api_version_from_str(CURRENT_VERSION)
+        test.transaction_timeout = 100
+        test.create_cluster_file_with_wrong_port()
         test.expected_error = 1031  # Timeout
+        test.exec()
+
+    def test_invalid_cluster_file(self):
+        # Testing with an invalid
+        test = ClientConfigTest(self)
+        test.create_external_lib_path(CURRENT_VERSION)
+        test.disable_local_client = True
+        test.api_version = api_version_from_str(CURRENT_VERSION)
+        test.transaction_timeout = 5000
+        test.create_invalid_cluster_file()
+        test.expected_error = 2104  # Connection string invalid
         test.exec()
 
 
@@ -264,8 +300,8 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         # Leaving an unsupported API version, ignore failures
         test = ClientConfigTest(self)
         test.create_external_lib_path(PREV_RELEASE_VERSION)
-        test.transaction_timeout = 100
-        test.expected_error = 1031  # Timeout
+        test.transaction_timeout = 5000
+        test.expected_error = 2125  # Incompatible client
         test.ignore_external_client_failures = True
         test.exec()
 
