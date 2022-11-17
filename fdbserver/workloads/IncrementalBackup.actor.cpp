@@ -151,7 +151,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 		if (self->submitOnly) {
 			TraceEvent("IBackupSubmitAttempt").log();
-			state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 			try {
 				wait(self->backupAgent.submitBackup(cx,
 				                                    self->backupDir,
@@ -160,8 +159,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
-				                                        configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
+				                                    true,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));

@@ -548,11 +548,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
-	                         Reference<TenantEntryCache<Void>> tenantCache,
+	                         EncryptionAtRestMode encryptMode,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options())
-	  : cx(cx), arena(arena), tenantCache(tenantCache), file(file), blockSize(blockSize), blockEnd(0),
+	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), blockSize(blockSize), blockEnd(0),
 	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
@@ -648,7 +648,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
-		state EncryptCipherDomainId curDomainId = wait(getEncryptionDomainDetails(key, self->tenantCache));
+		state EncryptCipherDomainId curDomainId = wait(getEncryptionDomainDetails(key, self->encryptMode));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -689,27 +689,21 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetailsImpl(
-	    KeyRef key,
-	    Reference<TenantEntryCache<Void>> tenantCache) {
+	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetailsImpl(KeyRef key,
+	                                                                          EncryptionAtRestMode encryptMode) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
-		if (key.size() < TENANT_PREFIX_SIZE) {
+		if (key.size() < TENANT_PREFIX_SIZE || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
 			return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 		}
+		// dealing with domain aware encryption so all keys should belong to a tenant
 		KeyRef tenantPrefix = KeyRef(key.begin(), TENANT_PREFIX_SIZE);
-		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
-		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
-		if (payload.present()) {
-			return tenantId;
-		}
-		return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+		return TenantMapEntry::prefixToId(tenantPrefix);
 	}
 
-	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(KeyRef key,
-	                                                                Reference<TenantEntryCache<Void>> tenantCache) {
-		return getEncryptionDomainDetailsImpl(key, tenantCache);
+	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
+		return getEncryptionDomainDetailsImpl(key, encryptMode);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -819,9 +813,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state EncryptCipherDomainId curKeyDomainId = wait(getEncryptionDomainDetails(k, self->tenantCache));
+		state EncryptCipherDomainId curKeyDomainId = wait(getEncryptionDomainDetails(k, self->encryptMode));
 		state EncryptCipherDomainId prevKeyDomainId =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
+		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode));
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId));
@@ -885,7 +879,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	Database cx;
 	Arena* arena;
-	Reference<TenantEntryCache<Void>> tenantCache;
+	EncryptionAtRestMode encryptMode;
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -1028,7 +1022,7 @@ private:
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
-                                        Optional<Reference<TenantEntryCache<Void>>> tenantCache,
+                                        Optional<EncryptionAtRestMode> encryptMode,
                                         Optional<BlobCipherEncryptHeader> encryptHeader) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
@@ -1047,16 +1041,16 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
 		if (encryptedBlock && g_network && g_network->isSimulated()) {
-			ASSERT(tenantCache.present());
+			ASSERT(encryptMode.present());
 			ASSERT(encryptHeader.present());
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
 				EncryptCipherDomainId domainId =
-				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, tenantCache.get()));
+				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode.get()));
 				prevDomainId = domainId;
 			}
 			EncryptCipherDomainId curDomainId =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, tenantCache.get()));
+			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode.get()));
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
 				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
@@ -1116,11 +1110,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader,
-			                   &results,
-			                   false,
-			                   Optional<Reference<TenantEntryCache<Void>>>(),
-			                   Optional<BlobCipherEncryptHeader>()));
+			wait(decodeKVPairs(
+			    &reader, &results, false, Optional<EncryptionAtRestMode>(), Optional<BlobCipherEncryptHeader>()));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			ASSERT(cx.present());
@@ -1144,12 +1135,13 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+			state Optional<EncryptionAtRestMode> encryptMode;
 			if (g_network && g_network->isSimulated()) {
-				tenantCache = makeReference<TenantEntryCache<Void>>(cx.get(), TenantEntryCacheRefreshMode::WATCH);
-				wait(tenantCache.get()->init());
+				// The encyption mode is only used during simulation for a sanity check
+				DatabaseConfiguration config = wait(getDatabaseConfiguration(cx.get()));
+				encryptMode = config.encryptionAtRestMode;
 			}
-			wait(decodeKVPairs(&reader, &results, true, tenantCache, header));
+			wait(decodeKVPairs(&reader, &results, true, encryptMode, header));
 		} else {
 			throw restore_unsupported_file_version();
 		}
@@ -1732,7 +1724,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 		state Arena arena;
-		state Reference<TenantEntryCache<Void>> tenantCache;
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
@@ -1801,6 +1792,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				state Version snapshotBeginVersion;
 				state int64_t snapshotRangeFileCount;
 
+				DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+				state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				loop {
 					try {
@@ -1822,16 +1815,14 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				    wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 				outFile = f;
 
-				const bool encrypted =
-				    encryptionEnabled.present() && encryptionEnabled.get() && cx->clientInfo->get().isEncryptionEnabled;
+				if (!encryptionEnabled.present() || !encryptionEnabled.get()) {
+					encryptMode = EncryptionAtRestMode::DISABLED;
+				}
+				TraceEvent(SevDebug, "EncryptionMode").detail("EncryptMode", encryptMode.toString());
 				// Initialize range file writer and write begin key
-				if (encrypted) {
+				if (encryptMode.mode != EncryptionAtRestMode::DISABLED) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
-					if (!tenantCache.isValid()) {
-						tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
-						wait(tenantCache->init());
-					}
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, tenantCache, outFile, blockSize);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, encryptMode, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
