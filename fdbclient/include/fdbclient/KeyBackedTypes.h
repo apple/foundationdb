@@ -109,14 +109,12 @@ inline std::string TupleCodec<std::string>::unpack(Standalone<StringRef> const& 
 template <typename First, typename Second>
 struct TupleCodec<std::pair<First, Second>> {
 	static Standalone<StringRef> pack(typename std::pair<First, Second> const& val) {
-		// Packing a concatenated tuple is the same as concatenating two packed tuples
-		return TupleCodec<First>::pack(val.first).withSuffix(TupleCodec<Second>::pack(val.second));
+		return Tuple::makeTuple(TupleCodec<First>::pack(val.first), TupleCodec<Second>::pack(val.second)).pack();
 	}
 	static std::pair<First, Second> unpack(Standalone<StringRef> const& val) {
 		Tuple t = Tuple::unpack(val);
 		ASSERT(t.size() == 2);
-		return { TupleCodec<First>::unpack(t.subTupleRawString(0)),
-			     TupleCodec<Second>::unpack(t.subTupleRawString(1)) };
+		return { TupleCodec<First>::unpack(t.getString(0)), TupleCodec<Second>::unpack(t.getString(1)) };
 	}
 };
 

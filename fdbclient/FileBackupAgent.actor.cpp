@@ -6658,3 +6658,11 @@ void simulateBlobFailure() {
 		}
 	}
 }
+
+TEST_CASE("/FileBackupAgent/TupleCodecPair") {
+	std::pair<KeyRange, Version> src(KeyRangeRef("begin"_sr, "end"_sr), Version(100));
+	Standalone<StringRef> bytes = TupleCodec<std::pair<KeyRange, Version>>::pack(src);
+	auto dest = TupleCodec<std::pair<KeyRange, Version>>::unpack(bytes);
+	ASSERT(src == dest);
+	return Void();
+}
