@@ -1766,7 +1766,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	// Read cluster configuration
-	if (useDB) {
+	if (useDB && g_network->isSimulated()) {
 		state Transaction tr = Transaction(cx);
 		state DatabaseConfiguration configuration;
 		loop {
