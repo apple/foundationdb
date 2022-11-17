@@ -486,6 +486,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		} else if (r < 0.75) {
 			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
 		}
+		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
 
@@ -495,7 +496,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 
 		// reset it to default
-		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = false;
+		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 		return Void();
 	}
 

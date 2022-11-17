@@ -200,7 +200,7 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	}
 
 	options.statistics = rocksdb::CreateDBStatistics();
-	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
+	options.statistics->set_stats_level(rocksdb::StatsLevel(SERVER_KNOBS->ROCKSDB_STATS_LEVEL));
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 
@@ -893,14 +893,19 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
 	};
 
+	// To control the rocksdb::StatsLevel, use ROCKSDB_STATS_LEVEL knob.
 	state std::vector<std::pair<const char*, uint32_t>> histogramStats = {
-		{ "CompactionTime", rocksdb::COMPACTION_TIME },
-		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME },
-		{ "CompressionTimeNanos", rocksdb::COMPRESSION_TIMES_NANOS },
-		{ "DecompressionTimeNanos", rocksdb::DECOMPRESSION_TIMES_NANOS },
-		{ "HardRateLimitDelayCount", rocksdb::HARD_RATE_LIMIT_DELAY_COUNT },
-		{ "SoftRateLimitDelayCount", rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT },
-		{ "WriteStall", rocksdb::WRITE_STALL },
+		{ "CompactionTime", rocksdb::COMPACTION_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
+		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
+		{ "CompressionTimeNanos",
+		  rocksdb::COMPRESSION_TIMES_NANOS }, // enabled if rocksdb::StatsLevel > kExceptDetailedTimers(3)
+		{ "DecompressionTimeNanos",
+		  rocksdb::DECOMPRESSION_TIMES_NANOS }, // enabled if rocksdb::StatsLevel > kExceptDetailedTimers(3)
+		{ "HardRateLimitDelayCount",
+		  rocksdb::HARD_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
+		{ "SoftRateLimitDelayCount",
+		  rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
+		{ "WriteStall", rocksdb::WRITE_STALL }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
 	};
 
 	state std::vector<std::pair<const char*, std::string>> intPropertyStats = {
@@ -957,11 +962,14 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 			cum = stat;
 		}
 
-		for (auto& [name, histogram] : histogramStats) {
-			rocksdb::HistogramData histogram_data;
-			statistics->histogramData(histogram, &histogram_data);
-			e.detail(format("%s%d", name, "P95"), histogram_data.percentile95);
-			e.detail(format("%s%d", name, "P99"), histogram_data.percentile99);
+		// None of the histogramStats are enabled unless the ROCKSDB_STATS_LEVEL > kExceptHistogramOrTimers(1)
+		if (SERVER_KNOBS->ROCKSDB_STATS_LEVEL > rocksdb::kExceptHistogramOrTimers) {
+			for (auto& [name, histogram] : histogramStats) {
+				rocksdb::HistogramData histogram_data;
+				statistics->histogramData(histogram, &histogram_data);
+				e.detail(format("%s%s", name, "P95"), histogram_data.percentile95);
+				e.detail(format("%s%s", name, "P99"), histogram_data.percentile99);
+			}
 		}
 
 		for (const auto& [name, property] : intPropertyStats) {
