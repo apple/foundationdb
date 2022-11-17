@@ -2187,6 +2187,9 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	if (logData->logSystem->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
+		DebugLogTraceEvent("LogPop", self->dbgid)
+		    .detail("Tag", logData->remoteTag.toString())
+		    .detail("Version", knownCommittedVersion);
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
