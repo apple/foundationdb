@@ -967,6 +967,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "cluster_type" : "management",
          "metacluster_name":"metacluster1",
          "metacluster_id":12345,
+         "data_cluster_name" : "data_cluster1",
+         "data_cluster_id" : 12346,
          "num_data_clusters":10
       },
       "tenants":{
