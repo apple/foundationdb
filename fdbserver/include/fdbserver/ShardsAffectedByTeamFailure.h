@@ -36,7 +36,9 @@ public:
 		bool primary;
 
 		Team() : primary(true) {}
-		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
+		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {
+			ASSERT(std::is_sorted(servers.begin(), servers.end()));
+		}
 
 		bool operator<(const Team& r) const {
 			if (servers == r.servers)
@@ -86,11 +88,17 @@ public:
 
 	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRef key);
 
+	std::vector<UID> getSourceServerIdsFor(KeyRef key);
+
 	// Shard boundaries are modified in defineShard and the content of what servers correspond to each shard is a copy
 	// or union of the shards already there
 	void defineShard(KeyRangeRef keys);
-	// moveShard never change the shard boundary but just change the team value
+	// moveShard never change the shard boundary but just change the team value. Move keys to destinationTeams by
+	// updating shard_teams, the old destination teams will be added to new source teams.
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
+	// This function assume keys is exactly a shard in this mapping, this function set the srcTeam and destination
+	// directly without retaining the old destination team info
+	void rawMoveShard(KeyRangeRef keys, const std::vector<Team>& srcTeams, const std::vector<Team>& destinationTeam);
 	// finishMove never change the shard boundary but just clear the old source team value
 	void finishMove(KeyRangeRef keys);
 	// a convenient function for (defineShard, moveShard, finishMove) pipeline

@@ -84,6 +84,7 @@ public:
 	}
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return (int)__COUNT; }
+	bool operator<(const RelocateReason& reason) { return (int)value < (int)reason.value; }
 
 private:
 	Value value;
