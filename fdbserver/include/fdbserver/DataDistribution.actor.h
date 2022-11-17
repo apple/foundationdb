@@ -84,6 +84,7 @@ public:
 	}
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return (int)__COUNT; }
+	bool operator<(const RelocateReason& reason) { return (int)value < (int)reason.value; }
 
 private:
 	Value value;
@@ -270,16 +271,18 @@ public:
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
 	};
 
-	// Two-step team selection
-	// Usage: getting primary dest team and remote dest team in dataDistributionRelocator()
-	// The overall process has two steps:
-	// Step 1: get a physical shard id given the input primary team
-	// Return a new physical shard id if the input primary team is new or the team has no available physical shard
-	// checkPhysicalShardAvailable() defines whether a physical shard is available
-	uint64_t determinePhysicalShardIDGivenPrimaryTeam(ShardsAffectedByTeamFailure::Team primaryTeam,
-	                                                  StorageMetrics const& metrics,
-	                                                  bool forceToUseNewPhysicalShard,
-	                                                  uint64_t debugID);
+	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
+	uint64_t generateNewPhysicalShardID(uint64_t debugID);
+
+	// If the input team has any available physical shard, return an available physical shard from the input team and
+	// not in `excludedPhysicalShards`. This method is used for two-step team selection The overall process has two
+	// steps: Step 1: get a physical shard id given the input primary team Return a new physical shard id if the input
+	// primary team is new or the team has no available physical shard checkPhysicalShardAvailable() defines whether a
+	// physical shard is available
+	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
+	                                                      StorageMetrics const& metrics,
+	                                                      const std::unordered_set<uint64_t>& excludedPhysicalShards,
+	                                                      uint64_t debugID);
 
 	// Step 2: get a remote team which has the input physical shard
 	// Return empty if no such remote team
@@ -345,17 +348,9 @@ private:
 	// Note that if the physical shard only contains the keyRange, always return FALSE
 	InOverSizePhysicalShard isInOverSizePhysicalShard(KeyRange keyRange);
 
-	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
-	uint64_t generateNewPhysicalShardID(uint64_t debugID);
-
 	// Check whether the input physical shard is available
 	// A physical shard is available if the current metric + moveInMetrics <= a threshold
 	PhysicalShardAvailable checkPhysicalShardAvailable(uint64_t physicalShardID, StorageMetrics const& moveInMetrics);
-
-	// If the input team has any available physical shard, return an available physical shard of the input team
-	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
-	                                                      StorageMetrics const& metrics,
-	                                                      uint64_t debugID);
 
 	// Reduce the metics of input physical shard by the input metrics
 	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);

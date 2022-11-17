@@ -56,12 +56,12 @@
 ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 	return ShardSizeBounds{
 		.max = StorageMetrics{ .bytes = -1,
-		                       .bytesPerKSecond = StorageMetrics::infinity,
+		                       .bytesWrittenPerKSecond = StorageMetrics::infinity,
 		                       .iosPerKSecond = StorageMetrics::infinity,
 		                       .bytesReadPerKSecond = StorageMetrics::infinity },
-		.min = StorageMetrics{ .bytes = -1, .bytesPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
+		.min = StorageMetrics{ .bytes = -1, .bytesWrittenPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
 		.permittedError = StorageMetrics{ .bytes = -1,
-		                                  .bytesPerKSecond = StorageMetrics::infinity,
+		                                  .bytesWrittenPerKSecond = StorageMetrics::infinity,
 		                                  .iosPerKSecond = StorageMetrics::infinity,
 		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
 	};

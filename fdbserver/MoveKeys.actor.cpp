@@ -580,8 +580,8 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 
 // keyServer: map from keys to destination servers
 // serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have),
-// complete(already has), ""(). Set keyServers[keys].dest = servers Set serverKeys[servers][keys] = active for each
-// subrange of keys that the server did not already have, complete for each subrange that it already has Set
+// complete(already has), ""(). Set keyServers[keys].dest = servers. Set serverKeys[servers][keys] = active for each
+// subrange of keys that the server did not already have, = complete for each subrange that it already has. Set
 // serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member
 // of servers OR if the source list is sufficiently degraded)
 ACTOR static Future<Void> startMoveKeys(Database occ,
@@ -2481,7 +2481,9 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	return Void();
 }
 
-Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+Future<Void> rawStartMovement(Database occ,
+                              const MoveKeysParams& params,
+                              std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		return startMoveShards(std::move(occ),
 		                       params.dataMoveId,
@@ -2504,7 +2506,7 @@ Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID
 }
 
 Future<Void> rawFinishMovement(Database occ,
-                               MoveKeysParams& params,
+                               const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		return finishMoveShards(std::move(occ),

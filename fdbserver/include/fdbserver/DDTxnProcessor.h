@@ -225,9 +225,10 @@ public:
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
 protected:
-	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
-	Future<Void> rawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawFinishMovement(const MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping);
 };
 
 struct DDMockTxnProcessorImpl;
@@ -237,6 +238,7 @@ struct DDMockTxnProcessorImpl;
 class DDMockTxnProcessor : public IDDTxnProcessor {
 	friend struct DDMockTxnProcessorImpl;
 
+protected:
 	std::shared_ptr<MockGlobalState> mgs;
 
 	std::vector<DDShardInfo> getDDShardInfos() const;
@@ -292,9 +294,10 @@ public:
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
 protected:
-	void rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
-	void rawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawFinishMovement(const MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping);
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H
