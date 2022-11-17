@@ -588,8 +588,8 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
-	ShardManager(std::string path, UID logId)
-	  : path(path), logId(logId), cfOptions(getCFOptions()), dataShardMap(nullptr, specialKeys.end) {}
+	ShardManager(std::string path, UID logId, const rocksdb::Options& options)
+	  : path(path), logId(logId), dbOptions(options), dataShardMap(nullptr, specialKeys.end) {}
 
 	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
 	                                             Future<Void> openFuture,
@@ -640,11 +640,11 @@ public:
 		return Void();
 	}
 
-	rocksdb::Status init(rocksdb::Options options) {
+	rocksdb::Status init() {
 		// Open instance.
 		TraceEvent(SevInfo, "ShardedRocksShardManagerInitBegin", this->logId).detail("DataPath", path);
 		std::vector<std::string> columnFamilies;
-		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
+		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
 
 		std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
 		bool foundMetadata = false;
@@ -652,18 +652,19 @@ public:
 			if (name == METADATA_SHARD_ID) {
 				foundMetadata = true;
 			}
-			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
+			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
 		}
 
 		ASSERT(foundMetadata || descriptors.size() == 0);
 
 		// Add default column family if it's a newly opened database.
 		if (descriptors.size() == 0) {
-			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ "default", cfOptions });
+			descriptors.push_back(
+			    rocksdb::ColumnFamilyDescriptor{ "default", rocksdb::ColumnFamilyOptions(dbOptions) });
 		}
 
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
-		status = rocksdb::DB::Open(options, path, descriptors, &handles, &db);
+		status = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
 		if (!status.ok()) {
 			logRocksDBError(status, "Open");
 			return status;
@@ -768,7 +769,8 @@ public:
 			physicalShards[defaultShard->id] = defaultShard;
 
 			// Create metadata shard.
-			auto metadataShard = std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, cfOptions);
+			auto metadataShard =
+			    std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, rocksdb::ColumnFamilyOptions(dbOptions));
 			metadataShard->init();
 			columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
 			physicalShards[METADATA_SHARD_ID] = metadataShard;
@@ -834,7 +836,8 @@ public:
 			}
 		}
 
-		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, cfOptions));
+		auto [it, inserted] = physicalShards.emplace(
+		    id, std::make_shared<PhysicalShard>(db, id, rocksdb::ColumnFamilyOptions(dbOptions)));
 		std::shared_ptr<PhysicalShard>& shard = it->second;
 
 		activePhysicalShardIds.emplace(id);
@@ -1148,7 +1151,7 @@ public:
 private:
 	const std::string path;
 	const UID logId;
-	rocksdb::ColumnFamilyOptions cfOptions;
+	rocksdb::Options dbOptions;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
 	std::unordered_set<std::string> activePhysicalShardIds;
@@ -1758,7 +1761,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			ShardManager* shardManager;
-			rocksdb::Options dbOptions;
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
 			const FlowLock* readLock;
@@ -1766,19 +1768,18 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			std::shared_ptr<RocksDBErrorListener> errorListener;
 
 			OpenAction(ShardManager* shardManager,
-			           rocksdb::Options dbOptions,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock,
 			           std::shared_ptr<RocksDBErrorListener> errorListener)
-			  : shardManager(shardManager), dbOptions(dbOptions), metrics(metrics), readLock(readLock),
-			    fetchLock(fetchLock), errorListener(errorListener) {}
+			  : shardManager(shardManager), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
+			    errorListener(errorListener) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
 		void action(OpenAction& a) {
-			auto status = a.shardManager->init(a.dbOptions);
+			auto status = a.shardManager->init();
 
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
@@ -2283,7 +2284,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
-	    shardManager(path, id), dbOptions(getOptions()),
+	    dbOptions(getOptions()), shardManager(path, id, dbOptions),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
@@ -2350,7 +2351,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			// mapping data.
 		} else {
 			auto a = std::make_unique<Writer::OpenAction>(
-			    &shardManager, dbOptions, metrics, &readSemaphore, &fetchSemaphore, errorListener);
+			    &shardManager, metrics, &readSemaphore, &fetchSemaphore, errorListener);
 			openFuture = a->done.getFuture();
 			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
@@ -2584,8 +2585,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
 
 	std::shared_ptr<ShardedRocksDBState> rState;
-	ShardManager shardManager;
 	rocksdb::Options dbOptions;
+	ShardManager shardManager;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 	std::string path;
 	UID id;
