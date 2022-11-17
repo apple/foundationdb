@@ -233,42 +233,4 @@ public actor MasterDataActor {
         }
     }
 
-    public func provideVersions(cxxState: MasterData) async {
-    }
-
-    nonisolated public func provideVersions(cxxState: MasterData, result promise: PromiseVoid) {
-        Task {
-            await provideVersions(cxxState: cxxState)
-
-            var result = Flow.Void()
-            promise.send(&result)
-        }
-    }
-
-    /// Equivalent to:
-    /// ```
-    /// ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-    ///     loop {
-    ///		    state UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
-    ///     }
-    /// }
-    /// ```
-    // nonisolated public func registerLastCommitProxyVersionReplies(uids: [Flow.UID], result promise: PromiseVoid) {
-    nonisolated public func updateRecoveryDataStream(cxxState myself: MasterData, result promise: PromiseVoid) {
-        Task {
-            for try await req in myself.myInterface.updateRecoveryData.getFuture() {
-                // Dispatch as another task, so we can await the result for this call,
-                // but also immediately await for another incoming request. We do want
-                // to allow interleaving/concurrent requests, which we get by scheduling
-                // more onto the actor; It guarantees thread safety, but task executions may interleave.
-                Task {
-                    var result = await self.updateRecoveryData(cxxState: myself, req: req)
-                    req.reply.send(&result)
-                }
-            }
-
-            var result = Flow.Void()
-            promise.send(&result)
-        }
-    }
 }
