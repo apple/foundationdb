@@ -3919,11 +3919,6 @@ public:
 			cx->decreaseWatchRefCount(tenantID, key, version);
 		}
 
-		// Since this class is only used by watchValueMap, and it is used *AFTER* a wait statement, this class is first
-		// initialized by default constructor, then, after the wait, this function is called to assign the actual
-		// database, key, etc., to re-initialize this object. At this stage, the reference count can be increased. And
-		// since the database object is moved, the rvalue will have null reference to the DatabaseContext and will not
-		// reduce the reference count.
 		cx = std::move(other.cx);
 		tenantID = std::move(other.tenantID);
 		key = std::move(other.key);
