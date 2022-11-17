@@ -245,50 +245,6 @@ public actor MasterDataActor {
         }
     }
 
-    func updateRecoveryData(cxxState myself: MasterData, req: UpdateRecoveryDataRequest) async -> Flow.Void {
-//        TraceEvent("UpdateRecoveryData", self->dbgid)
-//                .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
-//                .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
-//                .detail("CurrentRecoveryTxnVersion", self->recoveryTransactionVersion)
-//                .detail("CurrentLastEpochEnd", self->lastEpochEnd)
-//                .detail("NumCommitProxies", req.commitProxies.size())
-//                .detail("VersionEpoch", req.versionEpoch)
-//                .detail("PrimaryLocality", req.primaryLocality);
-//
-//        self->recoveryTransactionVersion = req.recoveryTransactionVersion;
-//        self->lastEpochEnd = req.lastEpochEnd;
-//
-//        if (req.commitProxies.size() > 0) {
-//            auto registeredUIDs = Swift::Array<UID>::init();
-//            for (size_t j = 0; j < req.commitProxies.size(); ++j)
-//            registeredUIDs.append(req.commitProxies[j].id());
-//            auto promise = Promise<Void>();
-//            self->swiftImpl->registerLastCommitProxyVersionReplies(registeredUIDs, promise);
-//            wait(promise.getFuture());
-//        }
-//        if (req.versionEpoch.present()) {
-//            self->referenceVersion = req.versionEpoch.get();
-//        } else if (BUGGIFY) {
-//            // Cannot use a positive version epoch in simulation because of the
-//            // clock starting at 0. A positive version epoch would mean the initial
-//            // cluster version was negative.
-//            // TODO: Increase the size of this interval after fixing the issue
-//            // with restoring ranges with large version gaps.
-//            self->referenceVersion = deterministicRandom()->randomInt64(-1e6, 0);
-//        }
-//
-//        self->resolutionBalancer.setCommitProxies(req.commitProxies);
-//        self->resolutionBalancer.setResolvers(req.resolvers);
-//
-//        self->locality = req.primaryLocality;
-
-        return Flow.Void()
-    }
-
-    nonisolated public func updateRecoveryDataStream(result promise: PromiseVoid) {}
-    nonisolated public func waitForPrev_2222(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {}
-
-
     /// Equivalent to:
     /// ```
     /// ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
@@ -310,10 +266,6 @@ public actor MasterDataActor {
                     req.reply.send(&result)
                 }
             }
-//            // TODO: support this directly:
-//            for await req in myself.myInterface.updateRecoveryData {
-//
-//            }
 
             var result = Flow.Void()
             promise.send(&result)
