@@ -786,7 +786,7 @@ def tenant_list(logger):
     output = run_fdbcli_command('tenant list')
     assert output == '1. tenant\n  2. tenant2'
 
-    output = run_fdbcli_command('tenant list a z 1')
+    output = run_fdbcli_command('tenant list a z limit=1')
     assert output == '1. tenant'
 
     output = run_fdbcli_command('tenant list a tenant2')
@@ -801,8 +801,14 @@ def tenant_list(logger):
     output = run_fdbcli_command_and_get_error('tenant list b a')
     assert output == 'ERROR: end must be larger than begin'
 
-    output = run_fdbcli_command_and_get_error('tenant list a b 12x')
+    output = run_fdbcli_command_and_get_error('tenant list a b limit=12x')
     assert output == 'ERROR: invalid limit `12x\''
+
+    output = run_fdbcli_command_and_get_error('tenant list a b offset=13y')
+    assert output == 'ERROR: invalid offset `13y\''
+
+    output = run_fdbcli_command_and_get_error('tenant list a b state=14z')
+    assert output == 'ERROR: unrecognized tenant state(s) `14z\'.'
 
 @enable_logging()
 def tenant_get(logger):
