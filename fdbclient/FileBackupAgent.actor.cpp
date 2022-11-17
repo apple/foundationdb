@@ -33,7 +33,6 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
-#include "fdbclient/TenantEntryCache.actor.h"
 
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
