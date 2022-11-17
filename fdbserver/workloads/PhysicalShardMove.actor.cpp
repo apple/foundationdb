@@ -76,6 +76,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		int ignore = wait(setDDMode(cx, 0));
 		state std::vector<UID> teamA;
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
+		                                 { "TestKeyAB"_sr, "TestValueAB"_sr },
+		                                 { "TestKeyAC"_sr, "TestValueAC"_sr },
 		                                 { "TestKeyB"_sr, "TestValueB"_sr },
 		                                 { "TestKeyC"_sr, "TestValueC"_sr },
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
@@ -181,6 +183,36 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				}
 			}
 		}
+
+		// Restore KVS.
+		state std::string rocksDBTestDir = "rocksdb-kvstore-test-restored-db";
+		platform::eraseDirectoryRecursive(rocksDBTestDir);
+		state std::string shardId = "restored-shard"; // format("%016llx", deterministicRandom()->randomUInt64());
+		state IKeyValueStore* kvStore = keyValueStoreShardedRocksDB(
+		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
+		wait(kvStore->init());
+		try {
+			wait(kvStore->restore(shardId, { testRange }, fetchedCheckpoints));
+		} catch (Error& e) {
+			TraceEvent(SevError, "TestRestoreCheckpointError")
+			    .errorUnsuppressed(e)
+			    .detail("Checkpoint", describe(fetchedCheckpoints));
+		}
+
+		TraceEvent("TestCheckpointRestored").detail("Checkpoint", describe(fetchedCheckpoints));
+
+		RangeResult kvRange = wait(kvStore->readRange(testRange));
+		for (int i = 0; i < kvRange.size(); ++i) {
+			ASSERT(kvs[kvRange[i].key] == kvRange[i].value);
+		}
+
+		TraceEvent("TestCheckpointVerified").detail("Checkpoint", describe(fetchedCheckpoints));
+
+		Future<Void> close = kvStore->onClosed();
+		kvStore->dispose();
+		wait(close);
+
+		TraceEvent("TestRocksDBClosed").detail("Checkpoint", describe(fetchedCheckpoints));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());

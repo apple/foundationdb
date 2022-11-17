@@ -903,6 +903,12 @@ public:
 		return it->second.get();
 	}
 
+	PhysicalShard* getMetaDataShard() {
+		auto it = physicalShards.find(METADATA_SHARD_ID);
+		ASSERT(it != physicalShards.end());
+		return it->second.get();
+	}
+
 	PhysicalShard* getPhysicalShardForAllRanges(std::vector<KeyRange> ranges) {
 		PhysicalShard* result = nullptr;
 		for (const auto& range : ranges) {
@@ -1125,14 +1131,12 @@ public:
 		}
 	}
 
-	void persistRangeMapping(KeyRangeRef range, bool isAdd) {
+	void populateRangeMappingMutations(rocksdb::WriteBatch* writeBatch, KeyRangeRef range, bool isAdd) {
 		TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 		    .detail("Info", "RangeToPersist")
 		    .detail("BeginKey", range.begin)
 		    .detail("EndKey", range.end);
-		auto it = physicalShards.find(METADATA_SHARD_ID);
-		ASSERT(it != physicalShards.end());
-		auto metadataShard = it->second;
+		PhysicalShard* metadataShard = getMetaDataShard();
 
 		writeBatch->DeleteRange(metadataShard->cf,
 		                        getShardMappingKey(range.begin, shardMappingPrefix),
@@ -1185,7 +1189,11 @@ public:
 		    .detail("Action", "PersistRangeMappingEnd")
 		    .detail("NextShardKey", lastKey)
 		    .detail("Value", nextShard == nullptr ? "" : nextShard->physicalShard->id);
-		dirtyShards->insert(metadataShard.get());
+	}
+
+	void persistRangeMapping(KeyRangeRef range, bool isAdd) {
+		populateRangeMappingMutations(writeBatch.get(), range, isAdd);
+		dirtyShards->insert(getMetaDataShard());
 	}
 
 	std::unique_ptr<rocksdb::WriteBatch> getWriteBatch() {
@@ -2215,11 +2223,27 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ASSERT(!a.checkpoints.empty());
 
-			// TODO: sanity check ranges for match.
-			// std::vector<KeyRange> ranges;
-			// for (const auto& checkpoint : a.checkpoints) {
-			// 	ranges.insert(ranges.back(), checkpoint.ranges.begin(), checkpoint.ranges.end());
-			// }
+			const CheckpointMetaData& checkpoint = a.checkpoints[0];
+
+			if (a.ranges.empty() || checkpoint.ranges.empty() || a.ranges.size() > checkpoint.ranges.size() ||
+			    a.ranges.front().begin != checkpoint.ranges.front().begin) {
+				TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
+				    .detail("Path", a.path)
+				    .detail("Ranges", describe(a.ranges))
+				    .detail("Checkpoints", describe(a.checkpoints));
+				a.done.sendError(failed_to_restore_checkpoint());
+			}
+
+			for (int i = 0; i < a.ranges.size(); ++i) {
+				if (a.ranges[i] != checkpoint.ranges[i] && i != a.ranges.size() - 1) {
+					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
+					    .detail("Path", a.path)
+					    .detail("Ranges", describe(a.ranges))
+					    .detail("Checkpoints", describe(a.checkpoints));
+					a.done.sendError(failed_to_restore_checkpoint());
+				}
+			}
+
 			const CheckpointFormat format = a.checkpoints[0].getFormat();
 			for (int i = 1; i < a.checkpoints.size(); ++i) {
 				if (a.checkpoints[i].getFormat() != format) {
@@ -2250,11 +2274,34 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Path", a.path)
 					    .detail("Checkpoint", a.checkpoints[0].toString());
 					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
-					a.done.send(Void());
 				}
 			} else if (format == RocksDB) {
 				throw not_implemented();
 			}
+
+			rocksdb::WriteBatch writeBatch;
+
+			for (const KeyRange& range : a.ranges) {
+				a.shardManager->populateRangeMappingMutations(&writeBatch, range, /*isAdd=*/true);
+			}
+
+			KeyRangeRef cRange(a.ranges.back().end, checkpoint.ranges.back().end);
+			if (!cRange.empty()) {
+				writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
+			}
+			rocksdb::WriteOptions options;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+
+			status = a.shardManager->getDb()->Write(options, &writeBatch);
+			if (!status.ok()) {
+				logRocksDBError(status, "Restore");
+				a.done.sendError(statusToError(status));
+			}
+			TraceEvent(SevInfo, "RocksDBRestorePersisted", logId);
+			a.shardManager->getMetaDataShard()->refreshReadIteratorPool();
+			TraceEvent(SevInfo, "RocksDBRestoreEnd", logId);
+			a.done.send(Void());
+			TraceEvent(SevInfo, "RocksDBRestoreReplied", logId);
 		}
 	};
 
@@ -2867,12 +2914,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	// Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) override {
-	// 	auto a = new Writer::RestoreAction(path, checkpoints);
-	// 	auto res = a->done.getFuture();
-	// 	writeThread->post(a);
-	// 	return res;
-	// }
+	Future<Void> restore(const std::string& shardId,
+	                     const std::vector<KeyRange>& ranges,
+	                     const std::vector<CheckpointMetaData>& checkpoints) override {
+		auto a = new Writer::RestoreAction(&shardManager, path, shardId, ranges, checkpoints);
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
+
 	std::vector<std::string> removeRange(KeyRangeRef range) override { return shardManager.removeRange(range); }
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) override {
