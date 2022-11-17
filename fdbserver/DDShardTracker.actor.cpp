@@ -1756,7 +1756,7 @@ InOverSizePhysicalShard PhysicalShardCollection::isInOverSizePhysicalShard(KeyRa
 }
 
 // May return a problematic remote team
-Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
+std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
     uint64_t inputPhysicalShardID,
     StorageMetrics const& moveInMetrics,
     uint64_t debugID) {
@@ -1764,10 +1764,10 @@ Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvail
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
 	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
 	if (physicalShardInstances.count(inputPhysicalShardID) == 0) {
-		return Optional<ShardsAffectedByTeamFailure::Team>();
+		return { Optional<ShardsAffectedByTeamFailure::Team>(), true };
 	}
 	if (!checkPhysicalShardAvailable(inputPhysicalShardID, moveInMetrics)) {
-		return Optional<ShardsAffectedByTeamFailure::Team>();
+		return { Optional<ShardsAffectedByTeamFailure::Team>(), false };
 	}
 	for (auto team : physicalShardInstances[inputPhysicalShardID].teams) {
 		if (team.primary == false) {
@@ -1777,10 +1777,12 @@ Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvail
 			    .detail("TeamSize", team.servers.size())
 			    .detail("PhysicalShardsOfTeam", convertIDsToString(teamPhysicalShardIDs[team]))
 			    .detail("DebugID", debugID);*/
-			return team;
+			return { team, true };
 		}
 	}
-	UNREACHABLE();
+	// In this case, the physical shard may not be populated in the remote region yet, e.g., we are making a
+	// configuration change to turn a single region cluster into HA mode.
+	return { Optional<ShardsAffectedByTeamFailure::Team>(), true };
 }
 
 // The update of PhysicalShardToTeams, Collection, keyRangePhysicalShardIDMap should be atomic
