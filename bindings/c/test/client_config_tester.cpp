@@ -28,6 +28,14 @@
 #include <thread>
 #include <string_view>
 
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <process.h>
+#else
+#error Unsupported platform
+#endif
+
 #undef ERROR
 #define ERROR(name, number, description) enum { error_code_##name = number };
 
@@ -208,12 +216,23 @@ bool parseArgs(int argc, char** argv) {
 	return true;
 }
 
+void exitImmediately(int exitCode) {
+#ifdef _WIN32
+	// This function is documented as being asynchronous, but we suspect it might actually be synchronous in the
+	// case that it is passed a handle to the current process. If not, then there may be cases where we escalate
+	// to the crashAndDie call below.
+	TerminateProcess(GetCurrentProcess(), exitCode);
+#else
+	_exit(exitCode);
+#endif
+}
+
 void checkErrorCodeAndExit(fdb::Error::CodeType e) {
 	if (e == options.expectedError) {
-		std::exit(0);
+		exitImmediately(0);
 	}
 	fmt::print(stderr, "Expected Error: {}, but got {}\n", options.expectedError, e);
-	std::exit(1);
+	exitImmediately(1);
 }
 
 void fdb_check(fdb::Error e, std::string_view msg) {
@@ -260,7 +279,7 @@ void testTransaction() {
 		}
 		if (err.code() == error_code_timed_out) {
 			fmt::print(stderr, "Transaction timed out\n");
-			exit(1);
+			exitImmediately(1);
 		}
 		auto onErrorFuture = tx.onError(err);
 		fdb_check(onErrorFuture.blockUntilReady(), "Wait on onError failed");
