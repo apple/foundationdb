@@ -1765,21 +1765,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 	// Read cluster configuration
 	if (useDB && g_network->isSimulated()) {
-		state Transaction tr = Transaction(cx);
-		state DatabaseConfiguration configuration;
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+		DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 
 		g_simulator->storagePolicy = configuration.storagePolicy;
 		g_simulator->tLogPolicy = configuration.tLogPolicy;
