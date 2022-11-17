@@ -963,11 +963,16 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
             }
          }
       },
-      "tenants":{
-         "num_tenants":0
-      },
       "metacluster" : {
-         "cluster_type" : "standalone"
+         "cluster_type" : "management",
+         "metacluster_name":"metacluster1",
+         "metacluster_id":12345,
+         "num_data_clusters":10
+      },
+      "tenants":{
+         "num_tenants":0,
+         "num_tenant_groups":10,
+         "tenant_group_capacity":20
       }
    },
    "client":{
