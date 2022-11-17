@@ -23,6 +23,7 @@
 #pragma once
 
 #include <fdbrpc/fdbrpc.h>
+#include "flow/network.h"
 
 class TimedRequest {
 	double _requestTime;
@@ -35,7 +36,7 @@ public:
 
 	TimedRequest() {
 		if (!FlowTransport::isClient()) {
-			_requestTime = timer();
+			_requestTime = g_network->timer();
 		} else {
 			_requestTime = 0.0;
 		}
