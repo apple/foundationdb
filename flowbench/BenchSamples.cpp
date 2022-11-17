@@ -22,7 +22,61 @@
 #include "flow/IRandom.h"
 #include "flowbench/GlobalData.h"
 #include "fdbrpc/Stats.h"
+#include "fdbrpc/DDSketch.h"
+#include "fdbrpc/ContinuousSample.h"
 #include "flow/Histogram.h"
+
+static void bench_ddsketchUnsigned(benchmark::State& state) {
+	DDSketchFastUnsigned dds;
+	InputGenerator<unsigned> data(1e6, []() { return deterministicRandom()->randomInt64(0, 1e9); });
+
+	for (auto _ : state) {
+		dds.addSample(data.next());
+	}
+
+	state.SetItemsProcessed(state.iterations());
+}
+// DDSketchFastUnsigned has a fixed error margin (~8%)
+BENCHMARK(bench_ddsketchUnsigned)->ReportAggregatesOnly(true);
+
+static void bench_ddsketchInt(benchmark::State& state) {
+	DDSketch<int64_t> dds((double)state.range(0) / 100);
+	InputGenerator<int64_t> data(1e6, []() { return deterministicRandom()->randomInt64(0, 1e9); });
+
+	for (auto _ : state) {
+		dds.addSample(data.next());
+	}
+
+	state.SetItemsProcessed(state.iterations());
+}
+// Try with 10%, 5% and 1% error margins
+BENCHMARK(bench_ddsketchInt)->Arg(10)->Arg(5)->Arg(1)->ReportAggregatesOnly(true);
+
+static void bench_ddsketchDouble(benchmark::State& state) {
+	DDSketch<double> dds((double)state.range(0) / 100);
+	InputGenerator<double> data(1e6, []() { return deterministicRandom()->randomInt64(0, 1e9); });
+
+	for (auto _ : state) {
+		dds.addSample(data.next());
+	}
+
+	state.SetItemsProcessed(state.iterations());
+}
+// Try with 10%, 5% and 1% error margins
+BENCHMARK(bench_ddsketchDouble)->Arg(10)->Arg(5)->Arg(1)->ReportAggregatesOnly(true);
+
+static void bench_ddsketchLatency(benchmark::State& state) {
+	DDSketch<double> dds((double)state.range(0) / 100);
+	InputGenerator<double> data(1e6, []() { return deterministicRandom()->random01() * 2.0; });
+
+	for (auto _ : state) {
+		dds.addSample(data.next());
+	}
+
+	state.SetItemsProcessed(state.iterations());
+}
+// Try with 10%, 5% and 1% error margins
+BENCHMARK(bench_ddsketchLatency)->Arg(10)->Arg(5)->Arg(1)->ReportAggregatesOnly(true);
 
 static void bench_continuousSampleInt(benchmark::State& state) {
 	ContinuousSample<int64_t> cs(state.range(0));

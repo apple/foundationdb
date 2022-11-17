@@ -68,12 +68,9 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be 6.27.3 or greater.
-static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
-static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 27 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
-static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 27) ? ROCKSDB_PATCH >= 3 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
+// Enforcing rocksdb version to be 7.7.3.
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
+              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
 namespace {
 using rocksdb::BackgroundErrorReason;
@@ -111,15 +108,15 @@ SharedRocksDBState::SharedRocksDBState(UID id)
     readOptions(initialReadOptions()), commitLatency(LatencySample("RocksDBCommitLatency",
                                                                    id,
                                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+                                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
     commitQueueLatency(LatencySample("RocksDBCommitQueueLatency",
                                      id,
                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+                                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
     dbWriteLatency(LatencySample("RocksDBWriteLatency",
                                  id,
                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                 SERVER_KNOBS->LATENCY_SAMPLE_SIZE)) {}
+                                 SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {}
 
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;
@@ -1402,17 +1399,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream)
 		  : id(id), db(db), cf(cf), sharedState(sharedState), readIterPool(readIterPool),
 		    perfContextMetrics(perfContextMetrics), metricPromiseStream(metricPromiseStream), threadIndex(threadIndex) {
-			if (g_network->isSimulated()) {
-				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
-				// very high load and single read thread cannot process all the load within the timeouts.
-				readValueTimeout = 5 * 60;
-				readValuePrefixTimeout = 5 * 60;
-				readRangeTimeout = 5 * 60;
-			} else {
-				readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
-				readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
-				readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
-			}
+
+			readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
+			readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+			readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
+
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
 				// Enable perf context on the same thread with the db thread
 				rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
