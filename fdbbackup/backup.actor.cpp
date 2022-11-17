@@ -184,6 +184,8 @@ enum {
 	OPT_DSTONLY,
 
 	OPT_TRACE_FORMAT,
+
+	OPT_SWIFT_TEST_FILTER,
 };
 
 // Top level binary commands.
@@ -360,6 +362,7 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
+	{ OPT_SWIFT_TEST_FILTER, "--swift-test-filter", SO_NONE },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };

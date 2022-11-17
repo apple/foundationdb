@@ -84,6 +84,7 @@ public actor MasterDataActor {
     }
 
     func getVersion(cxxState myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
+
         print("[swift] getVersion impl, requestNum: \(req.requestNum) -> ")
 
         myself.getCommitVersionRequests += 1
@@ -95,20 +96,20 @@ public actor MasterDataActor {
 
         // CODE_PROBE(lastVersionReplies.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up")
         try! await lastVersionReplies.latestRequestNum
-            .atLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
+                .atLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
 
         if let lastReply = lastVersionReplies.replies[req.requestNum] {
             // NOTE: CODE_PROBE is macro, won't be imported
             // CODE_PROBE(true, "Duplicate request for sequence")
             return lastReply
-         } else if (req.requestNum <= lastVersionReplies.latestRequestNum.get()) {
-             // NOTE: CODE_PROBE is macro, won't be imported
-             // CODE_PROBE(true, "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
-             assert(req.requestNum < lastVersionReplies.latestRequestNum.get())
-             // The latest request can never be acknowledged
-             return nil
+        } else if (req.requestNum <= lastVersionReplies.latestRequestNum.get()) {
+            // NOTE: CODE_PROBE is macro, won't be imported
+            // CODE_PROBE(true, "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
+            assert(req.requestNum < lastVersionReplies.latestRequestNum.get())
+            // The latest request can never be acknowledged
+            return nil
         }
-    
+
         var rep = GetCommitVersionReply()
 
         if (myself.version == invalidVersion) {
@@ -122,16 +123,16 @@ public actor MasterDataActor {
             }
 
             let toAdd = max(Version(1), min(
-                          getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS,
-                          Version(Double(getServerKnobs().VERSIONS_PER_SECOND) * (t1 - myself.lastVersionTime))))
+                    getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS,
+                    Version(Double(getServerKnobs().VERSIONS_PER_SECOND) * (t1 - myself.lastVersionTime))))
             rep.prevVersion = myself.version
             if let referenceVersion = Swift.Optional(cxxOptional: myself.referenceVersion) {
                 myself.version = figureVersion(current: myself.version,
-                                               now: SwiftGNetwork.timer(),
-                              reference: referenceVersion,
-                              toAdd: toAdd,
-                              maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
-                              maxVersionRateOffset: getServerKnobs().MAX_VERSION_RATE_OFFSET)
+                        now: SwiftGNetwork.timer(),
+                        reference: referenceVersion,
+                        toAdd: toAdd,
+                        maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
+                        maxVersionRateOffset: getServerKnobs().MAX_VERSION_RATE_OFFSET)
                 assert(myself.version > rep.prevVersion)
             } else {
                 myself.version += toAdd
@@ -196,7 +197,7 @@ public actor MasterDataActor {
             // TODO: Something is funky. pointee could be implicitly cast to an Int.  prevVersion is an Int64.
             try! await myself.liveCommittedVersion.atLeast(Int(prevVersion))
         }
-            
+
 
         // double latency = now() - startTime;
         let latency = now() - startTime
@@ -221,18 +222,101 @@ public actor MasterDataActor {
     }
 
     nonisolated public func waitForPrev(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {
-        // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift waitForPrev impl!")
         Task {
-            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
-            if let rep = await waitForPrev(cxxState: cxxState, req: req) {
-                var repMut = rep
-                req.reply.send(&repMut)
+            if var rep = await waitForPrev(cxxState: cxxState, req: req) {
+                req.reply.send(&rep)
             } else {
                 req.reply.sendNever()
             }
             var result = Flow.Void()
             promise.send(&result)
-            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
+        }
+    }
+
+    public func provideVersions(cxxState: MasterData) async {
+    }
+
+    nonisolated public func provideVersions(cxxState: MasterData, result promise: PromiseVoid) {
+        Task {
+            await provideVersions(cxxState: cxxState)
+
+            var result = Flow.Void()
+            promise.send(&result)
+        }
+    }
+
+    func updateRecoveryData(cxxState myself: MasterData, req: UpdateRecoveryDataRequest) async -> Flow.Void {
+//        TraceEvent("UpdateRecoveryData", self->dbgid)
+//                .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
+//                .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
+//                .detail("CurrentRecoveryTxnVersion", self->recoveryTransactionVersion)
+//                .detail("CurrentLastEpochEnd", self->lastEpochEnd)
+//                .detail("NumCommitProxies", req.commitProxies.size())
+//                .detail("VersionEpoch", req.versionEpoch)
+//                .detail("PrimaryLocality", req.primaryLocality);
+//
+//        self->recoveryTransactionVersion = req.recoveryTransactionVersion;
+//        self->lastEpochEnd = req.lastEpochEnd;
+//
+//        if (req.commitProxies.size() > 0) {
+//            auto registeredUIDs = Swift::Array<UID>::init();
+//            for (size_t j = 0; j < req.commitProxies.size(); ++j)
+//            registeredUIDs.append(req.commitProxies[j].id());
+//            auto promise = Promise<Void>();
+//            self->swiftImpl->registerLastCommitProxyVersionReplies(registeredUIDs, promise);
+//            wait(promise.getFuture());
+//        }
+//        if (req.versionEpoch.present()) {
+//            self->referenceVersion = req.versionEpoch.get();
+//        } else if (BUGGIFY) {
+//            // Cannot use a positive version epoch in simulation because of the
+//            // clock starting at 0. A positive version epoch would mean the initial
+//            // cluster version was negative.
+//            // TODO: Increase the size of this interval after fixing the issue
+//            // with restoring ranges with large version gaps.
+//            self->referenceVersion = deterministicRandom()->randomInt64(-1e6, 0);
+//        }
+//
+//        self->resolutionBalancer.setCommitProxies(req.commitProxies);
+//        self->resolutionBalancer.setResolvers(req.resolvers);
+//
+//        self->locality = req.primaryLocality;
+
+        return Flow.Void()
+    }
+
+    nonisolated public func updateRecoveryDataStream(result promise: PromiseVoid) {}
+    nonisolated public func waitForPrev_2222(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {}
+
+
+    /// Equivalent to:
+    /// ```
+    /// ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
+    ///     loop {
+    ///		    state UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
+    ///     }
+    /// }
+    /// ```
+    // nonisolated public func registerLastCommitProxyVersionReplies(uids: [Flow.UID], result promise: PromiseVoid) {
+    nonisolated public func updateRecoveryDataStream(cxxState myself: MasterData, result promise: PromiseVoid) {
+        Task {
+            for try await req in myself.myInterface.updateRecoveryData.getFuture() {
+                // Dispatch as another task, so we can await the result for this call,
+                // but also immediately await for another incoming request. We do want
+                // to allow interleaving/concurrent requests, which we get by scheduling
+                // more onto the actor; It guarantees thread safety, but task executions may interleave.
+                Task {
+                    var result = await self.updateRecoveryData(cxxState: myself, req: req)
+                    req.reply.send(&result)
+                }
+            }
+//            // TODO: support this directly:
+//            for await req in myself.myInterface.updateRecoveryData {
+//
+//            }
+
+            var result = Flow.Void()
+            promise.send(&result)
         }
     }
 }

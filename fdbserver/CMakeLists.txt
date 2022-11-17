@@ -28,10 +28,13 @@ include(FindSwiftLibs)
 add_library(fdbserver_swift STATIC
         masterserver.swift
         SwiftUtils.swift
+        swift_fdbserver_cxx_swift_value_conformance.swift
         swift_fdbserver_collections.swift
+        swift_fdbserver_stream_support.swift
         UID.swift
         # tests
         swift/tests/Rainbow.swift
+        swift/tests/SimpleSwiftTestSuite.swift
         swift/tests/swift_tests.swift
         swift/tests/swift_test_task.swift
         swift/tests/swift_test_streams.swift
@@ -64,7 +67,22 @@ target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHEL
 
 # Ensure that C++ code in fdbserver can import Swift using a compatibility header.
 include(SwiftToCXXInterop)
+
+add_swift_to_cxx_header_gen_target(
+  fdbserver_swift
+  fdbserver_swift_to_cxx_conformance_header
+  "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/FDBServer_CxxTypeConformances.h"
+   "${CMAKE_CURRENT_SOURCE_DIR}/swift_fdbserver_cxx_swift_value_conformance.swift"
+   FLAGS
+-Xcc -std=c++17 -enable-experimental-cxx-interop -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
+# Important: This is needed to avoid including header that depends on this generated header.
+-Xcc -DFOUNDATIONDB_FDBSERVER_STREAM_SUPPORT_H
+)
+
 generate_cxx_compat_header(fdbserver_swift "FDBServer")
+
+add_dependencies(fdbserver_swift_to_cxx_conformance_header flow_actors fdbserver_actors)
+add_dependencies(fdbserver_swift fdbserver_swift_to_cxx_conformance_header)
 
 add_dependencies(fdbserver_swift flow_swift)
 add_dependencies(fdbserver_swift flow_actors)

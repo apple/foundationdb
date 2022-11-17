@@ -402,14 +402,10 @@ ACTOR Future<Void> swiftCallsActor() {
 }
 
 ACTOR void swiftTestRunner() {
-	printf("[c++][%s:%d](%s) ============================== swift/flow tests ==============================\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 	auto p = PromiseVoid();
 	fdbserver_swift::swiftyTestRunner(p);
 	wait(p.getFuture());
-	printf("[c++][%s:%d](%s) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ end of swift/flow tests ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 
-	printf("[c++][%s:%d](%s) Shutting down...\n", __FILE_NAME__, __LINE__, __FUNCTION__);
-	wait(delay(3.0));
 	flushAndExit(0);
 }
 

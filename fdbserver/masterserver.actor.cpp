@@ -199,6 +199,13 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 }
 
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
+	auto promise = Promise<Void>();
+	self->swiftImpl->updateRecoveryDataStream(self.getPtr(), /*result=*/promise);
+	wait(promise.getFuture());
+	return Void();
+}
+
+ACTOR Future<Void> cxx_updateRecoveryData(Reference<MasterData> self) {
 	loop {
 		state UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
 		TraceEvent("UpdateRecoveryData", self->dbgid)

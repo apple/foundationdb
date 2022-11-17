@@ -28,8 +28,9 @@
 
 /// This annotation bridges immortal C++ singleton types
 /// that are always accessed via a pointer or a reference in C++ as immortal class types in Swift.
-#define SWIFT_CXX_IMMORTAL_SINGLETON_TYPE                                           	__attribute__((swift_attr("import_as_ref")))                    		   \
-    __attribute__((swift_attr("retain:immortal")))                  		   \
+#define SWIFT_CXX_IMMORTAL_SINGLETON_TYPE \
+    __attribute__((swift_attr("import_as_ref")))  \
+    __attribute__((swift_attr("retain:immortal")))                 		   \
 	__attribute__((swift_attr("release:immortal")))
 
 #define SWIFT_CXX_REF   													   \
@@ -37,9 +38,23 @@
     __attribute__((swift_attr("retain:addref")))   							   \
     __attribute__((swift_attr("release:delref")))
 
+/// Ignore that a type seems to be an unsafe projection, and import it regardless.
 #define SWIFT_CXX_IMPORT_UNSAFE												   \
     __attribute__((swift_attr("import_unsafe")))   							   \
 
+/// Import a C++ type as "owned", meaning that it "owns" all of the data it contains.
+///
+/// This is in contrast to a type which may have pointers to the "outside" somewhere,
+/// where we might end up keeping pointers to memory which has been deallocated,
+/// while we still have this projection in hand (and thus, an unsafe pointer access).
+#define SWIFT_CXX_IMPORT_OWNED												   \
+    __attribute__((swift_attr("import_owned")))   							   \
+
+/// Declare a type as `Sendable` which means that it is safe to be used concurrency,
+/// and passed across actor and task boundaries.
+///
+/// Since in Flow we are single-threaded, basically everything is Sendable,
+/// at least in the concurrent access safety sense of this annotation.
 #define SWIFT_SENDABLE 														   \
 	__attribute__((swift_attr("@Sendable")))
 

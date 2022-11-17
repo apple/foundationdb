@@ -1,5 +1,5 @@
 /*
- * clock_support.swift
+ * stream_support.swift
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,13 +20,11 @@
 
 import Flow
 
-protocol _FlowFutureStreamOps: AsyncSequence {
+public protocol _FlowStreamOps: AsyncSequence {
     /// Element type of the stream
     associatedtype Element
     typealias _T = Element // just convenience to share snippets between Future impl and this
 
-    /// Swift continuation wrapper type to use for the async/await bridging
-    associatedtype CB
     /// Box type to be used to wrap the checked continuation
     typealias CCBox = _Box<CheckedContinuation<Element?, Swift.Error>>
 
@@ -39,7 +37,10 @@ protocol _FlowFutureStreamOps: AsyncSequence {
     }
 }
 
-extension FutureStreamCInt: _FlowFutureStreamOps {
+// ==== ---------------------------------------------------------------------------------------------------------------
+// MARK: FutureStreams
+
+extension FutureStreamCInt: _FlowStreamOps {
     public typealias Element = CInt
     public typealias CB = SwiftContinuationSingleCallbackCInt
 
@@ -113,8 +114,8 @@ extension FutureStreamCInt: _FlowFutureStreamOps {
 }
 
 public final class _Box<Value> {
-    let value: Value
-    init(_ value: Value) {
+    public let value: Value
+    public init(_ value: Value) {
         self.value = value
     }
 }

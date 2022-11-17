@@ -165,7 +165,8 @@ target_link_directories(flow PUBLIC "${SWIFT_LINK_PATHS}")
 #              will do the right thing.
 target_link_options(flow PUBLIC 
     "-lswiftCore"
-    "-lswift_Concurrency")
+    "-lswift_Concurrency"
+    "-lswift_StringProcessing")
     
 # Link with runtime initialization stub (not needed on Darwin).
 if (NOT APPLE)

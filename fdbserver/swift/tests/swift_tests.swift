@@ -22,28 +22,25 @@ import Flow
 import flow_swift
 import FlowFutureSupport
 import flow_swift_future
-import FDBClient
-import fdbclient_swift
 
 // Don't do this at home;
 // We assume we run single-threadedly in Net2 in these tests,
 // as such, we access this global variable without synchronization and it is safe.
 var _mainThreadID = _tid()
 
+let SimpleSwiftTestSuites: [any SimpleSwiftTestSuite.Type] = [
+    TaskTests.self,
+    StreamTests.self,
+]
+
+
 @_expose(Cxx)
 public func swiftyTestRunner(p: PromiseVoid) {
-    print("[swift] \(#function): Execute all tests!".green)
-
     Task {
         do {
-            try await swift_flow_voidFuture_await()
-//            try await swift_flow_task_await()
-//            try await swift_flow_task_priority()
-
-            try await swift_flow_trivial_promisestreams()
-            try await swift_flow_trivial_promisestreams_asyncSequence()
+            try await SimpleSwiftTestRunner().run()
         } catch {
-            print("[swift][\(#function)] TEST THREW: \(error)")
+            print("[swift] Test suite failed: \(error)".red)
         }
 
         var void = Flow.Void()

@@ -101,6 +101,11 @@ extension FlowClock: Clock {
         _ = try await f.waitValue
     }
 
+    public static func sleep(
+        for duration: Duration
+    ) async throws {
+        try await Task.sleep(until: now + duration, clock: .flow)
+    }
 }
 
 extension FlowClock.Instant: InstantProtocol {

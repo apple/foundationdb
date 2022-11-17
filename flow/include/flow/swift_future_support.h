@@ -35,12 +35,16 @@
 using PromiseCInt = Promise<int>;
 using FutureCInt = Future<int>;
 using CallbackInt = Callback<int>;
-using PromiseStreamCInt = PromiseStream<int>;
-using FutureStreamCInt = FutureStream<int>;
 
 using PromiseVoid = Promise<Void>;
 using FutureVoid = Future<Void>;
 using CallbackVoid = Callback<Void>;
+
+using PromiseStreamCInt = PromiseStream<int>;
+using FutureStreamCInt = FutureStream<int>;
+
+using PromiseStreamVoid = PromiseStream<Void>;
+using FutureStreamVoid = FutureStream<Void>;
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
@@ -73,19 +77,16 @@ public:
     }
 
     void fire(const T &value) override {
-        printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
         Callback<T>::remove();
         Callback<T>::next = nullptr;
         continuationInstance.resume(value);
     }
     void error(Error error) override {
-        printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
         Callback<T>::remove();
         Callback<T>::next = nullptr;
         continuationInstance.resumeThrowing(error);
     }
     void unwait() override {
-        printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
         // TODO(swift): implement
     }
 };

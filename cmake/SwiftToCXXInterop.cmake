@@ -14,7 +14,7 @@ function(generate_cxx_compat_header target headerName)
       message(FATAL_ERROR "Swift: reverse interop support is too old. Update your toolchain.")
     endif()
   else()
-    message(FATAL_ERROR "Swift: reverse interop is required, but not supported. Update your toolcain.")
+    message(FATAL_ERROR "Swift: reverse interop is required, but not supported. Update your toolchain.")
   endif()
 
   set(destpath ${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules)
@@ -29,4 +29,31 @@ function(generate_cxx_compat_header target headerName)
   if (${headerName} STREQUAL "Flow")
     target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -clang-header-expose-decls=has-expose-attr>")
   endif()
+endfunction()
+
+function(add_swift_to_cxx_header_gen_target target_name header_target_name header_path source_path)
+  cmake_parse_arguments(ARG "" "" "FLAGS" ${ARGN})
+
+  set(target_includes_expr "$<TARGET_PROPERTY:${target_name},INCLUDE_DIRECTORIES>")
+  add_custom_command(
+  OUTPUT
+    "${header_path}"
+  COMMAND
+    ${CMAKE_Swift_COMPILER} -frontend -typecheck
+    "${source_path}"
+    -module-name "${target_name}"
+    -emit-clang-header-path "${header_path}"
+    "$<$<BOOL:${target_includes_expr}>:-I$<JOIN:${target_includes_expr},;-I>>"
+    ${ARG_FLAGS}
+  DEPENDS
+    "${source_path}"
+  COMMAND_EXPAND_LISTS
+  COMMENT
+    "Generating '${header_path}'"
+  )
+
+  add_custom_target(${header_target_name}
+    DEPENDS
+    "${header_path}"
+  )
 endfunction()

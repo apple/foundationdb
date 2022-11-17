@@ -4,21 +4,11 @@ import FlowFutureSupport
 
 // ==== ---------------------------------------------------------------------------------------------------------------
 
-// NOTE: can't implement waitValue only in the protocol because we end up with:
-// /root/src/foundationdb/flow/future_support.swift:12:10: note: protocol requires function '__getUnsafe()' with type '() -> UnsafePointer<__CxxTemplateInst6FutureIiE._T>' (aka '() -> UnsafePointer<Void>'); do you want to add a stub?
-//     func __getUnsafe() -> UnsafePointer<_T>
-//          ^
-// /root/src/foundationdb/flow/future_support.swift:20:1: error: type '__CxxTemplateInst6FutureI4VoidE' does not conform to protocol '_FlowFutureOps'
-// extension FutureVoid: _FlowFutureOps {
-// ^
-// Flow.__CxxTemplateInst6FutureI4VoidE:8:17: note: candidate has non-matching type '() -> UnsafePointer<Void>'
-//     public func __getUnsafe() -> UnsafePointer<Void>
-//                ^
-// since we have to express the __getUnsafe() as a protocol requirement...
-
 public protocol _FlowFutureOps {
     /// Element type of the future
     associatedtype _T
+
+    var waitValue: _T { mutating get async throws }
 }
 
 extension FutureCInt: _FlowFutureOps {

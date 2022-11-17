@@ -166,7 +166,7 @@ struct GetTLogPrevCommitVersionReply {
 	}
 };
 
-struct UpdateRecoveryDataRequest {
+struct SWIFT_CXX_IMPORT_OWNED UpdateRecoveryDataRequest {
 	constexpr static FileIdentifier file_identifier = 13605417;
 	Version recoveryTransactionVersion;
 	Version lastEpochEnd;

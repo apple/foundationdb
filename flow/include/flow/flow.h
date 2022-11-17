@@ -1162,6 +1162,7 @@ public:
 	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
 	T pop() { return queue->pop(); }
+
 	Error getError() {
 		ASSERT(queue->isError());
 		return queue->error;

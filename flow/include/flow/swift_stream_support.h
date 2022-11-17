@@ -62,24 +62,19 @@ public:
 		f.addCallbackAndClear(this);
 	}
 
-	// TODO(swift): virtual is an issue
 	void fire(int const& value) {
-		printf("[c++][%s:%d](%s) [stream] cb=%p, fire: %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, this, value);
 		SingleCallback<int>::remove();
 		SingleCallback<int>::next = 0;
 		resumeWithValue(continuationBox, value);
 	}
 
-	// TODO(swift): virtual is an issue
 	void fire(int&& value) {
-		printf("[c++][%s:%d](%s) [stream] cb=%p, fire&&: %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, this, value);
 		SingleCallback<int>::remove();
 		SingleCallback<int>::next = 0;
 		auto copy = value;
 		resumeWithValue(continuationBox, copy);
 	}
 
-	// TODO(swift): virtual is an issue
 	void error(Error error) {
 		printf("[c++][%s:%d](%s) [stream] cb=%p, ERROR: code=%d\n", __FILE_NAME__, __LINE__, __FUNCTION__, this, error.code());
 
@@ -91,6 +86,7 @@ public:
 		SingleCallback<int>::next = 0;
 		resumeWithError(continuationBox, error);
 	}
+
 	void unwait() {
 		// TODO(swift): implement
 	}

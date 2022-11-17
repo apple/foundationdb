@@ -22,99 +22,89 @@ import Flow
 import flow_swift
 import FlowFutureSupport
 import flow_swift_future
-import FDBClient
-import fdbclient_swift
 
-func swift_flow_voidFuture_await() async throws {
-    pprint("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
-    defer { pprint("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
+struct TaskTests: SimpleSwiftTestSuite {
 
-    let p = PromiseVoid()
-    var voidF = p.__getFutureUnsafe()
+    var tests: [TestCase] {
+        TestCase("await \(FutureVoid.self)") {
+            let p = PromiseVoid()
+            var voidF = p.__getFutureUnsafe()
 
-    var void = Flow.Void()
-    p.send(&void)
-    try await voidF.waitValue
-}
+            var void = Flow.Void()
+            p.send(&void)
+            try await voidF.waitValue
+        }
 
-// FIXME(swift): Somehow the waitValue is broken on FutureCInt: https://github.com/FoundationDB/foundationdb-swift/pull/31
-//func swift_flow_cIntFuture_await() async throws {
-//    pprint("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
-//    defer { pprint("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
+        // FIXME(swift): Somehow the waitValue is broken on FutureCInt: https://github.com/FoundationDB/foundationdb-swift/pull/31
+//        TestCase("await \(FutureCInt.self)") {
+//            let p = PromiseCInt()
+//            var intF: FutureCInt = p.__getFutureUnsafe()
 //
-//    let p = PromiseCInt()
-//    var intF: FutureCInt = p.__getFutureUnsafe()
-//
-//    var value: CInt = 42
-//    p.send(&value)
-//    let got = try await intF.waitValue
-//    precondition(got == value, "\(got) did not equal \(value)")
-//}
+//            var value: CInt = 42
+//            p.send(&value)
+//            let got = try await intF.waitValue
+//            precondition(got == value, "\(got) did not equal \(value)")
+//        }
 
-// FIXME(swift): Somehow the waitValue is broken on FutureCInt: https://github.com/FoundationDB/foundationdb-swift/pull/31
-//func swift_flow_task_await() async throws {
-//    pprint("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
-//    defer { pprint("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
+        // FIXME(swift): Somehow the waitValue is broken on FutureCInt: https://github.com/FoundationDB/foundationdb-swift/pull/31
+//        TestCase("more Flow task await tests") {
+//            let p: PromiseCInt = PromiseCInt()
+//            var f: FutureCInt = p.__getFutureUnsafe() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
+//            // TODO(swift): we perhaps should add a note that __getFutureUnsafe is available?
 //
-//    let p: PromiseCInt = PromiseCInt()
-//    var f: FutureCInt = p.__getFutureUnsafe() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
-//    // TODO(swift): we perhaps should add a note that __getFutureUnsafe is available?
+//            pprint("got PromiseCInt") // FIXME(swift/c++): printing the promise crashes!
+//            precondition(!f.isReady(), "Future should not be ready yet")
 //
-//    pprint("got PromiseCInt") // FIXME(swift/c++): printing the promise crashes!
-//    precondition(!f.isReady(), "Future should not be ready yet")
+//            var num = 1111
+//            pprint("send \(num)") // FIXME: printing the promise crashes!
+//            p.send(&num) // FIXME: rdar://99583467 ([C++ interop][fdb] Support xvalues, so we can use Future.send(U&& value))
+//            pprint("without wait, f.get(): \(f.__getUnsafe().pointee)")
 //
-//    var num = 1111
-//    pprint("send \(num)") // FIXME: printing the promise crashes!
-//    p.send(&num) // FIXME: rdar://99583467 ([C++ interop][fdb] Support xvalues, so we can use Future.send(U&& value))
-//    pprint("without wait, f.get(): \(f.__getUnsafe().pointee)")
+//            pprint("wait...")
+//            let value: CInt = try await f.waitValue
+//            assertOnNet2EventLoop() // hopped back to the right executor, yay
+//            precondition(f.isReady(), "Future should be ready by now")
 //
-//    pprint("wait...")
-//    let value: CInt = try await f.waitValue
-//    assertOnNet2EventLoop() // hopped back to the right executor, yay
-//    precondition(f.isReady(), "Future should be ready by now")
+//            pprint("await value = \(value)")
+//            precondition((value ?? -1) == num, "Value obtained from await did not match \(num), was: \(String(describing: value))!")
 //
-//    pprint("await value = \(value)")
-//    precondition((value ?? -1) == num, "Value obtained from await did not match \(num), was: \(String(describing: value))!")
+//            pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
+//            let p2 = PromiseCInt()
+//            var f2: FutureCInt = p2.__getFutureUnsafe() // FIXME: Make these not unsafe...
+//            let num2 = 2222
+//            Task { [num2] in
+//                assertOnNet2EventLoop()
 //
-//    pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
-//    let p2 = PromiseCInt()
-//    var f2: FutureCInt = p2.__getFutureUnsafe() // FIXME: Make these not unsafe...
-//    let num2 = 2222
-//    Task { [num2] in
-//        assertOnNet2EventLoop()
+//                pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: send \(num2)")
+//                var workaroundVar = num2 // FIXME workaround since we need inout xvalue for the C++ send()
+//                p2.send(&workaroundVar)
+//            }
+//            pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: waiting...")
+//            let got2: CInt? = try? await f2.waitValue
+//            pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2, got: \(String(describing: got2))")
+//            precondition(got2! == num2, "Value obtained from send after await did not match \(num2), was: \(String(describing: got2))!")
 //
-//        pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: send \(num2)")
-//        var workaroundVar = num2 // FIXME workaround since we need inout xvalue for the C++ send()
-//        p2.send(&workaroundVar)
-//    }
-//    pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: waiting...")
-//    let got2: CInt? = try? await f2.waitValue
-//    pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2, got: \(String(describing: got2))")
-//    precondition(got2! == num2, "Value obtained from send after await did not match \(num2), was: \(String(describing: got2))!")
-//
-//    // assert that we hopped back and are again on the Net2 event loop thread:
-//    assertOnNet2EventLoop()
-//}
+//            // assert that we hopped back and are again on the Net2 event loop thread:
+//            assertOnNet2EventLoop()
+//        }
 
-func swift_flow_task_priority() async throws {
-    print("[swift] Test: \(#function) ------------------------------------------------------------".yellow)
-    defer { print("[swift] Finished: \(#function) ------------------------------------------------------------".green) }
+        TestCase("Flow task priorities in Task.priority") {
+            await Task { assertOnNet2EventLoop() }.value
+            assertOnNet2EventLoop()
 
-    await Task {
-        assertOnNet2EventLoop()
-    }.value
-    assertOnNet2EventLoop()
+            // Note that we can assign Flow priorities to tasks explicitly:
+            pprint("Parent task priority: \(Task.currentPriority)")
+            pprint("Execute task with priority: \(_Concurrency.TaskPriority.Worker)")
+            precondition(_Concurrency.TaskPriority.Worker.rawValue == 60, "WAS: \(_Concurrency.TaskPriority.Worker.rawValue) wanted: 60")
 
-    // Note that we can assign Flow priorities to tasks explicitly:
-    pprint("Parent task priority: \(Task.currentPriority)")
-    pprint("Execute task with priority: \(_Concurrency.TaskPriority.Worker)")
-    precondition(_Concurrency.TaskPriority.Worker.rawValue == 60, "WAS: \(_Concurrency.TaskPriority.Worker.rawValue) wanted: 60")
-    await Task(priority: .Worker) {
-        pprint("Task executed, with priority: \(Task.currentPriority)")
-        precondition(Task.currentPriority == .Worker)
-        assertOnNet2EventLoop()
-    }.value
-    assertOnNet2EventLoop()
+            await Task(priority: .Worker) {
+                pprint("Task executed, with priority: \(Task.currentPriority)")
+                precondition(Task.currentPriority == .Worker)
+                assertOnNet2EventLoop()
+            }.value
+            assertOnNet2EventLoop()
 
-    pprint("Properly resumed...")
+            pprint("Properly resumed...")
+        }
+    }
 }
