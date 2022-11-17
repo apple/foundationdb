@@ -542,6 +542,22 @@ struct PhysicalShard {
 		return status;
 	}
 
+	rocksdb::Status restore(const CheckpointMetaData& checkpoint) {
+		rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
+		rocksdb::ImportColumnFamilyOptions importOptions;
+		importOptions.move_files = true;
+		rocksdb::Status status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
+
+		if (!status.ok()) {
+			logRocksDBError(status, "Restore");
+			return status;
+		}
+
+		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
+		this->isInitialized.store(true);
+		return status;
+	}
+
 	bool initialized() { return this->isInitialized.load(); }
 
 	void refreshReadIteratorPool() {
@@ -2169,16 +2185,77 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			res.setState(CheckpointMetaData::Complete);
 			a.reply.send(res);
 		}
-		// struct RestoreAction : TypedAction<Writer, RestoreAction> {
-		// 	RestoreAction(const std::string& path, const std::vector<CheckpointMetaData>& checkpoints)
-		// 	  : path(path), checkpoints(checkpoints) {}
 
-		// 	double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+		struct RestoreAction : TypedAction<Writer, RestoreAction> {
+			RestoreAction(ShardManager* shardManager,
+			              const std::string& path,
+			              const std::vector<CheckpointMetaData>& checkpoints)
+			  : shardManager(shardManager), path(path), shardId(std::string()), checkpoints(checkpoints) {}
+			RestoreAction(ShardManager* shardManager,
+			              const std::string& path,
+			              const std::string& shardId,
+			              const std::vector<KeyRange>& ranges,
+			              const std::vector<CheckpointMetaData>& checkpoints)
+			  : shardManager(shardManager), path(path), shardId(shardId), ranges(ranges), checkpoints(checkpoints) {}
 
-		// 	const std::string path;
-		// 	const std::vector<CheckpointMetaData> checkpoints;
-		// 	ThreadReturnPromise<Void> done;
-		// };
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			ShardManager* shardManager;
+			const std::string path;
+			const std::string shardId;
+			const std::vector<KeyRange> ranges;
+			const std::vector<CheckpointMetaData> checkpoints;
+			ThreadReturnPromise<Void> done;
+		};
+
+		void action(RestoreAction& a) {
+			TraceEvent("ShardedRocksDBRestoreBegin", logId)
+			    .detail("Path", a.path)
+			    .detail("Checkpoints", describe(a.checkpoints));
+
+			ASSERT(!a.checkpoints.empty());
+
+			// TODO: sanity check ranges for match.
+			// std::vector<KeyRange> ranges;
+			// for (const auto& checkpoint : a.checkpoints) {
+			// 	ranges.insert(ranges.back(), checkpoint.ranges.begin(), checkpoint.ranges.end());
+			// }
+			const CheckpointFormat format = a.checkpoints[0].getFormat();
+			for (int i = 1; i < a.checkpoints.size(); ++i) {
+				if (a.checkpoints[i].getFormat() != format) {
+					throw invalid_checkpoint_format();
+				}
+			}
+
+			PhysicalShard* ps = nullptr;
+			for (const KeyRange& range : a.ranges) {
+				ps = a.shardManager->addRange(range, a.shardId);
+			}
+
+			rocksdb::Status status;
+			if (format == DataMoveRocksCF) {
+				ASSERT(!ps->initialized());
+				TraceEvent("RocksDBServeRestoreCF", logId)
+				    .detail("Path", a.path)
+				    .detail("Checkpoint", a.checkpoints[0].toString())
+				    .detail("RocksDBCF", getRocksCF(a.checkpoints[0]).toString());
+
+				status = ps->restore(a.checkpoints[0]);
+
+				if (!status.ok()) {
+					logRocksDBError(status, "Restore");
+					a.done.sendError(statusToError(status));
+				} else {
+					TraceEvent(SevInfo, "RocksDBRestoreCFSuccess", logId)
+					    .detail("Path", a.path)
+					    .detail("Checkpoint", a.checkpoints[0].toString());
+					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
+					a.done.send(Void());
+				}
+			} else if (format == RocksDB) {
+				throw not_implemented();
+			}
+		}
 	};
 
 	struct Reader : IThreadPoolReceiver {
