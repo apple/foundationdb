@@ -5674,8 +5674,8 @@ private:
 				int64_t defaultDomainId = keyProvider->getDefaultEncryptionDomainId();
 				int64_t currentDomainId;
 				size_t prefixLength;
-				if (count == 0 || (splitByDomain && count > 0)) {
-					std::tie(currentDomainId, prefixLength) = keyProvider->getEncryptionDomain(rec.key, domainId);
+				if (count == 0 || splitByDomain) {
+					std::tie(currentDomainId, prefixLength) = keyProvider->getEncryptionDomain(rec.key);
 				}
 				if (count == 0) {
 					domainId = currentDomainId;
