@@ -124,14 +124,18 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 MasterData::~MasterData() {}
 
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-	state ActorCollection versionActors(false);
-
-	loop choose {
-		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
-			versionActors.add(getVersion(self, req));
-		}
-		when(wait(versionActors.getResult())) {}
-	}
+//	state ActorCollection versionActors(false);
+//
+//	loop choose {
+//		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
+//			versionActors.add(getVersion(self, req));
+//		}
+//		when(wait(versionActors.getResult())) {}
+//	}
+	auto promise = Promise<Void>();
+	self->swiftImpl->provideVersions(self.getPtr(), /*result=*/promise);
+	wait(promise.getFuture());
+	return Void();
 }
 
 void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequest req) {

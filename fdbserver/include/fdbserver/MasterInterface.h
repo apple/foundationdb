@@ -135,7 +135,7 @@ struct GetCommitVersionReply {
 	}
 };
 
-struct GetCommitVersionRequest {
+struct SWIFT_CXX_IMPORT_OWNED GetCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683181;
 	SpanContext spanContext;
 	uint64_t requestNum;

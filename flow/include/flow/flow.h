@@ -664,12 +664,9 @@ public:
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
 
-		// printf("[c++][%s:%d] send, next: %p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 		while (Callback<T>::next != this) {
-			// printf("[c++][%s:%d] send, fire! next:%p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 			Callback<T>::next->fire(this->value());
 		}
-		// printf("[c++][tid:%lu][%s:%d] send ..., done\n", pthread_self(), __FILE_NAME__, __LINE__);
 	}
 
 	void send(Never) {
@@ -1034,16 +1031,12 @@ struct NotifiedQueue : private SingleCallback<T>
 
 	template <class U>
 	void send(U&& value) {
-		printf("[c++][%s:%d](%s) [stream] queue send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
-
 		if (error.isValid())
 			return;
 
 		if (SingleCallback<T>::next != this) {
-			printf("[c++][%s:%d](%s) [stream] queue send, to queue: %p ====> fire! cb=%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this, SingleCallback<T>::next);
 			SingleCallback<T>::next->fire(std::forward<U>(value));
 		} else {
-			printf("[c++][%s:%d](%s) [stream] queue send, to queue: %p ====> forward\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
 			queue.emplace(std::forward<U>(value));
 		}
 	}
@@ -1133,7 +1126,6 @@ public:
 		return queue->isError();
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
-		printf("[c++][%s:%d](%s) [stream] add single callback cb=%p, to queue=%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, queue);
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = 0;
 	}
@@ -1169,7 +1161,6 @@ public:
 	}
 
 	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue) {
-		printf("[c++][%s:%d](%s) [stream] new future stream, queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
 	}
 
 private:
@@ -1213,15 +1204,12 @@ public:
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
 	void send(const T& value) {
-		printf("[c++][%s:%d](%s) [stream] send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
 		queue->send(value);
 	}
 	void sendCopy(T value) {
-		printf("[c++][%s:%d](%s) [stream] send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
 		queue->send(value);
 	}
 	void send(T&& value) {
-		printf("[c++][%s:%d](%s) [stream] send, to queue: %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, queue);
 		queue->send(std::move(value));
 	}
 	void sendError(const Error& error) { queue->sendError(error); }

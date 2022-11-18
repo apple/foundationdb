@@ -25,10 +25,13 @@ import flow_swift_future
 import FDBServer
 import Cxx
 
+// ==== ----------------------------------------------------------------------------------------------------------------
+// MARK: UpdateRecoveryDataRequest
+
 extension RequestStream_UpdateRecoveryDataRequest: _FlowStreamOps {
     public typealias Element = UpdateRecoveryDataRequest
-//    public typealias CB = SwiftContinuationSingleCallback_UpdateRecoveryDataRequest
     public typealias AsyncIterator = FutureStream_UpdateRecoveryDataRequest.AsyncIterator
+    typealias SingleCB = FlowSingleCallbackForSwiftContinuation_UpdateRecoveryDataRequest
 
     public var waitNext: Element? {
         mutating get async throws {
@@ -38,19 +41,19 @@ extension RequestStream_UpdateRecoveryDataRequest: _FlowStreamOps {
     }
 
     public func makeAsyncIterator() -> AsyncIterator {
-        pprint("[stream] make iterator!")
         return self.getFuture().makeAsyncIterator()
     }
 
 }
 
 extension FutureStream_UpdateRecoveryDataRequest: _FlowStreamOps {
+    public typealias Stream = Self
     public typealias Element = UpdateRecoveryDataRequest
+    public typealias SingleCB = FlowSingleCallbackForSwiftContinuation_UpdateRecoveryDataRequest
 
     public var waitNext: Element? {
         mutating get async throws {
             guard !self.isReady() else {
-                pprint("[stream] stream next future was ready, return immediately.")
                 if self.isError() {
                     let error = self.getError()
                     if error.isEndOfStream {
@@ -63,10 +66,10 @@ extension FutureStream_UpdateRecoveryDataRequest: _FlowStreamOps {
                 }
             }
 
-            var s = FlowSingleCallbackForSwiftContinuationUpdateRecoveryDataRequest()
+            var s = SingleCB()
             return try await withCheckedThrowingContinuation { cc in
                 withUnsafeMutablePointer(to: &s) { ptr in
-                    let ecc = FlowCheckedContinuation<UpdateRecoveryDataRequest>(cc)
+                    let ecc = FlowCheckedContinuation<Element>(cc)
                     withUnsafePointer(to: ecc) { ccPtr in
                         ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                     }
@@ -76,13 +79,64 @@ extension FutureStream_UpdateRecoveryDataRequest: _FlowStreamOps {
     }
 
     public func makeAsyncIterator() -> AsyncIterator {
-        pprint("[stream] make iterator!")
         return .init(self)
     }
 
     public struct AsyncIterator: AsyncIteratorProtocol {
-        public typealias Stream = FutureStream_UpdateRecoveryDataRequest
         public typealias Element = UpdateRecoveryDataRequest
+
+        var stream: Stream
+        init(_ stream: Stream) {
+            self.stream = stream
+        }
+
+        public mutating func next() async throws -> Element? {
+            try await stream.waitNext
+        }
+    }
+}
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+// MARK: GetCommitVersionRequest
+
+extension FutureStream_GetCommitVersionRequest: _FlowStreamOps {
+    public typealias Stream = Self
+    public typealias Element = GetCommitVersionRequest
+    public typealias SingleCB = FlowSingleCallbackForSwiftContinuation_GetCommitVersionRequest
+
+    public var waitNext: Element? {
+        mutating get async throws {
+            guard !self.isReady() else {
+                if self.isError() {
+                    let error = self.getError()
+                    if error.isEndOfStream {
+                        return nil
+                    } else {
+                        throw GeneralFlowError(error)
+                    }
+                } else {
+                    return self.pop()
+                }
+            }
+
+            var s = SingleCB()
+            return try await withCheckedThrowingContinuation { cc in
+                withUnsafeMutablePointer(to: &s) { ptr in
+                    let ecc = FlowCheckedContinuation<Element>(cc)
+                    withUnsafePointer(to: ecc) { ccPtr in
+                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
+                    }
+                }
+            }
+        }
+    }
+
+    public func makeAsyncIterator() -> AsyncIterator {
+        return .init(self)
+    }
+
+    public struct AsyncIterator: AsyncIteratorProtocol {
+        public typealias Element = Stream.Element
 
         var stream: Stream
         init(_ stream: Stream) {

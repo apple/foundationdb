@@ -84,9 +84,6 @@ public actor MasterDataActor {
     }
 
     func getVersion(cxxState myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
-
-        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> ")
-
         myself.getCommitVersionRequests += 1
 
         guard let lastVersionReplies = lastCommitProxyVersionReplies[req.requestingProxy] else {
@@ -167,9 +164,8 @@ public actor MasterDataActor {
         // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         Task {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
-            if let rep = await getVersion(cxxState: cxxState, req: req) {
-                var repMut = rep
-                req.reply.send(&repMut)
+            if var rep = await getVersion(cxxState: cxxState, req: req) {
+                req.reply.send(&rep)
             } else {
                 req.reply.sendNever()
             }
@@ -228,6 +224,31 @@ public actor MasterDataActor {
             } else {
                 req.reply.sendNever()
             }
+            var result = Flow.Void()
+            promise.send(&result)
+        }
+    }
+
+    nonisolated public func provideVersions(cxxState myself: MasterData, result promise: PromiseVoid) {
+        //  state ActorCollection versionActors(false);
+        //
+        //	loop choose {
+        //		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
+        //			versionActors.add(getVersion(self, req));
+        //		}
+        //		when(wait(versionActors.getResult())) {}
+        //	}
+        Task {
+            for try await req in myself.myInterface.getCommitVersion.getFuture() {
+                Task {
+                    if var rep = await self.getVersion(cxxState: myself, req: req) {
+                        req.reply.send(&rep)
+                    } else {
+                        req.reply.sendNever()
+                    }
+                }
+            }
+
             var result = Flow.Void()
             promise.send(&result)
         }

@@ -36,87 +36,15 @@
 using FutureStream_UpdateRecoveryDataRequest = FutureStream<struct UpdateRecoveryDataRequest>;
 using RequestStream_UpdateRecoveryDataRequest = RequestStream<struct UpdateRecoveryDataRequest>;
 
+using FutureStream_GetCommitVersionRequest = FutureStream<struct GetCommitVersionRequest>;
+
 // ==== ----------------------------------------------------------------------------------------------------------------
-// MARK:
-//
-//// FIXME(swift): either implement in Swift, or manage lifetime properly
-//struct UNSAFE_SWIFT_CXX_IMMORTAL_REF SwiftContinuationSingleCallback_UpdateRecoveryDataRequest : SingleCallback<UpdateRecoveryDataRequest> {
-//private:
-//	void* _Nonnull continuationBox;
-//	void (*_Nonnull resumeWithValue)(void* _Nonnull /*context*/, /*value*/ UpdateRecoveryDataRequest);
-//	void (*_Nonnull resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
-//
-//	SwiftContinuationSingleCallback_UpdateRecoveryDataRequest(void* continuationBox,
-//	                                    void (*_Nonnull returning)(void* _Nonnull, UpdateRecoveryDataRequest),
-//	                                    void (*_Nonnull throwing)(void* _Nonnull, Error))
-//	  : continuationBox(continuationBox),
-//	    resumeWithValue(returning),
-//	    resumeWithError(throwing) {}
-//
-//public:
-//	static SwiftContinuationSingleCallback_UpdateRecoveryDataRequest* _Nonnull make(void* continuationBox,
-//	                                                          void (*_Nonnull returning)(void* _Nonnull, UpdateRecoveryDataRequest),
-//	                                                          void (*_Nonnull throwing)(void* _Nonnull, Error)) {
-//		return new SwiftContinuationSingleCallback_UpdateRecoveryDataRequest(continuationBox, returning, throwing);
-//	}
-//
-//	void addCallbackAndClearTo(FutureStream_UpdateRecoveryDataRequest f) {
-//		f.addCallbackAndClear(this);
-//	}
-//
-//	void fire(UpdateRecoveryDataRequest const& value) {
-//		SingleCallback<UpdateRecoveryDataRequest>::remove();
-//		SingleCallback<UpdateRecoveryDataRequest>::next = 0;
-//		resumeWithValue(continuationBox, value);
-//	}
-//
-//	void fire(UpdateRecoveryDataRequest&& value) {
-//		SingleCallback<UpdateRecoveryDataRequest>::remove();
-//		SingleCallback<UpdateRecoveryDataRequest>::next = 0;
-//		auto copy = value;
-//		resumeWithValue(continuationBox, copy);
-//	}
-//
-//	void error(Error error) {
-//		printf("[c++][%s:%d](%s) [stream] cb=%p, ERROR: code=%d\n", __FILE_NAME__, __LINE__, __FUNCTION__, this, error.code());
-//
-//		if (error.code() == error_code_end_of_stream) {
-//			printf("[c++][%s:%d](%s) [stream] cb=%p, ERROR: END OF STREAM\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
-//		}
-//
-//		SingleCallback<UpdateRecoveryDataRequest>::remove();
-//		SingleCallback<UpdateRecoveryDataRequest>::next = 0;
-//		resumeWithError(continuationBox, error);
-//	}
-//
-//	void unwait() {
-//		// TODO(swift): implement
-//	}
-//};
 
 template<class T>
 class FlowSingleCallbackForSwiftContinuation : SingleCallback<T> {
 	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
 	SwiftCC continuationInstance;
-//private:
-//	void* _Nonnull continuationBox;
-//	void (*_Nonnull resumeWithValue)(void* _Nonnull /*context*/, /*value*/ UpdateRecoveryDataRequest);
-//	void (*_Nonnull resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
-
-//	SwiftContinuationSingleCallback_UpdateRecoveryDataRequest(void* continuationBox,
-//	                                                          void (*_Nonnull returning)(void* _Nonnull, UpdateRecoveryDataRequest),
-//	                                                          void (*_Nonnull throwing)(void* _Nonnull, Error))
-//	  : continuationBox(continuationBox),
-//	    resumeWithValue(returning),
-//	    resumeWithError(throwing) {}
-
 public:
-//	static SwiftContinuationSingleCallback_UpdateRecoveryDataRequest* _Nonnull make(void* continuationBox,
-//	                                                                                void (*_Nonnull returning)(void* _Nonnull, UpdateRecoveryDataRequest),
-//	                                                                                void (*_Nonnull throwing)(void* _Nonnull, Error)) {
-//		return new SwiftContinuationSingleCallback_UpdateRecoveryDataRequest(continuationBox, returning, throwing);
-//	}
-
 	void set(const void * _Nonnull pointerToContinuationInstance,
 	         FutureStream<T> fs,
 	         const void * _Nonnull thisPointer) {
@@ -139,26 +67,22 @@ public:
 	FlowSingleCallbackForSwiftContinuation(): continuationInstance(SwiftCC::init()) {
 	}
 
-//	void addCallbackAndClearTo(FutureStream_UpdateRecoveryDataRequest f) {
-//		f.addCallbackAndClear(this);
-//	}
-
 	void fire(T const& value) {
-		SingleCallback<UpdateRecoveryDataRequest>::remove();
-		SingleCallback<UpdateRecoveryDataRequest>::next = 0;
+		SingleCallback<T>::remove();
+		SingleCallback<T>::next = 0;
 		continuationInstance.resume(value);
 	}
 
 	void fire(T&& value) {
-		SingleCallback<UpdateRecoveryDataRequest>::remove();
-		SingleCallback<UpdateRecoveryDataRequest>::next = 0;
+		SingleCallback<T>::remove();
+		SingleCallback<T>::next = 0;
 		auto copy = value;
 		continuationInstance.resume(copy);
 	}
 
 	void error(Error error) {
-		SingleCallback<UpdateRecoveryDataRequest>::remove();
-		SingleCallback<UpdateRecoveryDataRequest>::next = 0;
+		SingleCallback<T>::remove();
+		SingleCallback<T>::next = 0;
 		continuationInstance.resumeThrowing(error);
 	}
 
@@ -167,6 +91,11 @@ public:
 	}
 };
 
-using FlowSingleCallbackForSwiftContinuationUpdateRecoveryDataRequest = FlowSingleCallbackForSwiftContinuation<UpdateRecoveryDataRequest>;
+using FlowSingleCallbackForSwiftContinuation_UpdateRecoveryDataRequest =
+    FlowSingleCallbackForSwiftContinuation<UpdateRecoveryDataRequest>;
+
+using FlowSingleCallbackForSwiftContinuation_GetCommitVersionRequest =
+    FlowSingleCallbackForSwiftContinuation<GetCommitVersionRequest>;
+
 
 #endif // FOUNDATIONDB_FDBSERVER_STREAM_SUPPORT_H
