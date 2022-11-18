@@ -281,6 +281,8 @@ class TenantAwareEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
 	using EncodingHeader = ArenaPage::AESEncryptionV1Encoder::Header;
 
+	const StringRef systemKeysPrefix = systemKeys.begin;
+
 	TenantAwareEncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db) : db(db) {}
 
 	virtual ~TenantAwareEncryptionKeyProvider() = default;
@@ -329,8 +331,8 @@ public:
 
 	std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key) override {
 		// System key.
-		if (key.startsWith(systemKeys.begin)) {
-			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, 2 };
+		if (key.startsWith(systemKeysPrefix)) {
+			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, systemKeysPrefix.size() };
 		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
 		if (key.size() < TENANT_PREFIX_SIZE) {
