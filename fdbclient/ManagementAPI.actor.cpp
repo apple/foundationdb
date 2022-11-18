@@ -962,6 +962,14 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		if (!disableConfigDB) {
 			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
 		}
+		if (BUGGIFY_WITH_PROB(0.1)) {
+			// Introduce a random delay in simulation to allow processes to be
+			// killed before previousCoordinatorKeys has been reset. This will
+			// help test scenarios where the previous configuration database
+			// state has been transferred to the new coordinators but the
+			// broadcaster thinks it has not been transferred.
+			wait(delay(deterministicRandom()->random01() * 10));
+		}
 		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
