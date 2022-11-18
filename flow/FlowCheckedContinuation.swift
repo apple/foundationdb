@@ -14,12 +14,6 @@ public func _exposeVoidValueTypeConformanceToCpp(_ val: ExposeVoidConf<Void>)  {
 }
 
 @_expose(Cxx)
-// This function ensures that the value witness table for `CInt` to C++ is
-// exposed in the generated C++ header.
-public func _exposeCIntValueTypeConformanceToCpp(_ val: ExposeVoidConf<CInt>)  {
-}
-
-@_expose(Cxx)
 public struct FlowCheckedContinuation<T> {
     public typealias CC = CheckedContinuation<T, Swift.Error>
     var cc: CC?
