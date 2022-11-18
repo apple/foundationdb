@@ -360,12 +360,14 @@ public:
 	}
 };
 
+/*
 TEST_CASE("/TenantCache/InsertAndTestPresence") {
-	wait(TenantCacheUnitTest::InsertAndTestPresence());
-	return Void();
+    wait(TenantCacheUnitTest::InsertAndTestPresence());
+    return Void();
 }
 
 TEST_CASE("/TenantCache/RefreshAndTestPresence") {
-	wait(TenantCacheUnitTest::RefreshAndTestPresence());
-	return Void();
+    wait(TenantCacheUnitTest::RefreshAndTestPresence());
+    return Void();
 }
+*/
