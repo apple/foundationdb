@@ -2200,7 +2200,7 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 	// state. Avoid updating the shared state if the database is a
 	// configuration database, because a configuration database does not have
 	// access to typical system keys and does not need to be updated.
-	if (CLIENT_KNOBS->ENABLE_CLUSTER_SHARED_STATE_MAP && db.isValid() && dbProtocolVersion.present() &&
+	if (db.isValid() && dbProtocolVersion.present() &&
 	    MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap() && !isConfigDB) {
 		Future<std::string> updateResult =
 		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), db);
@@ -2968,7 +2968,7 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 	// The cluster ID will be the connection record string (either a filename or the connection string itself)
 	// in versions before we could read the cluster ID.
 	state std::string clusterId = connectionRecord.toString();
-	if (dbProtocolVersion.hasClusterIdSpecialKey()) {
+	if (CLIENT_KNOBS->CLIENT_ENABLE_USING_CLUSTER_ID_KEY && dbProtocolVersion.hasClusterIdSpecialKey()) {
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
