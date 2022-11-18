@@ -1043,7 +1043,8 @@ public:
 		std::atomic<InitializationState> initializationState;
 
 		// Last error received during database initialization
-		std::atomic<Error> initializationError;
+		// Set on transition to INITIALIZATION_FAILED state, never changed afterwards
+		Error initializationError;
 
 		ThreadFuture<Void> changed;
 		ThreadFuture<Void> dbReady;

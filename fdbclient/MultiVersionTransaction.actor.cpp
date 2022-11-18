@@ -2030,7 +2030,7 @@ ErrorOr<Void> MultiVersionDatabase::DatabaseState::getInitializationError() {
 		return MultiVersionApi::api->ignoreIncompatibleClient ? ErrorOr<Void>(Void())
 		                                                      : ErrorOr<Void>(incompatible_client());
 	case InitializationState::INITIALIZATION_FAILED:
-		return ErrorOr<Void>(initializationError.load());
+		return ErrorOr<Void>(initializationError);
 	default:
 		return ErrorOr<Void>(Void());
 	}
