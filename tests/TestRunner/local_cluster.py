@@ -6,35 +6,60 @@ import subprocess
 import os
 import socket
 import time
+import fcntl
+import sys
+import tempfile
 
 CLUSTER_UPDATE_TIMEOUT_SEC = 10
 EXCLUDE_SERVERS_TIMEOUT_SEC = 120
 RETRY_INTERVAL_SEC = 0.5
+PORT_LOCK_DIR = Path(tempfile.gettempdir()).joinpath("fdb_local_cluster_port_locks")
+MAX_PORT_ACQUIRE_ATTEMPTS = 1000
 
 
-def _get_free_port_internal():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("0.0.0.0", 0))
-        return s.getsockname()[1]
+class PortProvider:
+    def __init__(self):
+        self._used_ports = set()
+        self._lock_files = []
+        PORT_LOCK_DIR.mkdir(exist_ok=True)
 
+    def get_free_port(self):
+        counter = 0
+        while True:
+            counter += 1
+            if counter > MAX_PORT_ACQUIRE_ATTEMPTS:
+                assert False, "Failed to acquire a free port after {} attempts".format(MAX_PORT_ACQUIRE_ATTEMPTS)
+            port = PortProvider._get_free_port_internal()
+            if port in self._used_ports:
+                continue
+            lock_path = PORT_LOCK_DIR.joinpath("{}.lock".format(port))
+            try:
+                locked_fd = open(lock_path, "w+")
+                self._lock_files.append(locked_fd)
+                fcntl.lockf(locked_fd, fcntl.LOCK_EX)
+                self._used_ports.add(port)
+                return port
+            except OSError:
+                print("Failed to lock file {}. Trying to aquire another port".format(lock_path), file=sys.stderr)
+                pass
 
-_used_ports = set()
+    def is_port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(("localhost", port)) == 0
 
+    def _get_free_port_internal():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("0.0.0.0", 0))
+            return s.getsockname()[1]
 
-def get_free_port():
-    global _used_ports
-    port = _get_free_port_internal()
-    while port in _used_ports:
-        port = _get_free_port_internal()
-    _used_ports.add(port)
-    return port
-
-
-def is_port_in_use(port):
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("localhost", port)) == 0
+    def release_locks(self):
+        for fd in self._lock_files:
+            fd.close()
+            try:
+                os.remove(fd.name)
+            except:
+                pass
+        self._lock_files.clear()
 
 
 valid_letters_for_secret = string.ascii_letters + string.digits
@@ -122,6 +147,7 @@ logdir = {logdir}
         custom_config: dict = {},
         public_key_json_str: str = "",
     ):
+        self.port_provider = PortProvider()
         self.basedir = Path(basedir)
         self.etc = self.basedir.joinpath("etc")
         self.log = self.basedir.joinpath("log")
@@ -188,7 +214,7 @@ logdir = {logdir}
 
     def __next_port(self):
         if self.first_port is None:
-            return get_free_port()
+            return self.port_provider.get_free_port()
         else:
             self.last_used_port += 1
             return self.last_used_port
@@ -279,7 +305,7 @@ logdir = {logdir}
             in_use = False
             for server_id in self.active_servers:
                 port = self.server_ports[server_id]
-                if is_port_in_use(port):
+                if PortProvider.is_port_in_use(port):
                     print("Port {} in use. Waiting for it to be released".format(port))
                     in_use = True
                     break
@@ -295,6 +321,10 @@ logdir = {logdir}
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.stop_cluster()
+        self.release_ports()
+
+    def release_ports(self):
+        self.port_provider.release_locks()
 
     def __fdbcli_exec(self, cmd, stdout, stderr, timeout):
         args = [self.fdbcli_binary, "-C", self.cluster_file, "--exec", cmd]
