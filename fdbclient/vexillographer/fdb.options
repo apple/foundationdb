@@ -124,6 +124,8 @@ description is not currently required but encouraged.
             description="Retain temporary external client library copies that are created for enabling multi-threading." />
     <Option name="ignore_external_client_failures" code="68"
             description="Ignore the failure to initialize some of the external clients" />
+    <Option name="ignore_incompatible_client" code="69"
+            description="Do not fail if there is no client matching the server version the client is connecting to" />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"

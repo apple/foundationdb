@@ -2027,7 +2027,8 @@ ErrorOr<Void> MultiVersionDatabase::DatabaseState::getInitializationError() {
 	InitializationState st = initializationState.load();
 	switch (st) {
 	case InitializationState::INCOMPATIBLE:
-		return ErrorOr<Void>(incompatible_client());
+		return MultiVersionApi::api->ignoreIncompatibleClient ? ErrorOr<Void>(Void())
+		                                                      : ErrorOr<Void>(incompatible_client());
 	case InitializationState::INITIALIZATION_FAILED:
 		return ErrorOr<Void>(initializationError.load());
 	default:
@@ -2138,7 +2139,6 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 	auto itr = clients.find(protocolVersion.normalizedVersion());
 	if (itr == clients.end()) {
 		// We don't have a client matching the current protocol
-		fprintf(stderr, "Client incompatible\n");
 		initializationState = InitializationState::INCOMPATIBLE;
 		updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
 		return;
@@ -2698,6 +2698,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::IGNORE_EXTERNAL_CLIENT_FAILURES) {
 		validateOption(value, false, true);
 		ignoreExternalClientFailures = true;
+	} else if (option == FDBNetworkOptions::IGNORE_INCOMPATIBLE_CLIENT) {
+		validateOption(value, false, true);
+		ignoreIncompatibleClient = true;
 	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
 		validateOption(value, false, true);
 		retainClientLibCopies = true;
@@ -3113,9 +3116,9 @@ std::vector<std::string> parseOptionValues(std::string valueStr) {
 	return values;
 }
 
-// This function sets all environment variable options which have not been set previously by a call to this function.
-// If an option has multiple values and setting one of those values failed with an error, then only those options
-// which were not successfully set will be set on subsequent calls.
+// This function sets all environment variable options which have not been set previously by a call to this
+// function. If an option has multiple values and setting one of those values failed with an error, then only those
+// options which were not successfully set will be set on subsequent calls.
 void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 	if (envOptionsLoaded) {
 		return;
@@ -3174,8 +3177,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
     disableBypass(false), bypassMultiClientApi(false), externalClient(false), ignoreExternalClientFailures(false),
-    retainClientLibCopies(false), apiVersion(0), threadCount(0), tmpDir("/tmp"), traceShareBaseNameAmongThreads(false),
-    envOptionsLoaded(false) {}
+    ignoreIncompatibleClient(false), retainClientLibCopies(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
+    traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 

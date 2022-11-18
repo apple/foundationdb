@@ -7,6 +7,8 @@ import sys
 import os
 import glob
 import unittest
+from threading import Thread
+import time
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "tests", "TestRunner")]
 
@@ -60,9 +62,19 @@ class TestCluster(LocalCluster):
         self.__enter__()
         self.create_database()
 
-    def tearDown(self):
+    def tear_down(self):
         self.__exit__(None, None, None)
         shutil.rmtree(self.tmp_dir)
+
+    def upgrade_to(self, version):
+        self.stop_cluster()
+        self.fdbmonitor_binary = downloader.binary_path(version, "fdbmonitor")
+        self.fdbserver_binary = downloader.binary_path(version, "fdbserver")
+        self.fdbcli_binary = downloader.binary_path(version, "fdbcli")
+        self.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
+        self.save_config()
+        self.ensure_ports_released()
+        self.start_cluster()
 
 
 # Client configuration tests using a cluster of the current version
@@ -80,6 +92,7 @@ class ClientConfigTest:
         self.tmp_dir.mkdir(parents=True)
         self.disable_local_client = False
         self.ignore_external_client_failures = False
+        self.ignore_incompatible_client = False
         self.api_version = None
         self.expected_error = None
         self.transaction_timeout = None
@@ -143,6 +156,9 @@ class ClientConfigTest:
         if self.ignore_external_client_failures:
             cmd_args += ["--ignore-external-client-failures"]
 
+        if self.ignore_incompatible_client:
+            cmd_args += ["--ignore-incompatible-client"]
+
         if self.api_version is not None:
             cmd_args += ["--api-version", str(self.api_version)]
 
@@ -172,7 +188,7 @@ class ClientConfigTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.cluster.tearDown()
+        cls.cluster.tear_down()
 
     def test_local_client_only(self):
         # Local client only
@@ -248,6 +264,19 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2125  # Incompatible client
         test.exec()
 
+    def test_external_client_not_matching_cluster_version_ignore(self):
+        # Trying to connect to a cluster having only
+        # an external client with not matching protocol version;
+        # Ignore incompatible client
+        test = ClientConfigTest(self)
+        test.create_external_lib_path(PREV_RELEASE_VERSION)
+        test.disable_local_client = True
+        test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
+        test.ignore_incompatible_client = True
+        test.transaction_timeout = 100
+        test.expected_error = 1031  # Timeout
+        test.exec()
+
     def test_cannot_connect_to_coordinator(self):
         # Testing a cluster file with a valid address, but server behind it
         test = ClientConfigTest(self)
@@ -280,7 +309,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.cluster.tearDown()
+        cls.cluster.tear_down()
 
     def test_external_client(self):
         # Using an external client to connect
@@ -304,6 +333,31 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.expected_error = 2125  # Incompatible client
         test.ignore_external_client_failures = True
         test.exec()
+
+
+# Client configuration tests using a separate cluster for each test
+class ClientConfigSeparateCluster(unittest.TestCase):
+    def test_wait_cluster_to_upgrade(self):
+        # Test starting a client incompatible to a cluster and connecting
+        # successfuly after cluster upgrade
+        self.cluster = TestCluster(PREV_RELEASE_VERSION)
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.create_external_lib_path(CURRENT_VERSION)
+            test.transaction_timeout = 10000
+            test.ignore_incompatible_client = True
+
+            def upgrade(cluster):
+                time.sleep(0.1)
+                cluster.upgrade_to(CURRENT_VERSION)
+
+            t = Thread(target=upgrade, args=(self.cluster,))
+            t.start()
+            test.exec()
+            t.join()
+        finally:
+            self.cluster.tear_down()
 
 
 if __name__ == "__main__":

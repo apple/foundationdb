@@ -1179,6 +1179,7 @@ private:
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
 	bool ignoreExternalClientFailures;
+	bool ignoreIncompatibleClient;
 	bool retainClientLibCopies;
 	ApiVersion apiVersion;
 
@@ -1192,6 +1193,8 @@ private:
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
 	volatile bool envOptionsLoaded;
+
+	friend struct MultiVersionDatabase::DatabaseState;
 };
 
 #endif

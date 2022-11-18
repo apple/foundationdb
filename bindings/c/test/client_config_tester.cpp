@@ -59,6 +59,7 @@ enum TesterOptionId {
 	OPT_TRACE_DIR,
 	OPT_TMP_DIR,
 	OPT_IGNORE_EXTERNAL_CLIENT_FAILURES,
+	OPT_IGNORE_INCOMPATIBLE_CLIENT,
 	OPT_EXPECTED_ERROR
 };
 
@@ -78,6 +79,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
 	  { OPT_TMP_DIR, "--tmp-dir", SO_REQ_SEP },
 	  { OPT_IGNORE_EXTERNAL_CLIENT_FAILURES, "--ignore-external-client-failures", SO_NONE },
+	  { OPT_IGNORE_INCOMPATIBLE_CLIENT, "--ignore-incompatible-client", SO_NONE },
 	  { OPT_EXPECTED_ERROR, "--expected-error", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
@@ -94,6 +96,7 @@ public:
 	std::string traceDir;
 	std::string tmpDir;
 	bool ignoreExternalClientFailures = false;
+	bool ignoreIncompatibleClient = false;
 	fdb::Error::CodeType expectedError = 0;
 };
 
@@ -128,6 +131,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Directory for temporary files of the client.\n"
 	       "  --ignore-external-client-failures\n"
 	       "                 Ignore failures to initialize external clients.\n"
+	       "  --ignore-incompatible-client\n"
+	       "                 Do not fail if there is no client matching the server version.\n"
 	       "  --expected-error ERR\n"
 	       "                 FDB error code the test expected to fail with (default: 0).\n"
 	       "  -h, --help     Display this help and exit.\n",
@@ -183,6 +188,9 @@ bool processArg(const CSimpleOpt& args) {
 		break;
 	case OPT_IGNORE_EXTERNAL_CLIENT_FAILURES:
 		options.ignoreExternalClientFailures = true;
+		break;
+	case OPT_IGNORE_INCOMPATIBLE_CLIENT:
+		options.ignoreIncompatibleClient = true;
 		break;
 	case OPT_EXPECTED_ERROR:
 		if (!processIntOption(args.OptionText(), args.OptionArg(), 0, 10000, options.expectedError)) {
@@ -261,6 +269,9 @@ void applyNetworkOptions() {
 	}
 	if (options.ignoreExternalClientFailures) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_IGNORE_EXTERNAL_CLIENT_FAILURES);
+	}
+	if (options.ignoreIncompatibleClient) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_IGNORE_INCOMPATIBLE_CLIENT);
 	}
 }
 
