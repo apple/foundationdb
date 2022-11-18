@@ -234,10 +234,13 @@ class ConfigNodeImpl {
 			req.reply.sendError(process_behind()); // Reuse the process_behind error
 			return Void();
 		}
+		if (BUGGIFY) {
+			wait(delay(deterministicRandom()->random01() * 2));
+		}
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
+		    wait(getMutations(self, req.lastSeenVersion + 1, req.mostRecentVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
-		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
+		    wait(getAnnotations(self, req.lastSeenVersion + 1, req.mostRecentVersion));
 		TraceEvent(SevInfo, "ConfigNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("ReqMostRecentVersion", req.mostRecentVersion)
@@ -245,7 +248,7 @@ class ConfigNodeImpl {
 		    .detail("NumMutations", versionedMutations.size())
 		    .detail("NumCommits", versionedAnnotations.size());
 		++self->successfulChangeRequests;
-		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations, versionedAnnotations });
+		req.reply.send(ConfigFollowerGetChangesReply{ versionedMutations, versionedAnnotations });
 		return Void();
 	}
 

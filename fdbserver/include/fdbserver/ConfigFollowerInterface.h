@@ -110,8 +110,7 @@ struct ConfigFollowerGetChangesReply {
 	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
 
 	ConfigFollowerGetChangesReply() = default;
-	explicit ConfigFollowerGetChangesReply(Version mostRecentVersion,
-	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	explicit ConfigFollowerGetChangesReply(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                                       Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations)
 	  : changes(changes), annotations(annotations) {}
 
