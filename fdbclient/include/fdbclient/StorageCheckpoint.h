@@ -54,7 +54,7 @@ struct CheckpointMetaData {
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
 
-	Optional<UID> actionId;
+	Optional<UID> actionId; // Unique ID defined by the application.
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,

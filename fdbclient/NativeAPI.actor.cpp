@@ -8886,7 +8886,7 @@ static Future<Void> createCheckpointImpl(T tr,
 	ASSERT(!tr->getTenant().present());
 	ASSERT(!ranges.empty());
 	ASSERT(actionId.present());
-	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Range", describe(ranges));
+	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Ranges", describe(ranges));
 
 	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, ranges[0]));
 	ASSERT(!keyServers.more);
@@ -8894,7 +8894,7 @@ static Future<Void> createCheckpointImpl(T tr,
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-	if (format == DataMoveRocksCF || format == RocksDB) {
+	if (format == DataMoveRocksCF) {
 		std::vector<UID> src;
 		std::vector<UID> dest;
 		UID srcId;
@@ -8904,19 +8904,16 @@ static Future<Void> createCheckpointImpl(T tr,
 		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
 		// An alternative is to choose a healthy replica.
 		const UID checkpointID = UID(srcId.first(), deterministicRandom()->randomUInt64());
-		// for (int idx = 0; idx < src.size(); ++idx) {
 		CheckpointMetaData checkpoint(ranges, format, src, checkpointID, actionId.get());
-		// checkpoint.actionId = actionId.get();
 		checkpoint.setState(CheckpointMetaData::Pending);
 		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
-		// }
 
 		TraceEvent(SevDebug, "CreateCheckpointTransactionShard")
-		    .detail("Ranges", describe(ranges))
 		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
-		    .detail("Format", static_cast<int16_t>(format))
-		    .detail("SrcServers", describe(src))
+		    .detail("CheckpointMetaData", checkpoint.toString())
 		    .detail("ReadVersion", tr->getReadVersion().get());
+	} else {
+		throw not_implemented();
 	}
 
 	return Void();
@@ -8944,7 +8941,7 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange r
                                                                       Optional<UID> actionId,
                                                                       Reference<LocationInfo> alternatives,
                                                                       double timeout) {
-	TraceEvent("GetCheckpointMetaDataInternalBegin")
+	TraceEvent(SevDebug, "GetCheckpointMetaDataInternalBegin")
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("Format", static_cast<int>(format))
@@ -8961,12 +8958,12 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange r
 
 	state Optional<Error> error;
 	wait(waitForAll(futures));
-	TraceEvent("GetCheckpointMetaDataInternalWaitEnd").detail("Range", range).detail("Version", version);
+	TraceEvent(SevDebug, "GetCheckpointMetaDataInternalWaitEnd").detail("Range", range).detail("Version", version);
 
 	for (index = 0; index < futures.size(); ++index) {
 		if (!futures[index].isReady()) {
 			error = timed_out();
-			TraceEvent("GetCheckpointMetaDataInternalSSTimeout")
+			TraceEvent(SevDebug, "GetCheckpointMetaDataInternalSSTimeout")
 			    .detail("Range", range)
 			    .detail("Version", version)
 			    .detail("StorageServer", alternatives->getInterface(index).uniqueID);
@@ -8975,7 +8972,7 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange r
 
 		if (futures[index].get().isError()) {
 			const Error& e = futures[index].get().getError();
-			TraceEvent("GetCheckpointMetaDataInternalError")
+			TraceEvent(SevWarn, "GetCheckpointMetaDataInternalError")
 			    .errorUnsuppressed(e)
 			    .detail("Range", range)
 			    .detail("Version", version)
@@ -9025,7 +9022,7 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRan
 			for (index = 0; index < locations.size(); ++index) {
 				futures.push_back(getCheckpointMetaDataInternal(
 				    locations[index].range, version, format, actionId, locations[index].locations, timeout));
-				TraceEvent("GetCheckpointShardBegin")
+				TraceEvent(SevDebug, "GetCheckpointShardBegin")
 				    .detail("Range", locations[index].range)
 				    .detail("Version", version)
 				    .detail("StorageServers", locations[index].locations->description());
@@ -9035,11 +9032,11 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRan
 				when(wait(cx->connectionFileChanged())) { cx->invalidateCache(KeyRef(), range); }
 				when(wait(waitForAll(futures))) { break; }
 				when(wait(delay(timeout))) {
-					TraceEvent("GetCheckpointTimeout").detail("Range", range).detail("Version", version);
+					TraceEvent(SevWarn, "GetCheckpointTimeout").detail("Range", range).detail("Version", version);
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent("GetCheckpointError").errorUnsuppressed(e).detail("Range", range);
+			TraceEvent(SevWarn, "GetCheckpointError").errorUnsuppressed(e).detail("Range", range);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
 				cx->invalidateCache(KeyRef(), range);
@@ -9052,7 +9049,7 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRan
 
 	std::vector<CheckpointMetaData> res;
 	for (index = 0; index < futures.size(); ++index) {
-		TraceEvent("GetCheckpointShardEnd").detail("Checkpoint", futures[index].get().toString());
+		TraceEvent(SevDebug, "GetCheckpointShardEnd").detail("Checkpoint", futures[index].get().toString());
 		res.push_back(futures[index].get());
 	}
 	return res;
