@@ -10165,7 +10165,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state PromiseStream<Version> committedVersions;
 	state Future<Void> verifyTask =
 	    verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
-	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree, &totalRecordsRead) || btree->getError());
+	state Future<Void> randomTask =
+	    serialTest ? Void() : waitOrError(randomReader(btree, &totalRecordsRead), btree->getError());
+
 	committedVersions.send(lastVer);
 
 	// Sometimes do zero-change commit at last version
@@ -10403,7 +10405,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				committedVersions = PromiseStream<Version>();
 				verifyTask = verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
 				if (!serialTest) {
-					randomTask = randomReader(btree, &totalRecordsRead) || btree->getError();
+					randomTask = waitOrError(randomReader(btree, &totalRecordsRead), btree->getError());
 				}
 				committedVersions.send(version);
 			}
