@@ -5862,12 +5862,18 @@ private:
 		if (useEncryptionDomain) {
 			ASSERT(pagesToBuild[0].domainId.present());
 			int64_t domainId = pagesToBuild[0].domainId.get();
-			// We need to make sure we use the domain prefix as the page lower bound, for the first page
-			// of a non-default domain on a level. That way we ensure that pages for a domain form a full subtree
-			// (i.e. have a single root) in the B-tree.
-			if (domainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
-			    !self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, false)) {
-				pageLowerBound = RedwoodRecordRef(entries[0].key.substr(0, pagesToBuild[0].domainPrefixLength));
+			// We make sure the page lower bound fits in the domain of the page.
+			// If the page domain is the default domain, we make sure the page doesn't fall within a domain
+			// specific subtree.
+			// If the page domain is non-default, in addition, we make the first page of the domain on a level
+			// use the domain prefix as the lower bound. Such a lower bound will ensure that pages for a domain
+			// form a full subtree (i.e. have a single root) in the B-tree.
+			if (!self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, true)) {
+				if (domainId == self->m_keyProvider->getDefaultEncryptionDomainId()) {
+					pageLowerBound = RedwoodRecordRef(entries[0].key);
+				} else {
+					pageLowerBound = RedwoodRecordRef(entries[0].key.substr(0, pagesToBuild[0].domainPrefixLength));
+				}
 			}
 		}
 
