@@ -115,8 +115,36 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                           includes,
 		                           excludes)));
 
-		std::vector<KeyRange> testRanges;
+		state std::vector<KeyRange> testRanges;
 		testRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr));
+		wait(self->checkpointRestore(self, cx, testRanges, &kvs));
+		TraceEvent(SevDebug, "TestMovedRange").detail("Range", KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+
+		// Move range [TestKeyD, TestKeyF) to sh0;
+		includes.insert(teamA.begin(), teamA.end());
+		state std::vector<UID> teamE = wait(self->moveShard(self,
+		                                                    cx,
+		                                                    UID(sh0, deterministicRandom()->randomUInt64()),
+		                                                    KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr),
+		                                                    teamSize,
+		                                                    includes,
+		                                                    excludes));
+		ASSERT(std::equal(teamA.begin(), teamA.end(), teamE.begin()));
+
+		state int teamIdx = 0;
+		for (teamIdx = 0; teamIdx < teamA.size(); ++teamIdx) {
+			TraceEvent("TestGettingServerShards", teamA[teamIdx])
+			    .detail("Range", KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr));
+			std::vector<StorageServerShard> shards =
+			    wait(self->getStorageServerShards(cx, teamA[teamIdx], KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr)));
+			ASSERT(shards.size() == 1);
+			ASSERT(shards[0].desiredId == sh0);
+			TraceEvent("TestStorageServerShards", teamA[teamIdx]).detail("Shards", describe(shards));
+		}
+
+		testRanges.clear();
+		testRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+		testRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr));
 		wait(self->checkpointRestore(self, cx, testRanges, &kvs));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
@@ -130,7 +158,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                                                    excludes));
 		ASSERT(std::equal(teamA.begin(), teamA.end(), teamB.begin()));
 
-		state int teamIdx = 0;
+		teamIdx = 0;
 		for (teamIdx = 0; teamIdx < teamA.size(); ++teamIdx) {
 			std::vector<StorageServerShard> shards =
 			    wait(self->getStorageServerShards(cx, teamA[teamIdx], KeyRangeRef("TestKeyA"_sr, "TestKeyC"_sr)));
