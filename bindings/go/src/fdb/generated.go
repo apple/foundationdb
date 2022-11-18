@@ -261,6 +261,11 @@ func (o NetworkOptions) SetIgnoreExternalClientFailures() error {
 	return o.setOpt(68, nil)
 }
 
+// Do not fail if there is no client matching the server version the client is connecting to
+func (o NetworkOptions) SetIgnoreIncompatibleClient() error {
+	return o.setOpt(69, nil)
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
