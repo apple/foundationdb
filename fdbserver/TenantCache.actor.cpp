@@ -124,9 +124,17 @@ public:
 
 		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL;
 		state double lastTenantListFetchTime = now();
+		state double lastTraceTime = 0;
 
 		loop {
 			state double fetchStartTime = now();
+
+			state bool toTrace = false;
+			if (fetchStartTime - lastTraceTime > SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL) {
+				toTrace = true;
+				lastTraceTime = fetchStartTime;
+			}
+
 			state std::vector<TenantGroupName> groups;
 			for (const auto& [group, storage] : tenantCache->tenantStorageMap) {
 				groups.push_back(group);
@@ -159,6 +167,14 @@ public:
 					}
 				}
 				tenantCache->tenantStorageMap[group].usage = usage;
+
+				if (toTrace) {
+					// Trace the storage used by all tenant groups for visibility.
+					TraceEvent(SevInfo, "StorageUsageUpdated", tenantCache->id())
+					    .detail("TenantGroup", group)
+					    .detail("Quota", tenantCache->tenantStorageMap[group].quota)
+					    .detail("Usage", tenantCache->tenantStorageMap[group].usage);
+				}
 			}
 
 			lastTenantListFetchTime = now();
