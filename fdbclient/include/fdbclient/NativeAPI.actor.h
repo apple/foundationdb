@@ -161,6 +161,7 @@ struct TransactionOptions {
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
 	bool rawAccess : 1;
+	bool bypassStorageQuota : 1;
 
 	TransactionPriority priority;
 
@@ -589,8 +590,8 @@ inline uint64_t getReadOperationCost(uint64_t bytes) {
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
-// will be 1. Otherwise, the value will be 0.
-// Returns the FDB version at which the transaction was committed.
+// will be 1. Otherwise, the value will be 0. The caller should take care of the reset of StorageWiggleMetrics if
+// necessary. Returns the FDB version at which the transaction was committed.
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,

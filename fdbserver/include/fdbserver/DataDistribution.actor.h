@@ -35,6 +35,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -83,6 +84,7 @@ public:
 	}
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return (int)__COUNT; }
+	bool operator<(const RelocateReason& reason) { return (int)value < (int)reason.value; }
 
 private:
 	Value value;
@@ -269,23 +271,25 @@ public:
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
 	};
 
-	// Two-step team selection
-	// Usage: getting primary dest team and remote dest team in dataDistributionRelocator()
-	// The overall process has two steps:
-	// Step 1: get a physical shard id given the input primary team
-	// Return a new physical shard id if the input primary team is new or the team has no available physical shard
-	// checkPhysicalShardAvailable() defines whether a physical shard is available
-	uint64_t determinePhysicalShardIDGivenPrimaryTeam(ShardsAffectedByTeamFailure::Team primaryTeam,
-	                                                  StorageMetrics const& metrics,
-	                                                  bool forceToUseNewPhysicalShard,
-	                                                  uint64_t debugID);
+	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
+	uint64_t generateNewPhysicalShardID(uint64_t debugID);
 
-	// Step 2: get a remote team which has the input physical shard
-	// Return empty if no such remote team
-	// May return a problematic remote team, and re-selection is required for this case
-	Optional<ShardsAffectedByTeamFailure::Team> tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID,
-	                                                                          StorageMetrics const& moveInMetrics,
-	                                                                          uint64_t debugID);
+	// If the input team has any available physical shard, return an available physical shard from the input team and
+	// not in `excludedPhysicalShards`. This method is used for two-step team selection The overall process has two
+	// steps: Step 1: get a physical shard id given the input primary team Return a new physical shard id if the input
+	// primary team is new or the team has no available physical shard checkPhysicalShardAvailable() defines whether a
+	// physical shard is available
+	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
+	                                                      StorageMetrics const& metrics,
+	                                                      const std::unordered_set<uint64_t>& excludedPhysicalShards,
+	                                                      uint64_t debugID);
+
+	// Step 2: get a remote team which has the input physical shard.
+	// Second field in the returned pair indicates whether this physical shard is available or not.
+	// Return empty if no such remote team.
+	// May return a problematic remote team, and re-selection is required for this case.
+	std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool>
+	tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID, StorageMetrics const& moveInMetrics, uint64_t debugID);
 	// Invariant:
 	// (1) If forceToUseNewPhysicalShard is set, use the bestTeams selected by getTeam(), and create a new physical
 	// shard for the teams
@@ -344,17 +348,9 @@ private:
 	// Note that if the physical shard only contains the keyRange, always return FALSE
 	InOverSizePhysicalShard isInOverSizePhysicalShard(KeyRange keyRange);
 
-	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
-	uint64_t generateNewPhysicalShardID(uint64_t debugID);
-
 	// Check whether the input physical shard is available
 	// A physical shard is available if the current metric + moveInMetrics <= a threshold
 	PhysicalShardAvailable checkPhysicalShardAvailable(uint64_t physicalShardID, StorageMetrics const& moveInMetrics);
-
-	// If the input team has any available physical shard, return an available physical shard of the input team
-	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
-	                                                      StorageMetrics const& metrics,
-	                                                      uint64_t debugID);
 
 	// Reduce the metics of input physical shard by the input metrics
 	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
@@ -541,98 +537,8 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 #ifndef __INTEL_COMPILER
 #pragma region Perpetual Storage Wiggle
 #endif
+struct DDTeamCollectionInitParams;
 class DDTeamCollection;
-
-struct StorageWiggleMetrics {
-	constexpr static FileIdentifier file_identifier = 4728961;
-
-	// round statistics
-	// One StorageServer wiggle round is considered 'complete', when all StorageServers with creationTime < T are
-	// wiggled
-	// Start and finish are in epoch seconds
-	double last_round_start = 0;
-	double last_round_finish = 0;
-	TimerSmoother smoothed_round_duration;
-	int finished_round = 0; // finished round since storage wiggle is open
-
-	// step statistics
-	// 1 wiggle step as 1 storage server is wiggled in the current round
-	// Start and finish are in epoch seconds
-	double last_wiggle_start = 0;
-	double last_wiggle_finish = 0;
-	TimerSmoother smoothed_wiggle_duration;
-	int finished_wiggle = 0; // finished step since storage wiggle is open
-
-	StorageWiggleMetrics() : smoothed_round_duration(20.0 * 60), smoothed_wiggle_duration(10.0 * 60) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		double step_total, round_total;
-		if (!ar.isDeserializing) {
-			step_total = smoothed_wiggle_duration.getTotal();
-			round_total = smoothed_round_duration.getTotal();
-		}
-		serializer(ar,
-		           last_wiggle_start,
-		           last_wiggle_finish,
-		           step_total,
-		           finished_wiggle,
-		           last_round_start,
-		           last_round_finish,
-		           round_total,
-		           finished_round);
-		if (ar.isDeserializing) {
-			smoothed_round_duration.reset(round_total);
-			smoothed_wiggle_duration.reset(step_total);
-		}
-	}
-
-	static Future<Void> runSetTransaction(Reference<ReadYourWritesTransaction> tr,
-	                                      bool primary,
-	                                      StorageWiggleMetrics metrics) {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
-		        ObjectWriter::toValue(metrics, IncludeVersion()));
-		return Void();
-	}
-
-	static Future<Void> runSetTransaction(Database cx, bool primary, StorageWiggleMetrics metrics) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			return runSetTransaction(tr, primary, metrics);
-		});
-	}
-
-	static Future<Optional<Value>> runGetTransaction(Reference<ReadYourWritesTransaction> tr, bool primary) {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-		return tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
-	}
-
-	static Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-			return runGetTransaction(tr, primary);
-		});
-	}
-
-	StatusObject toJSON() const {
-		StatusObject result;
-		result["last_round_start_datetime"] = epochsToGMTString(last_round_start);
-		result["last_round_finish_datetime"] = epochsToGMTString(last_round_finish);
-		result["last_round_start_timestamp"] = last_round_start;
-		result["last_round_finish_timestamp"] = last_round_finish;
-		result["smoothed_round_seconds"] = smoothed_round_duration.smoothTotal();
-		result["finished_round"] = finished_round;
-
-		result["last_wiggle_start_datetime"] = epochsToGMTString(last_wiggle_start);
-		result["last_wiggle_finish_datetime"] = epochsToGMTString(last_wiggle_finish);
-		result["last_wiggle_start_timestamp"] = last_wiggle_start;
-		result["last_wiggle_finish_timestamp"] = last_wiggle_finish;
-		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.smoothTotal();
-		result["finished_wiggle"] = finished_wiggle;
-		return result;
-	}
-};
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
@@ -640,6 +546,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
+	AsyncVar<bool> stopWiggleSignal;
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
 	// min-heap
@@ -650,7 +557,10 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection){};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true){};
+	// wiggle related actors will quit when this signal is set to true
+	void setStopSignal(bool value) { stopWiggleSignal.set(value); }
+	bool isStopped() const { return stopWiggleSignal.get(); }
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue

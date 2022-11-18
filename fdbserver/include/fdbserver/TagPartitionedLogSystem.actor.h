@@ -170,17 +170,17 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                    LogSystemConfig const& lsConf);
 
 	// Convert TagPartitionedLogSystem to DBCoreState and override input newState as return value
-	void toCoreState(DBCoreState& newState) final;
+	void toCoreState(DBCoreState& newState) const final;
 
-	bool remoteStorageRecovered() final;
+	bool remoteStorageRecovered() const final;
 
-	Future<Void> onCoreStateChanged() final;
+	Future<Void> onCoreStateChanged() const final;
 
 	void coreStateWritten(DBCoreState const& newState) final;
 
-	Future<Void> onError() final;
+	Future<Void> onError() const final;
 
-	ACTOR static Future<Void> onError_internal(TagPartitionedLogSystem* self);
+	ACTOR static Future<Void> onError_internal(TagPartitionedLogSystem const* self);
 
 	ACTOR static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
 

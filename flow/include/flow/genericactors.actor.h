@@ -1360,7 +1360,7 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 struct FlowMutex {
 	FlowMutex() { lastPromise.send(Void()); }
 
-	bool available() { return lastPromise.isSet(); }
+	bool available() const { return lastPromise.isSet(); }
 
 	struct Lock {
 		void release() { promise.send(Void()); }
@@ -1832,7 +1832,7 @@ public:
 		return true;
 	}
 
-	bool isError() {
+	bool isError() const {
 		for (int i = 0; i < futures.size(); i++)
 			if (futures[i].isError())
 				return true;

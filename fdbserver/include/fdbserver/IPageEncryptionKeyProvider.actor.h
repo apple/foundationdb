@@ -324,9 +324,8 @@ public:
 	ACTOR static Future<EncryptionKey> getLatestEncryptionKey(TenantAwareEncryptionKeyProvider* self,
 	                                                          int64_t domainId) {
 
-		EncryptCipherDomainNameRef domainName = self->getDomainName(domainId);
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName, BlobCipherMetrics::KV_REDWOOD));
+		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey encryptionKey;
 		encryptionKey.aesKey = cipherKeys;
 		return encryptionKey;
@@ -381,25 +380,6 @@ public:
 	}
 
 private:
-	EncryptCipherDomainNameRef getDomainName(int64_t domainId) {
-		if (domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
-			return FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME;
-		}
-		if (domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-			return FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
-		}
-		if (tenantPrefixIndex.isValid()) {
-			Key prefix(TenantMapEntry::idToPrefix(domainId));
-			auto view = tenantPrefixIndex->atLatest();
-			auto itr = view.find(prefix);
-			if (itr != view.end()) {
-				return itr->get();
-			}
-		}
-		TraceEvent(SevWarn, "TenantAwareEncryptionKeyProvider_TenantNotFoundForDomain").detail("DomainId", domainId);
-		throw tenant_not_found();
-	}
-
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Reference<TenantPrefixIndex> tenantPrefixIndex;
 };

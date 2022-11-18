@@ -2145,6 +2145,9 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 
 ACTOR Future<Void> lockDatabase(Database cx, UID id) {
 	state Transaction tr(cx);
+	UID debugID = deterministicRandom()->randomUniqueID();
+	TraceEvent("LockDatabaseTransaction", debugID).log();
+	tr.debugTransaction(debugID);
 	loop {
 		try {
 			wait(lockDatabase(&tr, id));

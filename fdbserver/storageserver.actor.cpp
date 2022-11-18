@@ -534,10 +534,9 @@ const int VERSION_OVERHEAD =
          sizeof(Reference<VersionedMap<KeyRef, ValueOrClearToRef>::PTreeT>)); // versioned map [ x2 for
                                                                               // createNewVersion(version+1) ], 64b
                                                                               // overhead for map
-// For both the mutation log and the versioned map.
+
 static int mvccStorageBytes(MutationRef const& m) {
-	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
-	       (MutationRef::OVERHEAD_BYTES + m.param1.size() + m.param2.size()) * 2;
+	return mvccStorageBytes(m.param1.size() + m.param2.size());
 }
 
 struct FetchInjectionInfo {
@@ -566,6 +565,8 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	// We need to track the version the change feed metadata was created by private mutation, so that if it is rolled
 	// back, we can avoid notifying other SS of change feeds that don't durably exist
 	Version metadataCreateVersion = invalidVersion;
+
+	FlowLock fetchLock = FlowLock(1);
 
 	bool removing = false;
 	bool destroyed = false;
@@ -1004,7 +1005,7 @@ public:
 	// investigate, but preventing a new storage process from replacing the TSS on the worker. It will still get removed
 	// from the cluster if it falls behind on the mutation stream, or if its tss pair gets removed and its tag is no
 	// longer valid.
-	bool isTSSInQuarantine() { return tssPairID.present() && tssInQuarantine; }
+	bool isTSSInQuarantine() const { return tssPairID.present() && tssInQuarantine; }
 
 	void startTssQuarantine() {
 		if (!tssInQuarantine) {
@@ -1054,6 +1055,11 @@ public:
 	                                      // when the disk permits
 	NotifiedVersion oldestVersion; // See also storageVersion()
 	NotifiedVersion durableVersion; // At least this version will be readable from storage after a power failure
+	// In the event of the disk corruption, sqlite and redwood will either not recover, recover to durableVersion
+	// but be unable to read some data, or they could lose the last commit. If we lose the last commit, the storage
+	// might not be able to peek from the tlog (depending on when it sent the last pop). So this version just keeps
+	// track of the version we committed to the storage engine before we did commit durableVersion.
+	Version storageMinRecoverVersion = 0;
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
 	NotifiedVersion knownCommittedVersion;
@@ -1267,48 +1273,48 @@ public:
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readKeyLatencySample("GetKeyMetrics",
 		                         self->thisServerID,
 		                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readValueLatencySample("GetValueMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readRangeLatencySample("GetRangeMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readVersionWaitSample("ReadVersionWaitMetrics",
 		                          self->thisServerID,
 		                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readQueueWaitSample("ReadQueueWaitMetrics",
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		    mappedRangeSample("GetMappedRangeMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    mappedRangeRemoteSample("GetMappedRangeRemoteMetrics",
 		                            self->thisServerID,
 		                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    kvReadRangeLatencySample("KVGetRangeMetrics",
 		                             self->thisServerID,
 		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    updateLatencySample("UpdateLatencyMetrics",
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -1508,6 +1514,7 @@ public:
 		desiredOldestVersion = ver;
 		oldestVersion = ver;
 		durableVersion = ver;
+		storageMinRecoverVersion = ver;
 		lastVersionWithData = ver;
 		restoredVersion = ver;
 
@@ -2118,7 +2125,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		/*
 		StorageMetrics m;
-		m.bytesPerKSecond = req.key.size() + (v.present() ? v.get().size() : 0);
+		m.bytesWrittenPerKSecond = req.key.size() + (v.present() ? v.get().size() : 0);
 		m.iosPerKSecond = 1;
 		data->metrics.notify(req.key, m);
 		*/
@@ -2801,6 +2808,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version emptyVersion = feedInfo->emptyVersion;
 	state Version durableValidationVersion = std::min(data->durableVersion.get(), feedInfo->durableFetchVersion.get());
 	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
+	state bool doFilterMutations = !req.range.contains(feedInfo->range);
+	state bool doValidation = EXPENSIVE_VALIDATION;
 
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsDetails", data->thisServerID)
@@ -2827,7 +2836,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			if (it->version >= req.end || it->version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
-			auto m = filterMutations(memoryReply.arena, *it, req.range, inverted);
+			MutationsAndVersionRef m = *it;
+			if (doFilterMutations) {
+				m = filterMutations(memoryReply.arena, *it, req.range, inverted);
+			}
 			if (m.mutations.size()) {
 				memoryReply.arena.dependsOn(it->arena());
 				memoryReply.mutations.push_back(memoryReply.arena, m);
@@ -2871,7 +2883,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
-		// TODO eventually: only do verify in simulation?
 		int memoryVerifyIdx = 0;
 
 		Version lastVersion = req.begin - 1;
@@ -2884,7 +2895,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
 
 			// gap validation
-			while (memoryVerifyIdx < memoryReply.mutations.size() &&
+			while (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
 			       version > memoryReply.mutations[memoryVerifyIdx].version) {
 				if (req.canReadPopped) {
 					// There are weird cases where SS fetching mixed with SS durability and popping can mean there are
@@ -2923,19 +2934,21 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				}
 			}
 
-			auto m = filterMutations(
-			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
+			MutationsAndVersionRef m = MutationsAndVersionRef(mutations, version, knownCommittedVersion);
+			if (doFilterMutations) {
+				m = filterMutations(reply.arena, m, req.range, inverted);
+			}
 			if (m.mutations.size()) {
 				reply.arena.dependsOn(mutations.arena());
 				reply.mutations.push_back(reply.arena, m);
 
-				if (memoryVerifyIdx < memoryReply.mutations.size() &&
+				if (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
 				    version == memoryReply.mutations[memoryVerifyIdx].version) {
 					// We could do validation of mutations here too, but it's complicated because clears can get split
 					// and stuff
 					memoryVerifyIdx++;
 				}
-			} else if (memoryVerifyIdx < memoryReply.mutations.size() &&
+			} else if (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
 			           version == memoryReply.mutations[memoryVerifyIdx].version) {
 				if (version > durableValidationVersion) {
 					// Another validation case - feed was popped, data was fetched, fetched data was persisted but pop
@@ -5692,6 +5705,7 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 	data->freeable.erase(data->freeable.begin(), data->freeable.lower_bound(nextDurableVersion));
 
 	Future<Void> checkFatalError = data->otherError.getFuture();
+	data->storageMinRecoverVersion = data->durableVersion.get();
 	data->durableVersion.set(nextDurableVersion);
 	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
 	if (checkFatalError.isReady())
@@ -5819,7 +5833,8 @@ void applyMutation(StorageServer* self,
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
-	metrics.bytesPerKSecond = mvccStorageBytes(m) / 2;
+	// FIXME: remove the / 2 and double the related knobs.
+	metrics.bytesWrittenPerKSecond = mvccStorageBytes(m) / 2; // comparable to counter.bytesInput / 2
 	metrics.iosPerKSecond = 1;
 	self->metrics.notify(m.param1, metrics);
 
@@ -5886,14 +5901,21 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 			}
 		}
 	} else if (m.type == MutationRef::ClearRange) {
-		auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+		KeyRangeRef mutationClearRange(m.param1, m.param2);
+		// FIXME: this might double-insert clears if the same feed appears in multiple sub-ranges
+		auto ranges = self->keyChangeFeed.intersectingRanges(mutationClearRange);
 		for (auto& r : ranges) {
 			for (auto& it : r.value()) {
 				if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion.get()));
 					}
-					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+
+					// clamp feed mutation to change feed range
+					KeyRangeRef clearIntersect = mutationClearRange & it->range;
+					it->mutations.back().mutations.push_back_deep(
+					    it->mutations.back().arena(),
+					    MutationRef(MutationRef::Type::ClearRange, clearIntersect.begin, clearIntersect.end));
 					self->currentChangeFeeds.insert(it->id);
 					self->addFeedBytesAtVersion(m.totalSize(), version);
 
@@ -6314,6 +6336,15 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              Version beginVersion,
                                              Version endVersion,
                                              ReadOptions readOptions) {
+	state FlowLock::Releaser feedFetchReleaser;
+
+	// avoid fetching the same version range of the same change feed multiple times.
+	choose {
+		when(wait(changeFeedInfo->fetchLock.take())) {
+			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
+		}
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
+	}
 
 	state Version startVersion = beginVersion;
 	startVersion = std::max(startVersion, emptyVersion + 1);
@@ -6333,6 +6364,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		return invalidVersion;
 	}
 
+	// FIXME: if this feed range is not wholly contained within the shard, set cache to true on reading
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
 	state Future<Void> feed = data->cx->getChangeFeedStream(feedResults,
 	                                                        rangeId,
@@ -6848,6 +6880,16 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	return feedIds;
 }
 
+ReadOptions readOptionsForFeedFetch(const ReadOptions& options, const KeyRangeRef& keys, const KeyRangeRef& feedRange) {
+	if (!feedRange.contains(keys)) {
+		return options;
+	}
+	// If feed range wholly contains shard range, cache on fetch because other shards will likely also fetch it
+	ReadOptions newOptions = options;
+	newOptions.cacheResult = true;
+	return newOptions;
+}
+
 // returns max version fetched for each feed
 // newFeedIds is used for the second fetch to get data for new feeds that weren't there for the first fetch
 ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer* data,
@@ -6872,8 +6914,9 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			auto feedIt = data->uidChangeFeed.find(feedId);
 			// feed may have been moved away or deleted after move was scheduled, do nothing in that case
 			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
+				ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
 				feedFetches[feedIt->second->id] =
-				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, readOptions);
+				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, fetchReadOptions);
 			}
 		}
 		for (auto& feedId : newFeedIds) {
@@ -6881,7 +6924,8 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			// we just read the change feed data map earlier in fetchKeys without yielding, so these feeds must exist
 			ASSERT(feedIt != data->uidChangeFeed.end());
 			ASSERT(!feedIt->second->removing);
-			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, readOptions);
+			ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
+			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, fetchReadOptions);
 		}
 
 		loop {
@@ -8798,7 +8842,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
-					if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+					if (g_network && g_network->isSimulated() &&
+					    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
 					    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
 					      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
 						ASSERT(false);
@@ -8956,7 +9001,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else {
 				MutationRef msg;
 				rd >> msg;
-				if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
+				if (g_network && g_network->isSimulated() &&
+				    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
 				    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
 				      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
 					ASSERT(false);
@@ -9432,7 +9478,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
-		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
+		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
 
 		if (removeKVSRanges) {
 			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
@@ -9574,7 +9620,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		// loaded.
 		state double beforeSSDurableVersionUpdate = now();
 		wait(data->durableVersionLock.take());
-		data->popVersion(data->durableVersion.get() + 1);
+		data->popVersion(data->storageMinRecoverVersion + 1);
 
 		while (!changeDurableVersion(data, newOldestVersion)) {
 			if (g_network->check_yield(TaskPriority::UpdateStorage)) {
@@ -10176,11 +10222,11 @@ Future<bool> StorageServerDisk::restoreDurableState() {
 
 // Determines whether a key-value pair should be included in a byte sample
 // Also returns size information about the sample
-ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
+ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
+	ASSERT(totalKvSize >= key.size());
 	ByteSampleInfo info;
 
-	const KeyRef key = keyValue.key;
-	info.size = key.size() + keyValue.value.size();
+	info.size = totalKvSize;
 
 	uint32_t a = 0;
 	uint32_t b = 0;
@@ -10315,12 +10361,14 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 						//  all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
-						  bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond ||
-						  m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
+						  bool b = ( m.bytes != metrics.bytes || m.bytesWrittenPerKSecond !=
+						  metrics.bytesWrittenPerKSecond
+						  || m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
 						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
 						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
-						  b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond,
-						  metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
+						  b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond, metrics.bytes,
+						  metrics.bytesWrittenPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesWrittenPerKSecond,
+						  c.iosPerKSecond);
 
 						  }*/
 					}
@@ -10827,7 +10875,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						}
 						self->logCursor = self->logSystem->peekSingle(
 						    self->thisServerID, self->version.get() + 1, self->tag, self->history);
-						self->popVersion(self->durableVersion.get() + 1, true);
+						self->popVersion(self->storageMinRecoverVersion + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
 					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys

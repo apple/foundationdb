@@ -21,7 +21,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tuple.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -91,6 +91,8 @@ static FILE* g_debugStream = stdout;
 #define BEACON debug_printf_always("HERE\n")
 #define TRACE                                                                                                          \
 	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
+
+using namespace std::string_view_literals;
 
 // Returns a string where every line in lines is prefixed with prefix
 std::string addPrefix(std::string prefix, std::string lines) {
@@ -489,7 +491,7 @@ public:
 		}
 
 		// Returns true if the mutex cannot be immediately taken.
-		bool isBusy() { return !mutex.available(); }
+		bool isBusy() const { return !mutex.available(); }
 
 		// Wait for all operations started before now to be ready, which is done by
 		// obtaining and releasing the mutex.
@@ -1026,17 +1028,31 @@ public:
 					// These pages are not encrypted
 					page->postReadPayload(c.pageID);
 				} catch (Error& e) {
-					TraceEvent(SevError, "RedwoodChecksumFailed")
+					bool isInjected = false;
+					if (g_network->isSimulated()) {
+						auto num4kBlocks = std::max(self->pager->getPhysicalPageSize() / 4096, 1);
+						auto startBlock = (c.pageID * self->pager->getPhysicalPageSize()) / 4096;
+						auto iter = g_simulator->corruptedBlocks.lower_bound(
+						    std::make_pair(self->pager->getName(), startBlock));
+						if (iter->first == self->pager->getName() && iter->second < startBlock + num4kBlocks) {
+							isInjected = true;
+						}
+					}
+					TraceEvent(isInjected ? SevWarnAlways : SevError, "RedwoodChecksumFailed")
 					    .error(e)
 					    .detail("PageID", c.pageID)
 					    .detail("PageSize", self->pager->getPhysicalPageSize())
-					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize());
+					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
+					    .detail("Filename", self->pager->getName());
 
 					debug_printf("FIFOQueue::Cursor(%s) peekALLExt getSubPage error=%s for %s. Offset %d ",
 					             c.toString().c_str(),
 					             e.what(),
 					             toString(c.pageID).c_str(),
 					             c.pageID * self->pager->getPhysicalPageSize());
+					if (isInjected) {
+						throw e.asInjectedFault();
+					}
 					throw;
 				}
 
@@ -1168,7 +1184,7 @@ public:
 		headWriter.write(item);
 	}
 
-	bool isBusy() {
+	bool isBusy() const {
 		return headWriter.isBusy() || headReader.isBusy() || tailWriter.isBusy() || !newTailPage.isReady();
 	}
 

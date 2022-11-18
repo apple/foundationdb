@@ -740,7 +740,8 @@ private:
 				}
 
 				CODE_PROBE(self->enableEncryption && self->uncommittedBytes() > 0,
-				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled");
+				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled",
+				           probe::decoration::rare);
 				self->semiCommit();
 
 				return Void();

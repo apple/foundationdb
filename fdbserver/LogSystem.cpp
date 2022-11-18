@@ -321,7 +321,7 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	}
 }
 
-std::vector<Standalone<StringRef>> LogPushData::getAllMessages() {
+std::vector<Standalone<StringRef>> LogPushData::getAllMessages() const {
 	std::vector<Standalone<StringRef>> results;
 	results.reserve(messagesWriter.size());
 	for (int loc = 0; loc < messagesWriter.size(); loc++) {
