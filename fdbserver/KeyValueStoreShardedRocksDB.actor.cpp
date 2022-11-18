@@ -41,12 +41,9 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be 6.27.3 or greater.
-static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
-static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 27 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
-static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 27) ? ROCKSDB_PATCH >= 3 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
+// Enforcing rocksdb version to be 7.7.3.
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
+              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
@@ -1890,21 +1887,23 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		                         rocksdb::DB* db,
 		                         std::vector<std::pair<uint32_t, KeyRange>>* deletes,
 		                         bool sample) {
-			DeleteVisitor dv(deletes);
-			rocksdb::Status s = batch->Iterate(&dv);
-			if (!s.ok()) {
-				logRocksDBError(s, "CommitDeleteVisitor");
-				return s;
-			}
+			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+				DeleteVisitor dv(deletes);
+				rocksdb::Status s = batch->Iterate(&dv);
+				if (!s.ok()) {
+					logRocksDBError(s, "CommitDeleteVisitor");
+					return s;
+				}
 
-			// If there are any range deletes, we should have added them to be deleted.
-			ASSERT(!deletes->empty() || !batch->HasDeleteRange());
+				// If there are any range deletes, we should have added them to be deleted.
+				ASSERT(!deletes->empty() || !batch->HasDeleteRange());
+			}
 
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
 			double writeBeginTime = sample ? timer_monotonic() : 0;
-			s = db->Write(options, batch);
+			rocksdb::Status s = db->Write(options, batch);
 			if (sample) {
 				rocksDBMetrics->getWriteHistogram()->sampleSeconds(timer_monotonic() - writeBeginTime);
 			}
