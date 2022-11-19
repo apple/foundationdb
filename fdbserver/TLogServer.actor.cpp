@@ -1098,7 +1098,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	}
 	// SOMEDAY: This seems to be running pretty often, should we slow it down???
 	// This needs a timeout since nothing prevents I/O operations from hanging indefinitely.
-	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration));
+	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration, "TLogCommit"));
 
 	wait(delay(0, TaskPriority::UpdateStorage));
 
@@ -2160,7 +2160,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	self->largeDiskQueueCommitBytes.set(false);
 
 	wait(ioDegradedOrTimeoutError(
-	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION));
+	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION, "TLogCommit"));
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
 		wait(delay(6.0));
 	}
@@ -3464,7 +3464,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 
 			TraceEvent("TLogRecover", self->dbgid)
 			    .detail("LogId", logData->logId)
@@ -3529,7 +3530,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 		} else {
 			// Brand new tlog, initialization has already been done by caller
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();
@@ -3600,13 +3602,14 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 	TraceEvent("SharedTlog", tlogId);
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
 
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
 		} else {
 			wait(ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 		}
 
 		// Disk errors need a chance to kill this actor.
