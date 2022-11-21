@@ -651,13 +651,43 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<Void> adjacentPurge(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
+		// Create 2 adjacent blobbified regions.
+		Key midKey = range.begin.withSuffix("mid"_sr);
+		state KeyRange range1(KeyRangeRef(range.begin, midKey));
+		state KeyRange range2(KeyRangeRef(midKey, range.end));
+
+		state bool setSuccess = false;
+		wait(store(setSuccess, cx->blobbifyRange(range1, self->tenantName)));
+		ASSERT(setSuccess);
+		wait(self->checkRange(cx, self, range1, true));
+		wait(store(setSuccess, cx->blobbifyRange(range2, self->tenantName)));
+		ASSERT(setSuccess);
+		wait(self->checkRange(cx, self, range2, true));
+
+		// force purge range
+		state Key purgeKey;
+		wait(store(purgeKey, self->versionedForcePurge(cx, range1, self->tenantName)));
+		wait(cx->waitPurgeGranulesComplete(purgeKey));
+		wait(store(purgeKey, self->versionedForcePurge(cx, range2, self->tenantName)));
+		wait(cx->waitPurgeGranulesComplete(purgeKey));
+
+		bool unsetSuccess = wait(cx->unblobbifyRange(range, self->tenantName));
+		ASSERT(unsetSuccess);
+
+		wait(self->tearDownRangeAfterUnit(cx, self, range));
+
+		return Void();
+	}
+
 	enum UnitTestTypes {
 		VERIFY_RANGE_UNIT,
 		VERIFY_RANGE_GAP_UNIT,
 		RANGES_MISALIGNED,
 		BLOBBIFY_IDEMPOTENT,
 		RE_BLOBBIFY,
-		OP_COUNT = 5 /* keep this last */
+		ADJACENT_PURGE,
+		OP_COUNT = 6 /* keep this last */
 	};
 
 	ACTOR Future<Void> blobGranuleRangesUnitTests(Database cx, BlobGranuleRangesWorkload* self) {
@@ -699,6 +729,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 				wait(self->blobbifyIdempotentUnit(cx, self, range));
 			} else if (op == RE_BLOBBIFY) {
 				wait(self->reBlobbifyUnit(cx, self, range));
+			} else if (op == ADJACENT_PURGE) {
+				wait(self->adjacentPurge(cx, self, range));
 			} else {
 				ASSERT(false);
 			}
