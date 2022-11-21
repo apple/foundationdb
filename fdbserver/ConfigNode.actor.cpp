@@ -523,6 +523,18 @@ class ConfigNodeImpl {
 			    ObjectReader::fromStringRef<KnobValue>(kv.value, IncludeVersion());
 		}
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
+		if (req.mostRecentVersion < reply.snapshotVersion) {
+			// The version in the request can be less than the last compacted
+			// version in certain circumstances where the coordinators are
+			// being changed and the consumer reads the latest committed
+			// version from a majority of ConfigNodes before they have received
+			// up to date snapshots. This should be fine, it just means the
+			// consumer needs to fetch the latest version and retry its
+			// request.
+			CODE_PROBE(true, "ConfigNode ahead of consumer", probe::decoration::rare);
+			req.reply.sendError(version_already_compacted());
+			return Void();
+		}
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		TraceEvent(SevInfo, "ConfigNodeGettingSnapshot", self->id)
