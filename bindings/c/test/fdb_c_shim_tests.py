@@ -11,7 +11,8 @@ sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tests
 
 # fmt: off
 from binary_download import FdbBinaryDownloader, CURRENT_VERSION
-from local_cluster import LocalCluster, random_secret_string
+from local_cluster import LocalCluster
+from test_util import random_alphanum_string
 # fmt: on
 
 LAST_RELEASE_VERSION = "7.1.5"
@@ -45,7 +46,7 @@ class TestEnv(LocalCluster):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
-        self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
+        self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.downloader = downloader
         self.version = version

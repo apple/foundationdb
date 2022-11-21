@@ -175,13 +175,11 @@ int cleanup(Database db, Arguments const& args) {
 			// Issue all tenant reads first
 			Transaction getTx = db.createTransaction();
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = getTenantNameByIndex(i);
-				tenantResults[i - (batch * batch_size)] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
+				tenantResults[i - (batch * batch_size)] = Tenant::getTenant(getTx, toBytesRef(getTenantNameByIndex(i)));
 			}
 			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
 			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = getTenantNameByIndex(i);
 				while (true) {
 					const auto rc = waitAndHandleError(getTx, tenantResults[i - (batch * batch_size)], "GET_TENANT");
 					if (rc == FutureRC::OK) {
@@ -232,8 +230,7 @@ int cleanup(Database db, Arguments const& args) {
 		tx.reset();
 		for (int batch = 0; batch < batches; ++batch) {
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = getTenantNameByIndex(i);
-				Tenant::deleteTenant(tx, toBytesRef(tenant_name));
+				Tenant::deleteTenant(tx, toBytesRef(getTenantNameByIndex(i)));
 			}
 			auto future_commit = tx.commit();
 			const auto rc = waitAndHandleError(tx, future_commit, "DELETE_TENANT");
@@ -284,8 +281,7 @@ int populate(Database db,
 			for (int batch = 0; batch < batches; ++batch) {
 				while (1) {
 					for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-						std::string tenant_str = getTenantNameByIndex(i);
-						Tenant::createTenant(systemTx, toBytesRef(tenant_str));
+						Tenant::createTenant(systemTx, toBytesRef(getTenantNameByIndex(i)));
 					}
 					auto future_commit = systemTx.commit();
 					const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
@@ -307,9 +303,7 @@ int populate(Database db,
 				// blobbify tenant ranges explicitly
 				// FIXME: skip if database not configured for blob granules?
 				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-					std::string tenant_str = getTenantNameByIndex(i);
-					BytesRef tenant_name = toBytesRef(tenant_str);
-					tenants[i] = db.openTenant(tenant_name);
+					tenants[i] = db.openTenant(toBytesRef(getTenantNameByIndex(i)));
 					std::string rangeEnd = "\xff";
 					blobbifyResults[i - (batch * batch_size)] =
 					    tenants[i].blobbifyRange(BytesRef(), toBytesRef(rangeEnd));
@@ -362,9 +356,7 @@ int populate(Database db,
 	// and create transactions as needed
 	Tenant tenants[args.active_tenants];
 	for (int i = 0; i < args.active_tenants; ++i) {
-		std::string tenantStr = getTenantNameByIndex(i);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		tenants[i] = db.openTenant(tenant_name);
+		tenants[i] = db.openTenant(toBytesRef(getTenantNameByIndex(i)));
 	}
 	int populate_iters = args.active_tenants > 0 ? args.active_tenants : 1;
 	// Each tenant should have the same range populated

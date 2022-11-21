@@ -5,7 +5,8 @@ import os
 import shutil
 import subprocess
 import sys
-from local_cluster import LocalCluster, TLSConfig, random_secret_string
+from local_cluster import LocalCluster, TLSConfig
+from test_util import random_alphanum_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
@@ -18,7 +19,7 @@ class TempCluster(LocalCluster):
         port: str = None,
         blob_granules_enabled: bool = False,
         tls_config: TLSConfig = None,
-        public_key_json_str: str = None,
+        authorization_kty: str = "",
         remove_at_exit: bool = True,
         custom_config: dict = {},
         enable_tenants: bool = True,
@@ -26,7 +27,7 @@ class TempCluster(LocalCluster):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
-        tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
+        tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         tmp_dir.mkdir(parents=True)
         self.tmp_dir = tmp_dir
         self.remove_at_exit = remove_at_exit
@@ -41,7 +42,7 @@ class TempCluster(LocalCluster):
             blob_granules_enabled=blob_granules_enabled,
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
-            public_key_json_str=public_key_json_str,
+            authorization_kty=authorization_kty,
             custom_config=custom_config,
         )
 

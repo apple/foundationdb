@@ -22,11 +22,11 @@ import fdb
 import pytest
 import subprocess
 import admin_server
-from authlib.jose import JsonWebKey, KeySet, jwt
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
+from authz_util import private_key_gen, public_keyset_from_keys
 from typing import Union
-from util import alg_from_kty, public_keyset_from_keys, random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
+from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 
 fdb.api_version(720)
 
@@ -67,45 +67,8 @@ def public_key_refresh_interval(request):
     return request.config.option.public_key_refresh_interval
 
 @pytest.fixture(scope="session")
-def alg(kty):
-    if kty == "EC":
-        return "ES256"
-    else:
-        return "RS256"
-
-@pytest.fixture(scope="session")
 def kid():
     return random_alphanum_str(12)
-
-@pytest.fixture(scope="session")
-def private_key_gen():
-    def fn(kty: str, kid: str):
-        if kty == "EC":
-            return JsonWebKey.generate_key(kty=kty, crv_or_size="P-256", is_private=True, options={"kid": kid})
-        else:
-            return JsonWebKey.generate_key(kty=kty, crv_or_size=4096, is_private=True, options={"kid": kid})
-    return fn
-
-@pytest.fixture(scope="session")
-def private_key(kty, kid, private_key_gen):
-    return private_key_gen(kty, kid)
-
-@pytest.fixture(scope="session")
-def public_key_jwks_str(private_key):
-    return public_keyset_from_keys([private_key])
-
-@pytest.fixture(scope="session")
-def token_gen():
-    def fn(private_key, claims, headers={}):
-        if not headers:
-            headers = {
-                "typ": "JWT",
-                "kty": private_key.kty,
-                "alg": alg_from_kty(private_key.kty),
-                "kid": private_key.kid,
-            }
-        return jwt.encode(headers, claims, private_key)
-    return fn
 
 @pytest.fixture(scope=cluster_scope)
 def admin_ipc():
@@ -115,11 +78,11 @@ def admin_ipc():
     server.join()
 
 @pytest.fixture(autouse=True, scope=cluster_scope)
-def cluster(admin_ipc, build_dir, public_key_jwks_str, public_key_refresh_interval, trusted_client):
+def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client):
     with TempCluster(
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
-            public_key_json_str=public_key_jwks_str,
+            authorization_kty="EC",
             remove_at_exit=True,
             custom_config={
                 "knob-public-key-file-refresh-interval-seconds": public_key_refresh_interval,
