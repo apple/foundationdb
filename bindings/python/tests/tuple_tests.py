@@ -173,7 +173,7 @@ def tupleTest(N=10000):
             print("Prefix not before prefixed:\n    Tuple: %s\n    Bytes: %s\n    Other: %s\n    Bytes: %s" % (t, repr(pack(t)), t2, repr(pack(t2))))
             return False
 
-    print ("Tuple check %d OK" % N)
+    print("Tuple check %d OK" % N)
     return True
 
 # test:

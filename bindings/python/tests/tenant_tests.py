@@ -27,24 +27,26 @@ from fdb.tuple import pack
 if __name__ == '__main__':
     fdb.api_version(720)
 
+
 def cleanup_tenant(db, tenant_name):
     try:
         tenant = db.open_tenant(tenant_name)
         del tenant[:]
         fdb.tenant_management.delete_tenant(db, tenant_name)
     except fdb.FDBError as e:
-        if e.code == 2131: # tenant not found
+        if e.code == 2131:  # tenant not found
             pass
         else:
             raise
 
+
 def test_tenant_tuple_name(db):
-    tuplename=(b'test', b'level', b'hierarchy', 3, 1.24, 'str')
+    tuplename = (b'test', b'level', b'hierarchy', 3, 1.24, 'str')
     cleanup_tenant(db, tuplename)
 
     fdb.tenant_management.create_tenant(db, tuplename)
 
-    tenant=db.open_tenant(tuplename)
+    tenant = db.open_tenant(tuplename)
     tenant[b'foo'] = b'bar'
 
     assert tenant[b'foo'] == b'bar'
@@ -100,7 +102,7 @@ def test_tenant_operations(db):
         del tr1[:]
         tr1.commit().wait()
     except fdb.FDBError as e:
-        tr.on_error(e).wait()
+        tr1.on_error(e).wait()
 
     assert tenant1[b'tenant_test_key'] == None
     assert db[prefix1 + b'tenant_test_key'] == None
@@ -113,7 +115,7 @@ def test_tenant_operations(db):
         tenant1[b'tenant_test_key']
         assert False
     except fdb.FDBError as e:
-        assert e.code == 2131 # tenant not found
+        assert e.code == 2131  # tenant not found
 
     del tenant2[:]
     fdb.tenant_management.delete_tenant(db, b'tenant2')
@@ -125,6 +127,7 @@ def test_tenant_operations(db):
     del db[b'tenant_test_key']
 
     assert db[b'tenant_test_key'] == None
+
 
 def test_tenant_operation_retries(db):
     cleanup_tenant(db, b'tenant1')
@@ -138,7 +141,7 @@ def test_tenant_operation_retries(db):
         fdb.tenant_management.create_tenant(db, b'tenant1')
         assert False
     except fdb.FDBError as e:
-        assert e.code == 2132 # tenant already exists
+        assert e.code == 2132  # tenant already exists
 
     # Using a transaction skips the existence check
     tr = db.create_transaction()
@@ -166,7 +169,7 @@ def test_tenant_operation_retries(db):
         fdb.tenant_management.delete_tenant(db, b'tenant1')
         assert False
     except fdb.FDBError as e:
-        assert e.code == 2131 # tenant not found
+        assert e.code == 2131  # tenant not found
 
     # Using a transaction skips the existence check
     tr = db.create_transaction()
@@ -186,10 +189,12 @@ def test_tenant_operation_retries(db):
     except fdb.FDBError as e:
         tr.on_error(e).wait()
 
+
 def test_tenants(db):
     test_tenant_tuple_name(db)
     test_tenant_operations(db)
     test_tenant_operation_retries(db)
+
 
 # Expect a cluster file as input. This test will write to the FDB cluster, so
 # be aware of potential side effects.
