@@ -186,7 +186,7 @@ public:
 
 	size_t getBucketSize() const { return buckets.size(); }
 
-	std::vector<uint64_t> getSamples() const { return buckets; }
+	std::vector<uint32_t> getSamples() const { return buckets; }
 
 	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
 		// Must have the same guarantee
@@ -208,7 +208,7 @@ protected:
 	double errorGuarantee; // As defined in the paper
 
 	uint64_t populationSize, zeroPopulationSize; // we need to separately count 0s
-	std::vector<uint64_t> buckets;
+	std::vector<uint32_t> buckets;
 	T minValue, maxValue, sum;
 	void setBucketSize(size_t capacity) { buckets.resize(capacity, 0); }
 };
@@ -217,7 +217,7 @@ protected:
 template <class T>
 class DDSketch : public DDSketchBase<DDSketch<T>, T> {
 public:
-	explicit DDSketch(double errorGuarantee = 0.01)
+	explicit DDSketch(double errorGuarantee = 0.005)
 	  : DDSketchBase<DDSketch<T>, T>(errorGuarantee), gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)),
 	    multiplier(fastLogger::correctingFactor * log(2) / log(gamma)) {
 		ASSERT(errorGuarantee > 0);
