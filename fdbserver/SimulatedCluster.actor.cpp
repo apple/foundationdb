@@ -2075,6 +2075,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (!testConfig.disableEncryption && (SERVER_KNOBS->ENABLE_ENCRYPTION || !testConfig.encryptModes.empty())) {
 		if (!testConfig.encryptModes.empty()) {
 			std::vector<EncryptionAtRestMode> validEncryptModes;
+			// Get the subset of valid encrypt modes given the tenant mode
 			for (int i = 0; i < testConfig.encryptModes.size(); i++) {
 				EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromString(testConfig.encryptModes.at(i));
 				if (validEncryptAndTenantMode(encryptMode, tenantMode)) {
