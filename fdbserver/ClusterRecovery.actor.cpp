@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Metacluster.h"
 #include "fdbrpc/sim_validation.h"
@@ -30,6 +31,7 @@
 #include "fdbserver/WaitFailure.h"
 
 #include "flow/ProtocolVersion.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -432,13 +434,10 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 }
 
 namespace {
-EncryptionAtRestMode getEncryptionAtRest() {
-	// TODO: Use db-config encryption config to determine cluster encryption status
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		return EncryptionAtRestMode(EncryptionAtRestMode::Mode::DOMAIN_AWARE);
-	} else {
-		return EncryptionAtRestMode();
-	}
+EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
+	// TODO: Remove the guard on the server knob once all locations have been updated to use the DB config
+	TraceEvent(SevDebug, "CCEncryptionAtRestMode").detail("Mode", config.encryptionAtRestMode.toString());
+	return config.encryptionAtRestMode;
 }
 } // namespace
 
@@ -448,7 +447,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
-	state EncryptionAtRestMode encryptionAtRestMode = getEncryptionAtRest();
+	state EncryptionAtRestMode encryptionAtRestMode = getEncryptionAtRest(self->configuration);
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
@@ -966,7 +965,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 
 		// The cluster's EncryptionAtRest status is now readable.
 		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
-			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest());
+			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest(self->configuration));
 		}
 	}
 

@@ -2064,16 +2064,20 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	simconfig.db.tenantMode = tenantMode;
 	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
-	if (!testConfig.encryptModes.empty()) {
-		simconfig.db.encryptionAtRestMode =
-		    EncryptionAtRestMode::fromString(deterministicRandom()->randomChoice(testConfig.encryptModes));
-	} else if (!testConfig.disableEncryption && deterministicRandom()->coinflip()) {
-		if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT ||
-		    deterministicRandom()->coinflip()) {
-			// optional and disabled tenant modes currently only support cluster aware encryption
-			simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
-		} else {
-			simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
+	// TODO: Remove check on the ENABLE_ENCRYPTION knob once the EKP can start using the db config
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+		if (!testConfig.encryptModes.empty()) {
+			simconfig.db.encryptionAtRestMode =
+			    EncryptionAtRestMode::fromString(deterministicRandom()->randomChoice(testConfig.encryptModes));
+		} else if (!testConfig.disableEncryption) {
+			// TODO: This case should only trigger with probability once the server knob is removed
+			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT ||
+			    deterministicRandom()->coinflip()) {
+				// optional and disabled tenant modes currently only support cluster aware encryption
+				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
+			} else {
+				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
+			}
 		}
 	}
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", simconfig.db.encryptionAtRestMode.toString());
