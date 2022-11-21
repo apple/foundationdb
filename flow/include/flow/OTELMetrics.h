@@ -110,14 +110,14 @@ public:
 	double errorGuarantee;
 	std::vector<Attribute> attributes;
 	double startTime;
-	const std::vector<uint64_t> buckets;
+	const std::vector<uint32_t> buckets;
 	double recordTime;
 	uint64_t count;
 	double sum;
 	double min;
 	double max;
 	DataPointFlags flags;
-	HistogramDataPoint(double error, const std::vector<uint64_t>& s, double _min, double _max, double _sum)
+	HistogramDataPoint(double error, const std::vector<uint32_t>& s, double _min, double _max, double _sum)
 	  : errorGuarantee(error), recordTime{ now() }, buckets{ s }, count{ buckets.size() }, min{ _min }, max{ _max },
 	    sum{ _sum }, flags{ DataPointFlags::FLAG_NONE } {}
 	HistogramDataPoint& addAttribute(const std::string& key, const std::string& value) {
@@ -134,7 +134,7 @@ public:
 	OTELHistogram() {}
 	OTELHistogram(const std::string& n,
 	              double error,
-	              const std::vector<uint64_t>& s,
+	              const std::vector<uint32_t>& s,
 	              double min,
 	              double max,
 	              double sum)
@@ -185,7 +185,7 @@ inline void serialize(const HistogramDataPoint& point, MsgpackBuffer& buf) {
 	serialize_value(point.sum, buf, 0xcb);
 	serialize_value(point.min, buf, 0xcb);
 	serialize_value(point.max, buf, 0xcb);
-	auto f_Bucket = [](const uint64_t& d, MsgpackBuffer& buf) { serialize_value(d, buf, 0xcf); };
+	auto f_Bucket = [](const uint32_t& d, MsgpackBuffer& buf) { serialize_value(d, buf, 0xce); };
 	serialize_vector(point.buckets, buf, f_Bucket);
 	serialize_value<uint8_t>(point.flags, buf, 0xcc);
 }
