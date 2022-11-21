@@ -62,17 +62,6 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	void debugPrintServerShards() const {
-		std::cout << std::hex;
-		for (auto it : this->serverShards) {
-			std::cout << serverInterfaces.at(it.first).address().toString() << ": [";
-			for (auto p : it.second) {
-				std::cout << "[" << p.first << "," << p.second << "], ";
-			}
-			std::cout << "] \n";
-		}
-	}
-
 	// for each boundary except the last one in boundaries, found the first existed key generated from keyForIndex as
 	// beginIdx, found the last existed key generated from keyForIndex the endIdx.
 	ACTOR static Future<IndexRangeVec> convertKeyBoundaryToIndexShard(Database cx,
@@ -170,9 +159,6 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		for (auto it : serverShards) {
 			self->serverShards.emplace_back(it);
 		}
-		//		if (self->clientId == 0) {
-		//			self->debugPrintServerShards();
-		//		}
 		return Void();
 	}
 
@@ -225,14 +211,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	// calculate hot server count
 	void setHotServers() {
 		hotServerCount = ceil(hotServerFraction * serverShards.size());
-		std::cout << "Choose " << hotServerCount << "/" << serverShards.size() << "/" << serverInterfaces.size()
-		          << " hot servers: [";
-		int begin = currentHotRound * hotServerCount;
-		for (int i = 0; i < hotServerCount; ++i) {
-			int idx = (begin + i) % serverShards.size();
-			std::cout << serverInterfaces.at(serverShards[idx].first).address().toString() << ",";
-		}
-		std::cout << "]\n";
+		std::cout << "Choose " << hotServerCount << "/" << serverShards.size() << "/" << serverInterfaces.size();
 	}
 
 	int64_t getRandomKeyFromHotServer(bool hotServerRead = true) {
