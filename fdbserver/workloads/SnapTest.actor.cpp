@@ -104,8 +104,9 @@ public: // variables
 	UID snapUID; // UID used for snap name
 	std::string restartInfoLocation; // file location to store the snap restore info
 	int maxRetryCntToRetrieveMessage; // number of retires to do trackLatest
-	bool skipCheck; // disable check if the exec fails
+	bool skipCheck = false; // disable check if the exec fails
 	int retryLimit; // -1 if no limit
+	bool snapSucceeded = false; // When taking snapshot, tracks snapshot success
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
@@ -114,14 +115,11 @@ public: // ctor & dtor
 		std::string workloadName = "SnapTest";
 		maxRetryCntToRetrieveMessage = 10;
 
-		numSnaps = getOption(options, LiteralStringRef("numSnaps"), 0);
-		maxSnapDelay = getOption(options, LiteralStringRef("maxSnapDelay"), 25.0);
-		testID = getOption(options, LiteralStringRef("testID"), 0);
-		restartInfoLocation =
-		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
-		        .toString();
-		skipCheck = false;
-		retryLimit = getOption(options, LiteralStringRef("retryLimit"), 5);
+		numSnaps = getOption(options, "numSnaps"_sr, 0);
+		maxSnapDelay = getOption(options, "maxSnapDelay"_sr, 25.0);
+		testID = getOption(options, "testID"_sr, 0);
+		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
+		retryLimit = getOption(options, "retryLimit"_sr, 5);
 	}
 
 public: // workload functions
@@ -138,41 +136,15 @@ public: // workload functions
 		return Void();
 	}
 
-	ACTOR Future<bool> _check(Database cx, SnapTestWorkload* self) {
-		if (self->skipCheck) {
-			TraceEvent(SevWarnAlways, "SnapCheckIgnored").log();
-			return true;
-		}
-		state Transaction tr(cx);
-		// read the key SnapFailedTLog.$UID
-		loop {
-			try {
-				Standalone<StringRef> keyStr =
-				    LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
-				TraceEvent("TestKeyStr").detail("Value", keyStr);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(keyStr));
-				if (val.present()) {
-					break;
-				}
-				// wait for the key to be written out by TLogs
-				wait(delay(0.1));
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		return true;
-	}
-
 	Future<bool> check(Database const& cx) override {
-		TraceEvent("SnapTestWorkloadCheck").detail("ClientID", clientId);
+		TraceEvent("SnapTestWorkloadCheck").detail("ClientID", clientId).detail("TestID", testID);
 		if (clientId != 0) {
 			return true;
 		}
-		if (this->testID != 5 && this->testID != 6) {
-			return true;
+		if (testID == 1) {
+			return snapSucceeded;
 		}
-		return _check(cx, this);
+		return true;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
@@ -259,7 +231,9 @@ public: // workload functions
 			ini.SetValue("RESTORE", "BackupFailed", format("%d", snapFailed).c_str());
 			ini.SaveFile(self->restartInfoLocation.c_str());
 			// write the snapUID to a file
-			TraceEvent("SnapshotCreateStatus").detail("Status", !snapFailed ? "Success" : "Failure");
+			auto const severity = snapFailed ? SevError : SevInfo;
+			TraceEvent(severity, "SnapshotCreateStatus").detail("Status", !snapFailed ? "Success" : "Failure");
+			self->snapSucceeded = !snapFailed;
 		} else if (self->testID == 2) {
 			// create odd keys after the snapshot
 			wait(self->_create_keys(cx, "snapKey", false /*even*/));
