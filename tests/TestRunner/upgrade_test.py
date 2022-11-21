@@ -11,7 +11,7 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader, SUPPORTED_VERSIONS, CURRENT_VERSION, FUTURE_VERSION
+from binary_download import FdbBinaryDownloader, CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster, random_secret_string
 
 TENANT_API_VERSION = 720
@@ -34,7 +34,7 @@ def version_from_str(ver_str):
 def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
     # fixes api version for these tests until that PR can be merged
-    if (ver_tuple[0] > 70):
+    if ver_tuple[0] > 70:
         ver_tuple[0] //= 10
     return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
@@ -58,8 +58,6 @@ class UpgradeTest:
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
-        for version in self.used_versions:
-            assert version in SUPPORTED_VERSIONS, "Unsupported version or cluster action {}".format(version)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.downloader = FdbBinaryDownloader(args.build_dir)
@@ -148,8 +146,9 @@ class UpgradeTest:
         self.cluster.fdbmonitor_binary = self.downloader.binary_path(version, "fdbmonitor")
         self.cluster.fdbserver_binary = self.downloader.binary_path(version, "fdbserver")
         self.cluster.fdbcli_binary = self.downloader.binary_path(version, "fdbcli")
-        self.cluster.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (
-            self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
+        self.cluster.set_env_var(
+            "LD_LIBRARY_PATH", "%s:%s" % (self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH"))
+        )
         self.cluster.use_legacy_conf_syntax = version_before(version, "7.1.0")
         self.cluster.use_future_protocol_version = version == FUTURE_VERSION
         self.cluster.save_config()
@@ -445,7 +444,6 @@ if __name__ == "__main__":
         print("Testing with {} processes".format(args.process_number))
 
     assert len(args.upgrade_path) > 0, "Upgrade path must be specified"
-    assert args.upgrade_path[0] in SUPPORTED_VERSIONS, "Upgrade path begin with a valid version number"
 
     if args.run_with_gdb:
         RUN_WITH_GDB = True
