@@ -39,6 +39,7 @@ import (
 // Would put this in futures.go but for the documented issue with
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
+//
 //export unlockMutex
 func unlockMutex(p unsafe.Pointer) {
 	m := (*sync.Mutex)(p)
@@ -337,7 +338,7 @@ func createDatabase(clusterFile string) (Database, error) {
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{db}, nil
+	return Database{clusterFile, db}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.

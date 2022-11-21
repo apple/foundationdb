@@ -2145,6 +2145,9 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 
 ACTOR Future<Void> lockDatabase(Database cx, UID id) {
 	state Transaction tr(cx);
+	UID debugID = deterministicRandom()->randomUniqueID();
+	TraceEvent("LockDatabaseTransaction", debugID).log();
+	tr.debugTransaction(debugID);
 	loop {
 		try {
 			wait(lockDatabase(&tr, id));
@@ -2563,6 +2566,12 @@ void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota) 
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	auto key = storageQuotaKey(tenantGroupName);
 	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
+}
+
+void clearStorageQuota(Transaction& tr, StringRef tenantGroupName) {
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto key = storageQuotaKey(tenantGroupName);
+	tr.clear(key);
 }
 
 ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName) {

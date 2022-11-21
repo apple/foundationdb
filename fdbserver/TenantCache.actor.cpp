@@ -124,9 +124,17 @@ public:
 
 		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL;
 		state double lastTenantListFetchTime = now();
+		state double lastTraceTime = 0;
 
 		loop {
 			state double fetchStartTime = now();
+
+			state bool toTrace = false;
+			if (fetchStartTime - lastTraceTime > SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL) {
+				toTrace = true;
+				lastTraceTime = fetchStartTime;
+			}
+
 			state std::vector<TenantGroupName> groups;
 			for (const auto& [group, storage] : tenantCache->tenantStorageMap) {
 				groups.push_back(group);
@@ -159,6 +167,14 @@ public:
 					}
 				}
 				tenantCache->tenantStorageMap[group].usage = usage;
+
+				if (toTrace) {
+					// Trace the storage used by all tenant groups for visibility.
+					TraceEvent(SevInfo, "StorageUsageUpdated", tenantCache->id())
+					    .detail("TenantGroup", group)
+					    .detail("Quota", tenantCache->tenantStorageMap[group].quota)
+					    .detail("Usage", tenantCache->tenantStorageMap[group].usage);
+				}
 			}
 
 			lastTenantListFetchTime = now();
@@ -177,6 +193,11 @@ public:
 		loop {
 			try {
 				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+				// Reset the quota for all groups; this essentially sets the quota to `max` for groups where the
+				// quota might have been cleared (i.e., groups that will not be returned in `getRange` request above).
+				for (auto& [group, storage] : tenantCache->tenantStorageMap) {
+					storage.quota = std::numeric_limits<int64_t>::max();
+				}
 				for (const auto kv : currentQuotas) {
 					const TenantGroupName group = kv.key.removePrefix(storageQuotaPrefix);
 					const int64_t quota = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());

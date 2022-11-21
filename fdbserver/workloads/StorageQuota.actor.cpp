@@ -92,17 +92,25 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 
 		// Check that writes to both the tenants are rejected when the group is over quota.
-		state bool rejected1 = wait(tryWrite(self, cx, self->tenant, /*expectOk=*/false));
+		state bool rejected1 = wait(tryWrite(self, cx, self->tenant, /*bypassQuota=*/false, /*expectOk=*/false));
 		ASSERT(rejected1);
-		state bool rejected2 = wait(tryWrite(self, cx, self->emptyTenant, /*expectOk=*/false));
+		state bool rejected2 = wait(tryWrite(self, cx, self->emptyTenant, /*bypassQuota=*/false, /*expectOk=*/false));
 		ASSERT(rejected2);
 
-		// Increase the quota. Check that writes to both the tenants are now able to commit.
-		quota = size * 2;
-		wait(setStorageQuotaHelper(cx, self->group, quota));
-		state bool committed1 = wait(tryWrite(self, cx, self->tenant, /*expectOk=*/true));
+		// Check that transaction is able to commit if we use the FDBTransactionOptions to bypass quota.
+		state bool bypassed = wait(tryWrite(self, cx, self->tenant, /*bypassQuota=*/true, /*expectOk=*/true));
+		ASSERT(bypassed);
+
+		// Increase the quota or clear the quota. Check that writes to both the tenants are now able to commit.
+		if (deterministicRandom()->coinflip()) {
+			quota = size * 2;
+			wait(setStorageQuotaHelper(cx, self->group, quota));
+		} else {
+			wait(clearStorageQuotaHelper(cx, self->group));
+		}
+		state bool committed1 = wait(tryWrite(self, cx, self->tenant, /*bypassQuota=*/false, /*expectOk=*/true));
 		ASSERT(committed1);
-		state bool committed2 = wait(tryWrite(self, cx, self->emptyTenant, /*expectOk=*/true));
+		state bool committed2 = wait(tryWrite(self, cx, self->emptyTenant, /*bypassQuota=*/false, /*expectOk=*/true));
 		ASSERT(committed2);
 
 		return Void();
@@ -144,12 +152,24 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> clearStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				clearStorageQuota(tr, tenantGroupName);
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<Optional<int64_t>> getStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
 		state Transaction tr(cx);
 		loop {
 			try {
 				state Optional<int64_t> quota = wait(getStorageQuota(&tr, tenantGroupName));
-				wait(tr.commit());
 				return quota;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -157,13 +177,20 @@ struct StorageQuotaWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self, Database cx, TenantName tenant, bool expectOk) {
+	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self,
+	                                   Database cx,
+	                                   TenantName tenant,
+	                                   bool bypassQuota,
+	                                   bool expectOk) {
 		state int i;
 		// Retry the transaction a few times if needed; this allows us wait for a while for all
 		// the storage usage and quota related monitors to fetch and propagate the latest information
 		// about the tenants that are over storage quota.
 		for (i = 0; i < 10; i++) {
 			state Transaction tr(cx, tenant);
+			if (bypassQuota) {
+				tr.setOption(FDBTransactionOptions::BYPASS_STORAGE_QUOTA);
+			}
 			loop {
 				try {
 					Standalone<KeyValueRef> kv =

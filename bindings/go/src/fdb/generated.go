@@ -497,6 +497,11 @@ func (o TransactionOptions) SetRawAccess() error {
 	return o.setOpt(303, nil)
 }
 
+// Allows this transaction to bypass storage quota enforcement. Should only be used for transactions that directly or indirectly decrease the size of the tenant group's data.
+func (o TransactionOptions) SetBypassStorageQuota() error {
+	return o.setOpt(304, nil)
+}
+
 // Not yet implemented.
 func (o TransactionOptions) SetDebugRetryLogging(param string) error {
 	return o.setOpt(401, []byte(param))
