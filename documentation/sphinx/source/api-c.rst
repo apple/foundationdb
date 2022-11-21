@@ -851,11 +851,11 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* transaction)
 
-  |future-return0| the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. |future-return1| call :func:`fdb_future_get_double()` to extract the size, |future-return2|
+  |future-return0| the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. |future-return1| call :func:`fdb_future_get_double()` to extract the duration, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* transaction)
 
-  |future-return0| the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler, and used for tag throttling if throughput quotas are specified. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+  |future-return0| the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler, and used for tag throttling if throughput quotas are specified. |future-return1| call :func:`fdb_future_get_int64()` to extract the cost, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* transaction)
 
