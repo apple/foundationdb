@@ -6,15 +6,10 @@ import shutil
 import subprocess
 import sys
 import os
-
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "tests", "TestRunner")]
-
-# fmt: off
-from binary_download import FdbBinaryDownloader, CURRENT_VERSION
+from binary_download import FdbBinaryDownloader
 from local_cluster import LocalCluster, random_secret_string
-# fmt: on
+from fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION
 
-LAST_RELEASE_VERSION = "7.1.5"
 TESTER_STATS_INTERVAL_SEC = 5
 DEFAULT_TEST_FILE = "CApiCorrectnessMultiThr.toml"
 IMPLIBSO_ERROR_CODE = -6  # SIGABORT
@@ -97,7 +92,7 @@ class FdbCShimTests:
         # binary downloads are currently available only for x86_64
         self.platform = platform.machine()
         if self.platform == "x86_64":
-            self.downloader.download_old_binaries(LAST_RELEASE_VERSION)
+            self.downloader.download_old_binaries(PREV_RELEASE_VERSION)
             self.downloader.download_old_binaries("7.0.0")
 
     def build_c_api_tester_args(self, test_env, test_file):
@@ -236,15 +231,15 @@ class FdbCShimTests:
         # binary downloads are currently available only for x86_64
         if self.platform == "x86_64":
             # Test the API workload with the release version
-            self.run_c_api_test(LAST_RELEASE_VERSION, DEFAULT_TEST_FILE)
+            self.run_c_api_test(PREV_RELEASE_VERSION, DEFAULT_TEST_FILE)
 
-            with TestEnv(self.build_dir, self.downloader, LAST_RELEASE_VERSION) as test_env:
+            with TestEnv(self.build_dir, self.downloader, PREV_RELEASE_VERSION) as test_env:
                 # Test using the loaded client library as the local client
-                self.run_c_shim_lib_tester(LAST_RELEASE_VERSION, test_env, call_set_path=True, use_external_lib=False)
+                self.run_c_shim_lib_tester(PREV_RELEASE_VERSION, test_env, call_set_path=True, use_external_lib=False)
 
                 # Test the client library of the release version in combination with the dev API version
                 self.run_c_shim_lib_tester(
-                    LAST_RELEASE_VERSION,
+                    PREV_RELEASE_VERSION,
                     test_env,
                     call_set_path=True,
                     api_version=api_version_from_str(CURRENT_VERSION),

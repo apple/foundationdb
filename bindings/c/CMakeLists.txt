@@ -283,7 +283,8 @@ if(NOT WIN32)
     foreach(test_file ${API_TEST_FILES})
       get_filename_component(file_name "${test_file}" NAME_WE)
       set(test_name "fdb_c_api_test_${file_name}")
-      add_test(NAME "${test_name}"
+      add_scripted_fdb_test(NAME "${test_name}"
+        TIMEOUT 300
         COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
           --api-tester-bin $<TARGET_FILE:fdb_c_api_tester>
@@ -291,99 +292,87 @@ if(NOT WIN32)
           --test-file ${test_file}
           --retain-client-lib-copies
       )
-      set_tests_properties("${test_name}" PROPERTIES TIMEOUT 300)
     endforeach()
 
-    add_test(NAME fdb_c_upgrade_to_future_version
+    add_scripted_fdb_test(NAME fdb_c_upgrade_to_future_version
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "7.3.0" "7.4.0" "7.3.0"
+      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
       --process-number 3
       )
-    set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 
-    add_test(NAME fdb_c_upgrade_to_future_version_blob_granules
+    add_scripted_fdb_test(NAME fdb_c_upgrade_to_future_version_blob_granules
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
-      --upgrade-path "7.3.0" "7.4.0" "7.3.0"
+      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
       --blob-granules-enabled
       --process-number 3
       )
 
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
-      add_test(NAME fdb_c_client_config_tests
+      add_scripted_fdb_test(NAME fdb_c_client_config_tests
         COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
         --build-dir ${CMAKE_BINARY_DIR}
         --client-config-tester-bin $<TARGET_FILE:fdb_c_client_config_tester>
         )
 
-      add_test(NAME fdb_c_upgrade_single_threaded_630api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_single_threaded_prev3_api
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-        --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.3.0"
+        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
         --process-number 1
         )
 
-      add_test(NAME fdb_c_upgrade_single_threaded_700api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_single_threaded_prev2_api
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-        --upgrade-path "7.0.0" "7.1.9" "7.3.0"
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
         --process-number 1
         )
 
-      add_test(NAME fdb_c_upgrade_multi_threaded_630api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_multi_threaded_prev3_api
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.3.0" "7.1.9"
+        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
         --process-number 3
         )
 
-      add_test(NAME fdb_c_upgrade_multi_threaded_700api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_multi_threaded_prev2_api
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.0.0" "7.1.9" "7.3.0" "7.1.9"
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
         --process-number 3
         )
 
-      add_test(NAME fdb_c_upgrade_multi_threaded_710api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_multi_threaded_prev_api
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.1.9" "7.3.0" "7.1.9"
+        --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
         --process-number 3
         )
 
-      add_test(NAME fdb_c_cluster_wiggle
+      add_scripted_fdb_test(NAME fdb_c_cluster_wiggle
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.3.0" "wiggle"
+        --upgrade-path "${FDB_CURRENT_VERSION}" "wiggle"
         --disable-log-dump
         --process-number 3
         --redundancy double
         )
 
-      add_test(NAME fdb_c_wiggle_and_upgrade_latest
+      add_scripted_fdb_test(NAME fdb_c_wiggle_and_upgrade_latest
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.1.9" "wiggle" "7.3.0"
-        --disable-log-dump
-        --process-number 3
-        --redundancy double
-        )
-
-      add_test(NAME fdb_c_wiggle_and_upgrade_63
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-        --build-dir ${CMAKE_BINARY_DIR}
-        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "6.3.24" "wiggle" "7.0.0"
+        --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "wiggle" "${FDB_CURRENT_VERSION}"
         --disable-log-dump
         --process-number 3
         --redundancy double
@@ -470,7 +459,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
   target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
-  add_test(NAME fdb_c_shim_library_tests
+  add_scripted_fdb_test(NAME fdb_c_shim_library_tests
     COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
     --build-dir ${CMAKE_BINARY_DIR}
     --unit-tests-bin $<TARGET_FILE:fdb_c_shim_unit_tests>
