@@ -42,8 +42,8 @@ type Error struct {
 	Code int
 }
 
-func (e Error) Error() string {
-	return fmt.Sprintf("FoundationDB error code %d (%s)", e.Code, C.GoString(C.fdb_get_error(C.fdb_error_t(e.Code))))
+func (err Error) Error() string {
+	return fmt.Sprintf("FoundationDB error code %d (%s)", err.Code, C.GoString(C.fdb_get_error(C.fdb_error_t(err.Code))))
 }
 
 // SOMEDAY: these (along with others) should be coming from fdb.options?
