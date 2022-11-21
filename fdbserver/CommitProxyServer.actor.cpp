@@ -2967,7 +2967,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                                  true,
 	                                                  true,
 	                                                  true,
-	                                                  commitData.encryptMode.mode != EncryptionAtRestMode::DISABLED);
+	                                                  isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);

@@ -2065,7 +2065,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	simconfig.db.tenantMode = tenantMode;
 	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 	// TODO: Remove check on the ENABLE_ENCRYPTION knob once the EKP can start using the db config
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION || !testConfig.encryptModes.empty()) {
 		if (!testConfig.encryptModes.empty()) {
 			simconfig.db.encryptionAtRestMode =
 			    EncryptionAtRestMode::fromString(deterministicRandom()->randomChoice(testConfig.encryptModes));
