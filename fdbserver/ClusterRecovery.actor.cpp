@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Metacluster.h"
 #include "fdbrpc/sim_validation.h"
@@ -31,7 +30,6 @@
 #include "fdbserver/WaitFailure.h"
 
 #include "flow/ProtocolVersion.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
