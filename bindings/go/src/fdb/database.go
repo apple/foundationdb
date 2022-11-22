@@ -42,6 +42,8 @@ import (
 // usually created and committed automatically by the (Database).Transact
 // method.
 type Database struct {
+	// String reference to the cluster file.
+	clusterFile string
 	*database
 }
 
@@ -56,6 +58,16 @@ type DatabaseOptions struct {
 	d *database
 }
 
+// Close will close the Database and clean up all resources.
+// You have to ensure that you're not resuing this database.
+func (d *Database) Close() {
+	// Remove database object from the cached databases
+	delete(openDatabases, d.clusterFile)
+
+	// Destroy the database
+	d.destroy()
+}
+
 func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 	return setOpt(func(p *C.uint8_t, pl C.int) C.fdb_error_t {
 		return C.fdb_database_set_option(opt.d.ptr, C.FDBDatabaseOption(code), p, pl)
@@ -63,6 +75,10 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 }
 
 func (d *database) destroy() {
+	if d.ptr == nil {
+		return
+	}
+
 	C.fdb_database_destroy(d.ptr)
 }
 

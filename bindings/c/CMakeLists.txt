@@ -292,6 +292,7 @@ if(NOT WIN32)
           --retain-client-lib-copies
       )
       set_tests_properties("${test_name}" PROPERTIES TIMEOUT 300)
+      set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
     endforeach()
 
     add_test(NAME fdb_c_upgrade_to_future_version

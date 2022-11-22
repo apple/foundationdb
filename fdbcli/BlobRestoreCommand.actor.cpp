@@ -36,7 +36,8 @@ ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringR
 	state bool success = false;
 	wait(store(success, localDb->blobRestore(normalKeys)));
 	if (success) {
-		fmt::print("Started blob restore for the full cluster. Please use 'status' command to check progress.\n");
+		fmt::print(
+		    "Started blob restore for the full cluster. Please use 'status details' command to check progress.\n");
 	} else {
 		fmt::print("Fail to start a new blob restore while there is a pending one.\n");
 	}

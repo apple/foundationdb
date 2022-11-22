@@ -545,7 +545,7 @@ ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
 					KeyRange keyRange = decodeBlobRestoreCommandKeyFor(r.key);
 					if (keyRange.contains(keys)) {
 						Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(r.value);
-						return status.progress < 100; // progress is less than 100
+						return status.phase < BlobRestorePhase::DONE;
 					}
 				}
 				if (!ranges.more) {
@@ -558,6 +558,47 @@ ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
 				}
 			}
 			return false;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Update restore status
+ACTOR Future<Void> updateRestoreStatus(Database db, KeyRangeRef range, BlobRestoreStatus status) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Key key = blobRestoreCommandKeyFor(range);
+			Value value = blobRestoreCommandValueFor(status);
+			tr.set(key, value);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Get restore status
+ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Key key = blobRestoreCommandKeyFor(range);
+			Optional<Value> value = wait(tr.get(key));
+			Optional<BlobRestoreStatus> result;
+			if (value.present()) {
+				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
+				result = status;
+			}
+			return result;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
