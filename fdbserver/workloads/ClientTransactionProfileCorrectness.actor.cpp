@@ -291,6 +291,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Tuple rate = Tuple::makeTuple(sampleProbability);
 			Tuple size = Tuple::makeTuple(sizeLimit);
