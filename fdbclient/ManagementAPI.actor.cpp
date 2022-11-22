@@ -467,6 +467,21 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	       options.count(p + "storage_engine") == 1;
 }
 
+/*
+    - Validates encryption and tenant mode configurations
+    - During cluster creation (configure new) we allow the following:
+        - If encryption mode is disabled/cluster_aware then any tenant mode is allowed
+        - If the encryption mode is domain_aware then the only allowed tenant mode is required
+    - During cluster configuration changes the following is allowed:
+        - Encryption mode cannot be changed (can only be set during creation)
+        - If the encryption mode is disabled then any tenant mode changes are allowed
+        - If the encryption mode is domain_aware then tenant mode changes are not allowed (as the only supported mode is
+          required)
+        - If the encryption mode is cluster_aware then there are two possibilities:
+            - If the previous tenant mode was required changing to any other tenant mode is possible
+            - If the previous tenant mode was optional/disabled changing to required is NOT allowed (any other changes
+              are allowed)
+*/
 bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfiguration,
                                         std::map<std::string, std::string> newConfig,
                                         bool creating) {
