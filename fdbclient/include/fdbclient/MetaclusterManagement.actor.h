@@ -1492,7 +1492,8 @@ struct DeleteTenantImpl {
 			return Void();
 		}
 
-		ASSERT(tenantEntry.get().tenantState == TenantState::REMOVING);
+		ASSERT(tenantEntry.get().tenantState == TenantState::REMOVING &&
+		       tenantEntry.get().renamePair == self->pairName);
 
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantName);
