@@ -540,8 +540,7 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 					    .detail("NewTenantMode", newTenantMode.toString());
 					return false;
 				}
-			} else if ((oldTenantMode == TenantMode::OPTIONAL_TENANT || oldTenantMode == TenantMode::DISABLED) &&
-			           newTenantMode == TenantMode::REQUIRED) {
+			} else if (oldTenantMode != TenantMode::REQUIRED && newTenantMode == TenantMode::REQUIRED) {
 				// TODO: Switching from optional/disabled tenant mode to required should be allowed if there is no
 				// non-tenant data
 				TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
