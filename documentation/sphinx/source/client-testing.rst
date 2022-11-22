@@ -321,7 +321,7 @@ and pass the test with ``-f``:
 Running a Workload on an actual Cluster
 =======================================
 
-Running a workload on a cluster works basically the smae way. However, one must
+Running a workload on a cluster works basically the same way. However, one must
 actually setup a cluster first. This cluster must run between one and many server
 processes with the class test. So above 2-step process becomes a bit more complex:
 
