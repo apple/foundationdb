@@ -156,12 +156,12 @@ class TimePositiveBudgetLimiter(PositiveBudgetLimiter):
     def can_start(self, params):
         return params.num_started + params.count <= self.limit
 
-    def update_budget(self, params, penalty=1):
+    def update_budget(self, params):
         # if params.num_started > 0:
         # print('Start update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s, last_batch=%d' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority, params.last_batch))
 
         if params.num_started > self.limit:
-            self.locked_until = min(params.time + 2.0, max(params.time, self.locked_until) + penalty / self.rate)
+            self.locked_until = min(params.time + 2.0, max(params.time, self.locked_until) + (params.num_started - self.limit) / self.rate)
             self.limit = 0
         else:
             self.limit -= params.num_started
