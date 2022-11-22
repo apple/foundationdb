@@ -474,85 +474,89 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
         - If the encryption mode is domain_aware then the only allowed tenant mode is required
     - During cluster configuration changes the following is allowed:
         - Encryption mode cannot be changed (can only be set during creation)
-        - If the encryption mode is disabled then any tenant mode changes are allowed
+        - If the encryption mode is disabled/cluster_aware then any tenant mode changes are allowed
         - If the encryption mode is domain_aware then tenant mode changes are not allowed (as the only supported mode is
           required)
-        - If the encryption mode is cluster_aware then there are two possibilities:
-            - If the previous tenant mode was required changing to any other tenant mode is possible
-            - If the previous tenant mode was optional/disabled changing to required is NOT allowed (any other changes
-              are allowed)
 */
 bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfiguration,
                                         std::map<std::string, std::string> newConfig,
                                         bool creating) {
+	EncryptionAtRestMode encryptMode;
+	TenantMode tenantMode;
 	if (creating) {
 		if (newConfig.count(encryptionAtRestModeConfKey.toString()) != 0) {
-			EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromValueRef(
+			encryptMode = EncryptionAtRestMode::fromValueRef(
 			    ValueRef(newConfig.find(encryptionAtRestModeConfKey.toString())->second));
-			if (encryptMode.mode == EncryptionAtRestMode::DISABLED ||
-			    encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
-				// In these cases the tenantMode does not matter
-				return true;
-			}
-
 			// check if the tenant mode is being set during configure new (otherwise assume tenants are disabled)
-			TenantMode tenantMode = TenantMode::DISABLED;
 			if (newConfig.count(tenantModeConfKey.toString()) != 0) {
 				tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
 			}
-			TraceEvent(SevDebug, "EncryptAndTenantModes")
-			    .detail("EncryptMode", encryptMode.toString())
-			    .detail("TenantMode", tenantMode.toString());
-			if (tenantMode != TenantMode::REQUIRED) {
-				// For domain aware encryption only the required tenant mode is currently supported
-				TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
-				    .detail("EncryptMode", encryptMode.toString())
-				    .detail("TenantMode", tenantMode.toString());
-				return false;
-			}
-			return true;
 		}
 	} else {
+		ASSERT(oldConfiguration.present());
+		encryptMode = oldConfiguration.get().encryptionAtRestMode;
 		if (newConfig.count(tenantModeConfKey.toString()) != 0) {
-			ASSERT(oldConfiguration.present());
-			// If the tenant mode is being changed then make sure it obeys the current cluster encryption state
-			EncryptionAtRestMode encryptMode = oldConfiguration.get().encryptionAtRestMode;
-
-			if (encryptMode.mode == EncryptionAtRestMode::DISABLED) {
-				// In this case the tenantMode does not matter
-				return true;
-			}
-			TenantMode oldTenantMode = oldConfiguration.get().tenantMode;
-			TenantMode newTenantMode = TenantMode::fromValue(newConfig.find(tenantModeConfKey.toString())->second);
-			TraceEvent(SevDebug, "EncryptAndTenantModes")
-			    .detail("EncryptMode", encryptMode.toString())
-			    .detail("OldTenantMode", oldTenantMode.toString())
-			    .detail("NewTenantMode", newTenantMode.toString());
-
-			if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
-				// For domain aware encryption only the required tenant mode is currently supported (changing to any
-				// other mode is disallowed)
-				ASSERT(oldTenantMode == TenantMode::REQUIRED);
-				if (newTenantMode != TenantMode::REQUIRED) {
-					TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
-					    .detail("EncryptMode", encryptMode.toString())
-					    .detail("OldTenantMode", oldTenantMode.toString())
-					    .detail("NewTenantMode", newTenantMode.toString());
-					return false;
-				}
-			} else if (oldTenantMode != TenantMode::REQUIRED && newTenantMode == TenantMode::REQUIRED) {
-				// TODO: Switching from optional/disabled tenant mode to required should be allowed if there is no
-				// non-tenant data
-				TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
-				    .detail("EncryptMode", encryptMode.toString())
-				    .detail("OldTenantMode", oldTenantMode.toString())
-				    .detail("NewTenantMode", newTenantMode.toString());
-				return false;
-			}
+			tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
+		} else {
+			// Tenant mode and encryption mode didn't change
 			return true;
 		}
 	}
+	TraceEvent(SevDebug, "EncryptAndTenantModes")
+	    .detail("EncryptMode", encryptMode.toString())
+	    .detail("TenantMode", tenantMode.toString());
+
+	if (encryptMode.mode == EncryptionAtRestMode::DISABLED || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
+		// In these cases the tenantMode does not matter
+		return true;
+	}
+
+	if (tenantMode != TenantMode::REQUIRED) {
+		// For domain aware encryption only the required tenant mode is currently supported
+		TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
+		    .detail("EncryptMode", encryptMode.toString())
+		    .detail("TenantMode", tenantMode.toString());
+		return false;
+	}
+
 	return true;
+}
+
+bool validTenantModeChange(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration) {
+	TenantMode oldTenantMode = oldConfiguration.tenantMode;
+	TenantMode newTenantMode = newConfiguration.tenantMode;
+	TraceEvent(SevDebug, "TenantModes")
+	    .detail("OldTenantMode", oldTenantMode.toString())
+	    .detail("NewTenantMode", newTenantMode.toString());
+	if (oldTenantMode != TenantMode::REQUIRED && newTenantMode == TenantMode::REQUIRED) {
+		// TODO: Changing from optional/disabled to required tenant mode should be allowed if there is no non-tenant
+		// data present
+		TraceEvent(SevWarnAlways, "InvalidTenantConfiguration")
+		    .detail("OldTenantMode", oldTenantMode.toString())
+		    .detail("NewTenantMode", newTenantMode.toString());
+		return false;
+	}
+	return true;
+}
+
+TEST_CASE("/ManagementAPI/ChangeConfig/TenantMode") {
+	DatabaseConfiguration oldConfig;
+	DatabaseConfiguration newConfig;
+	std::vector<TenantMode> tenantModes = { TenantMode::DISABLED, TenantMode::OPTIONAL_TENANT, TenantMode::REQUIRED };
+	// required tenant mode can change to any other tenant mode
+	oldConfig.tenantMode = TenantMode::REQUIRED;
+	newConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	ASSERT(validTenantModeChange(oldConfig, newConfig));
+	// optional/disabled tenant mode can switch to optional/disabled tenant mode
+	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	newConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	ASSERT(validTenantModeChange(oldConfig, newConfig));
+	// optional/disabled tenant mode CANNOT switch to required tenant mode
+	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	newConfig.tenantMode = TenantMode::REQUIRED;
+	ASSERT(!validTenantModeChange(oldConfig, newConfig));
+
+	return Void();
 }
 
 // unit test for changing encryption/tenant mode config options
@@ -617,17 +621,9 @@ TEST_CASE("/ManagementAPI/ChangeConfig/TenantAndEncryptMode") {
 	// cluster aware encryption checks
 	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
 	// required tenant mode can switch to any other tenant mode with cluster aware encryption
-	oldConfig.tenantMode = TenantMode::REQUIRED;
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
 	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
 	ASSERT(validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
-	// optional/disabled tenant mode can switch to optional/disabled tenant mode with cluster aware encryption
-	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
-	newConfig[tenantModeKey] =
-	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
-	ASSERT(validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
-	// optional/disabled tenant mode cannot switch to required tenant mode unless there is no non-tenant data
-	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
-	ASSERT(!validTenantAndEncryptionAtRestMode(oldConfig, newConfig, false));
 
 	// no tenant mode present
 	newConfig.erase(tenantModeKey);
