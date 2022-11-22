@@ -506,12 +506,7 @@ bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfi
 	    .detail("EncryptMode", encryptMode.toString())
 	    .detail("TenantMode", tenantMode.toString());
 
-	if (encryptMode.mode == EncryptionAtRestMode::DISABLED || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
-		// In these cases the tenantMode does not matter
-		return true;
-	}
-
-	if (tenantMode != TenantMode::REQUIRED) {
+	if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && tenantMode != TenantMode::REQUIRED) {
 		// For domain aware encryption only the required tenant mode is currently supported
 		TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
 		    .detail("EncryptMode", encryptMode.toString())
