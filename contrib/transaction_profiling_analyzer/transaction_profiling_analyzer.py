@@ -796,7 +796,7 @@ class WriteCounter(object):
                 filter_addresses = set(filter_addresses)
                 results = [r for r in results if filter_addresses.issubset(set(r[3]))][0:num]
         else:
-            results = [(key, count) for (count, key) in count_pairs[0:num]]
+            results = [(key, None, count) for (count, key) in count_pairs[0:num]]
 
         return results
 
