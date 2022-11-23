@@ -170,11 +170,13 @@ public:
 
 private:
 	struct EventInfo {
+		const char* name;
 		TraceEventFields fields;
 		EventInfo(double time, const char* name, uint64_t id, const char* location);
 	};
 
 	struct AttachInfo {
+		const char* name;
 		TraceEventFields fields;
 		AttachInfo(double time, const char* name, uint64_t id, uint64_t to);
 	};

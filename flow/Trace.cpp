@@ -55,8 +55,12 @@
 // 2. To avoid a historically documented but unknown crash that occurs when logging allocations
 //    during an open trace event
 thread_local int g_allocation_tracing_disabled = 1;
+
 unsigned tracedLines = 0;
 thread_local int failedLineOverflow = 0;
+std::unordered_map<std::string, int64_t> typeCounts;
+thread_local std::string mostLoggedEvent = "";
+thread_local int64_t mostLoggedEventCount = 0;
 
 ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
 
@@ -378,7 +382,7 @@ public:
 		fields.setAnnotated();
 	}
 
-	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError) {
+	void writeEvent(const char* type, TraceEventFields fields, std::string trackLatestKey, bool trackError) {
 		MutexHolder hold(mutex);
 
 		annotateEvent(fields);
@@ -399,6 +403,12 @@ public:
 		bufferLength += fields.sizeBytes();
 
 		if (g_network && g_network->isSimulated()) {
+			int64_t count = ++typeCounts[type];
+			if (count > mostLoggedEventCount) {
+				mostLoggedEventCount = count;
+				mostLoggedEvent = type;
+			}
+
 			// Throw an error if we have queued up a large number of events in simulation. This makes it easier to
 			// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
 			// Without this we would never see any trace events from that loop, and it would be more difficult to
@@ -1273,7 +1283,7 @@ void BaseTraceEvent::log() {
 					TraceEvent::eventCounts[severity / 10]++;
 				}
 
-				g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
+				g_traceLog.writeEvent(type, fields, trackingKey, severity > SevWarnAlways);
 
 				if (g_traceLog.isOpen()) {
 					// Log Metrics
@@ -1304,7 +1314,10 @@ BaseTraceEvent::~BaseTraceEvent() {
 	log();
 	if (failedLineOverflow == 1) {
 		failedLineOverflow = 2;
-		TraceEvent(SevError, "TracedTooManyLines").log();
+		TraceEvent(SevError, "TracedTooManyLines")
+		    .detail("MostLoggedEvent", mostLoggedEvent)
+		    .detail("MostLoggedEventCount", mostLoggedEventCount)
+		    .detail("TraceLineLimit", FLOW_KNOBS->MAX_TRACE_LINES);
 		crashAndDie();
 	}
 }
@@ -1430,21 +1443,21 @@ void TraceBatch::dump() {
 		if (g_network->isSimulated()) {
 			attachBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(attachBatch[i].fields, "", false);
+		g_traceLog.writeEvent(attachBatch[i].name, attachBatch[i].fields, "", false);
 	}
 
 	for (int i = 0; i < eventBatch.size(); i++) {
 		if (g_network->isSimulated()) {
 			eventBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(eventBatch[i].fields, "", false);
+		g_traceLog.writeEvent(eventBatch[i].name, eventBatch[i].fields, "", false);
 	}
 
 	for (int i = 0; i < buggifyBatch.size(); i++) {
 		if (g_network->isSimulated()) {
 			buggifyBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
+		g_traceLog.writeEvent("BuggifySection", buggifyBatch[i].fields, "", false);
 	}
 
 	onMainThreadVoid([]() { g_traceLog.flush(); });
@@ -1453,7 +1466,7 @@ void TraceBatch::dump() {
 	buggifyBatch.clear();
 }
 
-TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, const char* location) {
+TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, const char* location) : name(name) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
@@ -1464,7 +1477,7 @@ TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, con
 	fields.addField("Location", location);
 }
 
-TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, uint64_t to) {
+TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, uint64_t to) : name(name) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
