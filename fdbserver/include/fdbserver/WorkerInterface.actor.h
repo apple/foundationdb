@@ -1284,7 +1284,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 typedef decltype(&tLog) TLogFn;
 
 ACTOR template <class T>
-Future<T> ioTimeoutError(Future<T> what, double time) {
+Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
@@ -1298,7 +1298,12 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
-			TraceEvent(SevError, "IoTimeoutError").error(err);
+			TraceEvent e(SevError, "IoTimeoutError");
+			e.error(err);
+			if (context != nullptr) {
+				e.detail("Context", context);
+			}
+			e.log();
 			throw err;
 		}
 	}
@@ -1308,7 +1313,8 @@ ACTOR template <class T>
 Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double errTime,
                                    Reference<AsyncVar<bool>> degraded,
-                                   double degradedTime) {
+                                   double degradedTime,
+                                   const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
@@ -1337,7 +1343,12 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
-			TraceEvent(SevError, "IoTimeoutError").error(err);
+			TraceEvent e(SevError, "IoTimeoutError");
+			e.error(err);
+			if (context != nullptr) {
+				e.detail("Context", context);
+			}
+			e.log();
 			throw err;
 		}
 	}
