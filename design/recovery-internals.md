@@ -182,7 +182,7 @@ Now the main steps in recovery have finished. The CC keeps waiting for all tLogs
 
 ## Phase 6: ACCEPTING_COMMITS
 
-The transaction system starts to accept new transactions. This doesn't mean that this committed data will be available for reading by clients, because storage servers are not guaranteed to be alive in the recovery process. In case storage servers have not been alive, write-only transactions can be committed and will be buffered in tLogs. If storage servers are unavailable for long enough, pushing tLogs' memory usage above a configurable threshold, rakekeepr will throttle all transactions.
+The transaction system starts to accept new transactions. This doesn't mean that this committed data will be available for reading by clients, because storage servers are not guaranteed to be alive in the recovery process. In case storage servers have not been alive, write-only transactions can be committed and will be buffered in tLogs. If storage servers are unavailable for long enough, pushing tLogs' memory usage above a configurable threshold, rakekeeper will throttle all transactions.
 
 
 ## Phase 7: ALL_LOGS_RECRUITED
