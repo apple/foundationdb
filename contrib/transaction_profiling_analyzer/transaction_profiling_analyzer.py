@@ -959,7 +959,7 @@ def main():
                 else:
                     count_str = '%d sampled %s (%d intersecting)' % (start_count, context, total_count)
                 if not shard_count:
-                    print(" %d. [%s, %s]\n     %d sampled %s\n" % (idx + 1, start, end, total_count, context))
+                    print(" %d. [%s, %s]\n     %s\n" % (idx + 1, start, end, count_str))
                 else:
                     addresses_string = "; addresses=%s" % ', '.join(addresses) if addresses else ''
                     print(" %d. [%s, %s]\n     %s spanning %d shard(s)%s\n" % (
