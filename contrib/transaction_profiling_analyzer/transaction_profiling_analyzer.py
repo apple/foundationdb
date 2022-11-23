@@ -246,6 +246,11 @@ class CommitInfo(BaseInfo):
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.report_conflicting_keys = bb.get_bool()
 
+        if protocol_version >= PROTOCOL_VERSION_7_1:
+            self.lock_aware = bb.get_bool()
+            if bb.get_bool():
+                self.spanId = bb.get_bytes(16)
+
 
 class ErrorGetInfo(BaseInfo):
     def __init__(self, bb, protocol_version):
@@ -279,6 +284,11 @@ class ErrorCommitInfo(BaseInfo):
         self.read_snapshot_version = bb.get_long()
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.report_conflicting_keys = bb.get_bool()
+
+        if protocol_version >= PROTOCOL_VERSION_7_1:
+            self.lock_aware = bb.get_bool()
+            if bb.get_bool():
+                self.spanId = bb.get_bytes(16)
 
 
 class UnsupportedProtocolVersionError(Exception):
