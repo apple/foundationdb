@@ -18,94 +18,21 @@
  * limitations under the License.
  */
 
-#pragma once
 #ifndef FDBRPC_TOKEN_SIGN_H
 #define FDBRPC_TOKEN_SIGN_H
+#pragma once
 
 #include "flow/network.h"
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
 #include "flow/PKey.h"
+#include "fdbrpc/TokenSpec.h"
 #include <string>
 #include <vector>
 
-namespace authz {
-
-enum class Algorithm : int {
-	RS256,
-	ES256,
-	UNKNOWN,
-};
-
-Algorithm algorithmFromString(StringRef s) noexcept;
-
-} // namespace authz
-
-namespace authz::flatbuffers {
-
-struct TokenRef {
-	static constexpr FileIdentifier file_identifier = 1523118;
-	double expiresAt;
-	VectorRef<StringRef> tenants;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, expiresAt, tenants);
-	}
-};
-
-struct SignedTokenRef {
-	static constexpr FileIdentifier file_identifier = 5916732;
-	StringRef token;
-	StringRef keyName;
-	StringRef signature;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, token, keyName, signature);
-	}
-
-	int expectedSize() const { return token.size() + keyName.size() + signature.size(); }
-};
-
-SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey);
-
-bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey);
-
-} // namespace authz::flatbuffers
-
 namespace authz::jwt {
 
-// Given S = concat(B64UrlEnc(headerJson), ".", B64UrlEnc(payloadJson)),
-// JWT is concat(S, ".", B64UrlEnc(sign(S, PrivateKey))).
-// Below we refer to S as "sign input"
-
-// This struct is not meant to be flatbuffer-serialized
-// This is a parsed, flattened view of S and signature
-template <bool IsArenaBased>
-struct BasicTokenSpec {
-	using StringType = std::conditional_t<IsArenaBased, StringRef, std::string>;
-	template <class T>
-	using VectorType = std::conditional_t<IsArenaBased, VectorRef<T>, std::vector<T>>;
-	template <class T>
-	using OptionalType = std::conditional_t<IsArenaBased, Optional<T>, std::optional<T>>;
-	// header part ("typ": "JWT" implicitly enforced)
-	Algorithm algorithm; // alg
-	StringType keyId; // kid
-	// payload part
-	OptionalType<StringType> issuer; // iss
-	OptionalType<StringType> subject; // sub
-	OptionalType<VectorType<StringType>> audience; // aud
-	OptionalType<uint64_t> issuedAtUnixTime; // iat
-	OptionalType<uint64_t> expiresAtUnixTime; // exp
-	OptionalType<uint64_t> notBeforeUnixTime; // nbf
-	OptionalType<StringType> tokenId; // jti
-	OptionalType<VectorType<StringType>> tenants; // tenants
-	// signature part
-	StringType signature;
-};
-
-using TokenRef = BasicTokenSpec<true>;
+using TokenRef = BasicTokenSpec<StringRef, VectorRef, Optional>;
 
 // print each non-signature field in non-JSON, human-readable format e.g. for trace
 StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec);

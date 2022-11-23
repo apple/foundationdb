@@ -20,8 +20,9 @@
 #pragma once
 #ifndef FDBRPC_TOKEN_SIGN_STD_TYPES_H
 #define FDBRPC_TOKEN_SIGN_STD_TYPES_H
-#include "fdbrpc/TokenSign.h"
+#include "fdbrpc/TokenSpec.h"
 #include <string>
+#include <vector>
 
 // Below functions build as a library separate from fdbrpc
 // The intent is to re-use the key/token generation part in a way that the input, the output,
@@ -30,7 +31,7 @@
 
 namespace authz::jwt::stdtypes {
 
-using TokenSpec = BasicTokenSpec<false /*IsArenaBased*/>;
+using TokenSpec = BasicTokenSpec<std::string, std::vector>;
 
 // Generate an elliptic curve private key on a P-256 curve, and serialize it as PEM.
 std::string makeEcP256PrivateKeyPem();

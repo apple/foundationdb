@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/TokenSign.h"
 #include "fdbrpc/TokenSignStdTypes.h"
 #include "flow/PKey.h"
 #include "flow/MkCert.h"
