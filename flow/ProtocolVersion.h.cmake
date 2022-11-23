@@ -36,10 +36,6 @@ constexpr uint64_t minCompatibleProtocolVersionValue = @FDB_PV_MIN_COMPATIBLE_VE
 // Used only for testing upgrades to the future version
 constexpr uint64_t futureProtocolVersionValue = @FDB_PV_FUTURE_VERSION@;
 
-// Snowflake specific incompatible window (lastValid, invalidRange, firstValid).
-constexpr uint64_t minIncompatibleSFCWindow = 0x0FDB00B0710A0000LL;
-constexpr uint64_t maxIncompatibleSFCWindow = 0x0FDB00C071200000LL;
-
 // The first check second expression version doesn't need to change because it's just for earlier protocol versions.
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	static_assert((v & @FDB_PV_LSB_MASK@) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");             \
@@ -79,8 +75,7 @@ public:
 	}
 
 	constexpr bool isValid() const {
-		return (version() >= minValidProtocolVersion &&
-				(version() <= minIncompatibleSFCWindow || version() >= maxIncompatibleSFCWindow));
+		return version() >= minValidProtocolVersion;
 	}
 
 	constexpr bool isInvalid() const { return version() == invalidProtocolVersion; }
