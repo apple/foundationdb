@@ -278,7 +278,7 @@ class ClientConfigTests(unittest.TestCase):
         test.exec()
 
     def test_cannot_connect_to_coordinator(self):
-        # Testing a cluster file with a valid address, but server behind it
+        # Testing a cluster file with a valid address, but no server behind it
         test = ClientConfigTest(self)
         test.create_external_lib_path(CURRENT_VERSION)
         test.disable_local_client = True
@@ -289,7 +289,7 @@ class ClientConfigTests(unittest.TestCase):
         test.exec()
 
     def test_invalid_cluster_file(self):
-        # Testing with an invalid
+        # Testing with an invalid cluster file
         test = ClientConfigTest(self)
         test.create_external_lib_path(CURRENT_VERSION)
         test.disable_local_client = True

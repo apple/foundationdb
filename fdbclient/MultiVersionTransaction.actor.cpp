@@ -20,7 +20,6 @@
 
 #include "fdbclient/IClientApi.h"
 #include "flow/Trace.h"
-#include <utility>
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -1787,7 +1786,7 @@ void MultiVersionTenant::TenantState::updateTenant() {
 		tenant = Reference<ITenant>(nullptr);
 	}
 
-	tenantVar->set(tenant, true);
+	tenantVar->set(tenant, /* triggerIfSame */ !tenant.isValid());
 
 	Reference<TenantState> self = Reference<TenantState>::addRef(this);
 
@@ -2122,6 +2121,9 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 	if (dbProtocolVersion.present() &&
 	    protocolVersion.normalizedVersion() == dbProtocolVersion.get().normalizedVersion()) {
 		dbProtocolVersion = protocolVersion;
+
+		ASSERT(protocolVersionMonitor.isValid());
+		protocolVersionMonitor.cancel();
 		protocolVersionMonitor = monitorProtocolVersion();
 		return;
 	}

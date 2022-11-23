@@ -226,9 +226,6 @@ bool parseArgs(int argc, char** argv) {
 
 void exitImmediately(int exitCode) {
 #ifdef _WIN32
-	// This function is documented as being asynchronous, but we suspect it might actually be synchronous in the
-	// case that it is passed a handle to the current process. If not, then there may be cases where we escalate
-	// to the crashAndDie call below.
 	TerminateProcess(GetCurrentProcess(), exitCode);
 #else
 	_exit(exitCode);
