@@ -133,9 +133,10 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
-bool validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration> oldConfiguration,
-                                        std::map<std::string, std::string> newConfig,
-                                        bool creating);
+bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
+                                       std::map<std::string, std::string> newConfig,
+                                       bool creating);
+bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration);
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
@@ -280,7 +281,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
-		if (!validTenantAndEncryptionAtRestMode(Optional<DatabaseConfiguration>(), m, creating)) {
+		if (!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), m, creating)) {
 			return ConfigurationResult::INVALID_CONFIGURATION;
 		}
 	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
@@ -326,10 +327,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					for (auto kv : m) {
 						newConfig.set(kv.first, kv.second);
 					}
-					if (!newConfig.isValid()) {
-						return ConfigurationResult::INVALID_CONFIGURATION;
-					}
-					if (!validTenantAndEncryptionAtRestMode(oldConfig, m, creating)) {
+					if (!newConfig.isValid() || !isEncryptionAtRestModeConfigValid(oldConfig, m, creating) ||
+					    !isTenantModeModeConfigValid(oldConfig, newConfig)) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 

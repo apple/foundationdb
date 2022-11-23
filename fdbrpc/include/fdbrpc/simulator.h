@@ -56,7 +56,7 @@ public:
 		FailDisk,
 		RebootAndDelete,
 		RebootProcessAndDelete,
-		RebootProcessAndSwitch,
+		RebootProcessAndSwitch, // Reboot and switch cluster file
 		Reboot,
 		RebootProcess,
 		None

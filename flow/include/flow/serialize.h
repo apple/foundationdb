@@ -256,7 +256,7 @@ inline void load(Archive& ar, std::set<T>& value) {
 	T currentValue;
 	for (int i = 0; i < s; i++) {
 		ar >> currentValue;
-		value.insert(currentValue);
+		value.insert(value.end(), currentValue);
 	}
 	ASSERT(ar.protocolVersion().isValid());
 }
@@ -277,7 +277,7 @@ inline void load(Archive& ar, std::map<K, V>& value) {
 	for (int i = 0; i < s; ++i) {
 		std::pair<K, V> p;
 		ar >> p.first >> p.second;
-		value.emplace(p);
+		value.emplace_hint(value.end(), p);
 	}
 	ASSERT(ar.protocolVersion().isValid());
 }

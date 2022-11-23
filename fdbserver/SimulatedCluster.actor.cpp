@@ -2086,7 +2086,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				simconfig.db.encryptionAtRestMode = deterministicRandom()->randomChoice(validEncryptModes);
 			}
 		} else {
-			// TODO: This case should only trigger with probability once the server knob is removed
+			// TODO: This case should only trigger with probability (BUGGIFY) once the server knob is removed
 			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT) {
 				// optional and disabled tenant modes currently only support cluster aware encryption
 				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;

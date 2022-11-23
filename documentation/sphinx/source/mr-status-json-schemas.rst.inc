@@ -890,8 +890,18 @@
             }
          }
       },
-      "tenants":{
-         "num_tenants":0
+      "metacluster" : {
+         "cluster_type" : "management",         // management, data, or standalone
+         "metacluster_name" : "metacluster1",
+         "metacluster_id" : 12345,
+         "data_cluster_name" : "data_cluster1", // data cluster only
+         "data_cluster_id" : 12346,             // data cluster only
+         "num_data_clusters": 10                // management cluster only
+      },
+      "tenants" : {
+         "num_tenants" : 1, // on data cluster, local count; on management cluster, total metacluster count
+         "num_tenant_groups" : 10,
+         "tenant_group_capacity" : 20,
       }
    },
    "client":{

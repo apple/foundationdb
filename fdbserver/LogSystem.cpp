@@ -375,7 +375,7 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 		// parent->child.
 		SpanContextMessage contextMessage;
 		if (spanContext.isSampled()) {
-			CODE_PROBE(true, "Converting OTELSpanContextMessage to traced SpanContextMessage", probe::decoration::rare);
+			CODE_PROBE(true, "Converting OTELSpanContextMessage to traced SpanContextMessage");
 			contextMessage = SpanContextMessage(UID(spanContext.traceID.first(), spanContext.traceID.second()));
 		} else {
 			CODE_PROBE(true, "Converting OTELSpanContextMessage to untraced SpanContextMessage");

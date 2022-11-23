@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "flow/ActorCollection.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -75,8 +76,8 @@ private:
 	// Check if blob manifest is loaded so that blob migration can start
 	ACTOR static Future<Void> checkIfReadyForMigration(Reference<BlobMigrator> self) {
 		loop {
-			bool isFullRestore = wait(isFullRestoreMode(self->db_, normalKeys));
-			if (isFullRestore) {
+			Optional<BlobRestoreStatus> status = wait(getRestoreStatus(self->db_, normalKeys));
+			if (canStartMigration(status)) {
 				BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
 				if (!granules.empty()) {
 					self->blobGranules_ = granules;
@@ -87,11 +88,23 @@ private:
 						    .detail("Version", granule.version)
 						    .detail("SizeInBytes", granule.sizeInBytes);
 					}
+
+					BlobRestoreStatus status(BlobRestorePhase::MIGRATE, 0);
+					wait(updateRestoreStatus(self->db_, normalKeys, status));
 					return Void();
 				}
 			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
 		}
+	}
+
+	// Check if we should start migration. Migration can be started after manifest is fully loaded
+	static bool canStartMigration(Optional<BlobRestoreStatus> status) {
+		if (status.present()) {
+			BlobRestoreStatus value = status.get();
+			return value.phase == BlobRestorePhase::MANIFEST_DONE; // manifest is loaded successfully
+		}
+		return false;
 	}
 
 	// Prepare for data migration for given key range.
@@ -120,8 +133,8 @@ private:
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				state Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
-				wait(krmSetRange(&tr, keyServersPrefix, keys, value));
-				wait(krmSetRange(&tr, serverKeysPrefixFor(serverUID), keys, serverKeysTrue));
+				wait(krmSetRangeCoalescing(&tr, keyServersPrefix, keys, allKeys, value));
+				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue));
 				wait(tr.commit());
 				dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
 				return Void();
@@ -152,7 +165,7 @@ private:
 						}
 					}
 					if (owning) {
-						wait(krmSetRange(&tr, serverKeysPrefixFor(id), keys, serverKeysFalse));
+						wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(id), keys, allKeys, serverKeysFalse));
 						dprint("Unassign {} from storage server {}\n", keys.toString(), id.toString());
 						TraceEvent("UnassignKeys").detail("Keys", keys.toString()).detail("From", id.toString());
 					}
@@ -169,8 +182,12 @@ private:
 	ACTOR static Future<Void> logProgress(Reference<BlobMigrator> self) {
 		loop {
 			bool done = wait(checkProgress(self));
-			if (done)
+			if (done) {
+				BlobRestoreStatus status(BlobRestorePhase::DONE);
+				wait(updateRestoreStatus(self->db_, normalKeys, status));
+
 				return Void();
+			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
 		}
 	}
@@ -205,34 +222,9 @@ private:
 				state bool done = incompleted == 0;
 				dprint("Migration progress :{}%. done {}\n", progress, done);
 				TraceEvent("BlobMigratorProgress").detail("Progress", progress).detail("Done", done);
-				wait(updateProgress(self, normalKeys, progress));
+				BlobRestoreStatus status(BlobRestorePhase::MIGRATE, progress);
+				wait(updateRestoreStatus(self->db_, normalKeys, status));
 				return done;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
-	// Update restore progress
-	ACTOR static Future<Void> updateProgress(Reference<BlobMigrator> self, KeyRangeRef range, int progress) {
-		state Transaction tr(self->db_);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Key key = blobRestoreCommandKeyFor(range);
-				Optional<Value> value = wait(tr.get(key));
-				if (value.present()) {
-					Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-					if (progress > status.progress) {
-						status.progress = progress;
-						Value updatedValue = blobRestoreCommandValueFor(status);
-						tr.set(key, updatedValue);
-						wait(tr.commit());
-					}
-				}
-				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}

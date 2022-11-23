@@ -1561,26 +1561,64 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransactio
                                                                                   int limit) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
+	state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
 	    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit));
 
 	return results.results;
 }
 
 ACTOR template <class DB>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference<DB> db,
-                                                                       TenantName begin,
-                                                                       TenantName end,
-                                                                       int limit) {
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
+    Reference<DB> db,
+    TenantName begin,
+    TenantName end,
+    int limit,
+    int offset = 0,
+    std::vector<TenantState> filters = std::vector<TenantState>()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-			    wait(listTenantsTransaction(tr, begin, end, limit));
-			return tenants;
+			if (filters.empty()) {
+				state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+				wait(store(tenants, listTenantsTransaction(tr, begin, end, limit + offset)));
+				if (offset >= tenants.size()) {
+					tenants.clear();
+				} else if (offset > 0) {
+					tenants.erase(tenants.begin(), tenants.begin() + offset);
+				}
+				return tenants;
+			}
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+
+			state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
+			    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
+			        tr, begin, end, std::max(limit + offset, 100)));
+			state std::vector<std::pair<TenantName, TenantMapEntry>> filterResults;
+			state int count = 0;
+			loop {
+				for (auto pair : results.results) {
+					if (filters.empty() || std::count(filters.begin(), filters.end(), pair.second.tenantState)) {
+						++count;
+						if (count > offset) {
+							filterResults.push_back(pair);
+							if (count - offset == limit) {
+								ASSERT(count - offset == filterResults.size());
+								return filterResults;
+							}
+						}
+					}
+				}
+				if (!results.more) {
+					return filterResults;
+				}
+				begin = keyAfter(results.results.back().first);
+				wait(store(results,
+				           ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
+				               tr, begin, end, std::max(limit + offset, 100))));
+			}
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
