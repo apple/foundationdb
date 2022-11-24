@@ -54,10 +54,8 @@ std::string TenantAPI::TenantStateToString(TenantState tenantState) {
 		return "removing";
 	case TenantState::UPDATING_CONFIGURATION:
 		return "updating configuration";
-	case TenantState::RENAMING_FROM:
-		return "renaming from";
-	case TenantState::RENAMING_TO:
-		return "renaming to";
+	case TenantState::RENAMING:
+		return "renaming";
 	case TenantState::ERROR:
 		return "error";
 	default:
@@ -75,10 +73,8 @@ TenantAPI::TenantState TenantAPI::stringToTenantState(std::string stateStr) {
 		return TenantState::REMOVING;
 	} else if (stateStr == "updating configuration") {
 		return TenantState::UPDATING_CONFIGURATION;
-	} else if (stateStr == "renaming from") {
-		return TenantState::RENAMING_FROM;
-	} else if (stateStr == "renaming to") {
-		return TenantState::RENAMING_TO;
+	} else if (stateStr == "renaming") {
+		return TenantState::RENAMING;
 	} else if (stateStr == "error") {
 		return TenantState::ERROR;
 	}
@@ -158,9 +154,9 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	}
 
 	tenantEntry["lock_state"] = TenantAPI::tenantLockStateToString(tenantLockState);
-	if (tenantState == TenantAPI::TenantState::RENAMING_FROM || tenantState == TenantAPI::TenantState::RENAMING_TO) {
-		ASSERT(renamePair.present());
-		tenantEntry["rename_pair"] = binaryToJson(renamePair.get());
+	if (tenantState == TenantAPI::TenantState::RENAMING) {
+		ASSERT(renameDestination.present());
+		tenantEntry["rename_destination"] = binaryToJson(renameDestination.get());
 	} else if (tenantState == TenantAPI::TenantState::ERROR) {
 		tenantEntry["error"] = error;
 	}

@@ -73,6 +73,7 @@ using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(con
 // as a consequence of the design we cannot be sure that the state of a given tenant is accurate even if its present in
 // the cache.
 
+// TENANT_FIXME: what to do with this?
 template <class T>
 class TenantEntryCache : public ReferenceCounted<TenantEntryCache<T>>, NonCopyable {
 private:
@@ -105,7 +106,7 @@ private:
 		    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
-		TraceEvent(SevDebug, "TenantEntryCacheGetTenantList").detail("Count", tenantList.results.size());
+		 TraceEvent(SevDebug, "TenantEntryCacheGetTenantList").detail("Count", tenantList.results.size());
 
 		TenantNameEntryPairVec results;
 		for (auto t : tenantList.results) {
@@ -115,10 +116,10 @@ private:
 		return results;
 	}
 
-	ACTOR static Future<Void> refreshCacheById(int64_t tenantId,
-	                                           TenantEntryCache<T>* cache,
-	                                           TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+	static Future<Void> refreshCacheById(int64_t tenantId,
+	                                     TenantEntryCache<T>* cache,
+	                                     TenantEntryCacheRefreshReason reason) {
+		/*TraceEvent(SevDebug, "TenantEntryCacheIDRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
 			try {
@@ -134,14 +135,14 @@ private:
 				wait(tr->onError(e));
 			}
 		}
-		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));*/
 		return Void();
 	}
 
-	ACTOR static Future<Void> refreshCacheByName(TenantName name,
-	                                             TenantEntryCache<T>* cache,
-	                                             TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshStart", cache->id())
+	static Future<Void> refreshCacheByName(TenantName name,
+	                                       TenantEntryCache<T>* cache,
+	                                       TenantEntryCacheRefreshReason reason) {
+		/*TraceEvent(SevDebug, "TenantEntryCacheNameRefreshStart", cache->id())
 		    .detail("Reason", static_cast<int>(reason));
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
@@ -161,7 +162,7 @@ private:
 				wait(tr->onError(e));
 			}
 		}
-		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));*/
 		return Void();
 	}
 

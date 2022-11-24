@@ -148,7 +148,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 				// trigger GetKeyServerLocationsRequest and subsequent cache update
 				Optional<Value> value = wait(tr.get(key));
 				(void)value;
-				auto loc = cx->getCachedLocation(tenant, key);
+				// TENANT_FIXME: This requires a tenant info now
+				auto loc = cx->getCachedLocation(TenantInfo(), key);
 				if (loc.present()) {
 					return loc.get();
 				} else {
@@ -178,8 +179,9 @@ struct AuthzSecurityWorkload : TestWorkload {
 			GetValueRequest req;
 			req.key = key;
 			req.version = committedVersion;
-			req.tenantInfo.tenantId = loc.tenantEntry.id;
-			req.tenantInfo.name = tenant;
+			// TENANT_FIXME
+			/*req.tenantInfo.tenantId = loc.tenantEntry.id;
+			req.tenantInfo.name = tenant;*/
 			req.tenantInfo.token = token;
 			try {
 				GetValueReply reply = wait(loadBalance(loc.locations->locations(),
@@ -265,6 +267,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                               Database cx,
 	                                               KeyRangeLocationInfo loc) {
 		loop {
+			/* TENANT_FIXME
 			auto const& tenantEntry = loc.tenantEntry;
 			ASSERT(!tenantEntry.prefix.empty());
 			state Key prefixedKey = key.withPrefix(tenantEntry.prefix);
@@ -275,16 +278,17 @@ struct AuthzSecurityWorkload : TestWorkload {
 			req.tenantInfo.token = token;
 			req.tenantInfo.tenantId = tenantEntry.id;
 			try {
-				CommitID reply = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-				                                       &CommitProxyInterface::commit,
-				                                       req,
-				                                       TaskPriority::DefaultPromiseEndpoint,
-				                                       AtMostOnce::False));
-				return Optional<Error>();
+			    CommitID reply = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                                           &CommitProxyInterface::commit,
+			                                           req,
+			                                           TaskPriority::DefaultPromiseEndpoint,
+			                                           AtMostOnce::False));
+			    return Optional<Error>();
 			} catch (Error& e) {
-				CODE_PROBE(e.code() == error_code_permission_denied, "Cross tenant commit meets permission_denied");
-				return e;
-			}
+			    CODE_PROBE(e.code() == error_code_permission_denied, "Cross tenant commit meets permission_denied");
+			    return e;
+			}*/
+			return Optional<Error>();
 		}
 	}
 
