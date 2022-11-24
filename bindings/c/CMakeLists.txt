@@ -318,23 +318,7 @@ if(NOT WIN32)
         --client-config-tester-bin $<TARGET_FILE:fdb_c_client_config_tester>
         )
 
-      add_scripted_fdb_test(NAME fdb_c_upgrade_single_threaded_prev3_api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-        --build-dir ${CMAKE_BINARY_DIR}
-        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
-        --process-number 1
-        )
-
-      add_scripted_fdb_test(NAME fdb_c_upgrade_single_threaded_prev2_api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-        --build-dir ${CMAKE_BINARY_DIR}
-        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
-        --process-number 1
-        )
-
-      add_scripted_fdb_test(NAME fdb_c_upgrade_multi_threaded_prev3_api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_from_prev3_gradual
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
@@ -342,7 +326,15 @@ if(NOT WIN32)
         --process-number 3
         )
 
-      add_scripted_fdb_test(NAME fdb_c_upgrade_multi_threaded_prev2_api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_from_prev3_direct
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_scripted_fdb_test(NAME fdb_c_upgrade_from_prev2_gradual
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
@@ -350,7 +342,15 @@ if(NOT WIN32)
         --process-number 3
         )
 
-      add_scripted_fdb_test(NAME fdb_c_upgrade_multi_threaded_prev_api
+      add_scripted_fdb_test(NAME fdb_c_upgrade_from_prev2_direct
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_scripted_fdb_test(NAME fdb_c_upgrade_from_prev
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
@@ -358,7 +358,7 @@ if(NOT WIN32)
         --process-number 3
         )
 
-      add_scripted_fdb_test(NAME fdb_c_cluster_wiggle
+      add_scripted_fdb_test(NAME fdb_c_wiggle_only
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
@@ -368,7 +368,7 @@ if(NOT WIN32)
         --redundancy double
         )
 
-      add_scripted_fdb_test(NAME fdb_c_wiggle_and_upgrade_latest
+      add_scripted_fdb_test(NAME fdb_c_wiggle_and_upgrade
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
