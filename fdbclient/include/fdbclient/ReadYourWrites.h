@@ -69,6 +69,10 @@ class ReadYourWritesTransaction final : NonCopyable,
                                         public ISingleThreadTransaction,
                                         public FastAllocated<ReadYourWritesTransaction> {
 public:
+	explicit ReadYourWritesTransaction(Database const& cx,
+	                                   int64_t tenantId,
+	                                   Optional<TenantName> tenant = Optional<TenantName>());
+	// TENANT_FIXME: remove this constructor
 	explicit ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenant = Optional<TenantName>());
 	~ReadYourWritesTransaction();
 

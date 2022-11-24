@@ -138,7 +138,7 @@ bool canReplyWith(Error e) {
 	case error_code_server_overloaded:
 	case error_code_change_feed_popped:
 	case error_code_tenant_name_required:
-	case error_code_unknown_tenant:
+	case error_code_tenant_not_found:
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -781,7 +781,8 @@ public:
 
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
-	VersionedMap<int64_t, TenantName> tenantMap;
+	// TODO: replace with cheaper structure
+	VersionedMap<int64_t, Void> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -828,11 +829,11 @@ public:
 	void clearWatchMetadata();
 
 	// tenant map operations
-	void insertTenant(StringRef tenantPrefix, TenantName tenantName, Version version, bool persist);
+	void insertTenant(StringRef tenant, Version version, bool persist);
 	void clearTenants(StringRef startTenant, StringRef endTenant, Version version);
 
 	void checkTenantEntry(Version version, TenantInfo tenant);
-	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
+	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenant, Arena& arena);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
 
@@ -2013,12 +2014,7 @@ void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
 			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID)
 			    .detail("Tenant", tenantInfo.tenantId)
 			    .backtrace();
-			throw unknown_tenant();
-		}
-
-		// TENANT_TODO: this is temporary pending other changes to remove reliance on names
-		if (*itr != tenantInfo.name.get()) {
-			throw unknown_tenant();
+			throw tenant_not_found();
 		}
 	}
 }
@@ -3520,7 +3516,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.tenantId);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -4185,7 +4181,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 
 	++data->counters.quickGetKeyValuesMiss;
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.tenantId);
 		tr.setVersion(version);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			tr.debugTransaction(pOriginalReq->options.get().debugID.get());
@@ -4891,7 +4887,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	return result;
 }
 
-bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyRangeRef range, Version ver) {
+bool rangeIntersectsAnyTenant(VersionedMap<int64_t, Void>& tenantMap, KeyRangeRef range, Version ver) {
 	auto view = tenantMap.at(ver);
 
 	// There are no tenants, so we don't need to do any work
@@ -4941,10 +4937,10 @@ bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyR
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	std::set<int64_t> entries = { 0, 2, 3, 4, 6 };
 
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	tenantMap.createNewVersion(1);
 	for (auto entry : entries) {
-		tenantMap.insert(entry, ""_sr);
+		tenantMap.insert(entry, Void());
 	}
 
 	// Before all tenants
@@ -4954,10 +4950,9 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	ASSERT(!rangeIntersectsAnyTenant(tenantMap, KeyRangeRef("\xfe"_sr, "\xff"_sr), tenantMap.getLatestVersion()));
 
 	// In between tenants
-	ASSERT(
-	    !rangeIntersectsAnyTenant(tenantMap,
-	                              KeyRangeRef(TenantAPI::idToPrefix(1), TenantAPI::idToPrefix(1).withSuffix("\xff"_sr)),
-	                              tenantMap.getLatestVersion()));
+	ASSERT(!rangeIntersectsAnyTenant(tenantMap,
+	                                 KeyRangeRef(TenantAPI::idToPrefix(1), TenantAPI::idToPrefix(1).withSuffix("\xff"_sr)),
+	                                 tenantMap.getLatestVersion()));
 
 	// In between tenants with end intersecting tenant start
 	ASSERT(!rangeIntersectsAnyTenant(
@@ -4970,38 +4965,32 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	    tenantMap, KeyRangeRef(TenantAPI::idToPrefix(2), TenantAPI::idToPrefix(3)), tenantMap.getLatestVersion()));
 
 	// Partial tenants
-	ASSERT(
-	    rangeIntersectsAnyTenant(tenantMap,
-	                             KeyRangeRef(TenantAPI::idToPrefix(0), TenantAPI::idToPrefix(0).withSuffix("foo"_sr)),
-	                             tenantMap.getLatestVersion()));
-	ASSERT(
-	    rangeIntersectsAnyTenant(tenantMap,
-	                             KeyRangeRef(TenantAPI::idToPrefix(3).withSuffix("foo"_sr), TenantAPI::idToPrefix(4)),
-	                             tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(TenantAPI::idToPrefix(0), TenantAPI::idToPrefix(0).withSuffix("foo"_sr)),
+	                                tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(TenantAPI::idToPrefix(3).withSuffix("foo"_sr), TenantAPI::idToPrefix(4)),
+	                                tenantMap.getLatestVersion()));
 	ASSERT(rangeIntersectsAnyTenant(
 	    tenantMap,
 	    KeyRangeRef(TenantAPI::idToPrefix(4).withSuffix("bar"_sr), TenantAPI::idToPrefix(4).withSuffix("foo"_sr)),
 	    tenantMap.getLatestVersion()));
 
 	// Begin outside, end inside tenant
-	ASSERT(
-	    rangeIntersectsAnyTenant(tenantMap,
-	                             KeyRangeRef(TenantAPI::idToPrefix(1), TenantAPI::idToPrefix(2).withSuffix("foo"_sr)),
-	                             tenantMap.getLatestVersion()));
-	ASSERT(
-	    rangeIntersectsAnyTenant(tenantMap,
-	                             KeyRangeRef(TenantAPI::idToPrefix(1), TenantAPI::idToPrefix(3).withSuffix("foo"_sr)),
-	                             tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(TenantAPI::idToPrefix(1), TenantAPI::idToPrefix(2).withSuffix("foo"_sr)),
+	                                tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(TenantAPI::idToPrefix(1), TenantAPI::idToPrefix(3).withSuffix("foo"_sr)),
+	                                tenantMap.getLatestVersion()));
 
 	// Begin inside, end outside tenant
-	ASSERT(
-	    rangeIntersectsAnyTenant(tenantMap,
-	                             KeyRangeRef(TenantAPI::idToPrefix(3).withSuffix("foo"_sr), TenantAPI::idToPrefix(5)),
-	                             tenantMap.getLatestVersion()));
-	ASSERT(
-	    rangeIntersectsAnyTenant(tenantMap,
-	                             KeyRangeRef(TenantAPI::idToPrefix(4).withSuffix("foo"_sr), TenantAPI::idToPrefix(5)),
-	                             tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(TenantAPI::idToPrefix(3).withSuffix("foo"_sr), TenantAPI::idToPrefix(5)),
+	                                tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(TenantAPI::idToPrefix(4).withSuffix("foo"_sr), TenantAPI::idToPrefix(5)),
+	                                tenantMap.getLatestVersion()));
 
 	// Both inside different tenants
 	ASSERT(rangeIntersectsAnyTenant(
@@ -5029,13 +5018,13 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 }
 
 TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	std::set<Key> tenantPrefixes;
 	tenantMap.createNewVersion(1);
 	int numEntries = deterministicRandom()->randomInt(0, 20);
 	for (int i = 0; i < numEntries; ++i) {
 		int64_t tenantId = deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
-		tenantMap.insert(tenantId, ""_sr);
+		tenantMap.insert(tenantId, Void());
 		tenantPrefixes.insert(TenantAPI::idToPrefix(tenantId));
 	}
 
@@ -8545,9 +8534,8 @@ private:
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.startsWith(TenantMetadata::tenantMapPrivatePrefix())) {
 			if (m.type == MutationRef::SetValue) {
-				TenantName tenantName = m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix());
-				TenantMapEntry entry = TenantMapEntry::decode(m.param2);
-				data->insertTenant(entry.prefix, tenantName, currentVersion, true);
+				KeyRef tenantPrefix = m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix());
+				data->insertTenant(tenantPrefix, currentVersion, true);
 			} else if (m.type == MutationRef::ClearRange) {
 				data->clearTenants(m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
 				                   m.param2.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
@@ -8645,17 +8633,16 @@ private:
 	}
 };
 
-void StorageServer::insertTenant(StringRef tenantPrefix, TenantName tenantName, Version version, bool persist) {
+void StorageServer::insertTenant(StringRef tenant, Version version, bool persist) {
 	if (version >= tenantMap.getLatestVersion()) {
-		int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
+		int64_t tenantId = TenantAPI::prefixToId(tenant);
 		tenantMap.createNewVersion(version);
-		tenantMap.insert(tenantId, tenantName);
+		tenantMap.insert(tenantId, Void());
 
 		if (persist) {
 			auto& mLV = addVersionToMutationLog(version);
 			addMutationToMutationLog(
-			    mLV,
-			    MutationRef(MutationRef::SetValue, tenantPrefix.withPrefix(persistTenantMapKeys.begin), tenantName));
+				mLV, MutationRef(MutationRef::SetValue, tenant.withPrefix(persistTenantMapKeys.begin), ""_sr));
 		}
 
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantId).detail("Version", version);
@@ -8664,28 +8651,26 @@ void StorageServer::insertTenant(StringRef tenantPrefix, TenantName tenantName, 
 
 void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
+		int64_t startTenantId = TenantAPI::prefixToId(startTenant);
+		int64_t endTenantId = TenantAPI::prefixToId(endTenant);
+
 		tenantMap.createNewVersion(version);
 
 		auto view = tenantMap.at(version);
-		auto& mLV = addVersionToMutationLog(version);
-		std::set<int64_t> tenantsToClear;
-		for (auto itr = view.begin(); itr != view.end(); ++itr) {
-			if (*itr >= startTenant && *itr < endTenant) {
-				// Trigger any watches on the prefix associated with the tenant.
-				Key tenantPrefix = TenantAPI::idToPrefix(itr.key());
-				watches.triggerRange(tenantPrefix, strinc(tenantPrefix));
-				TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
-				tenantsToClear.insert(itr.key());
-				addMutationToMutationLog(mLV,
-				                         MutationRef(MutationRef::ClearRange,
-				                                     tenantPrefix.withPrefix(persistTenantMapKeys.begin),
-				                                     keyAfter(tenantPrefix.withPrefix(persistTenantMapKeys.begin))));
-			}
+		for (auto itr = view.lower_bound(startTenantId); itr != view.lower_bound(endTenantId); ++itr) {
+			// Trigger any watches on the prefix associated with the tenant.
+			Key tenantPrefix = TenantAPI::idToPrefix(itr.key());
+			watches.triggerRange(tenantPrefix, strinc(tenantPrefix));
+			TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
 		}
 
-		for (auto tenantId : tenantsToClear) {
-			tenantMap.erase(tenantId);
-		}
+		tenantMap.erase(startTenantId, endTenantId);
+
+		auto& mLV = addVersionToMutationLog(version);
+		addMutationToMutationLog(mLV,
+		                         MutationRef(MutationRef::ClearRange,
+		                                     startTenant.withPrefix(persistTenantMapKeys.begin),
+		                                     endTenant.withPrefix(persistTenantMapKeys.begin)));
 	}
 }
 
@@ -9669,7 +9654,7 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), *itr));
+		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), ""_sr));
 	}
 }
 
@@ -10164,7 +10149,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		auto const& result = tenantMap[tenantMapLoc];
 		int64_t tenantId = TenantAPI::prefixToId(result.key.substr(persistTenantMapKeys.begin.size()));
 
-		data->tenantMap.insert(tenantId, result.value);
+		data->tenantMap.insert(tenantId, Void());
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
@@ -11026,7 +11011,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			state Version version = wait(tr->getReadVersion());
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
-			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
+			KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> entries =
 			    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 			ASSERT(entries.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !entries.more);
 
@@ -11035,7 +11020,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			    .detail("NumTenants", entries.results.size());
 
 			for (auto entry : entries.results) {
-				self->insertTenant(entry.second.prefix, entry.first, version, false);
+				self->insertTenant(entry.second.prefix, version, true);
 			}
 			break;
 		} catch (Error& e) {

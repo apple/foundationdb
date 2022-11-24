@@ -101,14 +101,18 @@ private:
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-		KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList =
-		    wait(TenantMetadata::tenantMap().getRange(
-		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantList =
+		    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
 		TraceEvent(SevDebug, "TenantEntryCacheGetTenantList").detail("Count", tenantList.results.size());
 
-		return tenantList.results;
+		TenantNameEntryPairVec results;
+		for (auto t : tenantList.results) {
+			results.push_back(std::make_pair(t.second.tenantName, t.second));
+		}
+
+		return results;
 	}
 
 	ACTOR static Future<Void> refreshCacheById(int64_t tenantId,
@@ -120,13 +124,10 @@ private:
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				state Optional<TenantName> name = wait(TenantMetadata::tenantIdIndex().get(tr, tenantId));
-				if (name.present()) {
-					Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name.get()));
-					if (entry.present()) {
-						cache->put(std::make_pair(name.get(), entry.get()));
-						updateCacheRefreshMetrics(cache, reason);
-					}
+				state Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, tenantId));
+				if (entry.present()) {
+					cache->put(std::make_pair(entry.get().tenantName, entry.get()));
+					updateCacheRefreshMetrics(cache, reason);
 				}
 				break;
 			} catch (Error& e) {
@@ -147,10 +148,13 @@ private:
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name));
-				if (entry.present()) {
-					cache->put(std::make_pair(name, entry.get()));
-					updateCacheRefreshMetrics(cache, reason);
+				state Optional<int64_t> tenantId = wait(TenantMetadata::tenantNameIndex().get(tr, name));
+				if (tenantId.present()) {
+					Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, tenantId.get()));
+					if (entry.present()) {
+						cache->put(std::make_pair(name, entry.get()));
+						updateCacheRefreshMetrics(cache, reason);
+					}
 				}
 				break;
 			} catch (Error& e) {

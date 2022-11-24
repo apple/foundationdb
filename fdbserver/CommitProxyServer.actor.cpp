@@ -251,52 +251,42 @@ struct ResolutionRequestBuilder {
 	}
 };
 
-ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
-                                                 Optional<TenantNameRef> tenant,
-                                                 Optional<int64_t> tenantId,
-                                                 bool logOnFailure) {
-	if (tenant.present()) {
-		auto itr = commitData->tenantMap.find(tenant.get());
-		if (itr == commitData->tenantMap.end()) {
-			if (logOnFailure) {
-				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenant.get());
-			}
-
-			return unknown_tenant();
-		} else if (tenantId.present() && tenantId.get() != itr->second.id) {
-			if (logOnFailure) {
-				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
-				    .detail("Tenant", tenant.get())
-				    .detail("TenantId", tenantId)
-				    .detail("ExistingId", itr->second.id);
-			}
-
-			return unknown_tenant();
+ErrorOr<int64_t> lookupTenant(ProxyCommitData* commitData, TenantNameRef tenant, bool logOnFailure) {
+	auto itr = commitData->tenantNameIndex.find(tenant);
+	if (itr == commitData->tenantNameIndex.end()) {
+		if (logOnFailure) {
+			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("TenantName", tenant);
 		}
 
-		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(itr->second));
+		return tenant_not_found();
 	}
 
-	return Optional<TenantMapEntry>();
+	return itr->second;
+}
+
+ErrorOr<Void> checkTenant(ProxyCommitData* commitData, int64_t tenant) {
+	if (tenant != TenantInfo::INVALID_TENANT) {
+		auto itr = commitData->tenantMap.find(tenant);
+		if (itr == commitData->tenantMap.end()) {
+			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("Tenant", tenant);
+			return tenant_not_found();
+		}
+
+		return ErrorOr<Void>();
+	}
+
+	return Void();
 }
 
 bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransactionRequest& req) {
-	ErrorOr<Optional<TenantMapEntry>> tenantEntry =
-	    getTenantEntry(commitData, req.tenantInfo.name.castTo<TenantNameRef>(), req.tenantInfo.tenantId, true);
-
-	if (tenantEntry.isError()) {
-		return true;
-	}
-
-	if (tenantEntry.get().present()) {
-		Key tenantPrefix = tenantEntry.get().get().prefix;
+	if (req.tenantInfo.prefix.present()) {
+		KeyRef tenantPrefix = req.tenantInfo.prefix.get();
 		for (auto& m : req.transaction.mutations) {
 			if (m.param1 != metadataVersionKey) {
 				if (!m.param1.startsWith(tenantPrefix)) {
 					TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
 					    .suppressFor(60)
-					    .detail("Tenant", req.tenantInfo.name)
-					    .detail("TenantID", req.tenantInfo.tenantId)
+					    .detail("Tenant", req.tenantInfo.tenantId)
 					    .detail("Prefix", tenantPrefix)
 					    .detail("Key", m.param1);
 					return false;
@@ -305,8 +295,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 				if (m.type == MutationRef::ClearRange && !m.param2.startsWith(tenantPrefix)) {
 					TraceEvent(SevWarnAlways, "TenantClearRangePrefixMismatch")
 					    .suppressFor(60)
-					    .detail("Tenant", req.tenantInfo.name)
-					    .detail("TenantID", req.tenantInfo.tenantId)
+					    .detail("Tenant", req.tenantInfo.tenantId)
 					    .detail("Prefix", tenantPrefix)
 					    .detail("Key", m.param2);
 					return false;
@@ -317,8 +306,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 					if (*offset < tenantPrefix.size()) {
 						TraceEvent(SevWarnAlways, "TenantVersionstampInvalidOffset")
 						    .suppressFor(60)
-						    .detail("Tenant", req.tenantInfo.name)
-						    .detail("TenantID", req.tenantInfo.tenantId)
+						    .detail("Tenant", req.tenantInfo.tenantId)
 						    .detail("Prefix", tenantPrefix)
 						    .detail("Key", m.param1)
 						    .detail("Offset", *offset);
@@ -333,8 +321,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 			    (!rc.begin.startsWith(tenantPrefix) || !rc.end.startsWith(tenantPrefix))) {
 				TraceEvent(SevWarnAlways, "TenantReadConflictPrefixMismatch")
 				    .suppressFor(60)
-				    .detail("Tenant", req.tenantInfo.name)
-				    .detail("TenantID", req.tenantInfo.tenantId)
+				    .detail("Tenant", req.tenantInfo.tenantId)
 				    .detail("Prefix", tenantPrefix)
 				    .detail("BeginKey", rc.begin)
 				    .detail("EndKey", rc.end);
@@ -347,8 +334,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 			    (!wc.begin.startsWith(tenantPrefix) || !wc.end.startsWith(tenantPrefix))) {
 				TraceEvent(SevWarnAlways, "TenantWriteConflictPrefixMismatch")
 				    .suppressFor(60)
-				    .detail("Tenant", req.tenantInfo.name)
-				    .detail("TenantID", req.tenantInfo.tenantId)
+				    .detail("Tenant", req.tenantInfo.tenantId)
 				    .detail("Prefix", tenantPrefix)
 				    .detail("BeginKey", wc.begin)
 				    .detail("EndKey", wc.end);
@@ -413,9 +399,8 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						continue;
 					}
 
-					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
-					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() && tenantName.present() &&
-					    commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() && req.tenantInfo.hasTenant() &&
+					    commitData->tenantsOverStorageQuota.count(req.tenantInfo.tenantId) > 0) {
 						req.reply.sendError(storage_quota_exceeded());
 						continue;
 					}
@@ -786,7 +771,7 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 	for (const auto& tr : trs) {
 		if (tr.transaction.mutations.empty())
 			continue;
-		if (!tr.tenantInfo.name.present() &&
+		if (!tr.tenantInfo.hasTenant() &&
 		    (tr.transaction.mutations[0].param1.startsWith("\xff"_sr) || tr.transaction.read_conflict_ranges.empty())) {
 			return false;
 		}
@@ -896,19 +881,6 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 }
 
 namespace {
-// Routine allows caller to find TenantName for a given TenantId. It returns empty optional when either TenantId is
-// invalid or tenant is unknown
-Optional<TenantName> getTenantName(ProxyCommitData* commitData, int64_t tenantId) {
-	if (tenantId != TenantInfo::INVALID_TENANT) {
-		auto itr = commitData->tenantIdIndex.find(tenantId);
-		if (itr != commitData->tenantIdIndex.end()) {
-			return Optional<TenantName>(itr->second.get());
-		}
-	}
-
-	return Optional<TenantName>();
-}
-
 EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitData, MutationRef m) {
 	EncryptCipherDomainId domainId = INVALID_ENCRYPT_DOMAIN_ID;
 
@@ -928,12 +900,9 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 		if (m.param1.size() >= TenantAPI::PREFIX_SIZE) {
 			// Parse mutation key to determine mutation encryption domain
 			StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
-			int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+			int64_t tenantId = TenantAPI::prefixToId(prefix);
 			if (tenantId != TenantInfo::INVALID_TENANT) {
-				Optional<TenantName> tenantName = getTenantName(commitData, tenantId);
-				if (tenantName.present()) {
-					domainId = tenantId;
-				}
+				domainId = tenantId;
 			} else {
 				// Leverage 'default encryption domain'
 			}
@@ -1012,9 +981,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
-			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 			if (tenantId != TenantInfo::INVALID_TENANT) {
-				ASSERT(tenantName.present());
 				encryptDomainIds.emplace(tenantId);
 			} else {
 				// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
@@ -1188,8 +1155,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(
-			    pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), trs[t].tenantInfo.tenantId, true);
+			ErrorOr<Void> result = checkTenant(pProxyCommitData, trs[t].tenantInfo.tenantId);
 
 			if (result.isError()) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
@@ -2133,48 +2099,16 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
-	state ErrorOr<Optional<TenantMapEntry>> tenantEntry;
-	state Version minTenantVersion =
-	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
-
-	// If a large minTenantVersion is specified, we limit how long we wait for it to be available
-	state Future<Void> futureVersionDelay = minTenantVersion > commitData->stats.lastCommitVersionAssigned + 1
-	                                            ? delay(SERVER_KNOBS->FUTURE_VERSION_DELAY)
-	                                            : Never();
-
-	while (tenantEntry.isError()) {
-		bool finalQuery = commitData->version.get() >= minTenantVersion;
-		ErrorOr<Optional<TenantMapEntry>> _tenantEntry =
-		    getTenantEntry(commitData, req.tenant.name, Optional<int64_t>(), finalQuery);
-		tenantEntry = _tenantEntry;
-
-		if (tenantEntry.isError()) {
-			if (finalQuery) {
-				req.reply.sendError(tenant_not_found());
-				return Void();
-			} else {
-				choose {
-					// Wait until we are sure that we've received metadata updates through minTenantVersion
-					// If latestVersion is specified, this will wait until we have definitely received
-					// updates through the version at the time we received the request
-					when(wait(commitData->version.whenAtLeast(minTenantVersion))) {}
-					when(wait(futureVersionDelay)) {
-						req.reply.sendError(future_version());
-						return Void();
-					}
-				}
-			}
-		}
-	}
+	// TODO: does this need to handle cases where the tenant isn't there yet?
+	checkTenant(commitData, req.tenant.tenantId);
 
 	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
 
-	if (tenantEntry.get().present()) {
-		rep.tenantEntry = tenantEntry.get().get();
-		req.begin = req.begin.withPrefix(rep.tenantEntry.prefix, req.arena);
+	if (req.tenant.hasTenant()) {
+		req.begin = req.begin.withPrefix(req.tenant.prefix.get(), req.arena);
 		if (req.end.present()) {
-			req.end = req.end.get().withPrefix(rep.tenantEntry.prefix, req.arena);
+			req.end = req.end.get().withPrefix(req.tenant.prefix.get(), req.arena);
 		}
 	}
 

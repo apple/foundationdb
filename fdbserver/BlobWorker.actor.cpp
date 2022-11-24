@@ -3529,7 +3529,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 	state Optional<Key> tenantPrefix;
 	state Arena arena;
-	if (req.tenantInfo.name.present()) {
+	if (req.tenantInfo.hasTenant()) {
 		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
 		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
 		if (tenantEntry.present()) {
@@ -3541,9 +3541,8 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			// Just throw wrong_shard_server and make the client retry and assume we load it later
 			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
 			    .suppressFor(5.0)
-			    .detail("TenantName", req.tenantInfo.name.get())
 			    .detail("TenantId", req.tenantInfo.tenantId);
-			throw unknown_tenant();
+			throw tenant_not_found();
 		}
 		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
 		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
@@ -4794,15 +4793,14 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
-				wait(store(tenantResults,
-				           TenantMetadata::tenantMap().getRange(tr,
-				                                                Optional<TenantName>(),
-				                                                Optional<TenantName>(),
-				                                                CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantResults;
+				wait(store(
+				    tenantResults,
+				    TenantMetadata::tenantMap().getRange(
+				        tr, Optional<int64_t>(), Optional<int64_t>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 				ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
-				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+				std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
 				for (auto& it : tenantResults.results) {
 					// FIXME: handle removing/moving tenants!
 					tenants.push_back(std::pair(it.first, it.second));

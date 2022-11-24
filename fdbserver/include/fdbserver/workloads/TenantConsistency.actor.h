@@ -38,14 +38,14 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-template <class DB>
+template <class DB, class TenantEntry>
 class TenantConsistencyCheck {
 private:
 	Reference<DB> db;
 
 	struct TenantData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		std::map<TenantName, TenantMapEntry> tenantMap;
+		std::map<TenantName, TenantEntry> tenantMap;
 		std::map<int64_t, TenantName> tenantIdIndex;
 		int64_t lastTenantId;
 		int64_t tenantCount;
@@ -65,14 +65,15 @@ private:
 	// the case with the current metacluster simulation workloads
 	static inline const int metaclusterMaxTenants = 10e6;
 
-	ACTOR static Future<Void> loadTenantMetadata(TenantConsistencyCheck* self) {
+	ACTOR template <class T>
+	static Future<Void> loadTenantMetadata(TenantConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> tr = self->db->createTransaction();
-		state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList;
+		state KeyBackedRangeResult<std::pair<TenantName, TenantEntry>> tenantList;
 		state KeyBackedRangeResult<std::pair<int64_t, TenantName>> tenantIdIndexList;
 		state KeyBackedRangeResult<int64_t> tenantTombstoneList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroupList;
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
-		state TenantMetadataSpecification* tenantMetadata;
+		state TenantMetadataSpecification<T>* tenantMetadata;
 
 		loop {
 			try {
@@ -111,7 +112,7 @@ private:
 
 		ASSERT(!tenantList.more);
 		self->metadata.tenantMap =
-		    std::map<TenantName, TenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
+		    std::map<TenantName, TenantEntry>(tenantList.results.begin(), tenantList.results.end());
 
 		ASSERT(!tenantIdIndexList.more);
 		self->metadata.tenantIdIndex =
@@ -128,11 +129,11 @@ private:
 		for (auto t : tenantGroupTenantTuples.results) {
 			ASSERT(t.size() == 2);
 			TenantGroupName tenantGroupName = t.getString(0);
-			TenantName tenantName = t.getString(1);
+			int64_t tenantId = t.getInt(1);
 			ASSERT(self->metadata.tenantGroupMap.count(tenantGroupName));
-			ASSERT(self->metadata.tenantMap.count(tenantName));
-			self->metadata.tenantGroupIndex[tenantGroupName].insert(tenantName);
-			ASSERT(self->metadata.tenantsInTenantGroupIndex.insert(tenantName).second);
+			ASSERT(self->metadata.tenantMap.count(tenantId));
+			self->metadata.tenantGroupIndex[tenantGroupName].insert(tenantId);
+			ASSERT(self->metadata.tenantsInTenantGroupIndex.insert(tenantId).second);
 		}
 		ASSERT(self->metadata.tenantGroupIndex.size() == self->metadata.tenantGroupMap.size());
 
@@ -176,18 +177,18 @@ private:
 					ASSERT(pairMapEntry.assignedCluster.get() == tenantMapEntry.assignedCluster.get());
 					ASSERT(pairMapEntry.renamePair.present());
 					ASSERT(pairMapEntry.renamePair.get() == tenantName);
-					if (tenantMapEntry.tenantState == TenantState::RENAMING_FROM) {
-						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_TO);
-					} else if (tenantMapEntry.tenantState == TenantState::RENAMING_TO) {
-						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_FROM);
-					} else if (tenantMapEntry.tenantState == TenantState::REMOVING) {
-						ASSERT(pairMapEntry.tenantState == TenantState::REMOVING);
+					if (tenantMapEntry.tenantState == TenantAPI::TenantState::RENAMING_FROM) {
+						ASSERT(pairMapEntry.tenantState == TenantAPI::TenantState::RENAMING_TO);
+					} else if (tenantMapEntry.tenantState == TenantAPI::TenantState::RENAMING_TO) {
+						ASSERT(pairMapEntry.tenantState == TenantAPI::TenantState::RENAMING_FROM);
+					} else if (tenantMapEntry.tenantState == TenantAPI::TenantState::REMOVING) {
+						ASSERT(pairMapEntry.tenantState == TenantAPI::TenantState::REMOVING);
 					} else {
 						ASSERT(false); // Entry in an invalid state if we have a rename pair
 					}
 				}
 			} else {
-				ASSERT(tenantMapEntry.tenantState == TenantState::READY);
+				ASSERT(tenantMapEntry.tenantState == TenantAPI::TenantState::READY);
 				ASSERT(!tenantMapEntry.assignedCluster.present());
 				ASSERT(!tenantMapEntry.renamePair.present());
 			}

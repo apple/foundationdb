@@ -69,14 +69,23 @@ private:
 	                                        KeyRangeRef kr,
 	                                        RangeResult* results,
 	                                        GetRangeLimits limitsHint) {
-		std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+		std::vector<std::pair<TenantName, int64_t>> tenants =
 		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
+		// TODO: this is doing point lookups for all tenants to get metadata. Should we change this to just report IDs?
+		state std::vector<Future<TenantMapEntry>> tenantFutures;
 		for (auto tenant : tenants) {
-			std::string jsonString = tenant.second.toJson();
+			tenantFutures.push_back(TenantAPI::getTenantTransaction(&ryw->getTransaction(), tenant.first));
+		}
+
+		wait(waitForAll(tenantFutures));
+
+		for (auto tenant : tenantFutures) {
+			std::string jsonString = tenant.get().toJson();
 			ValueRef tenantEntryBytes(results->arena(), jsonString);
-			results->push_back(results->arena(),
-			                   KeyValueRef(withTenantMapPrefix(tenant.first, results->arena()), tenantEntryBytes));
+			results->push_back(
+			    results->arena(),
+			    KeyValueRef(withTenantMapPrefix(tenant.get().tenantName, results->arena()), tenantEntryBytes));
 		}
 
 		return Void();
@@ -110,8 +119,7 @@ private:
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state TenantMapEntry tenantEntry;
-		tenantEntry.setId(tenantId);
+		state TenantMapEntry tenantEntry(tenantId, tenantName);
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);
@@ -122,7 +130,7 @@ private:
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
-		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
+		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantEntry));
 
 		return entry.second;
 	}
@@ -180,7 +188,7 @@ private:
 			}
 		}
 
-		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, originalEntry, updatedEntry));
+		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), originalEntry, updatedEntry));
 		return Void();
 	}
 
@@ -190,7 +198,7 @@ private:
 		state Optional<TenantMapEntry> tenantEntry =
 		    wait(TenantAPI::tryGetTenantTransaction(&ryw->getTransaction(), tenantName));
 		if (tenantEntry.present()) {
-			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantEntry.get().id));
 			if (tenantEntry.get().tenantGroup.present()) {
 				(*tenantGroupNetTenantDelta)[tenantEntry.get().tenantGroup.get()]--;
 			}
@@ -203,7 +211,7 @@ private:
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant,
 	                                            std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(
+		state std::vector<std::pair<TenantName, int64_t>> tenants = wait(
 		    TenantAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
 		if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
@@ -217,10 +225,7 @@ private:
 
 		std::vector<Future<Void>> deleteFutures;
 		for (auto tenant : tenants) {
-			deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
-			if (tenant.second.tenantGroup.present()) {
-				(*tenantGroupNetTenantDelta)[tenant.second.tenantGroup.get()]--;
-			}
+			deleteFutures.push_back(deleteSingleTenant(ryw, tenant.first, tenantGroupNetTenantDelta));
 		}
 
 		wait(waitForAll(deleteFutures));

@@ -24,6 +24,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -84,7 +85,7 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantIdIndex(&proxyCommitData_.tenantIdIndex), initialCommit(initialCommit_) {}
+	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -133,8 +134,10 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::unordered_map<int64_t, TenantNameUniqueSet>* tenantIdIndex = nullptr;
+	std::map<int64_t, TenantName>* tenantMap = nullptr;
+
+	// TODO: does this have the restore problem where the same name may have multiple IDs?
+	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -660,27 +663,43 @@ private:
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
-		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
-		if (m.param1.startsWith(prefix)) {
-			TenantName tenantName = m.param1.removePrefix(prefix);
-			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+		KeyRef tenantMapPrefix = TenantMetadata::tenantMap().subspace.begin;
+		if (m.param1.startsWith(tenantMapPrefix)) {
+			KeyRef tenantPrefix = m.param1.removePrefix(tenantMapPrefix);
+
+			int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
+			TenantName tenantName;
+
+			if (!initialCommit) {
+				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+
+				ASSERT(tenantId == tenantEntry.id);
+
+				tenantName = tenantEntry.tenantName;
+				txnStateStore->set(
+				    KeyValueRef(m.param1, TenantTxnStateStoreEntry(tenantName, tenantEntry.tenantLockState).encode()));
+
+				TraceEvent("CommitProxyInsertTenant", dbgid)
+				    .detail("TenantName", tenantEntry.tenantName)
+				    .detail("TenantId", tenantId)
+				    .detail("Version", version);
+
+			} else {
+				TenantTxnStateStoreEntry tenantEntry = TenantTxnStateStoreEntry::decode(m.param2);
+				tenantName = tenantEntry.tenantName;
+
+				TraceEvent("CommitProxyRecoverTenant", dbgid)
+				    .detail("TenantId", tenantId)
+				    .detail("Version", version)
+				    .detail("LockState", TenantAPI::tenantLockStateToString(tenantEntry.tenantLockState));
+			}
 
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-
-				TraceEvent("CommitProxyInsertTenant", dbgid)
-				    .detail("Tenant", tenantName)
-				    .detail("Id", tenantEntry.id)
-				    .detail("Version", version);
-
-				(*tenantMap)[tenantName] = tenantEntry;
-				if (tenantIdIndex) {
-					(*tenantIdIndex)[tenantEntry.id].insert(tenantName);
-				}
+				(*(tenantMap))[tenantId] = tenantName;
 			}
-
-			if (!initialCommit) {
-				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			if (tenantNameIndex) {
+				(*tenantNameIndex)[tenantName] = tenantId;
 			}
 
 			// For now, this goes to all storage servers.
@@ -696,6 +715,7 @@ private:
 
 				MutationRef privatized = m;
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+				privatized.param2 = ""_sr;
 				writeMutation(privatized);
 			}
 
@@ -1079,6 +1099,22 @@ private:
 		confChange = true;
 	}
 
+	int64_t prefixToTenantId(StringRef prefix) {
+		if (prefix.empty()) {
+			return 0;
+		} else if (prefix.size() > 8) {
+			return TenantAPI::prefixToId(prefix.substr(0, 8)) + 1;
+		} else if (prefix.size() == 8) {
+			return TenantAPI::prefixToId(prefix.substr(0, 8));
+		} else {
+			Key extended = makeString(8);
+			uint8_t* bytes = mutateString(extended);
+			prefix.copyTo(bytes);
+			memset(bytes, 0, 8 - prefix.size());
+			return TenantAPI::prefixToId(extended);
+		}
+	}
+
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
 		if (subspace.intersects(range)) {
@@ -1089,26 +1125,19 @@ private:
 				StringRef endTenant =
 				    range.end.startsWith(subspace.begin) ? range.end.removePrefix(subspace.begin) : "\xff\xff"_sr;
 
+				int64_t startTenantId = prefixToTenantId(startTenant);
+				int64_t endTenantId = prefixToTenantId(endTenant);
+
 				TraceEvent("CommitProxyEraseTenants", dbgid)
-				    .detail("BeginTenant", startTenant)
-				    .detail("EndTenant", endTenant)
+				    .detail("BeginTenant", startTenantId)
+				    .detail("EndTenant", endTenantId)
 				    .detail("Version", version);
 
-				auto startItr = tenantMap->lower_bound(startTenant);
-				auto endItr = tenantMap->lower_bound(endTenant);
+				auto startItr = tenantMap->lower_bound(startTenantId);
+				auto endItr = tenantMap->lower_bound(endTenantId);
 
-				if (tenantIdIndex) {
-					// Iterate over iterator-range and remove entries from TenantIdName map
-					// TODO: O(n) operation, optimize cpu
-					auto itr = startItr;
-					while (itr != endItr) {
-						auto indexItr = tenantIdIndex->find(itr->second.id);
-						ASSERT(indexItr != tenantIdIndex->end());
-						if (indexItr->second.remove(itr->first)) {
-							tenantIdIndex->erase(indexItr);
-						}
-						itr++;
-					}
+				for (auto itr = startItr; itr != endItr; ++itr) {
+					ASSERT(tenantNameIndex->erase(itr->second));
 				}
 
 				tenantMap->erase(startItr, endItr);

@@ -339,7 +339,7 @@ public:
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
 		StringRef prefix = key.substr(0, TenantAPI::PREFIX_SIZE);
-		int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+		int64_t tenantId = TenantAPI::prefixToId(prefix);
 		// Tenant id must be non-negative.
 		if (tenantId < 0) {
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };

@@ -499,11 +499,11 @@ Future<Void> loadBlobMetadataForTenant(BGTenantMap* self, BlobMetadataDomainId d
 }
 
 // list of tenants that may or may not already exist
-void BGTenantMap::addTenants(std::vector<std::pair<TenantName, TenantMapEntry>> tenants) {
+void BGTenantMap::addTenants(std::vector<std::pair<int64_t, TenantMapEntry>> tenants) {
 	std::vector<BlobMetadataDomainId> tenantsToLoad;
 	for (auto entry : tenants) {
-		if (tenantInfoById.insert({ entry.second.id, entry.second }).second) {
-			auto r = makeReference<GranuleTenantData>(entry.first, entry.second);
+		if (tenantInfoById.insert({ entry.first, entry.second }).second) {
+			auto r = makeReference<GranuleTenantData>(entry.second.tenantName, entry.second);
 			tenantData.insert(KeyRangeRef(entry.second.prefix, entry.second.prefix.withSuffix(normalKeys.end)), r);
 			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 				r->bstoreLoaded.send(Void());

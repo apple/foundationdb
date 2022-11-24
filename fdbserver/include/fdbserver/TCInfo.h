@@ -261,7 +261,9 @@ public:
 	TCTenantInfo(TenantInfo tinfo, Key prefix) : m_tenantInfo(tinfo), m_prefix(prefix) {}
 	std::vector<Reference<TCTeamInfo>>& teams() { return m_tenantTeams; }
 
-	TenantName name() const { return m_tenantInfo.name.get(); }
+	// TENANT_FIXME
+	// TenantName name() const { return m_tenantInfo.name.get(); }
+	int64_t id() const { return m_tenantInfo.tenantId; }
 	std::string prefixDesc() const { return m_prefix.printable(); }
 
 	void addTeam(TCTeamInfo team);

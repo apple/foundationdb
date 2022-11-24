@@ -986,7 +986,7 @@ struct TenantManagementWorkload : TestWorkload {
 			assignedCluster = ClusterNameRef(assignedClusterStr);
 		}
 
-		TenantMapEntry entry(id, TenantNameRef(name), TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup);
+		TenantMapEntry entry(id, TenantNameRef(name), TenantAPI::stringToTenantState(tenantStateStr), tenantGroup);
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}

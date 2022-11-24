@@ -1459,6 +1459,16 @@ public:
 	}
 };
 
+ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx,
+                                                     int64_t tenantId,
+                                                     Optional<TenantName> tenantName)
+  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenantId, tenantName), cache(&arena), writes(&arena),
+    retries(0), approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
+    specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
+	std::copy(
+	    cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
+	applyPersistentOptions();
+}
 ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenantName)
   : ISingleThreadTransaction(cx->deferredError), tr(cx, tenantName), cache(&arena), writes(&arena), retries(0),
     approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),

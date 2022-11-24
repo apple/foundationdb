@@ -32,7 +32,6 @@ struct TenantInfo {
 	static constexpr const int64_t INVALID_TENANT = -1;
 
 	Arena arena;
-	Optional<TenantNameRef> name;
 	int64_t tenantId;
 	Optional<StringRef> prefix;
 	Optional<StringRef> token;
@@ -53,12 +52,7 @@ struct TenantInfo {
 	bool hasTenant() const { return tenantId != INVALID_TENANT; }
 
 	TenantInfo() : tenantId(INVALID_TENANT) {}
-	TenantInfo(Optional<TenantName> const& tenantName, Optional<Standalone<StringRef>> const& token, int64_t tenantId)
-	  : tenantId(tenantId) {
-		if (tenantName.present()) {
-			arena.dependsOn(tenantName.get().arena());
-			name = tenantName.get();
-		}
+	TenantInfo(int64_t tenantId, Optional<Standalone<StringRef>> const& token) : tenantId(tenantId) {
 		if (token.present()) {
 			arena.dependsOn(token.get().arena());
 			this->token = token.get();
@@ -78,11 +72,12 @@ template <>
 struct serializable_traits<TenantInfo> : std::true_type {
 	template <class Archiver>
 	static void serialize(Archiver& ar, TenantInfo& v) {
-		serializer(ar, v.name, v.tenantId, v.token, v.arena);
+		serializer(ar, v.tenantId, v.token, v.arena);
 		if constexpr (Archiver::isDeserializing) {
 			bool tenantAuthorized = FLOW_KNOBS->ALLOW_TOKENLESS_TENANT_ACCESS;
-			if (!tenantAuthorized && v.name.present() && v.token.present()) {
-				tenantAuthorized = TokenCache::instance().validate(v.name.get(), v.token.get());
+			if (!tenantAuthorized && v.tenantId != TenantInfo::INVALID_TENANT && v.token.present()) {
+				// FIXME
+				tenantAuthorized = TokenCache::instance().validate(""_sr /*v.tenantId*/, v.token.get());
 			}
 			v.trusted = FlowTransport::transport().currentDeliveryPeerIsTrusted();
 			v.tenantAuthorized = tenantAuthorized;

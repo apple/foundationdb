@@ -97,6 +97,7 @@ ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange key
 
 // TODO: versioned like SS has?
 struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
+	// TENANT_FIXME: does this need name or should it be ID?
 	TenantName name;
 	TenantMapEntry entry;
 	Reference<BlobConnectionProvider> bstore;
@@ -120,7 +121,7 @@ struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
 // TODO: add refreshing
 struct BGTenantMap {
 public:
-	void addTenants(std::vector<std::pair<TenantName, TenantMapEntry>>);
+	void addTenants(std::vector<std::pair<int64_t, TenantMapEntry>>);
 	void removeTenants(std::vector<int64_t> tenantIds);
 
 	Optional<TenantMapEntry> getTenantById(int64_t id);

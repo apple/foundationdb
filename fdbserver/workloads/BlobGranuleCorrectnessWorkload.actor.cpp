@@ -278,7 +278,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		state int directoryIdx = 0;
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
 		state BGTenantMap tenantData(self->dbInfo);
 		state Reference<GranuleTenantData> data;
 		for (; directoryIdx < self->directories.size(); directoryIdx++) {
@@ -288,7 +288,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			self->directories[directoryIdx]->tenant = tenantEntry;
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
-			tenants.push_back({ self->directories[directoryIdx]->tenantName, tenantEntry });
+			tenants.push_back({ self->directories[directoryIdx]->tenant.id, tenantEntry });
 			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
 			ASSERT(_success);
 		}

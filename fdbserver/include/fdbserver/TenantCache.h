@@ -35,7 +35,7 @@ typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 struct Storage {
 	int64_t quota = std::numeric_limits<int64_t>::max();
 	int64_t usage = 0;
-	std::unordered_set<TenantName> tenants;
+	std::unordered_set<int64_t> tenants;
 };
 typedef std::unordered_map<TenantGroupName, Storage> TenantStorageMap;
 
@@ -64,17 +64,17 @@ private:
 	// mark the start of a new sweep of the tenant cache
 	void startRefresh();
 
-	void insert(TenantName& tenantName, TenantMapEntry& tenant);
-	void keep(TenantName& tenantName, TenantMapEntry& tenant);
+	void insert(int64_t tenantId, TenantMapEntry& tenant);
+	void keep(int64_t tenantId, TenantMapEntry& tenant);
 
 	// return true if a new tenant is inserted into the cache
-	bool update(TenantName& tenantName, TenantMapEntry& tenant);
+	bool update(int64_t tenantId, TenantMapEntry& tenant);
 
 	// return count of tenants that were found to be stale and removed from the cache
 	int cleanup();
 
-	// return all the TenantName for all tenants stored in the cache
-	std::vector<TenantName> getTenantList() const;
+	// return all the tenant IDs for all tenants stored in the cache
+	std::vector<int64_t> getTenantList() const;
 
 	UID id() const { return distributorID; }
 
@@ -102,5 +102,5 @@ public:
 	Optional<Reference<TCTenantInfo>> tenantOwning(KeyRef key) const;
 
 	// Get the list of tenants where the storage bytes currently used is greater than the quota allocated
-	std::unordered_set<TenantName> getTenantsOverQuota() const;
+	std::unordered_set<int64_t> getTenantsOverQuota() const;
 };

@@ -237,8 +237,6 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
-
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	Optional<Standalone<StringRef>> authToken;
@@ -280,13 +278,14 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
-	                 Optional<TenantName> tenant,
+	                 int64_t tenantId,
+	                 Optional<TenantName> tenantName,
 	                 TaskPriority taskID,
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidId = AllowInvalidTenantID::False);
+	TenantInfo getTenantInfo();
 
 	Optional<TenantName> const& tenant();
 	bool hasTenant() const;
@@ -297,8 +296,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 			tenantId_ = tenantId;
 		}
 	}
-
-	Future<Void> handleUnknownTenant();
 
 private:
 	Optional<TenantName> tenant_;
@@ -313,6 +310,10 @@ class Tenant {
 
 class Transaction : NonCopyable {
 public:
+	explicit Transaction(Database const& cx,
+	                     int64_t tenantId,
+	                     Optional<TenantName> const& tenant = Optional<TenantName>());
+	// TENANT_FIXME: remove this constructor
 	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
 	~Transaction();
 

@@ -254,7 +254,7 @@ private:
 		state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterTenantList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterTenantGroups;
 
-		state TenantConsistencyCheck<IDatabase> tenantConsistencyCheck(dataDb);
+		state TenantConsistencyCheck<IDatabase, TenantMapEntry> tenantConsistencyCheck(dataDb);
 		wait(tenantConsistencyCheck.run());
 
 		loop {
@@ -335,7 +335,7 @@ private:
 	}
 
 	ACTOR static Future<Void> run(MetaclusterConsistencyCheck* self) {
-		state TenantConsistencyCheck<DB> managementTenantConsistencyCheck(self->managementDb);
+		state TenantConsistencyCheck<DB, MetaclusterTenantMapEntry> managementTenantConsistencyCheck(self->managementDb);
 		wait(managementTenantConsistencyCheck.run());
 		wait(loadManagementClusterMetadata(self));
 		self->validateManagementCluster();

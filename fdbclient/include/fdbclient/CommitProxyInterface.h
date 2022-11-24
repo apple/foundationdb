@@ -366,7 +366,6 @@ struct GetReadVersionRequest : TimedRequest {
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
-	TenantMapEntry tenantEntry;
 	std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> results;
 
 	// if any storage servers in results have a TSS pair, that mapping is in here
@@ -381,7 +380,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, tenantEntry, resultsTagMapping, arena);
+		serializer(ar, results, resultsTssMapping, resultsTagMapping, arena);
 	}
 };
 

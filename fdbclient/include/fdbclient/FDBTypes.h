@@ -594,7 +594,7 @@ KeyRef keyBetween(const KeyRangeRef& keys);
 // Returns a randomKey between keys. If it's impossible, return keys.end.
 Key randomKeyBetween(const KeyRangeRef& keys);
 
-KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix);
 
 struct KeySelectorRef {
 private:
