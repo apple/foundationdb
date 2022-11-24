@@ -33,7 +33,11 @@ def version_from_str(ver_str):
 
 def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
-    return ver_tuple[0] * 100 + ver_tuple[1] * 10
+    if ver_tuple[0] > 70:
+        # Latest open-source API Version supported by the Snowflake release
+        return ver_tuple[0] * 10
+    else:
+        return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
 
 def version_before(ver_str1, ver_str2):

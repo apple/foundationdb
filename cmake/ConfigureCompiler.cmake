@@ -27,6 +27,7 @@ env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation
 env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 env_set(FULL_DEBUG_SYMBOLS OFF BOOL "Generate full debug symbols")
 env_set(ENABLE_LONG_RUNNING_TESTS OFF BOOL "Add a long running tests package")
+env_set(COMPATIBLE_WITH_SNOWFLAKE_RELEASES OFF BOOL "Build binaries compatible with Snowflake releases")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)

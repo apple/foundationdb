@@ -8,11 +8,20 @@
 # used and should not be changed from 0.
 #                                                          xyzdev
 #                                                          vvvv
+
+if (COMPATIBLE_WITH_SNOWFLAKE_RELEASES)
+set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00C072000000LL")
+set(FDB_PV_FUTURE_VERSION                       "0x0FDB00C073000000LL")
+set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00C074000000LL")
+set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00C100000000LL")
+else()
 set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00B072000000LL")
 set(FDB_PV_FUTURE_VERSION                       "0x0FDB00B073000000LL")
-set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00B071000000LL")
 set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00B074000000LL")
 set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00B100000000LL")
+endif()
+
+set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00B071000000LL")
 set(FDB_PV_LSB_MASK                             "0xF0FFFFLL")
 
 # The 5th digit from right is dev version, for example, 2 in 0x0FDB00B061020000LL;
