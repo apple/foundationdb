@@ -2232,10 +2232,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ASSERT(!a.checkpoints.empty());
 
-			PhysicalShard* ps = nullptr;
-			for (const KeyRange& range : a.ranges) {
-				ps = a.shardManager->addRange(range, a.shardId);
-			}
+			PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.ranges);
+			ASSERT(ps != nullptr);
 
 			const CheckpointFormat format = a.checkpoints[0].getFormat();
 			for (int i = 1; i < a.checkpoints.size(); ++i) {
@@ -2945,6 +2943,18 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> restore(const std::string& shardId,
 	                     const std::vector<KeyRange>& ranges,
 	                     const std::vector<CheckpointMetaData>& checkpoints) override {
+		for (const KeyRange& range : ranges) {
+			std::vector<DataShard*> shards = shardManager.getDataShardsByRange(range);
+			if (!shards.empty()) {
+				TraceEvent(SevWarnAlways, "RestoreRangesNotEmpty", id)
+				    .detail("Range", range)
+				    .detail("RestoreShardID", shardId);
+				throw failed_to_restore_checkpoint();
+			}
+		}
+		for (const KeyRange& range : ranges) {
+			shardManager.addRange(range, shardId);
+		}
 		auto a = new Writer::RestoreAction(&shardManager, path, shardId, ranges, checkpoints);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
