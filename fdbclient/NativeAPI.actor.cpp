@@ -8896,6 +8896,8 @@ static Future<Void> createCheckpointImpl(T tr,
 	ASSERT(actionId.present());
 	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Ranges", describe(ranges));
 
+	// Only the first range is used to look up the location, since we assume all ranges are hosted by a single shard.
+	// The operation will fail on the storage server otherwise.
 	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, ranges[0]));
 	ASSERT(!keyServers.more);
 

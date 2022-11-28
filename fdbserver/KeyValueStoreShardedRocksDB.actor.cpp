@@ -49,7 +49,7 @@ static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
 
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
-const std::string SPECIAL_KEYS_SHARD_ID = "default";
+const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
 // TODO: move constants to a header file.
 const KeyRef persistVersion = "\xff\xffVersion"_sr;
@@ -599,7 +599,7 @@ struct PhysicalShard {
 		readIterPool.reset();
 
 		// Deleting default column family is not allowed.
-		if (id == SPECIAL_KEYS_SHARD_ID) {
+		if (id == DEFAULT_CF_NAME) {
 			return;
 		}
 
@@ -765,7 +765,7 @@ public:
 		// Add default column family if it's a newly opened database.
 		if (descriptors.size() == 0) {
 			descriptors.push_back(
-			    rocksdb::ColumnFamilyDescriptor{ SPECIAL_KEYS_SHARD_ID, rocksdb::ColumnFamilyOptions(dbOptions) });
+			    rocksdb::ColumnFamilyDescriptor{ DEFAULT_CF_NAME, rocksdb::ColumnFamilyOptions(dbOptions) });
 		}
 
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
@@ -792,7 +792,7 @@ public:
 
 			std::set<std::string> unusedShards(columnFamilies.begin(), columnFamilies.end());
 			unusedShards.erase(METADATA_SHARD_ID);
-			unusedShards.erase(SPECIAL_KEYS_SHARD_ID);
+			unusedShards.erase(DEFAULT_CF_NAME);
 
 			KeyRange keyRange = prefixRange(shardMappingPrefix);
 			while (true) {
@@ -867,7 +867,7 @@ public:
 
 			// Add SpecialKeys range. This range should not be modified.
 			std::shared_ptr<PhysicalShard> defaultShard =
-			    std::make_shared<PhysicalShard>(db, SPECIAL_KEYS_SHARD_ID, handles[0]);
+			    std::make_shared<PhysicalShard>(db, DEFAULT_CF_NAME, handles[0]);
 			columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
 			std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(specialKeys, defaultShard.get());
 			dataShardMap.insert(specialKeys, dataShard.get());
@@ -909,7 +909,7 @@ public:
 	}
 
 	PhysicalShard* getSpecialKeysShard() {
-		auto it = physicalShards.find(SPECIAL_KEYS_SHARD_ID);
+		auto it = physicalShards.find(DEFAULT_CF_NAME);
 		ASSERT(it != physicalShards.end());
 		return it->second.get();
 	}
@@ -926,10 +926,11 @@ public:
 		for (const auto& range : ranges) {
 			auto rangeIterator = this->dataShardMap.intersectingRanges(range);
 			for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
-				if (it.value() == nullptr || it.value()->physicalShard == nullptr) {
-					TraceEvent(SevWarn, "ShardedRocksDBRangeNotOnShard", logId).detail("Range", range);
+				if (it.value() == nullptr) {
+					TraceEvent(SevWarn, "ShardedRocksDBRangeNotInKVS", logId).detail("Range", range);
 					return nullptr;
 				} else {
+					ASSERT(it.value()->physicalShard != nullptr);
 					PhysicalShard* ps = it.value()->physicalShard;
 					if (result == nullptr) {
 						result = ps;
@@ -3275,7 +3276,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("m"_sr, "n"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("u"_sr, "v"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("x"_sr, "z"_sr)), "shard-1"));
-	mapping.push_back(std::make_pair(specialKeys, SPECIAL_KEYS_SHARD_ID));
+	mapping.push_back(std::make_pair(specialKeys, DEFAULT_CF_NAME));
 
 	for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
 		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
