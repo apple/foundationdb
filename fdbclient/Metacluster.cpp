@@ -39,6 +39,8 @@ std::string clusterTypeToString(const ClusterType& clusterType) {
 
 std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState) {
 	switch (clusterState) {
+	case DataClusterState::REGISTERING:
+		return "registering";
 	case DataClusterState::READY:
 		return "ready";
 	case DataClusterState::REMOVING:
@@ -51,7 +53,9 @@ std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState
 }
 
 DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
-	if (stateStr == "ready") {
+	if (stateStr == "registering") {
+		return DataClusterState::REGISTERING;
+	} else if (stateStr == "ready") {
 		return DataClusterState::READY;
 	} else if (stateStr == "removing") {
 		return DataClusterState::REMOVING;

@@ -236,7 +236,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_cluster_removed) {
+			if (e.code() != error_code_cluster_removed && e.code() != error_code_invalid_metacluster_operation) {
 				TraceEvent(SevError, "ConfigureClusterFailure").error(e).detail("ClusterName", clusterName);
 			}
 		}

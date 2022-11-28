@@ -57,11 +57,13 @@ std::string clusterTypeToString(const ClusterType& clusterType);
 
 // Represents the various states that a data cluster could be in.
 //
+// REGISTERING - the data cluster is in the process of being registered and cannot have its
+//				 configuration changed or any tenants created/updated/deleted
 // READY - the data cluster is active
 // REMOVING - the data cluster is being removed and cannot have its configuration changed or any tenants created
 // RESTORING - the data cluster is being restored and cannot have its configuration changed or any tenants
 //             created/updated/deleted.
-enum class DataClusterState { READY, REMOVING, RESTORING };
+enum class DataClusterState { REGISTERING, READY, REMOVING, RESTORING };
 
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;
