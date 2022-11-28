@@ -48,4 +48,11 @@ inline bool isEncryptionOpSupported(EncryptOperationType operation_type) {
 	}
 }
 
+inline bool isEncryptionOpSupported(EncryptOperationType operation_type, EncryptionAtRestMode encryptMode) {
+	if (operation_type == BLOB_GRANULE_ENCRYPTION) {
+		return encryptMode.isEncryptionEnabled() && SERVER_KNOBS->BG_METADATA_SOURCE == "tenant";
+	}
+	return encryptMode.isEncryptionEnabled();
+}
+
 #endif // FDBSERVER_ENCRYPTION_OPS_UTIL_H
