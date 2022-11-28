@@ -89,6 +89,15 @@ struct CheckpointMetaData {
 		return false;
 	}
 
+	bool hasRanges(const std::vector<KeyRange>& ranges) const {
+		for (const auto& range : ranges) {
+			if (!this->hasRange(range)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool operator==(const CheckpointMetaData& r) const { return checkpointID == r.checkpointID; }
 
 	std::string toString() const {

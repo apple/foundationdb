@@ -2358,9 +2358,11 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	    .detail("Ranges", describe(req.ranges))
 	    .detail("Format", static_cast<int>(req.format));
 	ASSERT(req.ranges.size() == 1);
-	if (!self->isReadable(req.ranges.front())) {
-		req.reply.sendError(wrong_shard_server());
-		return Void();
+	for (const auto& range : req.ranges) {
+		if (!self->isReadable(range)) {
+			req.reply.sendError(wrong_shard_server());
+			return Void();
+		}
 	}
 
 	try {
@@ -2368,7 +2370,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 		for (; it != self->checkpoints.end(); ++it) {
 			const CheckpointMetaData& md = it->second;
 			if (md.version == req.version && md.format == req.format && req.actionId == md.actionId &&
-			    md.hasRange(req.ranges[0]) && md.getState() == CheckpointMetaData::Complete) {
+			    md.hasRanges(req.ranges) && md.getState() == CheckpointMetaData::Complete) {
 				req.reply.send(md);
 				TraceEvent(SevDebug, "ServeGetCheckpointEnd", self->thisServerID).detail("Checkpoint", md.toString());
 				break;
