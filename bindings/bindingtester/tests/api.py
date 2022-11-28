@@ -154,6 +154,8 @@ class ApiTest(Test):
         snapshot_reads = [x + '_SNAPSHOT' for x in reads]
         database_reads = [x + '_DATABASE' for x in reads]
         database_mutations = [x + '_DATABASE' for x in mutations]
+        tenant_reads = [x + '_TENANT' for x in reads]
+        tenant_mutations = [x + '_TENANT' for x in mutations]
         mutations += ['VERSIONSTAMP']
         versions = ['GET_READ_VERSION', 'SET_READ_VERSION', 'GET_COMMITTED_VERSION']
         snapshot_versions = ['GET_READ_VERSION_SNAPSHOT']
@@ -183,6 +185,8 @@ class ApiTest(Test):
 
         if not args.no_tenants:
             op_choices += tenants
+            op_choices += tenant_reads
+            op_choices += tenant_mutations
 
         idempotent_atomic_ops = ['BIT_AND', 'BIT_OR', 'MAX', 'MIN', 'BYTE_MIN', 'BYTE_MAX']
         atomic_ops = idempotent_atomic_ops + ['ADD', 'BIT_XOR', 'APPEND_IF_FITS']
