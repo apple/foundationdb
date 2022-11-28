@@ -1860,18 +1860,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			state Future<Void> doMoveKeys =
-			    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
-			                                                 rd.keys,
-			                                                 destIds,
-			                                                 healthyIds,
-			                                                 self->lock,
-			                                                 dataMovementComplete,
-			                                                 &self->startMoveKeysParallelismLock,
-			                                                 &self->finishMoveKeysParallelismLock,
-			                                                 self->teamCollections.size() > 1,
-			                                                 relocateShardInterval.pairID,
-			                                                 ddEnabledState,
-			                                                 CancelConflictingDataMoves::False });
+			    self->txnProcessor->moveKeys(MoveKeysParams(rd.dataMoveId,
+			                                                rd.keys,
+			                                                destIds,
+			                                                healthyIds,
+			                                                self->lock,
+			                                                dataMovementComplete,
+			                                                &self->startMoveKeysParallelismLock,
+			                                                &self->finishMoveKeysParallelismLock,
+			                                                self->teamCollections.size() > 1,
+			                                                relocateShardInterval.pairID,
+			                                                ddEnabledState,
+			                                                CancelConflictingDataMoves::False));
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1885,18 +1885,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								extraIds.clear();
 								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
 								doMoveKeys =
-								    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
-								                                                 rd.keys,
-								                                                 destIds,
-								                                                 healthyIds,
-								                                                 self->lock,
-								                                                 Promise<Void>(),
-								                                                 &self->startMoveKeysParallelismLock,
-								                                                 &self->finishMoveKeysParallelismLock,
-								                                                 self->teamCollections.size() > 1,
-								                                                 relocateShardInterval.pairID,
-								                                                 ddEnabledState,
-								                                                 CancelConflictingDataMoves::False });
+								    self->txnProcessor->moveKeys(MoveKeysParams(rd.dataMoveId,
+								                                                rd.keys,
+								                                                destIds,
+								                                                healthyIds,
+								                                                self->lock,
+								                                                Promise<Void>(),
+								                                                &self->startMoveKeysParallelismLock,
+								                                                &self->finishMoveKeysParallelismLock,
+								                                                self->teamCollections.size() > 1,
+								                                                relocateShardInterval.pairID,
+								                                                ddEnabledState,
+								                                                CancelConflictingDataMoves::False));
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {

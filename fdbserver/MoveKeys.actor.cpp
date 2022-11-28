@@ -1241,7 +1241,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 // Set dataMoves[dataMoveId] = DataMoveMetaData.
 ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID dataMoveId,
-                                          KeyRange keys,
+                                          std::vector<KeyRange> ranges,
                                           std::vector<UID> servers,
                                           MoveKeysLock lock,
                                           FlowLock* startMoveKeysLock,
@@ -1257,8 +1257,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 	TraceEvent(SevDebug, "StartMoveShardsBegin", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("TargetRange", keys);
+	    .detail("TargetRange", describe(ranges));
 
+	// TODO: make startMoveShards work with multiple ranges.
+	ASSERT(ranges.size() == 1);
+	state KeyRangeRef keys = ranges[0];
 	try {
 		state Key begin = keys.begin;
 		state KeyRange currentKeys = keys;
@@ -2485,9 +2488,10 @@ Future<Void> rawStartMovement(Database occ,
                               const MoveKeysParams& params,
                               std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
 		return startMoveShards(std::move(occ),
 		                       params.dataMoveId,
-		                       params.keys,
+		                       params.ranges.get(),
 		                       params.destinationTeam,
 		                       params.lock,
 		                       params.startMoveKeysParallelismLock,
@@ -2495,8 +2499,9 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.ddEnabledState,
 		                       params.cancelConflictingDataMoves);
 	}
+	ASSERT(params.keys.present());
 	return startMoveKeys(std::move(occ),
-	                     params.keys,
+	                     params.keys.get(),
 	                     params.destinationTeam,
 	                     params.lock,
 	                     params.startMoveKeysParallelismLock,
@@ -2505,13 +2510,36 @@ Future<Void> rawStartMovement(Database occ,
 	                     params.ddEnabledState);
 }
 
+Future<Void> rawCheckFetchingState(Database cx,
+                                   const MoveKeysParams& params,
+                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
+		// TODO: make startMoveShards work with multiple ranges.
+		ASSERT(params.ranges.size() == 1);
+		return checkFetchingState(occ,
+		                          params.healthyDestinations,
+		                          params.ranges[0],
+		                          params.dataMovementComplete,
+		                          params.relocationIntervalId,
+		                          tssMapping);
+	}
+	ASSERT(params.keys.present());
+	return checkFetchingState(occ,
+	                          params.healthyDestinations,
+	                          params.keys,
+	                          params.dataMovementComplete,
+	                          params.relocationIntervalId,
+	                          tssMapping);
+}
+
 Future<Void> rawFinishMovement(Database occ,
                                const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		return finishMoveShards(std::move(occ),
 		                        params.dataMoveId,
-		                        params.keys,
+		                        params.keys.get(),
 		                        params.destinationTeam,
 		                        params.lock,
 		                        params.finishMoveKeysParallelismLock,
@@ -2521,7 +2549,7 @@ Future<Void> rawFinishMovement(Database occ,
 		                        params.ddEnabledState);
 	}
 	return finishMoveKeys(std::move(occ),
-	                      params.keys,
+	                      params.keys.get(),
 	                      params.destinationTeam,
 	                      params.lock,
 	                      params.finishMoveKeysParallelismLock,
@@ -2539,12 +2567,7 @@ ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
 
 	wait(rawStartMovement(occ, params, tssMapping));
 
-	state Future<Void> completionSignaller = checkFetchingState(occ,
-	                                                            params.healthyDestinations,
-	                                                            params.keys,
-	                                                            params.dataMovementComplete,
-	                                                            params.relocationIntervalId,
-	                                                            tssMapping);
+	state Future<Void> completionSignaller = rawCheckFetchingState(occ, params, tssMapping);
 
 	wait(rawFinishMovement(occ, params, tssMapping));
 

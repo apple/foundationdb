@@ -156,18 +156,18 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 			state Promise<Void> signal;
 			state DDEnabledState ddEnabledState;
 			wait(moveKeys(cx,
-			              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-			                              keys,
-			                              destinationTeamIDs,
-			                              destinationTeamIDs,
-			                              lock,
-			                              signal,
-			                              &fl1,
-			                              &fl2,
-			                              false,
-			                              relocateShardInterval.pairID,
-			                              &ddEnabledState,
-			                              CancelConflictingDataMoves::True }));
+			              MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			                             keys,
+			                             destinationTeamIDs,
+			                             destinationTeamIDs,
+			                             lock,
+			                             signal,
+			                             &fl1,
+			                             &fl2,
+			                             false,
+			                             relocateShardInterval.pairID,
+			                             &ddEnabledState,
+			                             CancelConflictingDataMoves::True)));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {
