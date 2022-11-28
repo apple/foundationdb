@@ -1633,7 +1633,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId).detail("Version", "4.6");
 
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
 		wait(restorePersistentState(&self, locality));
 
 		self.sharedActors.send(cleanupPeekTrackers(&self));

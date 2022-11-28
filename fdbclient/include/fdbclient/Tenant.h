@@ -235,7 +235,6 @@ struct TenantNameUniqueSet {
 		return tenantNames.empty();
 	}
 };
-
-class TenantPrefixIndex : public VersionedMap<Key, TenantNameUniqueSet>, public ReferenceCounted<TenantPrefixIndex> {};
+typedef VersionedMap<Key, TenantNameUniqueSet> TenantPrefixIndex;
 
 #endif
