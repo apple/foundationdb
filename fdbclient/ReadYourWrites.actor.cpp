@@ -2446,7 +2446,7 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 	case FDBTransactionOptions::READ_YOUR_WRITES_DISABLE:
 		validateOptionValueNotPresent(value);
 
-		if (!reading.isReady() || !cache.empty() || !writes.empty())
+		if (reading.began() || !cache.empty() || !writes.empty())
 			throw client_invalid_operation();
 
 		options.readYourWritesDisabled = true;
