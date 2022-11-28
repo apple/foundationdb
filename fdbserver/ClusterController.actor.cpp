@@ -23,8 +23,10 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <tuple>
 #include <vector>
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
@@ -691,7 +693,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	WorkerDetails newMGWorker;
 	if (self->db.blobGranulesEnabled.get()) {
 		newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			newMGWorker = findNewProcessForSingleton(self, ProcessClass::BlobMigrator, id_used);
 		}
 	}
@@ -710,7 +712,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	ProcessClass::Fitness bestFitnessForMG;
 	if (self->db.blobGranulesEnabled.get()) {
 		bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			bestFitnessForMG = findBestFitnessForSingleton(self, newMGWorker, ProcessClass::BlobManager);
 		}
 	}
@@ -744,7 +746,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (self->db.blobGranulesEnabled.get()) {
 		bmHealthy = isHealthySingleton<BlobManagerInterface>(
 		    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			mgHealthy = isHealthySingleton<BlobMigratorInterface>(
 			    self, newMGWorker, mgSingleton, bestFitnessForMG, self->recruitingBlobMigratorID);
 		}
@@ -775,7 +777,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (self->db.blobGranulesEnabled.get()) {
 		currBMProcessId = bmSingleton.interface.get().locality.processId();
 		newBMProcessId = newBMWorker.interf.locality.processId();
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			currMGProcessId = mgSingleton.interface.get().locality.processId();
 			newMGProcessId = newMGWorker.interf.locality.processId();
 		}
@@ -792,7 +794,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (self->db.blobGranulesEnabled.get()) {
 		currPids.emplace_back(currBMProcessId);
 		newPids.emplace_back(newBMProcessId);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			currPids.emplace_back(currMGProcessId);
 			newPids.emplace_back(newMGProcessId);
 		}
@@ -810,7 +812,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (!self->db.blobGranulesEnabled.get()) {
 		ASSERT(currColocMap[currBMProcessId] == 0);
 		ASSERT(newColocMap[newBMProcessId] == 0);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			ASSERT(currColocMap[currMGProcessId] == 0);
 			ASSERT(newColocMap[newMGProcessId] == 0);
 		}
@@ -836,7 +838,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			ddSingleton.recruit(self);
 		} else if (self->db.blobGranulesEnabled.get() && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
 			bmSingleton.recruit(self);
-		} else if (self->db.blobGranulesEnabled.get() && isFullRestoreMode() &&
+		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get() &&
 		           newColocMap[newMGProcessId] < currColocMap[currMGProcessId]) {
 			mgSingleton.recruit(self);
 		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
@@ -1404,13 +1406,13 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
 	}
 
-	if (self->db.blobGranulesEnabled.get() && isFullRestoreMode() && req.blobManagerInterf.present()) {
+	if (self->db.blobGranulesEnabled.get() && req.blobManagerInterf.present()) {
 		auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
 		auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
 		haltRegisteringOrCurrentSingleton<BlobManagerInterface>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
 	}
-	if (req.blobMigratorInterf.present()) {
+	if (req.blobMigratorInterf.present() && self->db.blobRestoreEnabled.get()) {
 		auto currSingleton = BlobMigratorSingleton(self->db.serverInfo->get().blobMigrator);
 		auto registeringSingleton = BlobMigratorSingleton(req.blobMigratorInterf);
 		haltRegisteringOrCurrentSingleton<BlobMigratorInterface>(
@@ -2553,6 +2555,43 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state Key blobRestoreCommandKey = blobRestoreCommandKeyFor(normalKeys);
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
+			if (blobRestoreCommand.present()) {
+				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
+				TraceEvent("WatchBlobRestoreCommand").detail("Progress", status.progress).detail("Phase", status.phase);
+				if (status.phase == BlobRestorePhase::INIT) {
+					self->db.blobRestoreEnabled.set(true);
+					if (self->db.blobGranulesEnabled.get()) {
+						const auto& blobManager = self->db.serverInfo->get().blobManager;
+						if (blobManager.present()) {
+							BlobManagerSingleton(blobManager)
+							    .haltBlobGranules(self, blobManager.get().locality.processId());
+						}
+						const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
+						if (blobMigrator.present()) {
+							BlobMigratorSingleton(blobMigrator).halt(self, blobMigrator.get().locality.processId());
+						}
+					}
+				}
+			}
+
+			state Future<Void> watch = tr->watch(blobRestoreCommandKey);
+			wait(tr->commit());
+			wait(watch);
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTime) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	// Also wait to avoid too many consecutive recruits in a small time window.
@@ -2629,9 +2668,8 @@ ACTOR Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
 	}
 	loop {
 		if (self->db.serverInfo->get().blobMigrator.present() && !self->recruitBlobMigrator.get()) {
-			state Future<Void> wfClient =
-			    waitFailureClient(self->db.serverInfo->get().blobMigrator.get().ssi.waitFailure,
-			                      SERVER_KNOBS->BLOB_MIGRATOR_FAILURE_TIME);
+			state Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().blobMigrator.get().waitFailure,
+			                                                SERVER_KNOBS->BLOB_MIGRATOR_FAILURE_TIME);
 			loop {
 				choose {
 					when(wait(wfClient)) {
@@ -2643,11 +2681,11 @@ ACTOR Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
 					when(wait(self->recruitBlobMigrator.onChange())) {}
 				}
 			}
-		} else if (self->db.blobGranulesEnabled.get() && isFullRestoreMode()) {
+		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get()) {
 			// if there is no blob migrator present but blob granules are now enabled, recruit a BM
 			wait(startBlobMigrator(self, recruitThrottler.newRecruitment()));
 		} else {
-			wait(self->db.blobGranulesEnabled.onChange());
+			wait(self->db.blobGranulesEnabled.onChange() || self->db.blobRestoreEnabled.onChange());
 		}
 	}
 }
@@ -2778,7 +2816,7 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 							const auto& blobManager = self->db.serverInfo->get().blobManager;
 							BlobManagerSingleton(blobManager)
 							    .haltBlobGranules(self, blobManager.get().locality.processId());
-							if (isFullRestoreMode()) {
+							if (self->db.blobRestoreEnabled.get()) {
 								const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
 								BlobMigratorSingleton(blobMigrator).halt(self, blobMigrator.get().locality.processId());
 							}
@@ -3079,8 +3117,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));
-	self.addActor.send(monitorBlobMigrator(&self));
 	self.addActor.send(watchBlobGranulesConfigKey(&self));
+	self.addActor.send(monitorBlobMigrator(&self));
+	self.addActor.send(watchBlobRestoreCommand(&self));
 	self.addActor.send(monitorConsistencyScan(&self));
 	self.addActor.send(metaclusterMetricsUpdater(&self));
 	self.addActor.send(dbInfoUpdater(&self));

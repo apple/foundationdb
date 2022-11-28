@@ -42,8 +42,8 @@
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbrpc/DDSketch.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -353,8 +353,9 @@ public:
 
 	int apiVersionAtLeast(int minVersion) const { return apiVersion.version() >= minVersion; }
 
-	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
-	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
+	Future<Void> onConnected()
+	    const; // Returns after a majority of coordination servers are available and have reported a
+	           // leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<IClusterConnectionRecord> getConnectionRecord();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
@@ -403,6 +404,7 @@ public:
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
 	                                Optional<TenantName> tenantName = {});
+	Future<bool> blobRestore(const KeyRange range);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -565,7 +567,7 @@ public:
 	Counter bgReadRowsCleared;
 	Counter bgReadRowsInserted;
 	Counter bgReadRowsUpdated;
-	ContinuousSample<double> bgLatencies, bgGranulesPerRequest;
+	DDSketch<double> bgLatencies, bgGranulesPerRequest;
 
 	// Change Feed metrics. Omit change feed metrics from logging if not used
 	bool usedAnyChangeFeeds;
@@ -577,8 +579,7 @@ public:
 	Counter feedPops;
 	Counter feedPopsFallback;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit;
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;

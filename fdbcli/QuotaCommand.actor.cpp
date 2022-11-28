@@ -19,11 +19,13 @@
  */
 
 #include "fdbcli/fdbcli.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
 namespace {
 
-enum class LimitType { RESERVED, TOTAL };
+enum class QuotaType { RESERVED, TOTAL, STORAGE };
 
 Optional<TransactionTag> parseTag(StringRef token) {
 	if (token.size() > CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH) {
@@ -33,17 +35,19 @@ Optional<TransactionTag> parseTag(StringRef token) {
 	}
 }
 
-Optional<LimitType> parseLimitType(StringRef token) {
+Optional<QuotaType> parseQuotaType(StringRef token) {
 	if (token == "reserved_throughput"_sr) {
-		return LimitType::RESERVED;
+		return QuotaType::RESERVED;
 	} else if (token == "total_throughput"_sr) {
-		return LimitType::TOTAL;
+		return QuotaType::TOTAL;
+	} else if (token == "storage"_sr) {
+		return QuotaType::STORAGE;
 	} else {
 		return {};
 	}
 }
 
-Optional<int64_t> parseLimitValue(StringRef token) {
+Optional<int64_t> parseQuotaValue(StringRef token) {
 	try {
 		return std::stol(token.toString());
 	} catch (...) {
@@ -51,20 +55,26 @@ Optional<int64_t> parseLimitValue(StringRef token) {
 	}
 }
 
-ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, LimitType limitType) {
+ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, QuotaType quotaType) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
+			state ThreadFuture<Optional<Value>> resultFuture =
+			    tr->get(quotaType == QuotaType::STORAGE ? storageQuotaKey(tag) : ThrottleApi::getTagQuotaKey(tag));
 			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 			if (!v.present()) {
 				fmt::print("<empty>\n");
 			} else {
+				if (quotaType == QuotaType::STORAGE) {
+					int64_t storageQuota = BinaryReader::fromStringRef<int64_t>(v.get(), Unversioned());
+					fmt::print("{}\n", storageQuota);
+					return Void();
+				}
 				auto const quota = ThrottleApi::TagQuotaValue::fromValue(v.get());
-				if (limitType == LimitType::TOTAL) {
+				if (quotaType == QuotaType::TOTAL) {
 					fmt::print("{}\n", quota.totalQuota);
-				} else if (limitType == LimitType::RESERVED) {
+				} else if (quotaType == QuotaType::RESERVED) {
 					fmt::print("{}\n", quota.reservedQuota);
 				}
 			}
@@ -75,32 +85,36 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 	}
 }
 
-ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitType limitType, int64_t value) {
+ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, QuotaType quotaType, int64_t value) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
-			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
-			ThrottleApi::TagQuotaValue quota;
-			if (v.present()) {
-				quota = ThrottleApi::TagQuotaValue::fromValue(v.get());
+			if (quotaType == QuotaType::STORAGE) {
+				tr->set(storageQuotaKey(tag), BinaryWriter::toValue<int64_t>(value, Unversioned()));
+			} else {
+				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
+				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
+				ThrottleApi::TagQuotaValue quota;
+				if (v.present()) {
+					quota = ThrottleApi::TagQuotaValue::fromValue(v.get());
+				}
+				// Internally, costs are stored in terms of pages, but in the API,
+				// costs are specified in terms of bytes
+				if (quotaType == QuotaType::TOTAL) {
+					// Round up to nearest page size
+					quota.totalQuota = ((value - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) *
+					                   CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+				} else if (quotaType == QuotaType::RESERVED) {
+					// Round up to nearest page size
+					quota.reservedQuota = ((value - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) *
+					                      CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+				}
+				if (!quota.isValid()) {
+					throw invalid_throttle_quota_value();
+				}
+				ThrottleApi::setTagQuota(tr, tag, quota.reservedQuota, quota.totalQuota);
 			}
-			// Internally, costs are stored in terms of pages, but in the API,
-			// costs are specified in terms of bytes
-			if (limitType == LimitType::TOTAL) {
-				// Round up to nearest page size
-				quota.totalQuota =
-				    ((value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
-			} else if (limitType == LimitType::RESERVED) {
-				// Round up to nearest page size
-				quota.reservedQuota =
-				    ((value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
-			}
-			if (!quota.isValid()) {
-				throw invalid_throttle_quota_value();
-			}
-			ThrottleApi::setTagQuota(tr, tag, quota.reservedQuota, quota.totalQuota);
 			wait(safeThreadFutureToFuture(tr->commit()));
 			fmt::print("Successfully updated quota.\n");
 			return Void();
@@ -115,6 +129,7 @@ ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
+			tr->clear(storageQuotaKey(tag));
 			tr->clear(ThrottleApi::getTagQuotaKey(tag));
 			wait(safeThreadFutureToFuture(tr->commit()));
 			fmt::print("Successfully cleared quota.\n");
@@ -125,8 +140,8 @@ ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
 	}
 }
 
-constexpr auto usage = "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
-                       "[reserved_throughput|total_throughput] <value> | clear <tag>]";
+constexpr auto usage = "quota [get <tag> [reserved_throughput|total_throughput|storage] | set <tag> "
+                       "[reserved_throughput|total_throughput|storage] <value> | clear <tag>]";
 
 bool exitFailure() {
 	fmt::print(usage);
@@ -150,22 +165,22 @@ ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<String
 			if (tokens.size() != 4) {
 				return exitFailure();
 			}
-			auto const limitType = parseLimitType(tokens[3]);
-			if (!limitType.present()) {
+			auto const quotaType = parseQuotaType(tokens[3]);
+			if (!quotaType.present()) {
 				return exitFailure();
 			}
-			wait(getQuota(db, tag.get(), limitType.get()));
+			wait(getQuota(db, tag.get(), quotaType.get()));
 			return true;
 		} else if (tokens[1] == "set"_sr) {
 			if (tokens.size() != 5) {
 				return exitFailure();
 			}
-			auto const limitType = parseLimitType(tokens[3]);
-			auto const limitValue = parseLimitValue(tokens[4]);
-			if (!limitType.present() || !limitValue.present()) {
+			auto const quotaType = parseQuotaType(tokens[3]);
+			auto const quotaValue = parseQuotaValue(tokens[4]);
+			if (!quotaType.present() || !quotaValue.present()) {
 				return exitFailure();
 			}
-			wait(setQuota(db, tag.get(), limitType.get(), limitValue.get()));
+			wait(setQuota(db, tag.get(), quotaType.get(), quotaValue.get()));
 			return true;
 		} else if (tokens[1] == "clear"_sr) {
 			if (tokens.size() != 3) {

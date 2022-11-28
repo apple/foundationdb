@@ -24,6 +24,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbserver/Knobs.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
@@ -60,7 +61,7 @@ struct BlobManifestFile {
 	int64_t seqNo{ 0 };
 
 	BlobManifestFile(const std::string& path) {
-		if (sscanf(path.c_str(), MANIFEST_FOLDER "/manifest.%" SCNd64 ".%" SCNd64, &epoch, &seqNo) == 2) {
+		if (sscanf(path.c_str(), MANIFEST_FOLDER "/" MANIFEST_FOLDER ".%" SCNd64 ".%" SCNd64, &epoch, &seqNo) == 2) {
 			fileName = path;
 		}
 	}
@@ -76,7 +77,7 @@ struct BlobManifestFile {
 			BlobManifestFile file(path);
 			return file.epoch > 0 && file.seqNo > 0;
 		};
-		BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(reader->listFiles(MANIFEST_FOLDER, filter));
+		BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(reader->listFiles(MANIFEST_FOLDER "/", filter));
 
 		std::vector<BlobManifestFile> result;
 		for (auto& f : filesAndSizes) {
@@ -107,6 +108,9 @@ public:
 		try {
 			state Standalone<BlobManifest> manifest;
 			Standalone<VectorRef<KeyValueRef>> rows = wait(getSystemKeys(self));
+			if (rows.size() == 0) {
+				return Void();
+			}
 			manifest.rows = rows;
 			Value data = encode(manifest);
 			wait(writeToFile(self, data));
@@ -134,10 +138,23 @@ private:
 					blobRangeKeys // Key ranges managed by blob
 				};
 				for (auto range : ranges) {
-					// todo use getRangeStream for better performance
-					RangeResult result = wait(tr.getRange(range, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-					for (auto& row : result) {
-						rows.push_back_deep(rows.arena(), KeyValueRef(row.key, row.value));
+					state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+					limits.minRows = 0;
+					state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
+					state KeySelectorRef end = firstGreaterOrEqual(range.end);
+					loop {
+						RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
+						for (auto& row : result) {
+							rows.push_back_deep(rows.arena(), KeyValueRef(row.key, row.value));
+						}
+						if (!result.more) {
+							break;
+						}
+						if (result.readThrough.present()) {
+							begin = firstGreaterOrEqual(result.readThrough.get());
+						} else {
+							begin = firstGreaterThan(result.end()[-1].key);
+						}
 					}
 				}
 				return rows;
@@ -149,11 +166,19 @@ private:
 
 	// Write data to blob manifest file
 	ACTOR static Future<Void> writeToFile(Reference<BlobManifestDumper> self, Value data) {
+		static int32_t lastWrittenBytes = 0;
+		if (data.size() == lastWrittenBytes) {
+			dprint("Skip writting blob manifest with same size {}\n", lastWrittenBytes);
+			return Void();
+		}
+		lastWrittenBytes = data.size();
+
 		state Reference<BackupContainerFileSystem> writer;
 		state std::string fullPath;
 
 		std::tie(writer, fullPath) = self->blobConn_->createForWrite(MANIFEST_FOLDER);
-		state std::string fileName = format(MANIFEST_FOLDER "/manifest.%lld.%lld", self->epoch_, self->seqNo_);
+		state std::string fileName =
+		    format(MANIFEST_FOLDER "/" MANIFEST_FOLDER ".%lld.%lld", self->epoch_, self->seqNo_);
 		state Reference<IBackupFile> file = wait(writer->writeFile(fileName));
 		wait(file->append(data.begin(), data.size()));
 		wait(file->finish());
@@ -208,7 +233,7 @@ public:
 	ACTOR static Future<Void> execute(Reference<BlobManifestLoader> self) {
 		try {
 			Value data = wait(readFromFile(self));
-			Standalone<BlobManifest> manifest = decode(data);
+			state Standalone<BlobManifest> manifest = decode(data);
 			wait(writeSystemKeys(self, manifest.rows));
 			BlobGranuleRestoreVersionVector _ = wait(listGranules(self));
 		} catch (Error& e) {
@@ -227,13 +252,32 @@ public:
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			try {
-				std::vector<KeyRangeRef> granules;
+				state Standalone<VectorRef<KeyRef>> blobRanges;
+				// Read all granules
+				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+				limits.minRows = 0;
+				state KeySelectorRef begin = firstGreaterOrEqual(blobGranuleMappingKeys.begin);
+				state KeySelectorRef end = firstGreaterOrEqual(blobGranuleMappingKeys.end);
+				loop {
+					RangeResult rows = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					for (auto& row : rows) {
+						blobRanges.push_back_deep(blobRanges.arena(), row.key);
+					}
+					if (!rows.more) {
+						break;
+					}
+					if (rows.readThrough.present()) {
+						begin = firstGreaterOrEqual(rows.readThrough.get());
+					} else {
+						begin = firstGreaterThan(rows.end()[-1].key);
+					}
+				}
+
+				// check each granule range
 				state int i = 0;
-				auto limit = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
-				state RangeResult blobRanges = wait(tr.getRange(blobGranuleMappingKeys, limit));
 				for (i = 0; i < blobRanges.size() - 1; i++) {
-					Key startKey = blobRanges[i].key.removePrefix(blobGranuleMappingKeys.begin);
-					Key endKey = blobRanges[i + 1].key.removePrefix(blobGranuleMappingKeys.begin);
+					Key startKey = blobRanges[i].removePrefix(blobGranuleMappingKeys.begin);
+					Key endKey = blobRanges[i + 1].removePrefix(blobGranuleMappingKeys.begin);
 					state KeyRange granuleRange = KeyRangeRef(startKey, endKey);
 					try {
 						Standalone<BlobGranuleRestoreVersion> granule = wait(getGranule(&tr, granuleRange));
@@ -296,17 +340,32 @@ private:
 
 	// Write system keys to database
 	ACTOR static Future<Void> writeSystemKeys(Reference<BlobManifestLoader> self, VectorRef<KeyValueRef> rows) {
+		state int start = 0;
+		state int end = 0;
+		for (start = 0; start < rows.size(); start = end) {
+			end = std::min(start + SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS, rows.size());
+			wait(writeSystemKeys(self, rows, start, end));
+		}
+		return Void();
+	}
+
+	// Write system keys from start index to end(exclusive), so that we don't exceed the limit of transaction limit
+	ACTOR static Future<Void> writeSystemKeys(Reference<BlobManifestLoader> self,
+	                                          VectorRef<KeyValueRef> rows,
+	                                          int start,
+	                                          int end) {
 		state Transaction tr(self->db_);
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
-				for (auto& row : rows) {
-					tr.set(row.key, row.value);
+				for (int i = start; i < end; ++i) {
+					tr.set(rows[i].key, rows[i].value);
 				}
 				wait(tr.commit());
-				dprint("Blob manifest loaded {} rows\n", rows.size());
+				dprint("Blob manifest loaded rows from {} to {}\n", start, end);
+				TraceEvent("BlobManifestLoader").detail("RowStart", start).detail("RowEnd", end);
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -320,8 +379,7 @@ private:
 		KeyRange historyKeyRange = blobGranuleHistoryKeyRangeFor(range);
 		// reverse lookup so that the first row is the newest version
 		state RangeResult results =
-		    wait(tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::False, Reverse::True));
-
+		    wait(tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::True, Reverse::True));
 		for (KeyValueRef row : results) {
 			state KeyRange keyRange;
 			state Version version;
@@ -363,24 +421,39 @@ private:
 
 	// List all files for given granule
 	ACTOR static Future<std::vector<GranuleFileVersion>> listGranuleFiles(Transaction* tr, UID granuleID) {
+		state std::vector<GranuleFileVersion> files;
+
 		state KeyRange fileKeyRange = blobGranuleFileKeyRangeFor(granuleID);
-		RangeResult results = wait(tr->getRange(fileKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+		state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+		limits.minRows = 0;
+		state KeySelectorRef begin = firstGreaterOrEqual(fileKeyRange.begin);
+		state KeySelectorRef end = firstGreaterOrEqual(fileKeyRange.end);
+		loop {
+			RangeResult results = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			for (auto& row : results) {
+				UID gid;
+				Version version;
+				uint8_t fileType;
+				Standalone<StringRef> filename;
+				int64_t offset;
+				int64_t length;
+				int64_t fullFileLength;
+				Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
-		std::vector<GranuleFileVersion> files;
-		for (auto& row : results) {
-			UID gid;
-			Version version;
-			uint8_t fileType;
-			Standalone<StringRef> filename;
-			int64_t offset;
-			int64_t length;
-			int64_t fullFileLength;
-			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
-
-			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(row.key);
-			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(row.value);
-			GranuleFileVersion vs = { version, fileType, filename.toString(), length };
-			files.push_back(vs);
+				std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(row.key);
+				std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) =
+				    decodeBlobGranuleFileValue(row.value);
+				GranuleFileVersion vs = { version, fileType, filename.toString(), length };
+				files.push_back(vs);
+			}
+			if (!results.more) {
+				break;
+			}
+			if (results.readThrough.present()) {
+				begin = firstGreaterOrEqual(results.readThrough.get());
+			} else {
+				begin = firstGreaterThan(results.end()[-1].key);
+			}
 		}
 		return files;
 	}
@@ -452,4 +525,82 @@ ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider
 	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
 	int64_t epoc = wait(BlobManifestLoader::lastBlobEpoc(loader));
 	return epoc;
+}
+
+// Return true if the given key range is restoring
+ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
+	state Transaction tr(db);
+	loop {
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+			limits.minRows = 0;
+			state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreCommandKeys.begin);
+			state KeySelectorRef end = firstGreaterOrEqual(blobRestoreCommandKeys.end);
+			loop {
+				RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
+				for (auto& r : ranges) {
+					KeyRange keyRange = decodeBlobRestoreCommandKeyFor(r.key);
+					if (keyRange.contains(keys)) {
+						Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(r.value);
+						return status.phase < BlobRestorePhase::DONE;
+					}
+				}
+				if (!ranges.more) {
+					break;
+				}
+				if (ranges.readThrough.present()) {
+					begin = firstGreaterOrEqual(ranges.readThrough.get());
+				} else {
+					begin = firstGreaterThan(ranges.end()[-1].key);
+				}
+			}
+			return false;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Update restore status
+ACTOR Future<Void> updateRestoreStatus(Database db, KeyRangeRef range, BlobRestoreStatus status) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Key key = blobRestoreCommandKeyFor(range);
+			Value value = blobRestoreCommandValueFor(status);
+			tr.set(key, value);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Get restore status
+ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Key key = blobRestoreCommandKeyFor(range);
+			Optional<Value> value = wait(tr.get(key));
+			Optional<BlobRestoreStatus> result;
+			if (value.present()) {
+				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
+				result = status;
+			}
+			return result;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }

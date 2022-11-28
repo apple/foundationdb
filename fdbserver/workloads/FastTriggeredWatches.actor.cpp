@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -41,6 +40,12 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		nodes = getOption(options, "nodes"_sr, 100);
 		defaultValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
+	}
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// This test asserts that watches fire within a certain version range. Attrition will make this assertion fail
+		// since it can cause recoveries which will bump the cluster version significantly
+		out.emplace("Attrition");
 	}
 
 	Future<Void> setup(Database const& cx) override {
