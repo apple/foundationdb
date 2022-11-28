@@ -243,7 +243,7 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 
 	auto i = r->headers.find("Content-Length");
 	if (i != r->headers.end())
-		r->contentLen = atoi(i->second.c_str());
+		r->contentLen = strtoll(i->second.c_str());
 	else
 		r->contentLen = -1; // Content length unknown
 
@@ -481,7 +481,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		}
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
-			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
+			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %lld]\n",
 			       conn->getDebugID().toString().c_str(),
 			       (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
 			       r->code,
@@ -491,7 +491,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			       resource.c_str(),
 			       contentLen,
 			       total_sent,
-			       (int)r->contentLen);
+			       r->contentLen);
 		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			printf("[%s] HTTP RESPONSE:  %s %s\n%s\n",
