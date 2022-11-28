@@ -1180,7 +1180,7 @@ private:
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
 	bool ignoreExternalClientFailures;
-	bool ignoreIncompatibleClient;
+	bool failIncompatibleClient;
 	bool retainClientLibCopies;
 	ApiVersion apiVersion;
 

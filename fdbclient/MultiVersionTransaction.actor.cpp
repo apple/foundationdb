@@ -2028,8 +2028,8 @@ ErrorOr<Void> MultiVersionDatabase::DatabaseState::getInitializationError() {
 	InitializationState st = initializationState.load();
 	switch (st) {
 	case InitializationState::INCOMPATIBLE:
-		return MultiVersionApi::api->ignoreIncompatibleClient ? ErrorOr<Void>(Void())
-		                                                      : ErrorOr<Void>(incompatible_client());
+		return MultiVersionApi::api->failIncompatibleClient ? ErrorOr<Void>(incompatible_client())
+		                                                    : ErrorOr<Void>(Void());
 	case InitializationState::INITIALIZATION_FAILED:
 		return ErrorOr<Void>(initializationError);
 	default:
@@ -2702,9 +2702,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::IGNORE_EXTERNAL_CLIENT_FAILURES) {
 		validateOption(value, false, true);
 		ignoreExternalClientFailures = true;
-	} else if (option == FDBNetworkOptions::IGNORE_INCOMPATIBLE_CLIENT) {
+	} else if (option == FDBNetworkOptions::FAIL_INCOMPATIBLE_CLIENT) {
 		validateOption(value, false, true);
-		ignoreIncompatibleClient = true;
+		failIncompatibleClient = true;
 	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
 		validateOption(value, false, true);
 		retainClientLibCopies = true;
@@ -3181,7 +3181,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
     disableBypass(false), bypassMultiClientApi(false), externalClient(false), ignoreExternalClientFailures(false),
-    ignoreIncompatibleClient(false), retainClientLibCopies(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
+    failIncompatibleClient(false), retainClientLibCopies(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
     traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();

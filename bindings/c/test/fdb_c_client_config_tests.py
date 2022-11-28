@@ -11,7 +11,7 @@ from threading import Thread
 import time
 from fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION
 from binary_download import FdbBinaryDownloader
-from local_cluster import LocalCluster, random_secret_string
+from local_cluster import LocalCluster, PortProvider, random_secret_string
 
 args = None
 downloader = None
@@ -85,7 +85,7 @@ class ClientConfigTest:
         self.tmp_dir.mkdir(parents=True)
         self.disable_local_client = False
         self.ignore_external_client_failures = False
-        self.ignore_incompatible_client = False
+        self.fail_incompatible_client = True
         self.api_version = None
         self.expected_error = None
         self.transaction_timeout = None
@@ -149,8 +149,8 @@ class ClientConfigTest:
         if self.ignore_external_client_failures:
             cmd_args += ["--ignore-external-client-failures"]
 
-        if self.ignore_incompatible_client:
-            cmd_args += ["--ignore-incompatible-client"]
+        if self.fail_incompatible_client:
+            cmd_args += ["--fail-incompatible-client"]
 
         if self.api_version is not None:
             cmd_args += ["--api-version", str(self.api_version)]
@@ -265,7 +265,7 @@ class ClientConfigTests(unittest.TestCase):
         test.create_external_lib_path(PREV_RELEASE_VERSION)
         test.disable_local_client = True
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
-        test.ignore_incompatible_client = True
+        test.fail_incompatible_client = False
         test.transaction_timeout = 100
         test.expected_error = 1031  # Timeout
         test.exec()
@@ -339,7 +339,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             test = ClientConfigTest(self)
             test.create_external_lib_path(CURRENT_VERSION)
             test.transaction_timeout = 10000
-            test.ignore_incompatible_client = True
+            test.fail_incompatible_client = False
 
             def upgrade(cluster):
                 time.sleep(0.1)

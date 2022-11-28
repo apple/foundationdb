@@ -261,8 +261,8 @@ func (o NetworkOptions) SetIgnoreExternalClientFailures() error {
 	return o.setOpt(68, nil)
 }
 
-// Do not fail if there is no client matching the server version the client is connecting to
-func (o NetworkOptions) SetIgnoreIncompatibleClient() error {
+// Fail with an error if there is no client matching the server version the client is connecting to
+func (o NetworkOptions) SetFailIncompatibleClient() error {
 	return o.setOpt(69, nil)
 }
 
