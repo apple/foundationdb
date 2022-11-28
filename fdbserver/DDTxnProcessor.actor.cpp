@@ -723,6 +723,18 @@ struct DDMockTxnProcessorImpl {
 		return Void();
 	}
 
+	Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, MoveKeysParams params) {
+		state KeyRange keys;
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			ASSERT(params.ranges.present());
+			// TODO: make startMoveShards work with multiple ranges.
+			ASSERT(params.ranges.size() == 1);
+			return checkFetchingState(self, params.destinationTeam, params.ranges.get().at(0));
+		}
+		ASSERT(params.keys.present());
+		return checkFetchingState(self, params.destinationTeam, params.keys.get());
+	}
+
 	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
 		state std::map<UID, StorageServerInterface> tssMapping;
 		// Because SFBTF::Team requires the ID is ordered
@@ -732,7 +744,7 @@ struct DDMockTxnProcessorImpl {
 		wait(self->rawStartMovement(params, tssMapping));
 		ASSERT(tssMapping.empty());
 
-		wait(checkFetchingState(self, params.destinationTeam, params.keys));
+		wait(rawCheckFetchingState(self, params.destinationTeam, params.keys));
 
 		wait(self->rawFinishMovement(params, tssMapping));
 		if (!params.dataMovementComplete.isSet())
@@ -915,6 +927,16 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
                                     MoveKeysParams params,
                                     std::map<UID, StorageServerInterface> tssMapping) {
+	state KeyRange keys;
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
+		// TODO: make startMoveShards work with multiple ranges.
+		ASSERT(params.ranges.size() == 1);
+		keys = params.ranges.get().at(0);
+	} else {
+		ASSERT(params.keys.present());
+		keys = params.keys.get();
+	}
 	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
 	// will always finish without coroutine switch.
 	ASSERT(params.startMoveKeysParallelismLock->activePermits() == 0);
@@ -925,15 +947,15 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	destTeams.emplace_back(params.destinationTeam, true);
 	// invariant: the splitting and merge operation won't happen at the same moveKeys action. For example, if [a,c) [c,
 	// e) exists, the params.keys won't be [b, d).
-	auto intersectRanges = mgs->shardMapping->intersectingRanges(params.keys);
+	auto intersectRanges = mgs->shardMapping->intersectingRanges(keys);
 	// 1. splitting or just move a range. The new boundary need to be defined in startMovement
-	if (intersectRanges.begin().range().contains(params.keys)) {
-		mgs->shardMapping->defineShard(params.keys);
+	if (intersectRanges.begin().range().contains(keys)) {
+		mgs->shardMapping->defineShard(keys);
 	}
 	// 2. merge ops will coalesce the boundary in finishMovement;
-	intersectRanges = mgs->shardMapping->intersectingRanges(params.keys);
-	ASSERT(params.keys.begin == intersectRanges.begin().begin());
-	ASSERT(params.keys.end == intersectRanges.end().begin());
+	intersectRanges = mgs->shardMapping->intersectingRanges(keys);
+	ASSERT(keys.begin == intersectRanges.begin().begin());
+	ASSERT(keys.end == intersectRanges.end().begin());
 
 	for (auto it = intersectRanges.begin(); it != intersectRanges.end(); ++it) {
 		auto teamPair = mgs->shardMapping->getTeamsFor(it->begin());
@@ -945,8 +967,8 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 	for (auto& id : params.destinationTeam) {
 		auto& server = mgs->allServers.at(id);
-		server.setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
-		server.signalFetchKeys(params.keys, randomRangeSize);
+		server.setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+		server.signalFetchKeys(keys, randomRangeSize);
 	}
 	return Void();
 }
@@ -959,6 +981,17 @@ Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
 ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
                                      MoveKeysParams params,
                                      std::map<UID, StorageServerInterface> tssMapping) {
+	state KeyRange keys;
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
+		// TODO: make startMoveShards work with multiple ranges.
+		ASSERT(params.ranges.size() == 1);
+		keys = params.ranges.get().at(0);
+	} else {
+		ASSERT(params.keys.present());
+		keys = params.keys.get();
+	}
+
 	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
 	// will always finish without coroutine switch.
 	ASSERT(params.finishMoveKeysParallelismLock->activePermits() == 0);
@@ -966,7 +999,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	state FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
 
 	// get source and dest teams
-	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(params.keys);
+	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(keys);
 
 	ASSERT_EQ(destTeams.size(), 1); // Will the multi-region or dynamic replica make destTeam.size() > 1?
 	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {
@@ -978,7 +1011,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+		mgs->allServers.at(id).setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
 	}
 
 	// remove destination servers from source servers
@@ -986,11 +1019,11 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	for (auto& id : srcTeams.front().servers) {
 		// the only caller moveKeys will always make sure the UID are sorted
 		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
-			mgs->allServers.at(id).removeShard(params.keys);
+			mgs->allServers.at(id).removeShard(keys);
 		}
 	}
-	mgs->shardMapping->finishMove(params.keys);
-	mgs->shardMapping->defineShard(params.keys); // coalesce for merge
+	mgs->shardMapping->finishMove(keys);
+	mgs->shardMapping->defineShard(keys); // coalesce for merge
 	return Void();
 }
 
