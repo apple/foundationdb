@@ -216,18 +216,18 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 				TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
 				wait(moveKeys(cx,
-				              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-				                              keys,
-				                              dest,
-				                              dest,
-				                              moveKeysLock,
-				                              Promise<Void>(),
-				                              &self->startMoveKeysParallelismLock,
-				                              &self->finishMoveKeysParallelismLock,
-				                              false,
-				                              UID(), // for logging only
-				                              &ddEnabledState,
-				                              CancelConflictingDataMoves::True }));
+				              MoveKeysParams(deterministicRandom()->randomUniqueID(),
+				                             keys,
+				                             dest,
+				                             dest,
+				                             moveKeysLock,
+				                             Promise<Void>(),
+				                             &self->startMoveKeysParallelismLock,
+				                             &self->finishMoveKeysParallelismLock,
+				                             false,
+				                             UID(), // for logging only
+				                             &ddEnabledState,
+				                             CancelConflictingDataMoves::True)));
 				break;
 			} catch (Error& e) {
 				TraceEvent("DataLossRecovery").error(e).detail("Phase", "MoveRangeError");

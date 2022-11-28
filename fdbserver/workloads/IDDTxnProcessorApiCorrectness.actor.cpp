@@ -332,18 +332,18 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		KeyRange keys = self->getRandomKeys();
 		std::vector<UID> destTeam = self->getRandomTeam();
 		std::sort(destTeam.begin(), destTeam.end());
-		return MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-			                   keys,
-			                   destTeam,
-			                   destTeam,
-			                   lock,
-			                   Promise<Void>(),
-			                   nullptr,
-			                   nullptr,
-			                   false,
-			                   UID(),
-			                   self->ddContext.ddEnabledState.get(),
-			                   CancelConflictingDataMoves::True };
+		return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+		                      keys,
+		                      destTeam,
+		                      destTeam,
+		                      lock,
+		                      Promise<Void>(),
+		                      nullptr,
+		                      nullptr,
+		                      false,
+		                      UID(),
+		                      self->ddContext.ddEnabledState.get(),
+		                      CancelConflictingDataMoves::True);
 	}
 
 	ACTOR static Future<Void> testMoveKeys(IDDTxnProcessorApiWorkload* self) {
