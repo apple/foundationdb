@@ -42,6 +42,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
@@ -2086,8 +2087,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				simconfig.db.encryptionAtRestMode = deterministicRandom()->randomChoice(validEncryptModes);
 			}
 		} else {
-			// TODO: This case should only trigger with probability (BUGGIFY) once the server knob is removed
-			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT) {
+			// TODO: These cases should only trigger with probability (BUGGIFY) once the server knob is removed
+			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT ||
+			    deterministicRandom()->coinflip()) {
 				// optional and disabled tenant modes currently only support cluster aware encryption
 				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
 			} else {
