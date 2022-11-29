@@ -156,7 +156,7 @@ struct PageChecksumCodec {
 					severity = SevWarnAlways;
 				}
 			}
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)
