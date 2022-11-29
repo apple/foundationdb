@@ -2331,7 +2331,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Merge finish stopped because of force purge");
+				CODE_PROBE(true, "Merge finish stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);

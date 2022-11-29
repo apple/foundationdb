@@ -1582,7 +1582,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 							logData->queueCommittedVersion.set(qe.version);
 
 							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
-								CODE_PROBE(true, "Flush excess data during TLog queue recovery");
+								CODE_PROBE(
+								    true, "Flush excess data during TLog queue recovery", probe::decoration::rare);
 								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
 								    .detail("BytesInput", self->bytesInput)
 								    .detail("BytesDurable", self->bytesDurable)

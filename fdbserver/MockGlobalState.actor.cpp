@@ -193,7 +193,7 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 	auto ranges = serverKeys.intersectingRanges(range);
 
 	if (ranges.empty()) {
-		CODE_PROBE(true, "new shard is adding to server");
+		CODE_PROBE(true, "new shard is adding to server", probe::decoration::rare);
 		serverKeys.insert(range, ShardInfo{ status, 0 });
 		return;
 	}
