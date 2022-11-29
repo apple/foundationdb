@@ -1795,9 +1795,9 @@ public:
 	AndFuture& operator=(AndFuture const& f) = default;
 	AndFuture& operator=(AndFuture&& f) noexcept = default;
 
-	AndFuture(Future<Void> const& f) : began_(true), futures{ f } {}
+	AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
 
-	AndFuture(Error const& e) : began_(true), futures{ Future<Void>(e) } {}
+	AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
 
 	operator Future<Void>() { return getFuture(); }
 
@@ -1850,18 +1850,18 @@ public:
 	}
 
 	void add(Future<Void> const& f) {
-		began_ = true;
+		++futureCount;
 		if (!f.isReady() || f.isError())
 			futures.push_back(f);
 	}
 
 	void add(AndFuture f) { add(f.getFuture()); }
 
-	// Whether or not there has ever been a future associated with this AndFuture
-	bool began() const { return began_; }
+	// The total number of futures which have ever been added to this AndFuture
+	int64_t getFutureCount() const { return futureCount; }
 
 private:
-	bool began_ = false;
+	int64_t futureCount = 0;
 	std::vector<Future<Void>> futures;
 };
 
