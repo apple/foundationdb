@@ -3360,7 +3360,6 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
 
-	span.addAttribute("key"_sr, key);
 	trState->cx->validateVersion(ver);
 
 	loop {
@@ -8878,7 +8877,9 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 
 void Transaction::setTransactionID(UID id) {
 	ASSERT(getSize() == 0);
-	trState->spanContext = SpanContext(id, trState->spanContext.spanID);
+	trState->spanContext = SpanContext(id, trState->spanContext.spanID, trState->spanContext.m_Flags);
+	tr.spanContext = trState->spanContext;
+	span.context = trState->spanContext;
 }
 
 void Transaction::setToken(uint64_t token) {
