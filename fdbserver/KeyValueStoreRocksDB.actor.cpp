@@ -1030,7 +1030,10 @@ void logRocksDBError(UID id,
                      Optional<Severity> sev = Optional<Severity>()) {
 	Severity level = sev.present() ? sev.get() : (status.IsTimedOut() ? SevWarn : SevError);
 	TraceEvent e(level, "RocksDBError", id);
-	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
+	e.setMaxFieldLength(10000)
+	    .detail("Error", status.ToString())
+	    .detail("Method", method)
+	    .detail("RocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
 		e.detail("SubCode", status.subcode());
 	}
