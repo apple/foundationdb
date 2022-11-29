@@ -965,8 +965,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			allConnectionsFailed = false;
 		} else {
 			CODE_PROBE(rep.getError().code() == error_code_failed_to_progress,
-			           "Coordinator cant talk to cluster controller",
-			           probe::decoration::rare);
+			           "Coordinator cant talk to cluster controller");
 			TraceEvent("MonitorProxiesConnectFailed")
 			    .detail("Error", rep.getError().name())
 			    .detail("Coordinator", clientLeaderServer.getAddressString());

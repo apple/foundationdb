@@ -4813,7 +4813,7 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 
 		if (tssData.present()) {
-			CODE_PROBE(true, "duplicating stream to TSS", probe::decoration::rare);
+			CODE_PROBE(true, "duplicating stream to TSS");
 			resetReply(req);
 			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream duplication
 			RequestStream<Request> tssRequestStream(tssData.get().endpoint);
