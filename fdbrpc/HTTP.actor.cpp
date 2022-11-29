@@ -481,7 +481,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		}
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
-			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %lld]\n",
+			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, "
+			"response content len %lld]\n",
 			       conn->getDebugID().toString().c_str(),
 			       (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
 			       r->code,
