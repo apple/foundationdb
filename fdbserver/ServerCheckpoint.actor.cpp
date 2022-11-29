@@ -23,10 +23,10 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, const FetchKvs fetchKvs, UID logID) {
 	const CheckpointFormat format = checkpoint.getFormat();
 	if (format == DataMoveRocksCF || format == RocksDB) {
-		return newRocksDBCheckpointReader(checkpoint, logID);
+		return newRocksDBCheckpointReader(checkpoint, fetchKvs, logID);
 	} else {
 		throw not_implemented();
 	}
@@ -49,6 +49,7 @@ ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
+                                                 FetchKvs fetchKvs,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent("FetchCheckpointBegin", initialState.checkpointID).detail("CheckpointMetaData", initialState.toString());
 	state CheckpointMetaData result;
@@ -68,10 +69,11 @@ ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
     Database cx,
     std::vector<CheckpointMetaData> initialStates,
     std::string dir,
+    FetchKvs fetchKvs,
     std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	std::vector<Future<CheckpointMetaData>> actors;
 	for (const auto& checkpoint : initialStates) {
-		actors.push_back(fetchCheckpoint(cx, checkpoint, dir, cFun));
+		actors.push_back(fetchCheckpoint(cx, checkpoint, dir, fetchKvs, cFun));
 	}
 	std::vector<CheckpointMetaData> res = wait(getAll(actors));
 	return res;

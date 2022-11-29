@@ -31,6 +31,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+FDB_DECLARE_BOOLEAN_PARAM(FetchKvs);
+
 // An ICheckpointReader can read the contents of a checkpoint created from a KV store,
 // i.e., by IKeyValueStore::checkpoint().
 class ICheckpointReader {
@@ -51,7 +53,7 @@ protected:
 	virtual ~ICheckpointReader() {}
 };
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, const FetchKvs fetchKvs, UID logID);
 
 // Delete a checkpoint.
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
@@ -62,12 +64,14 @@ ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
+                                                 FetchKvs fetchKvs,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
     Database cx,
     std::vector<CheckpointMetaData> initialStates,
     std::string dir,
+    FetchKvs fetchKvs,
     std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 #include "flow/unactorcompiler.h"

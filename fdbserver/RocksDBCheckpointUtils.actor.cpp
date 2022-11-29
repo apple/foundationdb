@@ -42,6 +42,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+FDB_DEFINE_BOOLEAN_PARAM(FetchKvs);
+
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 // Enforcing rocksdb version to be 7.7.3.
 static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
@@ -53,6 +55,43 @@ using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
 
 const KeyRef persistVersion = "\xff\xffVersion"_sr;
+
+rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
+	rocksdb::ExportImportFilesMetaData metaData;
+	if (checkpoint.getFormat() != DataMoveRocksCF) {
+		return metaData;
+	}
+
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+	metaData.db_comparator_name = rocksCF.dbComparatorName;
+
+	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
+		rocksdb::LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.file_number = fileMetaData.file_number;
+		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+		liveFileMetaData.largestkey = fileMetaData.largestkey;
+		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+		liveFileMetaData.num_entries = fileMetaData.num_entries;
+		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+		liveFileMetaData.level = fileMetaData.level;
+		metaData.files.push_back(liveFileMetaData);
+	}
+
+	return metaData;
+}
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -69,7 +108,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
-	options.create_if_missing = false;
+	options.create_if_missing = true;
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
@@ -116,14 +155,13 @@ public:
 private:
 	struct Reader : IThreadPoolReceiver {
 		struct OpenAction : TypedAction<Reader, OpenAction> {
-			OpenAction(std::string path, KeyRange range, Version version)
-			  : path(std::move(path)), range(range), version(version) {}
+			OpenAction(CheckpointMetaData checkpoint, KeyRange range)
+			  : checkpoint(std::move(checkpoint)), range(range) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
-			const std::string path;
+			const CheckpointMetaData checkpoint;
 			const KeyRange range;
-			const Version version;
 			ThreadReturnPromise<Void> done;
 		};
 
@@ -173,20 +211,28 @@ private:
 	std::string path;
 	const UID id;
 	Version version;
-	Reference<IThreadPool> readThreads;
+	CheckpointMetaData checkpoint;
+	Reference<IThreadPool> threads;
 	Future<Void> openFuture;
 };
 
 RocksDBCheckpointReader::RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID)
-  : id(logID), version(checkpoint.version) {
-	RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
-	this->path = rocksCheckpoint.checkpointDir;
+  : id(logID), checkpoint(checkpoint) {
+	// CheckpointFormat format = checkpoint.getFormat();
+	// if (format == RocksDB) {
+	// 	RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
+	// 	this->path = rocksCheckpoint.checkpointDir;
+	// } else if (format == DataMoveRocksCF) {
+	// 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+	// 	ASSERT(!rocksCF.sstFiles.empty());
+	// 	this->path = rocksCF.sstFiles.front().db_path + "reader";
+	// }
 	if (g_network->isSimulated()) {
-		readThreads = CoroThreadPool::createThreadPool();
+		threads = CoroThreadPool::createThreadPool();
 	} else {
-		readThreads = createGenericThreadPool();
+		threads = createGenericThreadPool();
 	}
-	readThreads->addThread(new Reader(db), "fdb-rocks-rd");
+	threads->addThread(new Reader(db), "fdb-rocks-cr");
 }
 
 Future<Void> RocksDBCheckpointReader::init(StringRef token) {
@@ -194,17 +240,29 @@ Future<Void> RocksDBCheckpointReader::init(StringRef token) {
 		return openFuture;
 	}
 
-	KeyRange range = BinaryReader::fromStringRef<KeyRange>(token, IncludeVersion());
-	auto a = std::make_unique<Reader::OpenAction>(this->path, range, this->version);
+	// const CheckpointFormat format = checkpoint.getFormat();
+	// if (format != DataMoveRocksCF) {
+	// 	throw not_implemented();
+	// }
+
+	// RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+	// ASSERT(!rocksCF.sstFiles.empty());
+	// this->path = rocksCF.sstFiles.front().db_path + "/reader";
+	// if (directoryExists(this->path)) {
+	// 	platform::eraseDirectoryRecursive(dir);
+	// }
+
+	const KeyRange range = BinaryReader::fromStringRef<KeyRange>(token, IncludeVersion());
+	auto a = std::make_unique<Reader::OpenAction>(this->checkpoint, range);
 	openFuture = a->done.getFuture();
-	readThreads->post(a.release());
+	threads->post(a.release());
 	return openFuture;
 }
 
 Future<RangeResult> RocksDBCheckpointReader::nextKeyValues(const int rowLimit, const int byteLimit) {
 	auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit);
 	auto res = a->result.getFuture();
-	readThreads->post(a.release());
+	threads->post(a.release());
 	return res;
 }
 
@@ -221,42 +279,81 @@ RocksDBCheckpointReader::Reader::Reader(DB& db) : db(db), cf(nullptr) {
 void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::OpenAction& a) {
 	ASSERT(cf == nullptr);
 
+	TraceEvent(SevDebug, "RocksDBCheckpointReaderBegin");
+
+	const CheckpointMetaData& checkpoint = a.checkpoint;
+	const CheckpointFormat format = checkpoint.getFormat();
+	if (format != DataMoveRocksCF) {
+		a.done.sendError(not_implemented());
+		return;
+	}
+
+	TraceEvent(SevDebug, "RocksDBCheckpointReader");
+
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+	ASSERT(!rocksCF.sstFiles.empty());
+	const std::string path = rocksCF.sstFiles.front().db_path + "/reader";
+	if (directoryExists(path)) {
+		platform::eraseDirectoryRecursive(path);
+	}
+
 	std::vector<std::string> columnFamilies;
-	rocksdb::Options options = getOptions();
-	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
+	const rocksdb::Options options = getOptions();
+	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
 	if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
 		columnFamilies.push_back("default");
 	}
 
-	rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
+	TraceEvent(SevDebug, "RocksDBCheckpointReaderListedCF");
+
+	const rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
 	for (const std::string& name : columnFamilies) {
 		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 	}
 
-	status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
+	status = rocksdb::DB::Open(options, path, descriptors, &handles, &db);
+	// status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
+	TraceEvent(SevDebug, "RocksDBCheckpointReaderOpenedDB");
 
 	if (!status.ok()) {
-		logRocksDBError(status, "OpenForReadOnly");
+		logRocksDBError(status, "CheckpointReaderOpen");
 		a.done.sendError(statusToError(status));
 		return;
 	}
 
-	for (rocksdb::ColumnFamilyHandle* handle : handles) {
-		if (handle->GetName() == SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY) {
-			cf = handle;
-			break;
-		}
+	rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
+	rocksdb::ImportColumnFamilyOptions importOptions;
+	importOptions.move_files = false;
+	status = db->CreateColumnFamilyWithImport(cfOptions, "CheckpointReader", importOptions, metaData, &cf);
+	TraceEvent(SevDebug, "RocksDBCheckpointReaderImportedCF");
+
+	if (!status.ok()) {
+		logRocksDBError(status, "CheckpointReaderImportCheckpoint");
+		a.done.sendError(statusToError(status));
+		return;
 	}
 
 	ASSERT(db != nullptr && cf != nullptr);
+
+	// for (rocksdb::ColumnFamilyHandle* handle : handles) {
+	// 	if (handle != nullptr) {
+	// 		TraceEvent("RocksDBCheckpointReaderDestroyCF").detail("Path", a.path).detail("CF", handle->GetName());
+	// 		db->DestroyColumnFamilyHandle(handle);
+	// 	}
+	// }
+	// handles.clear();
+
+	// rocksdb::Status s = db->Close();
+	// if (!s.ok()) {
+	// 	logRocksDBError(s, "Close");
+	// }
 
 	begin = a.range.begin;
 	end = a.range.end;
 
 	TraceEvent(SevInfo, "RocksDBCheckpointReaderInit")
-	    .detail("Path", a.path)
-	    .detail("Method", "OpenForReadOnly")
+	    .detail("Path", path)
 	    .detail("ColumnFamily", cf->GetName())
 	    .detail("Begin", begin)
 	    .detail("End", end);
@@ -274,7 +371,7 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Op
 	const Version version =
 	    status.IsNotFound() ? latestVersion : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 
-	ASSERT(version == a.version);
+	ASSERT(version == checkpoint.version);
 
 	cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, cf));
 	cursor->Seek(toSlice(begin));
@@ -385,11 +482,11 @@ ACTOR Future<Void> RocksDBCheckpointReader::doClose(RocksDBCheckpointReader* sel
 
 	auto a = new RocksDBCheckpointReader::Reader::CloseAction(self->path, false);
 	auto f = a->done.getFuture();
-	self->readThreads->post(a);
+	self->threads->post(a);
 	wait(f);
 
 	if (self != nullptr) {
-		wait(self->readThreads->stop());
+		wait(self->threads->stop());
 	}
 
 	if (self != nullptr) {
@@ -846,12 +943,14 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 	return totalBytes;
 }
 
-ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
+ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
+                                              const FetchKvs fetchKvs,
+                                              UID logID) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	const CheckpointFormat format = checkpoint.getFormat();
-	if (format == DataMoveRocksCF) {
+	if (format == DataMoveRocksCF && !fetchKvs) {
 		return new RocksDBCFCheckpointReader(checkpoint, logID);
-	} else if (format == RocksDB) {
+	} else {
 		return new RocksDBCheckpointReader(checkpoint, logID);
 	}
 #endif // SSD_ROCKSDB_EXPERIMENTAL

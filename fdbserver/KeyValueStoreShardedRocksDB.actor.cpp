@@ -3480,6 +3480,69 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	return Void();
 }
 
+TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
+	// state std::string cwd = platform::getWorkingDirectory() + "/";
+	state std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// Add some ranges.
+	std::vector<Future<Void>> addRangeFutures;
+	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "c"_sr), "shard-1"));
+	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("c"_sr, "f"_sr), "shard-2"));
+	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), true);
+	wait(waitForAll(addRangeFutures) && kvStore->commit(false));
+
+	kvStore->set(KeyValueRef("a1"_sr, "foo"_sr));
+	kvStore->set(KeyValueRef("d1"_sr, "bar"_sr));
+	wait(kvStore->commit(false));
+
+	state std::string checkpointDir = "checkpoint";
+	platform::eraseDirectoryRecursive(checkpointDir);
+
+	CheckpointRequest request(
+	    latestVersion, { KeyRangeRef("a"_sr, "c"_sr) }, DataMoveRocksCF, deterministicRandom()->randomUniqueID(), checkpointDir);
+	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
+
+	TraceEvent(SevDebug, "RocksDBCreatedCheckpoint");
+	state Standalone<StringRef> token = BinaryWriter::toValue(KeyRangeRef("a"_sr, "c"_sr), IncludeVersion());
+	state ICheckpointReader* cpReader =
+	    newCheckpointReader(metaData, FetchKvs::True, deterministicRandom()->randomUniqueID());
+	TraceEvent(SevDebug, "RocksDBCheckpointReaderCreated");
+	ASSERT(cpReader != nullptr);
+	wait(cpReader->init(token));
+	TraceEvent(SevDebug, "RocksDBCheckpointReaderInited");
+	loop {
+		try {
+			state RangeResult res =
+			    wait(cpReader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			state int i = 0;
+			for (; i < res.size(); ++i) {
+				Optional<Value> val = wait(kvStore->readValue(res[i].key));
+				ASSERT(val.present() && val.get() == res[i].value);
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			} else {
+				TraceEvent(SevError, "TestFailed").error(e);
+			}
+		}
+	}
+
+	std::vector<Future<Void>> closes;
+	closes.push_back(cpReader->close());
+	closes.push_back(kvStore->onClosed());
+	kvStore->dispose();
+	wait(waitForAll(closes));
+
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	platform::eraseDirectoryRecursive(checkpointDir);
+
+	return Void();
+}
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
