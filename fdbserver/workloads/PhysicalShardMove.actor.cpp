@@ -354,7 +354,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				                             &self->finishMoveKeysParallelismLock,
 				                             false,
 				                             deterministicRandom()->randomUniqueID(), // for logging only
-				                             &ddEnabledState)));
+				                             &ddEnabledState,
+				                             CancelConflictingDataMoves::False)));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_movekeys_conflict) {

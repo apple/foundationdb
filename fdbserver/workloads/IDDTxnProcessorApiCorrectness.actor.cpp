@@ -262,9 +262,20 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	}
 
 	void verifyServerKeyDest(MoveKeysParams& params) const {
+		KeyRangeRef keys;
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			ASSERT(params.ranges.present());
+			// TODO: make startMoveShards work with multiple ranges.
+			ASSERT(params.ranges.get().size() == 1);
+			keys = params.ranges.get().at(0);
+		} else {
+			ASSERT(params.keys.present());
+			keys = params.keys.get();
+		}
+
 		// check destination servers
 		for (auto& id : params.destinationTeam) {
-			ASSERT(mgs->serverIsDestForShard(id, params.keys));
+			ASSERT(mgs->serverIsDestForShard(id, keys));
 		}
 	}
 	ACTOR static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {

@@ -723,12 +723,11 @@ struct DDMockTxnProcessorImpl {
 		return Void();
 	}
 
-	Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, MoveKeysParams params) {
-		state KeyRange keys;
+	static Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, const MoveKeysParams& params) {
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			ASSERT(params.ranges.present());
 			// TODO: make startMoveShards work with multiple ranges.
-			ASSERT(params.ranges.size() == 1);
+			ASSERT(params.ranges.get().size() == 1);
 			return checkFetchingState(self, params.destinationTeam, params.ranges.get().at(0));
 		}
 		ASSERT(params.keys.present());
@@ -744,7 +743,7 @@ struct DDMockTxnProcessorImpl {
 		wait(self->rawStartMovement(params, tssMapping));
 		ASSERT(tssMapping.empty());
 
-		wait(rawCheckFetchingState(self, params.destinationTeam, params.keys));
+		wait(rawCheckFetchingState(self, params));
 
 		wait(self->rawFinishMovement(params, tssMapping));
 		if (!params.dataMovementComplete.isSet())
@@ -931,7 +930,7 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		ASSERT(params.ranges.present());
 		// TODO: make startMoveShards work with multiple ranges.
-		ASSERT(params.ranges.size() == 1);
+		ASSERT(params.ranges.get().size() == 1);
 		keys = params.ranges.get().at(0);
 	} else {
 		ASSERT(params.keys.present());
@@ -985,7 +984,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		ASSERT(params.ranges.present());
 		// TODO: make startMoveShards work with multiple ranges.
-		ASSERT(params.ranges.size() == 1);
+		ASSERT(params.ranges.get().size() == 1);
 		keys = params.ranges.get().at(0);
 	} else {
 		ASSERT(params.keys.present());
