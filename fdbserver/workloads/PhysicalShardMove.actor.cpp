@@ -345,7 +345,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
 				wait(moveKeys(cx,
 				              MoveKeysParams(dataMoveId,
-				                             keys,
+				                             std::vector<KeyRange>{ keys },
 				                             dests,
 				                             dests,
 				                             moveKeysLock,

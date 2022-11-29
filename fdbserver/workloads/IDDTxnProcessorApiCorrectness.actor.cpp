@@ -25,6 +25,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/VersionedMap.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -343,18 +344,33 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		KeyRange keys = self->getRandomKeys();
 		std::vector<UID> destTeam = self->getRandomTeam();
 		std::sort(destTeam.begin(), destTeam.end());
-		return MoveKeysParams(deterministicRandom()->randomUniqueID(),
-		                      keys,
-		                      destTeam,
-		                      destTeam,
-		                      lock,
-		                      Promise<Void>(),
-		                      nullptr,
-		                      nullptr,
-		                      false,
-		                      UID(),
-		                      self->ddContext.ddEnabledState.get(),
-		                      CancelConflictingDataMoves::True);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			                      std::vector<KeyRange>{ keys },
+			                      destTeam,
+			                      destTeam,
+			                      lock,
+			                      Promise<Void>(),
+			                      nullptr,
+			                      nullptr,
+			                      false,
+			                      UID(),
+			                      self->ddContext.ddEnabledState.get(),
+			                      CancelConflictingDataMoves::True);
+		} else {
+			return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			                      keys,
+			                      destTeam,
+			                      destTeam,
+			                      lock,
+			                      Promise<Void>(),
+			                      nullptr,
+			                      nullptr,
+			                      false,
+			                      UID(),
+			                      self->ddContext.ddEnabledState.get(),
+			                      CancelConflictingDataMoves::True);
+		}
 	}
 
 	ACTOR static Future<Void> testMoveKeys(IDDTxnProcessorApiWorkload* self) {
