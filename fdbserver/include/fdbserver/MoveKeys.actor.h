@@ -70,6 +70,8 @@ struct MoveKeysParams {
 	const DDEnabledState* ddEnabledState = nullptr;
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
 
+	MoveKeysParams() {}
+
 	MoveKeysParams(UID dataMoveId,
 	               const KeyRange& keys,
 	               const std::vector<UID>& destinationTeam,

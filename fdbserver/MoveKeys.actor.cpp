@@ -2513,14 +2513,14 @@ Future<Void> rawStartMovement(Database occ,
 	                     params.ddEnabledState);
 }
 
-Future<Void> rawCheckFetchingState(Database cx,
+Future<Void> rawCheckFetchingState(const Database& cx,
                                    const MoveKeysParams& params,
                                    const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		ASSERT(params.ranges.present());
 		// TODO: make startMoveShards work with multiple ranges.
-		ASSERT(params.ranges.size() == 1);
-		return checkFetchingState(occ,
+		ASSERT(params.ranges.get().size() == 1);
+		return checkFetchingState(cx,
 		                          params.healthyDestinations,
 		                          params.ranges.get().at(0),
 		                          params.dataMovementComplete,
@@ -2528,7 +2528,7 @@ Future<Void> rawCheckFetchingState(Database cx,
 		                          tssMapping);
 	}
 	ASSERT(params.keys.present());
-	return checkFetchingState(occ,
+	return checkFetchingState(cx,
 	                          params.healthyDestinations,
 	                          params.keys.get(),
 	                          params.dataMovementComplete,
