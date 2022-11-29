@@ -110,6 +110,12 @@ set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
 file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
+set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
+set(FDB_FUTURE_VERSION "7.4.0")
+set(FDB_PREV_RELEASE_VERSION "7.1.25")
+set(FDB_PREV2_RELEASE_VERSION "7.0.0")
+set(FDB_PREV3_RELEASE_VERSION "6.3.25")
+
 ################################################################################
 # Flow
 ################################################################################

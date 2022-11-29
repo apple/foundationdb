@@ -7,16 +7,9 @@ import sys
 import os
 import glob
 import unittest
-
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "tests", "TestRunner")]
-
-# fmt: off
-from binary_download import FdbBinaryDownloader, CURRENT_VERSION
+from fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION
+from binary_download import FdbBinaryDownloader
 from local_cluster import LocalCluster, random_secret_string
-# fmt: on
-
-PREV_RELEASE_VERSION = "7.1.5"
-PREV_PREV_RELEASE_VERSION = "7.0.0"
 
 args = None
 downloader = None
@@ -180,15 +173,15 @@ class ClientConfigTests(unittest.TestCase):
     def test_multiple_external_clients(self):
         # Multiple external clients, normal case
         test = ClientConfigTest(self)
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV_PREV_RELEASE_VERSION])
+        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.disable_local_client = True
-        test.api_version = api_version_from_str(PREV_PREV_RELEASE_VERSION)
+        test.api_version = api_version_from_str(PREV2_RELEASE_VERSION)
         test.exec()
 
     def test_no_external_client_support_api_version(self):
         # Multiple external clients, API version supported by none of them
         test = ClientConfigTest(self)
-        test.create_external_lib_dir([PREV_PREV_RELEASE_VERSION, PREV_RELEASE_VERSION])
+        test.create_external_lib_dir([PREV2_RELEASE_VERSION, PREV_RELEASE_VERSION])
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.expected_error = 2204  # API function missing
@@ -197,7 +190,7 @@ class ClientConfigTests(unittest.TestCase):
     def test_no_external_client_support_api_version_ignore(self):
         # Multiple external clients; API version supported by none of them; Ignore failures
         test = ClientConfigTest(self)
-        test.create_external_lib_dir([PREV_PREV_RELEASE_VERSION, PREV_RELEASE_VERSION])
+        test.create_external_lib_dir([PREV2_RELEASE_VERSION, PREV_RELEASE_VERSION])
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.ignore_external_client_failures = True
@@ -207,7 +200,7 @@ class ClientConfigTests(unittest.TestCase):
     def test_one_external_client_wrong_api_version(self):
         # Multiple external clients, API version unsupported by one of othem
         test = ClientConfigTest(self)
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV_PREV_RELEASE_VERSION])
+        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.expected_error = 2204  # API function missing
@@ -216,7 +209,7 @@ class ClientConfigTests(unittest.TestCase):
     def test_one_external_client_wrong_api_version_ignore(self):
         # Multiple external clients;  API version unsupported by one of them; Ignore failures
         test = ClientConfigTest(self)
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV_PREV_RELEASE_VERSION])
+        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.ignore_external_client_failures = True
@@ -286,6 +279,6 @@ if __name__ == "__main__":
 
     downloader = FdbBinaryDownloader(args.build_dir)
     downloader.download_old_binaries(PREV_RELEASE_VERSION)
-    downloader.download_old_binaries(PREV_PREV_RELEASE_VERSION)
+    downloader.download_old_binaries(PREV2_RELEASE_VERSION)
 
     unittest.main(verbosity=2)

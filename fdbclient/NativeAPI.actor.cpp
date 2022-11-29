@@ -7110,11 +7110,11 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	state Reference<Histogram> batchIntervalDist =
 	    Histogram::getHistogram("GrvBatcher"_sr,
 	                            "ClientGrvBatchInterval"_sr,
-	                            Histogram::Unit::microseconds,
+	                            Histogram::Unit::milliseconds,
 	                            0,
 	                            CLIENT_KNOBS->GRV_BATCH_TIMEOUT * 1000000 * 2);
 	state Reference<Histogram> grvReplyLatencyDist =
-	    Histogram::getHistogram("GrvBatcher"_sr, "ClientGrvReplyLatency"_sr, Histogram::Unit::microseconds);
+	    Histogram::getHistogram("GrvBatcher"_sr, "ClientGrvReplyLatency"_sr, Histogram::Unit::milliseconds);
 	state double lastRequestTime = now();
 
 	state TransactionTagMap<uint32_t> tags;
@@ -10732,12 +10732,13 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 
 			// must be aligned to blob range(s)
 			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedBegin =
-			    getBlobRanges(&tr, KeyRangeRef(purgeRange.begin, purgeRange.begin), 2);
+			    getBlobRanges(&tr, KeyRangeRef(purgeRange.begin, keyAfter(purgeRange.begin)), 1);
 			state Future<Standalone<VectorRef<KeyRangeRef>>> blobbifiedEnd =
-			    getBlobRanges(&tr, KeyRangeRef(purgeRange.end, purgeRange.end), 2);
+			    getBlobRanges(&tr, KeyRangeRef(purgeRange.end, keyAfter(purgeRange.end)), 1);
 			wait(success(blobbifiedBegin) && success(blobbifiedEnd));
+			// If there are no blob ranges on the boundary that's okay as we allow purging of multiple full ranges.
 			if ((!blobbifiedBegin.get().empty() && blobbifiedBegin.get().front().begin < purgeRange.begin) ||
-			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().back().end > purgeRange.end)) {
+			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().front().begin < purgeRange.end)) {
 				TraceEvent("UnalignedPurge")
 				    .detail("Range", range)
 				    .detail("Version", purgeVersion)

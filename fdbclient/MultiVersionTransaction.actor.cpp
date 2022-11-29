@@ -1548,17 +1548,19 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 		auto f = tr.transaction ? tr.transaction->onError(e) : makeTimeout<Void>();
 		f = abortableFuture(f, tr.onChange);
 
-		return flatMapThreadFuture<Void, Void>(f, [this, e](ErrorOr<Void> ready) {
-			if (!ready.isError() || ready.getError().code() != error_code_cluster_version_changed) {
-				if (ready.isError()) {
-					return ErrorOr<ThreadFuture<Void>>(ready.getError());
-				}
-
+		return flatMapThreadFuture<Void, Void>(f, [this](ErrorOr<Void> ready) {
+			if (ready.isError() && ready.getError().code() == error_code_cluster_version_changed) {
+				// In case of a cluster version change, upgrade (or downgrade) the transaction
+				// and let it to be retried independently of the original error
+				updateTransaction();
 				return ErrorOr<ThreadFuture<Void>>(Void());
 			}
-
-			updateTransaction();
-			return ErrorOr<ThreadFuture<Void>>(onError(e));
+			// In all other cases forward the result of the inner onError call
+			if (ready.isError()) {
+				return ErrorOr<ThreadFuture<Void>>(ready.getError());
+			} else {
+				return ErrorOr<ThreadFuture<Void>>(Void());
+			}
 		});
 	}
 }
