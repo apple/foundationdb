@@ -64,7 +64,7 @@ struct BulkSetupWorkload : TestWorkload {
 			std::vector<Future<Void>> tenantFutures;
 			for (int i = 0; i < numTenantsToCreate; i++) {
 				TenantMapEntry entry;
-				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+				entry.encrypted = false;
 				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
 				TraceEvent("CreatingTenant")
 				    .detail("Tenant", workload->tenantNames.back())

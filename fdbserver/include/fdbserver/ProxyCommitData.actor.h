@@ -121,32 +121,32 @@ struct ProxyStats {
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
 	                                    id,
 	                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                                    SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    computeLatency("ComputeLatency",
 	                   id,
 	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    maxComputeNS(0), minComputeNS(1e12),
 	    commitBatchQueuingDist(
-	        Histogram::getHistogram("CommitProxy"_sr, "CommitBatchQueuing"_sr, Histogram::Unit::microseconds)),
+	        Histogram::getHistogram("CommitProxy"_sr, "CommitBatchQueuing"_sr, Histogram::Unit::milliseconds)),
 	    getCommitVersionDist(
-	        Histogram::getHistogram("CommitProxy"_sr, "GetCommitVersion"_sr, Histogram::Unit::microseconds)),
-	    resolutionDist(Histogram::getHistogram("CommitProxy"_sr, "Resolution"_sr, Histogram::Unit::microseconds)),
+	        Histogram::getHistogram("CommitProxy"_sr, "GetCommitVersion"_sr, Histogram::Unit::milliseconds)),
+	    resolutionDist(Histogram::getHistogram("CommitProxy"_sr, "Resolution"_sr, Histogram::Unit::milliseconds)),
 	    postResolutionDist(
-	        Histogram::getHistogram("CommitProxy"_sr, "PostResolutionQueuing"_sr, Histogram::Unit::microseconds)),
+	        Histogram::getHistogram("CommitProxy"_sr, "PostResolutionQueuing"_sr, Histogram::Unit::milliseconds)),
 	    processingMutationDist(
-	        Histogram::getHistogram("CommitProxy"_sr, "ProcessingMutation"_sr, Histogram::Unit::microseconds)),
-	    tlogLoggingDist(Histogram::getHistogram("CommitProxy"_sr, "TlogLogging"_sr, Histogram::Unit::microseconds)),
-	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::microseconds)) {
+	        Histogram::getHistogram("CommitProxy"_sr, "ProcessingMutation"_sr, Histogram::Unit::milliseconds)),
+	    tlogLoggingDist(Histogram::getHistogram("CommitProxy"_sr, "TlogLogging"_sr, Histogram::Unit::milliseconds)),
+	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return pVersion->get(); });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -235,7 +235,7 @@ struct ProxyCommitData {
 	double lastResolverReset;
 	int localTLogCount = -1;
 
-	bool isEncryptionEnabled = false;
+	EncryptionAtRestMode encryptMode;
 
 	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey;
 	Standalone<VectorRef<MutationRef>> idempotencyClears;
@@ -308,7 +308,7 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()), isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+	    lastResolverReset(now()), encryptMode(EncryptionAtRestMode::DISABLED) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

@@ -375,7 +375,7 @@ struct TLogData : NonCopyable {
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
 	    degraded(degraded),
-	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::microseconds)) {
+	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
@@ -1098,7 +1098,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	}
 	// SOMEDAY: This seems to be running pretty often, should we slow it down???
 	// This needs a timeout since nothing prevents I/O operations from hanging indefinitely.
-	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration));
+	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration, "TLogCommit"));
 
 	wait(delay(0, TaskPriority::UpdateStorage));
 
@@ -1824,8 +1824,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
 				UID ssID = nondeterministicRandom()->randomUniqueID();
 				std::string s = "BlockingPeekLatencies-" + reqTag.toString();
-				logData->blockingPeekLatencies.try_emplace(
-				    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+				logData->blockingPeekLatencies.try_emplace(reqTag,
+				                                           s,
+				                                           ssID,
+				                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+				                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 			}
 			LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
 			sample.addMeasurement(latency);
@@ -2157,7 +2160,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	self->largeDiskQueueCommitBytes.set(false);
 
 	wait(ioDegradedOrTimeoutError(
-	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION));
+	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION, "TLogCommit"));
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
 		wait(delay(6.0));
 	}
@@ -2184,6 +2187,9 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	if (logData->logSystem->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
+		DebugLogTraceEvent("LogPop", self->dbgid)
+		    .detail("Tag", logData->remoteTag.toString())
+		    .detail("Version", knownCommittedVersion);
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
@@ -3458,7 +3464,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 
 			TraceEvent("TLogRecover", self->dbgid)
 			    .detail("LogId", logData->logId)
@@ -3523,7 +3530,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 		} else {
 			// Brand new tlog, initialization has already been done by caller
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();
@@ -3594,13 +3602,14 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 	TraceEvent("SharedTlog", tlogId);
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
 
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
 		} else {
 			wait(ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 		}
 
 		// Disk errors need a chance to kill this actor.

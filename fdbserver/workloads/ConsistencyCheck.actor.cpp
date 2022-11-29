@@ -1565,7 +1565,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
+		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {

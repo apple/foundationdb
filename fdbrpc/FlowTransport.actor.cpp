@@ -878,11 +878,11 @@ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
   : transport(transport), destination(destination), compatible(true), outgoingConnectionIdle(true),
     lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), peerReferences(-1),
     bytesReceived(0), bytesSent(0), lastDataPacketSentTime(now()), outstandingReplies(0),
-    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedTime(0.0),
+    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SKETCH_ACCURACY : 0.1), lastLoggedTime(0.0),
     lastLoggedBytesReceived(0), lastLoggedBytesSent(0), timeoutCount(0),
     protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())),
     connectOutgoingCount(0), connectIncomingCount(0), connectFailedCount(0),
-    connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {
+    connectLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SKETCH_ACCURACY : 0.1) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
 }
 

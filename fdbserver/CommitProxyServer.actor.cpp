@@ -920,7 +920,7 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 	if (isSystemKey(m.param1)) {
 		// Encryption domain == FDB SystemKeyspace encryption domain
 		domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-	} else if (commitData->tenantMap.empty()) {
+	} else if (commitData->tenantMap.empty() || commitData->encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
 		// Cluster serves no-tenants; use 'default encryption domain'
 	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		ASSERT_NE((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
@@ -1004,29 +1004,32 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
-	if (pProxyCommitData->isEncryptionEnabled) {
+	if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 		static const std::unordered_set<EncryptCipherDomainId> defaultDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 			                                                                        ENCRYPT_HEADER_DOMAIN_ID,
 			                                                                        FDB_DEFAULT_ENCRYPT_DOMAIN_ID };
 		std::unordered_set<EncryptCipherDomainId> encryptDomainIds = defaultDomainIds;
-		for (int t = 0; t < trs.size(); t++) {
-			TenantInfo const& tenantInfo = trs[t].tenantInfo;
-			int64_t tenantId = tenantInfo.tenantId;
-			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
-			if (tenantId != TenantInfo::INVALID_TENANT) {
-				ASSERT(tenantName.present());
-				encryptDomainIds.emplace(tenantId);
-			} else {
-				// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
-				if (pProxyCommitData->tenantMap.size() > 0) {
-					for (auto m : trs[t].transaction.mutations) {
-						EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, m);
-						encryptDomainIds.emplace(domainId);
-					}
+		// For cluster aware encryption only the default domain id is needed
+		if (pProxyCommitData->encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
+			for (int t = 0; t < trs.size(); t++) {
+				TenantInfo const& tenantInfo = trs[t].tenantInfo;
+				int64_t tenantId = tenantInfo.tenantId;
+				Optional<TenantNameRef> const& tenantName = tenantInfo.name;
+				if (tenantId != TenantInfo::INVALID_TENANT) {
+					ASSERT(tenantName.present());
+					encryptDomainIds.emplace(tenantId);
 				} else {
-					// Ensure default encryption domain-ids are present.
-					ASSERT_EQ(encryptDomainIds.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
-					ASSERT_EQ(encryptDomainIds.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
+					// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
+					if (pProxyCommitData->tenantMap.size() > 0) {
+						for (auto m : trs[t].transaction.mutations) {
+							EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, m);
+							encryptDomainIds.emplace(domainId);
+						}
+					} else {
+						// Ensure default encryption domain-ids are present.
+						ASSERT_EQ(encryptDomainIds.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
+						ASSERT_EQ(encryptDomainIds.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
+					}
 				}
 			}
 		}
@@ -1057,7 +1060,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
 	}
-	if (pProxyCommitData->isEncryptionEnabled) {
+	if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
 		self->cipherKeys = cipherKeys;
 	}
@@ -1202,7 +1205,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       pProxyCommitData->logSystem,
 				                       trs[t].transaction.mutations,
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
+				                       pProxyCommitData->encryptMode.isEncryptionEnabled() ? &self->cipherKeys
+				                                                                           : nullptr,
 				                       self->forceRecovery,
 				                       self->commitVersion,
 				                       self->commitVersion + 1,
@@ -1264,7 +1268,7 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 	state const BlobCipherEncryptHeader* header;
 
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
-	ASSERT(self->pProxyCommitData->isEncryptionEnabled);
+	ASSERT(self->pProxyCommitData->encryptMode.isEncryptionEnabled());
 	ASSERT(g_network && g_network->isSimulated());
 
 	ASSERT(encryptedMutation.isEncrypted());
@@ -1289,7 +1293,7 @@ ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContex
 	state MutationRef encryptedMutation;
 
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
-	ASSERT(self->pProxyCommitData->isEncryptionEnabled);
+	ASSERT(self->pProxyCommitData->encryptMode.isEncryptionEnabled());
 	ASSERT_NE((MutationRef::Type)mutation->type, MutationRef::Type::ClearRange);
 
 	domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
@@ -1305,7 +1309,7 @@ ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContex
 }
 
 Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
-                                          int64_t tenantId,
+                                          int64_t domainId,
                                           const MutationRef* mutation,
                                           Optional<MutationRef>* encryptedMutationOpt,
                                           Arena* arena) {
@@ -1322,8 +1326,10 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 	// the penalty happens iff any of above conditions are met. Otherwise, corresponding handle routine (ACTOR
 	// compliant) gets invoked ("slow path").
 
-	if (self->pProxyCommitData->isEncryptionEnabled) {
-		EncryptCipherDomainId domainId = tenantId;
+	if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+		if (self->pProxyCommitData->encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
+			ASSERT(domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID || domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
+		}
 		MutationRef encryptedMutation;
 		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::DISABLED,
 		           "using disabled tenant mode");
@@ -1338,13 +1344,13 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			ASSERT(encryptedMutation.isEncrypted());
 			// During simulation check whether the encrypted mutation matches the decrpyted mutation
 			if (g_network && g_network->isSimulated()) {
-				return writeMutationEncryptedMutation(self, tenantId, mutation, encryptedMutationOpt, arena);
+				return writeMutationEncryptedMutation(self, domainId, mutation, encryptedMutationOpt, arena);
 			}
 		} else {
 			if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
 				domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
 				if (self->cipherKeys.find(domainId) == self->cipherKeys.end()) {
-					return writeMutationFetchEncryptKey(self, tenantId, mutation, arena);
+					return writeMutationFetchEncryptKey(self, domainId, mutation, arena);
 				}
 
 				CODE_PROBE(true, "Raw access mutation encryption");
@@ -1382,7 +1388,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state VectorRef<Optional<MutationRef>>* encryptedMutations =
 		    &trs[self->transactionNum].transaction.encryptedMutations;
 		ASSERT(encryptedMutations->size() == 0 || encryptedMutations->size() == pMutations->size());
-		state int64_t tenantId = trs[self->transactionNum].tenantInfo.tenantId;
+		state int64_t encryptDomain = trs[self->transactionNum].tenantInfo.tenantId;
+		if (self->pProxyCommitData->encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
+		    encryptDomain != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+			encryptDomain = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+		}
 
 		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
 
@@ -1449,7 +1459,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (encryptedMutation.present()) {
 					ASSERT(encryptedMutation.get().isEncrypted());
 				}
-				WriteMutationRefVar var = wait(writeMutation(self, tenantId, &m, &encryptedMutation, &arena));
+				WriteMutationRefVar var = wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -1505,7 +1515,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				WriteMutationRefVar var = wait(writeMutation(self, tenantId, &m, &encryptedMutation, &arena));
+				WriteMutationRefVar var = wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -1539,7 +1549,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				// Add the mutation to the relevant backup tag
 				for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
 					// If encryption is enabled make sure the mutation we are writing is also encrypted
-					ASSERT(!self->pProxyCommitData->isEncryptionEnabled || writtenMutation.isEncrypted());
+					ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 					CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
 					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
 				}
@@ -1561,7 +1571,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 					// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must
 					// be changed to account for clear ranges which span tenant boundaries
-					if (self->pProxyCommitData->isEncryptionEnabled) {
+					if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 						CODE_PROBE(true, "encrypting clear range backup mutation");
 						if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
 						    encryptedMutation.present()) {
@@ -1676,7 +1686,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                            idempotencyIdSet.param2 = kv.value;
 		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
 		                            self->toCommit.addTags(tags);
-		                            if (self->pProxyCommitData->isEncryptionEnabled) {
+		                            if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 			                            CODE_PROBE(true, "encrypting idempotency mutation");
 			                            EncryptCipherDomainId domainId =
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
@@ -2731,7 +2741,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 	}
 
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
-	if (pContext->pCommitData->isEncryptionEnabled) {
+	if (pContext->pCommitData->encryptMode.isEncryptionEnabled()) {
 		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
@@ -2797,7 +2807,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		Arena arena;
 		bool confChanges;
 		CODE_PROBE(
-		    pContext->pCommitData->isEncryptionEnabled,
+		    pContext->pCommitData->encryptMode.isEncryptionEnabled(),
 		    "Commit proxy apply metadata mutations from txnStateStore on recovery, with encryption-at-rest enabled");
 		applyMetadataMutations(SpanContext(),
 		                       *pContext->pCommitData,
@@ -2805,7 +2815,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       Reference<ILogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
-		                       pContext->pCommitData->isEncryptionEnabled ? &cipherKeys : nullptr,
+		                       pContext->pCommitData->encryptMode.isEncryptionEnabled() ? &cipherKeys : nullptr,
 		                       confChanges,
 		                       /* version= */ 0,
 		                       /* popVersion= */ 0,
@@ -2867,6 +2877,27 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 
 } // anonymous namespace
 
+ACTOR Future<EncryptionAtRestMode> getEncryptionAtRestMode(Reference<AsyncVar<ServerDBInfo> const> db) {
+	loop {
+		state UID randomUID = deterministicRandom()->randomUniqueID();
+		state GetEncryptionAtRestModeRequest req(randomUID);
+		try {
+			choose {
+				when(wait(db->onChange())) {}
+				when(GetEncryptionAtRestModeResponse resp =
+				         wait(brokenPromiseToNever(db->get().clusterInterface.getEncryptionAtRestMode.getReply(req)))) {
+					EncryptionAtRestMode mode = (EncryptionAtRestMode::Mode)resp.mode;
+					TraceEvent(SevDebug, "CPEncryptionAtRestMode", randomUID).detail("Mode", mode.toString());
+					return mode;
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("GetEncryptionAtRestError", randomUID).error(e);
+			throw;
+		}
+	}
+}
+
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
                                          LifetimeToken masterLifetime,
@@ -2889,6 +2920,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
+	EncryptionAtRestMode mode = wait(getEncryptionAtRestMode(db));
+	commitData.encryptMode = mode;
+
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::COMMIT_PROXY, proxy.id()));
 
@@ -2897,8 +2931,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION &&
-	         (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ||
-	          commitData.db->get().encryptKeyProxy.present()))) {
+	         (!commitData.encryptMode.isEncryptionEnabled() || commitData.db->get().encryptKeyProxy.present()))) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
 	}
@@ -2910,7 +2943,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
 		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
-		    "CommitProxy"_sr, "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::microseconds));
+		    "CommitProxy"_sr, "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::milliseconds));
 	}
 
 	// Initialize keyResolvers map
@@ -2922,6 +2955,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
+	// TODO: Pass the encrypt mode once supported in IKeyValueStore
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter,
 	                                                  commitData.db,
 	                                                  proxy.id(),

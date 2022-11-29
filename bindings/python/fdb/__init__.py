@@ -25,14 +25,14 @@ https://apple.github.io/foundationdb/api-python.html"""
 
 
 def open(*args, **kwargs):
-    raise RuntimeError('You must call api_version() before using any fdb methods')
+    raise RuntimeError("You must call api_version() before using any fdb methods")
 
 
 init = open
 
 
 def transactional(*args, **kwargs):
-    raise RuntimeError('You must call api_version() before using fdb.transactional')
+    raise RuntimeError("You must call api_version() before using fdb.transactional")
 
 
 def _add_symbols(module, symbols):
@@ -41,29 +41,29 @@ def _add_symbols(module, symbols):
 
 
 def is_api_version_selected():
-    return '_version' in globals()
+    return "_version" in globals()
 
 
 def get_api_version():
     if is_api_version_selected():
-        return globals()['_version']
+        return globals()["_version"]
     else:
-        raise RuntimeError('API version is not set')
+        raise RuntimeError("API version is not set")
 
 
 def api_version(ver):
     header_version = 720
 
-    if '_version' in globals():
-        if globals()['_version'] != ver:
-            raise RuntimeError('FDB API already loaded at version %d' % _version)
+    if "_version" in globals():
+        if globals()["_version"] != ver:
+            raise RuntimeError("FDB API already loaded at version %d" % _version)
         return
 
     if ver < 13:
-        raise RuntimeError('FDB API versions before 13 are not supported')
+        raise RuntimeError("FDB API versions before 13 are not supported")
 
     if ver > header_version:
-        raise RuntimeError('Latest known FDB API version is %d' % header_version)
+        raise RuntimeError("Latest known FDB API version is %d" % header_version)
 
     import fdb.impl
 
@@ -71,31 +71,37 @@ def api_version(ver):
     if err == 2203:  # api_version_not_supported, but that's not helpful to the user
         max_supported_ver = fdb.impl._capi.fdb_get_max_api_version()
         if header_version > max_supported_ver:
-            raise RuntimeError("This version of the FoundationDB Python binding is not supported by the installed "
-                               "FoundationDB C library. The binding requires a library that supports API version "
-                               "%d, but the installed library supports a maximum version of %d." % (header_version, max_supported_ver))
+            raise RuntimeError(
+                "This version of the FoundationDB Python binding is not supported by the installed "
+                "FoundationDB C library. The binding requires a library that supports API version "
+                "%d, but the installed library supports a maximum version of %d."
+                % (header_version, max_supported_ver)
+            )
 
         else:
-            raise RuntimeError("API version %d is not supported by the installed FoundationDB C library." % ver)
+            raise RuntimeError(
+                "API version %d is not supported by the installed FoundationDB C library."
+                % ver
+            )
 
     elif err != 0:
-        raise RuntimeError('FoundationDB API error')
+        raise RuntimeError("FoundationDB API error")
 
     fdb.impl.init_c_api()
 
     list = (
-        'FDBError',
-        'predicates',
-        'Future',
-        'Database',
-        'Tenant',
-        'Transaction',
-        'KeyValue',
-        'KeySelector',
-        'open',
-        'transactional',
-        'options',
-        'StreamingMode',
+        "FDBError",
+        "predicates",
+        "Future",
+        "Database",
+        "Tenant",
+        "Transaction",
+        "KeyValue",
+        "KeySelector",
+        "open",
+        "transactional",
+        "options",
+        "StreamingMode",
     )
 
     _add_symbols(fdb.impl, list)
@@ -134,14 +140,20 @@ def api_version(ver):
             if not hasattr(self, "__iterating"):
                 self.__iterating = iter(self)
             return next(self.__iterating)
+
         setattr(fdb.impl.FDBRange, "next", next)
 
-    globals()['_version'] = ver
+    globals()["_version"] = ver
 
     import fdb.directory_impl
-    directory_symbols = ('directory', 'DirectoryLayer',)
+
+    directory_symbols = (
+        "directory",
+        "DirectoryLayer",
+    )
     _add_symbols(fdb.directory_impl, directory_symbols)
 
     import fdb.subspace_impl
-    subspace_symbols = ('Subspace',)
+
+    subspace_symbols = ("Subspace",)
     _add_symbols(fdb.subspace_impl, subspace_symbols)

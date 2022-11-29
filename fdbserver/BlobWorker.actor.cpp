@@ -305,8 +305,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	          resnapshotLock,
 	          deltaWritesLock,
 	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	          SERVER_KNOBS->FILE_LATENCY_SAMPLE_SIZE,
-	          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	          SERVER_KNOBS->FILE_LATENCY_SKETCH_ACCURACY,
+	          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {}
 
 	bool managerEpochOk(int64_t epoch) {
@@ -1645,7 +1645,7 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 
 		// FIXME: maybe separate knob and/or value for write rate?
 		if (currentMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES / 2 ||
-		    currentMetrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
+		    currentMetrics.bytesWrittenPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
 			wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS / 2.0));
 			CODE_PROBE(true, "wait and check later to see if granule got smaller or colder");
 			continue;

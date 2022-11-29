@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
@@ -555,6 +556,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("PerformRestore", self->performRestore)
@@ -697,7 +699,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
 				Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges;
 				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (!SERVER_KNOBS->ENABLE_ENCRYPTION ||
+					if (!config.encryptionAtRestMode.isEncryptionEnabled() ||
 					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {

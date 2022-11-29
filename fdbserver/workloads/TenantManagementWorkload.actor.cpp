@@ -401,7 +401,7 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
 			if (operationType == OperationType::SPECIAL_KEYS) {
-				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+				entry.encrypted = false;
 			} else {
 				entry.encrypted = deterministicRandom()->coinflip();
 			}
@@ -1677,7 +1677,6 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(localItr != self->createdTenants.end());
 				ASSERT(dataItr->first == localItr->first);
 				ASSERT(dataItr->second.tenantGroup == localItr->second.tenantGroup);
-				ASSERT(dataItr->second.encrypted == localItr->second.encrypted);
 
 				checkTenants.push_back(checkTenantContents(self, dataItr->first, localItr->second));
 				lastTenant = dataItr->first;

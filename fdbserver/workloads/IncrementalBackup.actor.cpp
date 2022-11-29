@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -147,6 +148,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		addDefaultBackupRanges(backupRanges);
 
 		if (self->submitOnly) {
@@ -232,7 +234,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			for (auto r : backupRanges) {
-				if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
+				if (!config.encryptionAtRestMode.isEncryptionEnabled() || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					KeyRangeRef normalKeyRange = r & normalKeys;

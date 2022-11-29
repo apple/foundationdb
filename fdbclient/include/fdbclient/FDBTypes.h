@@ -591,6 +591,9 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // The returned reference is valid as long as keys is valid.
 KeyRef keyBetween(const KeyRangeRef& keys);
 
+// Returns a randomKey between keys. If it's impossible, return keys.end.
+Key randomKeyBetween(const KeyRangeRef& keys);
+
 KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
 
 struct KeySelectorRef {
@@ -1510,6 +1513,8 @@ struct EncryptionAtRestMode {
 
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+
+	bool isEncryptionEnabled() { return mode != EncryptionAtRestMode::DISABLED; }
 
 	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {

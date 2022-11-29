@@ -159,8 +159,7 @@ bool canReplyWith(Error e) {
 
 #define PERSIST_PREFIX "\xff\xff"
 
-FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
-FDB_DEFINE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+FDB_BOOLEAN_PARAM(UnlimitedCommitBytes);
 
 // Immutable
 static const KeyValueRef persistFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/4"_sr);
@@ -534,10 +533,9 @@ const int VERSION_OVERHEAD =
          sizeof(Reference<VersionedMap<KeyRef, ValueOrClearToRef>::PTreeT>)); // versioned map [ x2 for
                                                                               // createNewVersion(version+1) ], 64b
                                                                               // overhead for map
-// For both the mutation log and the versioned map.
+
 static int mvccStorageBytes(MutationRef const& m) {
-	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
-	       (MutationRef::OVERHEAD_BYTES + m.param1.size() + m.param2.size()) * 2;
+	return mvccStorageBytes(m.param1.size() + m.param2.size());
 }
 
 struct FetchInjectionInfo {
@@ -787,7 +785,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	TenantMap tenantMap;
-	Reference<TenantPrefixIndex> tenantPrefixIndex;
+	TenantPrefixIndex tenantPrefixIndex;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -806,7 +804,7 @@ public:
 		FetchKeysHistograms()
 		  : latency(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 		                                    FETCH_KEYS_LATENCY_HISTOGRAM,
-		                                    Histogram::Unit::microseconds)),
+		                                    Histogram::Unit::milliseconds)),
 		    bytes(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 		                                  FETCH_KEYS_BYTES_HISTOGRAM,
 		                                  Histogram::Unit::bytes)),
@@ -1274,48 +1272,48 @@ public:
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readKeyLatencySample("GetKeyMetrics",
 		                         self->thisServerID,
 		                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readValueLatencySample("GetValueMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readRangeLatencySample("GetRangeMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readVersionWaitSample("ReadVersionWaitMetrics",
 		                          self->thisServerID,
 		                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readQueueWaitSample("ReadQueueWaitMetrics",
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		    mappedRangeSample("GetMappedRangeMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    mappedRangeRemoteSample("GetMappedRangeRemoteMetrics",
 		                            self->thisServerID,
 		                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    kvReadRangeLatencySample("KVGetRangeMetrics",
 		                             self->thisServerID,
 		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    updateLatencySample("UpdateLatencyMetrics",
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -1370,31 +1368,31 @@ public:
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
 	              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
-	  : tenantPrefixIndex(makeReference<TenantPrefixIndex>()), encryptionKeyProvider(encryptionKeyProvider),
-	    shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
-	                                                                               Histogram::Unit::microseconds)),
+	  : encryptionKeyProvider(encryptionKeyProvider), shardAware(false),
+	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                            Histogram::Unit::milliseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
-	                                                          Histogram::Unit::microseconds)),
+	                                                          Histogram::Unit::milliseconds)),
 	    eagerReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                       EAGER_READS_LATENCY_HISTOGRAM,
-	                                                       Histogram::Unit::microseconds)),
+	                                                       Histogram::Unit::milliseconds)),
 	    fetchKeysPTreeUpdatesLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                  FETCH_KEYS_PTREE_UPDATES_LATENCY_HISTOGRAM,
-	                                                                  Histogram::Unit::microseconds)),
+	                                                                  Histogram::Unit::milliseconds)),
 	    tLogMsgsPTreeUpdatesLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                 TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM,
-	                                                                 Histogram::Unit::microseconds)),
+	                                                                 Histogram::Unit::milliseconds)),
 	    storageUpdatesDurableLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                  STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM,
-	                                                                  Histogram::Unit::microseconds)),
+	                                                                  Histogram::Unit::milliseconds)),
 	    storageCommitLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          STORAGE_COMMIT_LATENCY_HISTOGRAM,
-	                                                          Histogram::Unit::microseconds)),
+	                                                          Histogram::Unit::milliseconds)),
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
-	                                                                   Histogram::Unit::microseconds)),
+	                                                                   Histogram::Unit::milliseconds)),
 	    readRangeBytesReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                            SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM,
 	                                                            Histogram::Unit::bytes)),
@@ -2126,7 +2124,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		/*
 		StorageMetrics m;
-		m.bytesPerKSecond = req.key.size() + (v.present() ? v.get().size() : 0);
+		m.bytesWrittenPerKSecond = req.key.size() + (v.present() ? v.get().size() : 0);
 		m.iosPerKSecond = 1;
 		data->metrics.notify(req.key, m);
 		*/
@@ -5112,7 +5110,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				throw tenant_name_required();
 			}
 
-			if (rangeIntersectsAnyTenant(*(data->tenantPrefixIndex), KeyRangeRef(begin, end), req.version)) {
+			if (rangeIntersectsAnyTenant(data->tenantPrefixIndex, KeyRangeRef(begin, end), req.version)) {
 				throw tenant_name_required();
 			}
 		}
@@ -5828,7 +5826,8 @@ void applyMutation(StorageServer* self,
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
-	metrics.bytesPerKSecond = mvccStorageBytes(m) / 2;
+	// FIXME: remove the / 2 and double the related knobs.
+	metrics.bytesWrittenPerKSecond = mvccStorageBytes(m) / 2; // comparable to counter.bytesInput / 2
 	metrics.iosPerKSecond = 1;
 	self->metrics.notify(m.param1, metrics);
 
@@ -8616,11 +8615,11 @@ private:
 bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex->createNewVersion(version);
+		tenantPrefixIndex.createNewVersion(version);
 
 		tenantMap.insert(tenantName, tenantEntry);
 
-		auto view = tenantPrefixIndex->at(version);
+		auto view = tenantPrefixIndex.at(version);
 		auto itr = view.find(tenantEntry.prefix);
 		TenantNameUniqueSet nameSet;
 		if (itr != view.end()) {
@@ -8628,7 +8627,7 @@ bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenant
 		}
 
 		nameSet.insert(tenantName);
-		tenantPrefixIndex->insert(tenantEntry.prefix, nameSet);
+		tenantPrefixIndex.insert(tenantEntry.prefix, nameSet);
 
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
 		return true;
@@ -8648,20 +8647,20 @@ void StorageServer::insertTenant(TenantNameRef tenantName, ValueRef value, Versi
 void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex->createNewVersion(version);
+		tenantPrefixIndex.createNewVersion(version);
 
 		auto view = tenantMap.at(version);
 		for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
-			auto indexView = tenantPrefixIndex->at(version);
+			auto indexView = tenantPrefixIndex.at(version);
 			// Trigger any watches on the prefix associated with the tenant.
 			watches.triggerRange(itr->prefix, strinc(itr->prefix));
 			auto indexItr = indexView.find(itr->prefix);
 			ASSERT(indexItr != indexView.end());
 			TenantNameUniqueSet nameSet = *indexItr;
 			if (nameSet.remove(itr.key())) {
-				tenantPrefixIndex->erase(itr->prefix);
+				tenantPrefixIndex.erase(itr->prefix);
 			} else {
-				tenantPrefixIndex->insert(itr->prefix, nameSet);
+				tenantPrefixIndex.insert(itr->prefix, nameSet);
 			}
 			TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
 		}
@@ -9348,7 +9347,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
-				data->tenantPrefixIndex->createNewVersion(newOldestVersion);
+				data->tenantPrefixIndex.createNewVersion(newOldestVersion);
 			}
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
 			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
@@ -9356,7 +9355,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			Future<Void> finishedForgetting =
 			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
 			    data->tenantMap.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
-			    data->tenantPrefixIndex->forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
+			    data->tenantPrefixIndex.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
 			data->oldestVersion.set(newOldestVersion);
 			wait(finishedForgetting);
 			wait(yield(TaskPriority::UpdateStorage));
@@ -9468,7 +9467,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
 		}
 
-		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
+		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
@@ -10165,7 +10164,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 
 		data->tenantMap.insert(tenantName, tenantEntry);
 
-		auto view = data->tenantPrefixIndex->at(version);
+		auto view = data->tenantPrefixIndex.at(version);
 		auto itr = view.find(tenantEntry.prefix);
 		TenantNameUniqueSet nameSet;
 		if (itr != view.end()) {
@@ -10173,7 +10172,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		}
 
 		nameSet.insert(tenantName);
-		data->tenantPrefixIndex->insert(tenantEntry.prefix, nameSet);
+		data->tenantPrefixIndex.insert(tenantEntry.prefix, nameSet);
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
@@ -10215,11 +10214,11 @@ Future<bool> StorageServerDisk::restoreDurableState() {
 
 // Determines whether a key-value pair should be included in a byte sample
 // Also returns size information about the sample
-ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
+ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
+	ASSERT(totalKvSize >= key.size());
 	ByteSampleInfo info;
 
-	const KeyRef key = keyValue.key;
-	info.size = key.size() + keyValue.value.size();
+	info.size = totalKvSize;
 
 	uint32_t a = 0;
 	uint32_t b = 0;
@@ -10354,12 +10353,14 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 						//  all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
-						  bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond ||
-						  m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
+						  bool b = ( m.bytes != metrics.bytes || m.bytesWrittenPerKSecond !=
+						  metrics.bytesWrittenPerKSecond
+						  || m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
 						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
 						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
-						  b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond,
-						  metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
+						  b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond, metrics.bytes,
+						  metrics.bytesWrittenPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesWrittenPerKSecond,
+						  c.iosPerKSecond);
 
 						  }*/
 					}
@@ -11273,7 +11274,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			self.tag = seedTag;
 		}
 
-		self.encryptionKeyProvider->setTenantPrefixIndex(self.tenantPrefixIndex);
 		self.storage.makeNewStorageServerDurable(self.shardAware);
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
@@ -11355,13 +11355,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			if (recovered.canBeSet())
 				recovered.send(Void());
 			return Void();
-		}
-		// Pass a reference of tenantPrefixIndex to the storage engine to support per-tenant data encryption,
-		// after the tenant map is recovered in restoreDurableState. In case of a storage server reboot,
-		// it is possible that the storage engine is still holding a pre-reboot tenantPrefixIndex, and use that
-		// for its own recovery, before we set the tenantPrefixIndex here.
-		if (self.encryptionKeyProvider.isValid()) {
-			self.encryptionKeyProvider->setTenantPrefixIndex(self.tenantPrefixIndex);
 		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -5958,6 +5959,7 @@ public:
 		state Reference<ReadYourWritesTransaction> ryw_tr =
 		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		state BackupConfig backupConfig;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		loop {
 			try {
 				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -6076,9 +6078,8 @@ public:
 			TraceEvent("AS_StartRestore").log();
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
-			bool encryptionEnabled = cx->clientInfo->get().isEncryptionEnabled;
 			for (auto r : ranges) {
-				if (!encryptionEnabled || !r.intersects(getSystemBackupRanges())) {
+				if (!config.encryptionAtRestMode.isEncryptionEnabled() || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					KeyRangeRef normalKeyRange = r & normalKeys;

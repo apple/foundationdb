@@ -240,7 +240,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (i < self->numTenants) {
 				TenantMapEntry entry;
 				entry.tenantGroup = self->getTenantGroup(i);
-				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+				entry.encrypted = false;
 				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
 				self->createdTenants.insert(tenantName);
 			}
