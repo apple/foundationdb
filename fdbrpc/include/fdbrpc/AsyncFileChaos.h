@@ -112,7 +112,10 @@ public:
 				}
 			}
 		}
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(getDelay()), [=](Void _) -> Future<Void> {
+
+		// Wait for diskDelay before submitting the write
+		// Capture file by value in case this is destroyed during the delay
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(getDelay()), [=, file = file](Void _) -> Future<Void> {
 			if (pdata) {
 				return map(holdWhile(arena, file->write(pdata, length, offset)),
 				           [corruptedBlock, file = file](auto res) {
