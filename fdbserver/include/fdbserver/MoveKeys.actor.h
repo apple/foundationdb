@@ -58,8 +58,12 @@ public:
 
 struct MoveKeysParams {
 	UID dataMoveId;
+
+	// Only one of `keys` and `ranges` can be set. `ranges` is created mainly for physical shard moves to move a full
+	// physical shard with multiple key ranges.
 	Optional<KeyRange> keys;
 	Optional<std::vector<KeyRange>> ranges;
+
 	std::vector<UID> destinationTeam, healthyDestinations;
 	MoveKeysLock lock;
 	Promise<Void> dataMovementComplete;
@@ -80,7 +84,7 @@ struct MoveKeysParams {
 	               const Promise<Void>& dataMovementComplete,
 	               FlowLock* startMoveKeysParallelismLock,
 	               FlowLock* finishMoveKeysParallelismLock,
-	               bool hasRemove,
+	               bool hasRemote,
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves)
@@ -99,7 +103,7 @@ struct MoveKeysParams {
 	               const Promise<Void>& dataMovementComplete,
 	               FlowLock* startMoveKeysParallelismLock,
 	               FlowLock* finishMoveKeysParallelismLock,
-	               bool hasRemove,
+	               bool hasRemote,
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves)
