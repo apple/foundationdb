@@ -210,10 +210,6 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_snap_log_anti_quorum_unsupported) {
-						snapFailed = true;
-						break;
-					}
 					TraceEvent("SnapCreateError").error(e);
 					++retry;
 					// snap v2 can fail for many reasons, so retry for 5 times and then fail it
@@ -301,8 +297,7 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_snap_not_fully_recovered_unsupported ||
-					    e.code() == error_code_snap_log_anti_quorum_unsupported) {
+					if (e.code() == error_code_snap_not_fully_recovered_unsupported) {
 						snapFailed = true;
 						break;
 					}

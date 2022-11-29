@@ -159,8 +159,7 @@ bool canReplyWith(Error e) {
 
 #define PERSIST_PREFIX "\xff\xff"
 
-FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
-FDB_DEFINE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+FDB_BOOLEAN_PARAM(UnlimitedCommitBytes);
 
 // Immutable
 static const KeyValueRef persistFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/4"_sr);
