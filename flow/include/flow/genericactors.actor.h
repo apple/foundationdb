@@ -1801,16 +1801,6 @@ public:
 
 	operator Future<Void>() { return getFuture(); }
 
-	void operator=(Future<Void> const& f) {
-		began_ = true;
-		futures.push_back(f);
-	}
-
-	void operator=(Error const& e) {
-		began_ = true;
-		futures.push_back(e);
-	}
-
 	Future<Void> getFuture() {
 		if (futures.empty())
 			return Void();
