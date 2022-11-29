@@ -143,7 +143,7 @@ public:
 		// Wait for diskDelay before submitting the I/O
 		// Capture file by value in case this is destroyed during the delay
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [this, size, file = file](Void _) -> Future<Void> {
+		    delay(diskDelay), [size, file = file](Void _) -> Future<Void> {
 			    constexpr auto maxBlockValue =
 			        std::numeric_limits<decltype(g_simulator->corruptedBlocks)::key_type::second_type>::max();
 			    auto firstDeletedBlock =
