@@ -52,8 +52,8 @@ mkdir -p -m 0755 $CLIENTSDIR/usr/share/doc/foundationdb-clients
 mkdir -p -m 0755 $CLIENTSDIR/usr/lib/foundationdb/backup_agent
 
 install -m 0755 bin/fdbcli $CLIENTSDIR/usr/bin
-install -m 0644 lib/libfdb_c.so lib/libfdb_c_shim.so $CLIENTSDIR/usr/lib
-install -m 0644 bindings/c/foundationdb/fdb_c.h bindings/c/foundationdb/fdb_c_types.h bindings/c/foundationdb/fdb_c_internal.h bindings/c/foundationdb/fdb_c_options.g.h fdbclient/vexillographer/fdb.options bindings/c/foundationdb/fdb_c_shim.h $CLIENTSDIR/usr/include/foundationdb
+install -m 0644 lib/libfdb_c.so $CLIENTSDIR/usr/lib
+install -m 0644 bindings/c/foundationdb/fdb_c.h bindings/c/foundationdb/fdb_c_types.h bindings/c/foundationdb/fdb_c_internal.h bindings/c/foundationdb/fdb_c_options.g.h fdbclient/vexillographer/fdb.options $CLIENTSDIR/usr/include/foundationdb
 dos2unix -q -n README.md $CLIENTSDIR/usr/share/doc/foundationdb-clients/README
 chmod 0644 $CLIENTSDIR/usr/share/doc/foundationdb-clients/README
 install -m 0755 bin/fdbbackup $CLIENTSDIR/usr/lib/foundationdb/backup_agent/backup_agent
