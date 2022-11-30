@@ -244,6 +244,8 @@ public:
 	                                                 // in the TenantCache
 	int TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL; // How often the storage quota allocated to each tenant is
 	                                                 // refreshed in the TenantCache
+	int TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL; // The minimum interval between consecutive trace events logging the
+	                                               // storage bytes used by a tenant group
 	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
 	                                                  // distributor to fetch the list of tenants over storage quota
 
@@ -313,7 +315,7 @@ public:
 	// KeyValueStoreRocksDB
 	bool ROCKSDB_SET_READ_TIMEOUT;
 	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	bool ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_READER_THREAD_PRIORITY;
 	int ROCKSDB_WRITER_THREAD_PRIORITY;

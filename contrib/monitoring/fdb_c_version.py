@@ -24,9 +24,11 @@ import sys
 import platform
 import os
 
+
 def error(message):
     print(message)
     sys.exit(1)
+
 
 def get_version_string(library_path):
     try:
@@ -57,6 +59,7 @@ def get_version_string(library_path):
     version_str += 'protocol %s' % version_components[2]
 
     return version_str
+
 
 if __name__ == '__main__':
     if platform.system() == 'Linux':

@@ -10,7 +10,7 @@ set(TEST_AGGREGATE_TRACES "NONE" CACHE STRING "Create aggregated trace files (NO
 set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)")
 set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
 set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
-set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
+set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
 
 # for the restart test we optimally want to use the last stable fdbserver
 # to test upgrades
@@ -33,6 +33,8 @@ if(WITH_PYTHON)
   It is recommended to install the current stable version from https://www.foundationdb.org/download/ \
   Or provide a path to another fdbserver")
   endif()
+
+  configure_file(${PROJECT_SOURCE_DIR}/tests/TestRunner/fdb_version.py.cmake ${PROJECT_BINARY_DIR}/tests/TestRunner/fdb_version.py)
 
   set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/TestRunner.py")
 
@@ -124,6 +126,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
   add_fdb_test(TEST_FILES fast/AtomicOpsApiCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/AuthzSecurity.toml)
   add_fdb_test(TEST_FILES fast/AutomaticIdempotency.toml)
   add_fdb_test(TEST_FILES fast/BackupAzureBlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupS3BlobCorrectness.toml IGNORE)

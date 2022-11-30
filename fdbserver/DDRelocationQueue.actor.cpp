@@ -1548,14 +1548,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
 							       physicalShardIDCandidate != anonymousShardId.first());
-							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
+							std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> remoteTeamWithPhysicalShard =
 							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
 							        physicalShardIDCandidate, metrics, debugID);
-							// TODO: when we know that `physicalShardIDCandidate` exists, remote team must also exists.
-							if (remoteTeamWithPhysicalShard.present()) {
+							if (!remoteTeamWithPhysicalShard.second) {
+								// Physical shard with `physicalShardIDCandidate` is not available. Retry selecting new
+								// dst physical shard.
+								self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
+								foundTeams = false;
+								break;
+							}
+							if (remoteTeamWithPhysicalShard.first.present()) {
 								// Exists a remoteTeam in the mapping that has the physicalShardIDCandidate
 								// use the remoteTeam with the physicalShard as the bestTeam
-								req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
+								req = GetTeamRequest(remoteTeamWithPhysicalShard.first.get().servers);
 							}
 						}
 
@@ -1853,19 +1859,35 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
-			state Future<Void> doMoveKeys =
-			    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
-			                                                 rd.keys,
-			                                                 destIds,
-			                                                 healthyIds,
-			                                                 self->lock,
-			                                                 dataMovementComplete,
-			                                                 &self->startMoveKeysParallelismLock,
-			                                                 &self->finishMoveKeysParallelismLock,
-			                                                 self->teamCollections.size() > 1,
-			                                                 relocateShardInterval.pairID,
-			                                                 ddEnabledState,
-			                                                 CancelConflictingDataMoves::False });
+			std::unique_ptr<MoveKeysParams> params;
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+				                                          std::vector<KeyRange>{ rd.keys },
+				                                          destIds,
+				                                          healthyIds,
+				                                          self->lock,
+				                                          dataMovementComplete,
+				                                          &self->startMoveKeysParallelismLock,
+				                                          &self->finishMoveKeysParallelismLock,
+				                                          self->teamCollections.size() > 1,
+				                                          relocateShardInterval.pairID,
+				                                          ddEnabledState,
+				                                          CancelConflictingDataMoves::False);
+			} else {
+				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+				                                          rd.keys,
+				                                          destIds,
+				                                          healthyIds,
+				                                          self->lock,
+				                                          dataMovementComplete,
+				                                          &self->startMoveKeysParallelismLock,
+				                                          &self->finishMoveKeysParallelismLock,
+				                                          self->teamCollections.size() > 1,
+				                                          relocateShardInterval.pairID,
+				                                          ddEnabledState,
+				                                          CancelConflictingDataMoves::False);
+			}
+			state Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1878,19 +1900,35 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 								extraIds.clear();
 								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
-								doMoveKeys =
-								    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
-								                                                 rd.keys,
-								                                                 destIds,
-								                                                 healthyIds,
-								                                                 self->lock,
-								                                                 Promise<Void>(),
-								                                                 &self->startMoveKeysParallelismLock,
-								                                                 &self->finishMoveKeysParallelismLock,
-								                                                 self->teamCollections.size() > 1,
-								                                                 relocateShardInterval.pairID,
-								                                                 ddEnabledState,
-								                                                 CancelConflictingDataMoves::False });
+								std::unique_ptr<MoveKeysParams> params;
+								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+									                                          std::vector<KeyRange>{ rd.keys },
+									                                          destIds,
+									                                          healthyIds,
+									                                          self->lock,
+									                                          Promise<Void>(),
+									                                          &self->startMoveKeysParallelismLock,
+									                                          &self->finishMoveKeysParallelismLock,
+									                                          self->teamCollections.size() > 1,
+									                                          relocateShardInterval.pairID,
+									                                          ddEnabledState,
+									                                          CancelConflictingDataMoves::False);
+								} else {
+									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+									                                          rd.keys,
+									                                          destIds,
+									                                          healthyIds,
+									                                          self->lock,
+									                                          Promise<Void>(),
+									                                          &self->startMoveKeysParallelismLock,
+									                                          &self->finishMoveKeysParallelismLock,
+									                                          self->teamCollections.size() > 1,
+									                                          relocateShardInterval.pairID,
+									                                          ddEnabledState,
+									                                          CancelConflictingDataMoves::False);
+								}
+								doMoveKeys = self->txnProcessor->moveKeys(*params);
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
