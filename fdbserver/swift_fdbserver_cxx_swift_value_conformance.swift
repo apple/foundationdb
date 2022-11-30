@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+import FDBClient
 import FDBServer
 
 @_expose(Cxx)
@@ -25,16 +26,32 @@ public struct ExposeTypeConf<T> {
     let x: CInt
 }
 
-// FIXME: return ExposeTypeConf? for conformance instead once header supports stdlib types.
-@_expose(Cxx)
-// This function ensures that the value witness table for `Void` to C++ is
-// exposed in the generated C++ header.
-public func exposeUpdateRecoveryDataRequestValueTypeConformanceToCpp(
-        _ val: ExposeTypeConf<UpdateRecoveryDataRequest>)  {}
+/*****************************************************************************/
+/* Whenever you see a 'type cannot be used in a Swift generic context' error */
+/* you need to expose the the type in question via an expose... function.    */
+/*                                                                           */
+/* These functions function ensures that the value witness table for `T`     */
+/* to C++ is exposed in the generated C++ header.                            */
+/*****************************************************************************/
+
+// TODO(swift): we should somehow simplify this process, so we don't have to expose manually.
 
 // FIXME: return ExposeTypeConf? for conformance instead once header supports stdlib types.
 @_expose(Cxx)
-// This function ensures that the value witness table for `Void` to C++ is
-// exposed in the generated C++ header.
-public func exposeGetCommitVersionRequestValueTypeConformanceToCpp(
-        _ val: ExposeTypeConf<GetCommitVersionRequest>)  {}
+public func exposeConformanceToCxx_UpdateRecoveryDataRequest(
+        _: ExposeTypeConf<UpdateRecoveryDataRequest>)  {}
+
+// FIXME: return ExposeTypeConf? for conformance instead once header supports stdlib types.
+@_expose(Cxx)
+public func exposeConformanceToCxx_GetCommitVersionRequest(
+        _: ExposeTypeConf<GetCommitVersionRequest>)  {}
+
+// FIXME: return ExposeTypeConf? for conformance instead once header supports stdlib types.
+@_expose(Cxx)
+public func exposeConformanceToCxx_GetRawCommittedVersionRequest(
+        _: ExposeTypeConf<GetRawCommittedVersionRequest>)  {}
+
+// FIXME: return ExposeTypeConf? for conformance instead once header supports stdlib types.
+@_expose(Cxx)
+public func exposeConformanceToCxx_ReportRawCommittedVersionRequest(
+        _: ExposeTypeConf<ReportRawCommittedVersionRequest>)  {}

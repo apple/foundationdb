@@ -200,7 +200,7 @@ struct SWIFT_CXX_IMPORT_OWNED UpdateRecoveryDataRequest {
 	}
 };
 
-struct ReportRawCommittedVersionRequest {
+struct SWIFT_CXX_IMPORT_OWNED ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
 	Version version;
 	bool locked;

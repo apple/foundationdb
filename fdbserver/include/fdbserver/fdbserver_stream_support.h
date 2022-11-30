@@ -38,6 +38,12 @@ using RequestStream_UpdateRecoveryDataRequest = RequestStream<struct UpdateRecov
 
 using FutureStream_GetCommitVersionRequest = FutureStream<struct GetCommitVersionRequest>;
 
+using RequestStream_GetRawCommittedVersionRequest = RequestStream<struct GetRawCommittedVersionRequest>;
+using FutureStream_GetRawCommittedVersionRequest = FutureStream<struct GetRawCommittedVersionRequest>;
+
+using RequestStream_ReportRawCommittedVersionRequest = RequestStream<struct ReportRawCommittedVersionRequest>;
+using FutureStream_ReportRawCommittedVersionRequest = FutureStream<struct ReportRawCommittedVersionRequest>;
+
 // ==== ----------------------------------------------------------------------------------------------------------------
 
 template<class T>
@@ -96,6 +102,12 @@ using FlowSingleCallbackForSwiftContinuation_UpdateRecoveryDataRequest =
 
 using FlowSingleCallbackForSwiftContinuation_GetCommitVersionRequest =
     FlowSingleCallbackForSwiftContinuation<GetCommitVersionRequest>;
+
+using FlowSingleCallbackForSwiftContinuation_GetRawCommittedVersionRequest =
+    FlowSingleCallbackForSwiftContinuation<GetRawCommittedVersionRequest>;
+
+using FlowSingleCallbackForSwiftContinuation_ReportRawCommittedVersionRequest =
+    FlowSingleCallbackForSwiftContinuation<ReportRawCommittedVersionRequest>;
 
 
 #endif // FOUNDATIONDB_FDBSERVER_STREAM_SUPPORT_H

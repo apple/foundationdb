@@ -83,7 +83,7 @@ public actor MasterDataActor {
         }
     }
 
-    func getVersion(cxxState myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
+    func getVersion(myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
         myself.getCommitVersionRequests += 1
 
         guard let lastVersionReplies = lastCommitProxyVersionReplies[req.requestingProxy] else {
@@ -160,11 +160,12 @@ public actor MasterDataActor {
 
     /// Promise type must match result type of the target function.
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
-    nonisolated public func getVersion(cxxState: MasterData, req: GetCommitVersionRequest, result promise: PromiseVoid) {
+    nonisolated public func getVersion(myself: MasterData, req: GetCommitVersionRequest,
+                                       result promise: PromiseVoid) {
         // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         Task {
             // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
-            if var rep = await getVersion(cxxState: cxxState, req: req) {
+            if var rep = await getVersion(myself: myself, req: req) {
                 req.reply.send(&rep)
             } else {
                 req.reply.sendNever()
@@ -176,10 +177,9 @@ public actor MasterDataActor {
     }
 
     // ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-    func waitForPrev(cxxState myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Void? {
+    func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Void {
         print("[swift] waitForPrev impl, version: \(req.version) -> ")
 
-        // state double startTime = now();
         let startTime = now()
 
         // wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
@@ -195,41 +195,33 @@ public actor MasterDataActor {
         }
 
 
-        // double latency = now() - startTime;
         let latency = now() - startTime
 
-        // self->waitForPrevLatencies.addMeasurement(latency);
         myself.waitForPrevLatencies.addMeasurement(latency)
 
-        // ++self->waitForPrevCommitRequests;
         // Note.  To fix: error: value of type 'MasterData' has no member 'waitForPrevCommitRequests'
         // change the field type in MasterData from Counter to CounterValue
-        myself.waitForPrevCommitRequests += 1;
+        myself.waitForPrevCommitRequests += 1
 
-        // updateLiveCommittedVersion(self, req);
         // NOTE.  To fix: error: cannot find 'updateLiveCommittedVersion' in scope
         // Add the C++ declaration to the .h...
         // Note:  To fix. cannot convert value of type 'MasterData' to expected argument type '__CxxTemplateInst9ReferenceI10MasterDataE'
         // Change the C++ method to take a raw C++ reference instead of an FDB Reference<Foo>
         updateLiveCommittedVersion(myself, req)
 
-        // req.reply.send(Void());
         return Void()
     }
 
-    nonisolated public func waitForPrev(cxxState: MasterData, req: ReportRawCommittedVersionRequest, result promise: PromiseVoid) {
+    nonisolated public func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest,
+                                        result promise: PromiseVoid) {
         Task {
-            if var rep = await waitForPrev(cxxState: cxxState, req: req) {
-                req.reply.send(&rep)
-            } else {
-                req.reply.sendNever()
-            }
-            var result = Flow.Void()
-            promise.send(&result)
+            var rep = await waitForPrev(myself: myself, req: req)
+            req.reply.send(&rep)
+            promise.send(&rep)
         }
     }
 
-    nonisolated public func provideVersions(cxxState myself: MasterData, result promise: PromiseVoid) {
+    nonisolated public func provideVersions(myself: MasterData, result promise: PromiseVoid) {
         //  state ActorCollection versionActors(false);
         //
         //	loop choose {
@@ -241,10 +233,94 @@ public actor MasterDataActor {
         Task {
             for try await req in myself.myInterface.getCommitVersion.getFuture() {
                 Task {
-                    if var rep = await self.getVersion(cxxState: myself, req: req) {
+                    if var rep = await self.getVersion(myself: myself, req: req) {
                         req.reply.send(&rep)
                     } else {
                         req.reply.sendNever()
+                    }
+                }
+            }
+
+            var result = Flow.Void()
+            promise.send(&result)
+        }
+    }
+
+    public func getLiveCommittedVersion(myself: MasterData, _ req: GetRawCommittedVersionRequest) -> GetRawCommittedVersionReply {
+        if req.debugID.present() {
+            // TODO: trace event here
+            //     g_traceBatch.addEvent("TransactionDebug",
+            //		    req.debugID.get().first(),
+            //			"MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
+        }
+
+        // if (self->liveCommittedVersion.get() == invalidVersion) {
+        //     self->liveCommittedVersion.set(self->recoveryTransactionVersion);
+        // }
+        if myself.liveCommittedVersion.get() == invalidVersion {
+            myself.liveCommittedVersion.set(Int(myself.recoveryTransactionVersion));
+        }
+
+        // ++self->getLiveCommittedVersionRequests;
+        myself.getLiveCommittedVersionRequests += 1
+
+        // GetRawCommittedVersionReply reply;
+        // reply.version = self->liveCommittedVersion.get();
+        // reply.locked = self->databaseLocked;
+        // reply.metadataVersion = self->proxyMetadataVersion;
+        // reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
+        var reply = GetRawCommittedVersionReply()
+        let liveCommittedVersion: Int = myself.liveCommittedVersion.get()
+        reply.version = Version(liveCommittedVersion)
+        reply.locked = myself.databaseLocked
+        reply.metadataVersion = myself.proxyMetadataVersion
+        reply.minKnownCommittedVersion = myself.minKnownCommittedVersion
+
+        // if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+        //     self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
+        //     self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+        // }
+        if (getServerKnobs().ENABLE_VERSION_VECTOR) {
+             // myself.ssVersionVector.getDelta(req.maxVersion, &reply.ssVersionVectorDelta) // FIXME: help!
+            // FIXME:
+            //     /root/build/fdbserver/CMakeFiles/fdbserver_swift.dir/./masterserver.swift.o: In function `VersionVector::getDelta(long, VersionVector&) const':
+            //     masterserver.swift.o:(.text._ZNK13VersionVector8getDeltaElRS_[_ZNK13VersionVector8getDeltaElRS_]+0xc7): undefined reference to `std::tuple_element<0ul, std::pair<Tag, long> >::type const& std::get<0ul, Tag, long>(std::pair<Tag, long> const&)'
+            //     masterserver.swift.o:(.text._ZNK13VersionVector8getDeltaElRS_[_ZNK13VersionVector8getDeltaElRS_]+0xd2): undefined reference to `std::tuple_element<1ul, std::pair<Tag, long> >::type const& std::get<1ul, Tag, long>(std::pair<Tag, long> const&)'
+            myself.versionVectorSizeOnCVReply.addMeasurement(Double(reply.ssVersionVectorDelta.size()))
+        }
+
+        return reply
+    }
+
+    func reportLiveCommittedVersion(myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Void {
+        if let prevVersion = Swift.Optional(cxxOptional: req.prevVersion),
+           getServerKnobs().ENABLE_VERSION_VECTOR &&
+          (myself.liveCommittedVersion.get() != invalidVersion) &&
+          (myself.liveCommittedVersion.get() < prevVersion) {
+            return await waitForPrev(myself: myself, req: req)
+        } else {
+            updateLiveCommittedVersion(myself, req)
+            myself.nonWaitForPrevCommitRequests += 1
+            return Void()
+        }
+    }
+
+    nonisolated public func serveLiveCommittedVersion(myself: MasterData, result promise: PromiseVoid) {
+        Task {
+            await withThrowingTaskGroup(of: Swift.Void.self) { group in
+                // getLiveCommittedVersion
+                group.addTask {
+                    for try await req in myself.myInterface.getLiveCommittedVersion.getFuture() {
+                        var rep = await self.getLiveCommittedVersion(myself: myself, req)
+                        req.reply.send(&rep)
+                    }
+                }
+
+                // reportLiveCommittedVersion
+                group.addTask {
+                    for try await req in myself.myInterface.reportLiveCommittedVersion.getFuture() {
+                        var rep = await self.reportLiveCommittedVersion(myself: myself, req: req)
+                        req.reply.send(&rep)
                     }
                 }
             }

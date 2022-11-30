@@ -38,7 +38,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+SWIFT_ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
   self->swiftImpl->getVersion(self.getPtr(), req, /*result=*/promise);
@@ -46,7 +46,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
   return Void();
 }
 
-ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	auto promise = Promise<Void>();
 	self->swiftImpl->waitForPrev(self.getPtr(), req, /*result=*/promise);
 	wait(promise.getFuture());
@@ -59,7 +59,8 @@ void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
     latestRequestNum.set(v);
 }
 
-CounterValue::CounterValue(std::string const& name, CounterCollection& collection) : value(std::make_shared<Counter>(name, collection)) {}
+CounterValue::CounterValue(std::string const& name, CounterCollection& collection) :
+    value(std::make_shared<Counter>(name, collection)) {}
 
 void CounterValue::operator+=(Value delta) {
     value->operator +=(delta);
@@ -123,21 +124,26 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 
 MasterData::~MasterData() {}
 
-ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-//	state ActorCollection versionActors(false);
-//
-//	loop choose {
-//		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
-//			versionActors.add(getVersion(self, req));
-//		}
-//		when(wait(versionActors.getResult())) {}
-//	}
+// Old C++ implementation
+ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
+	state ActorCollection versionActors(false);
+
+	loop choose {
+		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
+			versionActors.add(getVersion(self, req));
+		}
+		when(wait(versionActors.getResult())) {}
+	}
+}
+
+SWIFT_ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	auto promise = Promise<Void>();
 	self->swiftImpl->provideVersions(self.getPtr(), /*result=*/promise);
 	wait(promise.getFuture());
 	return Void();
 }
 
+// TODO: rewrite in Swift, even though just plain C++ code here
 void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequest req) {
 	self.minKnownCommittedVersion = std::max(self.minKnownCommittedVersion, req.minKnownCommittedVersion);
 
@@ -162,44 +168,11 @@ void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequ
 	++self.reportLiveCommittedVersionRequests;
 }
 
-ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	loop {
-		choose {
-			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
-				if (req.debugID.present())
-					g_traceBatch.addEvent("TransactionDebug",
-					                      req.debugID.get().first(),
-					                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
-
-				if (self->liveCommittedVersion.get() == invalidVersion) {
-					self->liveCommittedVersion.set(self->recoveryTransactionVersion);
-				}
-				++self->getLiveCommittedVersionRequests;
-				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion.get();
-				reply.locked = self->databaseLocked;
-				reply.metadataVersion = self->proxyMetadataVersion;
-				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-					self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-					self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
-				}
-				req.reply.send(reply);
-			}
-			when(ReportRawCommittedVersionRequest req =
-			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
-				    (self->liveCommittedVersion.get() != invalidVersion) &&
-				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
-					self->addActor.send(waitForPrev(self, req));
-				} else {
-					updateLiveCommittedVersion(*self, req);
-					++self->nonWaitForPrevCommitRequests;
-					req.reply.send(Void());
-				}
-			}
-		}
-	}
+SWIFT_ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+	auto promise = Promise<Void>();
+	self->swiftImpl->serveLiveCommittedVersion(self.getPtr(), /*result=*/promise);
+	wait(promise.getFuture());
+	return Void();
 }
 
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {

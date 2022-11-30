@@ -122,6 +122,7 @@ add_library(flow_swift STATIC
 
 add_library(flow_swift_future STATIC
     future_support.swift
+    reply_support.swift
     clock_support.swift)
 
 target_include_directories(flow_swift PUBLIC

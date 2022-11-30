@@ -22,6 +22,7 @@ import Flow
 import flow_swift
 import FlowFutureSupport
 import flow_swift_future
+import FDBClient
 import FDBServer
 import Cxx
 
@@ -83,7 +84,57 @@ extension FutureStream_UpdateRecoveryDataRequest: _FlowStreamOps {
     }
 
     public struct AsyncIterator: AsyncIteratorProtocol {
-        public typealias Element = UpdateRecoveryDataRequest
+        public typealias Element = Stream.Element
+
+        var stream: Stream
+        init(_ stream: Stream) {
+            self.stream = stream
+        }
+
+        public mutating func next() async throws -> Element? {
+            try await stream.waitNext
+        }
+    }
+}
+
+extension FutureStream_GetRawCommittedVersionRequest: _FlowStreamOps {
+    public typealias Stream = Self
+    public typealias Element = FDBClient.GetRawCommittedVersionRequest
+    public typealias SingleCB = FlowSingleCallbackForSwiftContinuation_GetRawCommittedVersionRequest
+
+    public var waitNext: Element? {
+        mutating get async throws {
+            guard !self.isReady() else {
+                if self.isError() {
+                    let error = self.getError()
+                    if error.isEndOfStream {
+                        return nil
+                    } else {
+                        throw GeneralFlowError(error)
+                    }
+                } else {
+                    return self.pop()
+                }
+            }
+
+            var s = SingleCB()
+            return try await withCheckedThrowingContinuation { cc in
+                withUnsafeMutablePointer(to: &s) { ptr in
+                    let ecc = FlowCheckedContinuation<Element>(cc)
+                    withUnsafePointer(to: ecc) { ccPtr in
+                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
+                    }
+                }
+            }
+        }
+    }
+
+    public func makeAsyncIterator() -> AsyncIterator {
+        return .init(self)
+    }
+
+    public struct AsyncIterator: AsyncIteratorProtocol {
+        public typealias Element = Stream.Element
 
         var stream: Stream
         init(_ stream: Stream) {
@@ -103,6 +154,59 @@ extension FutureStream_GetCommitVersionRequest: _FlowStreamOps {
     public typealias Stream = Self
     public typealias Element = GetCommitVersionRequest
     public typealias SingleCB = FlowSingleCallbackForSwiftContinuation_GetCommitVersionRequest
+
+    public var waitNext: Element? {
+        mutating get async throws {
+            guard !self.isReady() else {
+                if self.isError() {
+                    let error = self.getError()
+                    if error.isEndOfStream {
+                        return nil
+                    } else {
+                        throw GeneralFlowError(error)
+                    }
+                } else {
+                    return self.pop()
+                }
+            }
+
+            var s = SingleCB()
+            return try await withCheckedThrowingContinuation { cc in
+                withUnsafeMutablePointer(to: &s) { ptr in
+                    let ecc = FlowCheckedContinuation<Element>(cc)
+                    withUnsafePointer(to: ecc) { ccPtr in
+                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
+                    }
+                }
+            }
+        }
+    }
+
+    public func makeAsyncIterator() -> AsyncIterator {
+        return .init(self)
+    }
+
+    public struct AsyncIterator: AsyncIteratorProtocol {
+        public typealias Element = Stream.Element
+
+        var stream: Stream
+        init(_ stream: Stream) {
+            self.stream = stream
+        }
+
+        public mutating func next() async throws -> Element? {
+            try await stream.waitNext
+        }
+    }
+}
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+// MARK: ReportRawCommittedVersionRequest
+
+extension FutureStream_ReportRawCommittedVersionRequest: _FlowStreamOps {
+    public typealias Stream = Self
+    public typealias Element = ReportRawCommittedVersionRequest
+    public typealias SingleCB = FlowSingleCallbackForSwiftContinuation_ReportRawCommittedVersionRequest
 
     public var waitNext: Element? {
         mutating get async throws {
