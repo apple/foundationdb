@@ -43,9 +43,8 @@ TEST_CASE("/fdbrpc/ddsketch/correctness") {
 	DDSketch<double> dd;
 
 	for (int i = 0; i < 4000; i++) {
-		// This generates a uniform real disitribution between the range of
-		// [0.0004, 0.01]
-		double sample = (static_cast<double>(deterministicRandom()->randomSkewedUInt32(40, 1000)) / 100000);
+		// The samples should be on the smaller end
+		double sample = deterministicRandom()->random01() * 0.004;
 		dd.addSample(sample);
 	}
 	double p50 = dd.percentile(0.5);
