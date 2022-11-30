@@ -657,13 +657,16 @@ struct TenantManagementWorkload : TestWorkload {
 
 			wait(waitForAll(deleteFutures));
 			wait(tr->commit());
-		} else {
+		} else { // operationType == OperationType::METACLUSTER
 			ASSERT(!endTenant.present() && tenants.size() == 1);
-			if (deterministicRandom()->coinflip()) {
-				// Read the entry first and then issue delete by ID
-				state TenantMapEntry entry;
-				wait(store(entry, MetaclusterAPI::getTenant(self->mvDb, beginTenant)));
-				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.id));
+			// Read the entry first and then issue delete by ID
+			// getTenant throwing tenant_not_found will break some test cases because it is not wrapped
+			// by runManagementTransaction. For such cases, fall back to delete by name and allow
+			// the errors to flow through there
+			Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->mvDb, beginTenant));
+			if (entry.present() && deterministicRandom()->coinflip()) {
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.get().id));
+				CODE_PROBE(true, "Deleted tenant by ID");
 			} else {
 				wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
 			}

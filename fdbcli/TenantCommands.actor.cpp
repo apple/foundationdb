@@ -293,9 +293,9 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 				fmt::print(stderr, "ERROR: delete by ID should only be run on a management cluster.\n");
 				return false;
 			}
-			if (sscanf(tokens[2].toString().c_str(), "%lld%n", &tenantId, &n) != 1 || n != tokens[2].size() ||
+			if (sscanf(tokens[2].toString().c_str(), "%ld%n", &tenantId, &n) != 1 || n != tokens[2].size() ||
 			    tenantId < 0) {
-				fmt::print(stderr, "ERROR: invalid ID `{}'\n", token.toString().c_str());
+				fmt::print(stderr, "ERROR: invalid ID `{}'\n", tokens[2].toString().c_str());
 				return false;
 			}
 			wait(MetaclusterAPI::deleteTenant(db, tenantId));
