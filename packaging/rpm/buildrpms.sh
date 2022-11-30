@@ -33,8 +33,7 @@ install -m 0755 bin/fdbcli $INSTDIR/usr/bin
 install -m 0755 bin/fdbserver $INSTDIR/usr/sbin
 install -m 0755 bin/fdbmonitor $INSTDIR/usr/lib/foundationdb
 install -m 0755 lib/libfdb_c.so $INSTDIR/usr/lib64
-install -m 0755 lib/libfdb_c_shim.so $INSTDIR/usr/lib64
-install -m 0644 bindings/c/foundationdb/fdb_c.h bindings/c/foundationdb/fdb_c_options.g.h bindings/c/foundationdb/fdb_c_types.h bindings/c/foundationdb/fdb_c_internal.h bindings/c/foundationdb/fdb_c_shim.h fdbclient/vexillographer/fdb.options $INSTDIR/usr/include/foundationdb
+install -m 0644 bindings/c/foundationdb/fdb_c.h bindings/c/foundationdb/fdb_c_options.g.h bindings/c/foundationdb/fdb_c_types.h bindings/c/foundationdb/fdb_c_internal.h fdbclient/vexillographer/fdb.options $INSTDIR/usr/include/foundationdb
 dos2unix -q -n README.md $INSTDIR/usr/share/doc/foundationdb-clients/README
 dos2unix -q -n README.md $INSTDIR/usr/share/doc/foundationdb-server/README
 chmod 0644 $INSTDIR/usr/share/doc/foundationdb-clients/README

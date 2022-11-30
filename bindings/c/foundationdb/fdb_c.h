@@ -70,15 +70,6 @@ DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_error_t code);
 
 #define /* fdb_error_t */ fdb_select_api_version(v) fdb_select_api_version_impl(v, FDB_API_VERSION)
 
-/*
- * A variant of fdb_select_api_version that caps the header API version by the maximum API version
- * supported by the client library. It is intended mainly for use in combination with the shim
- * layer, which loads the client library dynamically.
- */
-#define /* fdb_error_t */ fdb_select_api_version_capped(v)                                                             \
-	fdb_select_api_version_impl(                                                                                       \
-	    v, FDB_API_VERSION < fdb_get_max_api_version() ? FDB_API_VERSION : fdb_get_max_api_version())
-
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_network_set_option(FDBNetworkOption option,
                                                                 uint8_t const* value,
                                                                 int value_length);
