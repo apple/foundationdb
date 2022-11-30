@@ -94,7 +94,13 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
 };
 
-enum EncodingType : uint8_t { XXHash64 = 0, XOREncryption_TestOnly = 1, AESEncryptionV1 = 2, MAX_ENCODING_TYPE = 3 };
+enum EncodingType : uint8_t {
+	XXHash64 = 0,
+	XOREncryption_TestOnly = 1,
+	AESEncryption = 2,
+	AESEncryptionWithAuth = 3,
+	MAX_ENCODING_TYPE = 4
+};
 
 enum PageType : uint8_t {
 	HeaderPage = 0,
@@ -226,7 +232,7 @@ public:
 	// Encryption key used to encrypt a page. Different encoding types may use different structs to represent
 	// an encryption key, and EncryptionKeyRef is a union of these structs.
 	struct EncryptionKeyRef {
-		TextAndHeaderCipherKeys aesKey; // For AESEncryptionV1
+		TextAndHeaderCipherKeys aesKey; // For AESEncryption and AESEncryptionWithAuth
 		uint8_t xorKey; // For XOREncryption_TestOnly
 		uint8_t xorWith; // For XOREncryption_TestOnly
 	};
@@ -368,31 +374,65 @@ public:
 		}
 	};
 
-	struct AESEncryptionV1Encoder {
-		using Header = BlobCipherEncryptHeader;
+	// By default, xxhash is used to checksum the page. But ff authentication is enabled (such as when we are using
+	// aes256-ctr-hmac-sha256 encryption scheme), the auth tag plays the role of a checksum while assuring authenticity
+	// of the data. xxhash checksum is not needed in this case.
+	template <EncodingType encodingType,
+	          typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth,
+	                                  bool>::type = true>
+	struct AESEncryptionEncoder {
+		struct AESEncryptionEncodingHeader {
+			BlobCipherEncryptHeader encryption;
+			XXH64_hash_t checksum;
+		};
 
-		static void encode(void* header, const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
+		struct AESEncryptionWithAuthEncodingHeader {
+			BlobCipherEncryptHeader encryption;
+		};
+
+		using Header = typename std::conditional<encodingType == AESEncryption,
+		                                         AESEncryptionEncodingHeader,
+		                                         AESEncryptionWithAuthEncodingHeader>::type;
+
+		static void encode(void* header,
+		                   const TextAndHeaderCipherKeys& cipherKeys,
+		                   uint8_t* payload,
+		                   int len,
+		                   PhysicalPageID seed) {
 			Header* h = reinterpret_cast<Header*>(header);
 			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
 			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
-			StringRef ciphertext = cipher.encrypt(payload, len, h, arena)->toStringRef();
+			StringRef ciphertext = cipher.encrypt(payload, len, &h->encryption, arena)->toStringRef();
 			ASSERT_EQ(len, ciphertext.size());
 			memcpy(payload, ciphertext.begin(), len);
+			if constexpr (encodingType == AESEncryption) {
+				h->checksum = XXH3_64bits_withSeed(payload, len, seed);
+			}
 		}
 
-		static void decode(void* header, const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
+		static void decode(void* header,
+		                   const TextAndHeaderCipherKeys& cipherKeys,
+		                   uint8_t* payload,
+		                   int len,
+		                   PhysicalPageID seed) {
 			Header* h = reinterpret_cast<Header*>(header);
+			if constexpr (encodingType == AESEncryption) {
+				if (h->checksum != XXH3_64bits_withSeed(payload, len, seed)) {
+					throw page_decoding_failed();
+				}
+			}
 			DecryptBlobCipherAes256Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, h->iv, BlobCipherMetrics::KV_REDWOOD);
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, h->encryption.iv, BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
-			StringRef plaintext = cipher.decrypt(payload, len, *h, arena)->toStringRef();
+			StringRef plaintext = cipher.decrypt(payload, len, h->encryption, arena)->toStringRef();
 			ASSERT_EQ(len, plaintext.size());
 			memcpy(payload, plaintext.begin(), len);
 		}
 	};
+
 #pragma pack(pop)
 
 	// Get the size of the encoding header based on type
@@ -403,8 +443,10 @@ public:
 			return sizeof(XXHashEncoder::Header);
 		} else if (t == EncodingType::XOREncryption_TestOnly) {
 			return sizeof(XOREncryptionEncoder::Header);
-		} else if (t == EncodingType::AESEncryptionV1) {
-			return sizeof(AESEncryptionV1Encoder::Header);
+		} else if (t == EncodingType::AESEncryption) {
+			return sizeof(AESEncryptionEncoder<AESEncryption>::Header);
+		} else if (t == EncodingType::AESEncryptionWithAuth) {
+			return sizeof(AESEncryptionEncoder<AESEncryptionWithAuth>::Header);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -511,8 +553,12 @@ public:
 			XXHashEncoder::encode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			XOREncryptionEncoder::encode(page->getEncodingHeader(), encryptionKey, pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			AESEncryptionV1Encoder::encode(page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize);
+		} else if (page->encodingType == EncodingType::AESEncryption) {
+			AESEncryptionEncoder<AESEncryption>::encode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::AESEncryptionWithAuth) {
+			AESEncryptionEncoder<AESEncryptionWithAuth>::encode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -557,8 +603,12 @@ public:
 			XXHashEncoder::decode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			XOREncryptionEncoder::decode(page->getEncodingHeader(), encryptionKey, pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			AESEncryptionV1Encoder::decode(page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize);
+		} else if (page->encodingType == EncodingType::AESEncryption) {
+			AESEncryptionEncoder<AESEncryption>::decode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::AESEncryptionWithAuth) {
+			AESEncryptionEncoder<AESEncryptionWithAuth>::decode(
+			    page->getEncodingHeader(), encryptionKey.aesKey, pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -567,7 +617,8 @@ public:
 	const Arena& getArena() const { return arena; }
 
 	static bool isEncodingTypeEncrypted(EncodingType t) {
-		return t == EncodingType::AESEncryptionV1 || t == EncodingType::XOREncryption_TestOnly;
+		return t == EncodingType::AESEncryption || t == EncodingType::AESEncryptionWithAuth ||
+		       t == EncodingType::XOREncryption_TestOnly;
 	}
 
 	// Returns true if the page's encoding type employs encryption
@@ -576,8 +627,9 @@ public:
 	// Return encryption domain id used. This method only use information from the encryptionKey.
 	// Caller should make sure encryption domain is in use.
 	int64_t getEncryptionDomainId() const {
-		// encryption domain is only supported by AESEncryptionV1.
-		ASSERT(getEncodingType() == EncodingType::AESEncryptionV1);
+		// encryption domain is only supported by AESEncryption and AESEncryptionWithAuth.
+		ASSERT(getEncodingType() == EncodingType::AESEncryption ||
+		       getEncodingType() == EncodingType::AESEncryptionWithAuth);
 		const Reference<BlobCipherKey>& cipherKey = encryptionKey.aesKey.cipherTextKey;
 		ASSERT(cipherKey.isValid());
 		return cipherKey->getDomainId();

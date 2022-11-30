@@ -7975,8 +7975,9 @@ public:
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
 		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
-			ASSERT(encryptionKeyProvider->expectedEncodingType() == EncodingType::AESEncryptionV1);
-			encodingType = EncodingType::AESEncryptionV1;
+			encodingType = FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ? EncodingType::AESEncryptionWithAuth
+			                                                             : EncodingType::AESEncryption;
+			ASSERT_EQ(encodingType, encryptionKeyProvider->expectedEncodingType());
 			m_keyProvider = encryptionKeyProvider;
 		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Simulation only. Deterministically enable encryption based on uid
@@ -10041,7 +10042,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
 	state unsigned int encryptionDomainMode =
 	    params.getInt("domainMode")
-	        .orDefault(deterministicRandom()->randomInt(0, RandomEncryptionKeyProvider::EncryptionDomainMode::MAX));
+	        .orDefault(deterministicRandom()->randomInt(
+	            0, RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode::MAX));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -10094,9 +10096,12 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state Reference<IPageEncryptionKeyProvider> keyProvider;
-	if (encodingType == EncodingType::AESEncryptionV1) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider>(
-		    RandomEncryptionKeyProvider::EncryptionDomainMode(encryptionDomainMode));
+	if (encodingType == EncodingType::AESEncryption) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryption>>(
+		    RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode(encryptionDomainMode));
+	} else if (encodingType == EncodingType::AESEncryptionWithAuth) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>(
+		    RandomEncryptionKeyProvider<AESEncryptionWithAuth>::EncryptionDomainMode(encryptionDomainMode));
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
