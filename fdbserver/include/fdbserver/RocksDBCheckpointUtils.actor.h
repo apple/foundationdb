@@ -197,7 +197,7 @@ struct RocksDBColumnFamilyCheckpoint {
 
 	std::vector<LiveFileMetaData> sstFiles;
 
-	CheckpointFormat format() const { return RocksDBColumnFamily; }
+	CheckpointFormat format() const { return DataMoveRocksCF; }
 
 	std::string toString() const {
 		std::string res = "RocksDBColumnFamilyCheckpoint:\nSST Files:\n";
