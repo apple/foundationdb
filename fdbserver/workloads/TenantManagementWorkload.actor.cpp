@@ -659,11 +659,11 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else {
 			ASSERT(!endTenant.present() && tenants.size() == 1);
-			if (deterministicRandom->coinflip()) {
+			if (deterministicRandom()->coinflip()) {
 				// Read the entry first and then issue delete by ID
-				TenantMapEntry entry;
+				state TenantMapEntry entry;
 				wait(store(entry, MetaclusterAPI::getTenant(self->mvDb, beginTenant)));
-				wait(MetaClusterAPI::deleteTenant(self->mvDb, entry.id));
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.id));
 			} else {
 				wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
 			}
