@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Release Notes &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    '../',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="../_static/jquery.js"></script>
-    <script type="text/javascript" src="../_static/underscore.js"></script>
-    <script type="text/javascript" src="../_static/doctools.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Release Notes &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="../_static/doctools.js"></script>
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Release Notes" href="release-notes-620.html" />
     <link rel="prev" title="Release Notes" href="release-notes-600.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="../_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="../index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="../earlier-release-notes.html">Earlier Release Notes</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -190,224 +305,224 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="release-notes">
+  <section id="release-notes">
 <h1>Release Notes</h1>
-<div class="section" id="id1">
+<section id="id1">
 <h2>6.1.13</h2>
 <ul class="simple">
-<li>Loading a 6.1 or newer <code class="docutils literal"><span class="pre">fdb_c</span></code> library as a secondary client using the multi-version client could lead to an infinite recursion when run with API versions older than 610. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2169">(PR #2169)</a></li>
-<li>Using C API functions that were removed in 6.1 when using API version 610 or above now results in a compilation error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2169">(PR #2169)</a></li>
-<li><code class="docutils literal"><span class="pre">fdbrestore</span></code> commands other than <code class="docutils literal"><span class="pre">start</span></code> required a default cluster file to be found but did not actually use it. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1912">(PR #1912)</a>.</li>
+<li><p>Loading a 6.1 or newer <code class="docutils literal notranslate"><span class="pre">fdb_c</span></code> library as a secondary client using the multi-version client could lead to an infinite recursion when run with API versions older than 610. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2169">(PR #2169)</a></p></li>
+<li><p>Using C API functions that were removed in 6.1 when using API version 610 or above now results in a compilation error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2169">(PR #2169)</a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> commands other than <code class="docutils literal notranslate"><span class="pre">start</span></code> required a default cluster file to be found but did not actually use it. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1912">(PR #1912)</a>.</p></li>
 </ul>
-</div>
-<div class="section" id="id3">
+</section>
+<section id="id3">
 <h2>6.1.12</h2>
-<div class="section" id="fixes">
+<section id="fixes">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Fixed a thread safety issue while writing large keys or values. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1846">(Issue #1846)</a></li>
-<li>An untracked data distributor could prevent a newly recruited data distributor from being started. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1849">(PR #1849)</a></li>
+<li><p>Fixed a thread safety issue while writing large keys or values. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1846">(Issue #1846)</a></p></li>
+<li><p>An untracked data distributor could prevent a newly recruited data distributor from being started. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1849">(PR #1849)</a></p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id4">
+</section>
+</section>
+<section id="id4">
 <h2>6.1.11</h2>
-<div class="section" id="id5">
+<section id="id5">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Machines which were added to a cluster immediately after the cluster was upgraded to 6.1 would not be given data. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1764">(PR #1764)</a></li>
+<li><p>Machines which were added to a cluster immediately after the cluster was upgraded to 6.1 would not be given data. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1764">(PR #1764)</a></p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id6">
+</section>
+</section>
+<section id="id6">
 <h2>6.1.10</h2>
-<div class="section" id="performance">
+<section id="performance">
 <h3>Performance</h3>
 <ul class="simple">
-<li>Improved the recovery speed of storage servers with large amount of data. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1700">(PR #1700)</a></li>
+<li><p>Improved the recovery speed of storage servers with large amount of data. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1700">(PR #1700)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id7">
+</section>
+<section id="id7">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">fdbrestore</span></code> commands <code class="docutils literal"><span class="pre">abort</span></code>, <code class="docutils literal"><span class="pre">wait</span></code>, and <code class="docutils literal"><span class="pre">status</span></code> would use a default cluster file instead of the destination cluster file argument.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/1701">(PR #1701)</a></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> commands <code class="docutils literal notranslate"><span class="pre">abort</span></code>, <code class="docutils literal notranslate"><span class="pre">wait</span></code>, and <code class="docutils literal notranslate"><span class="pre">status</span></code> would use a default cluster file instead of the destination cluster file argument.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/1701">(PR #1701)</a></p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id8">
+</section>
+</section>
+<section id="id8">
 <h2>6.1.9</h2>
-<div class="section" id="id9">
+<section id="id9">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Sometimes a minority of coordinators would not converge to the leader. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1649">(PR #1649)</a></li>
-<li>HTTP responses indicating a server-side error are no longer expected to contain a ResponseID header. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1651">(PR #1651)</a></li>
+<li><p>Sometimes a minority of coordinators would not converge to the leader. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1649">(PR #1649)</a></p></li>
+<li><p>HTTP responses indicating a server-side error are no longer expected to contain a ResponseID header. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1651">(PR #1651)</a></p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id10">
+</section>
+</section>
+<section id="id10">
 <h2>6.1.8</h2>
-<div class="section" id="features">
+<section id="features">
 <h3>Features</h3>
 <ul class="simple">
-<li>Improved replication mechanism using a new hierarchical technique that significantly reduces the frequency of data loss events even when multiple fault-tolerance zones permanently fail at the same time. After upgrading to 6.1 clusters will experience a low level of background data movement to store data in accordance with the new policy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/964">(PR #964)</a>.</li>
-<li>Added a background actor to remove redundant teams from team collection so that the healthy team number is guaranteed to not exceed the desired number. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1139">(PR #1139)</a></li>
-<li>Get read version, read, and commit requests are counted and aggregated by server-side latency in configurable latency bands and output in JSON status. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1084">(PR #1084)</a></li>
-<li>Added configuration option to choose log spilling implementation <a class="reference external" href="https://github.com/apple/foundationdb/pull/1160">(PR #1160)</a></li>
-<li>Added configuration option to choose log system implementation <a class="reference external" href="https://github.com/apple/foundationdb/pull/1160">(PR #1160)</a></li>
-<li>Batch priority transactions are now limited separately by ratekeeper and will be throttled at lower levels of cluster saturation. This makes it possible to run a more intense background load at saturation without significantly affecting normal priority transactions. It is still recommended not to run excessive loads at batch priority. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1198">(PR #1198)</a></li>
-<li>Restore now requires the destination cluster to be specified explicitly to avoid confusion. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1240">(PR #1240)</a></li>
-<li>Restore now accepts a timestamp that can be used to determine the restore version if the original cluster is available. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1240">(PR #1240)</a></li>
-<li>Backup <code class="docutils literal"><span class="pre">status</span></code> and <code class="docutils literal"><span class="pre">describe</span></code> commands now have a <code class="docutils literal"><span class="pre">--json</span></code> output option. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1248">(PR #1248)</a></li>
-<li>Separated data distribution from the master into its own role. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1062">(PR #1062)</a></li>
-<li>Separated ratekeeper from the master into its own role. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1176">(PR #1176)</a></li>
-<li>Added a <code class="docutils literal"><span class="pre">CompareAndClear</span></code> atomic op that clears a key if its value matches the supplied value. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1105">(PR #1105)</a></li>
-<li>Added support for IPv6. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1178">(PR #1178)</a></li>
-<li>FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to and from TLS. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1157">(PR #1157)</a></li>
-<li>Added <code class="docutils literal"><span class="pre">DISABLE_POSIX_KERNEL_AIO</span></code> knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1283">(PR #1283)</a></li>
-<li>Added support for configuring the cluster to use the primary and remote DC&#8217;s as satellites. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1320">(PR #1320)</a></li>
-<li>Added support for restoring multiple key ranges in a single restore job. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1190">(PR #1190)</a></li>
-<li>Deprecated transaction option <code class="docutils literal"><span class="pre">TRANSACTION_LOGGING_ENABLE</span></code>. Added two new transaction options <code class="docutils literal"><span class="pre">DEBUG_TRANSACTION_IDENTIFIER</span></code> and <code class="docutils literal"><span class="pre">LOG_TRANSACTION</span></code> that sets an identifier for the transaction and logs the transaction to the trace file respectively. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1200">(PR #1200)</a></li>
-<li>Clients can now specify default transaction timeouts and retry limits for all transactions through a database option. <a class="reference external" href="https://github.com/apple/foundationdb/issues/775">(Issue #775)</a></li>
-<li>The &#8220;timeout&#8221;, &#8220;max retry delay&#8221;, and &#8220;retry limit&#8221; transaction options are no longer reset when the transaction is reset after a call to <code class="docutils literal"><span class="pre">onError</span></code> (as of API version 610). <a class="reference external" href="https://github.com/apple/foundationdb/issues/775">(Issue #775)</a></li>
-<li>Added the <code class="docutils literal"><span class="pre">force_recovery_with_data_loss</span></code> command to <code class="docutils literal"><span class="pre">fdbcli</span></code>. When a cluster is configured with usable_regions=2, this command will force the database to recover in the remote region. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1168">(PR #1168)</a></li>
-<li>Added a limit to the number of status requests the cluster controller will handle. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1093">(PR #1093)</a> (submitted by tclinken)</li>
-<li>Added a <code class="docutils literal"><span class="pre">coordinator</span></code> process class. Processes with this class can only be used as a coordinator, and <code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code> will prefer to choose processes of this class. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1069">(PR #1069)</a> (submitted by tclinken)</li>
-<li>The <code class="docutils literal"><span class="pre">consistencycheck</span></code> fdbserver role will check the entire database at most once every week. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1126">(PR #1126)</a></li>
-<li>Added the metadata version key (<code class="docutils literal"><span class="pre">\xff/metadataVersion</span></code>). The value of this key is sent with every read version. It is intended to help clients cache rarely changing metadata. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1213">(PR #1213)</a></li>
-<li>The <code class="docutils literal"><span class="pre">fdbdr</span> <span class="pre">switch</span></code> command verifies a <code class="docutils literal"><span class="pre">dr_agent</span></code> exists in both directions. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1220">(Issue #1220)</a></li>
-<li>Transaction logs that cannot commit to disk for more than 5 seconds are marked as degraded. The cluster controller will prefer to recruit transaction logs on other processes before using degraded processes. <a class="reference external" href="https://github.com/apple/foundationdb/issues/690">(Issue #690)</a></li>
-<li>The <code class="docutils literal"><span class="pre">memory</span></code> storage engine configuration now uses the ssd engine for transaction log spilling. Transaction log spilling only happens when the transaction logs are using too much memory, so using the memory storage engine for this purpose can cause the process to run out of memory. Existing clusters will NOT automatically change their configuration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1314">(PR #1314)</a></li>
-<li>Trace logs can be output as JSON instead of XML using the <code class="docutils literal"><span class="pre">--trace_format</span></code> command line option. <a class="reference external" href="https://github.com/apple/foundationdb/pull/976">(PR #976)</a> (by atn34)</li>
-<li>Added <code class="docutils literal"><span class="pre">modify</span></code> command to fdbbackup for modifying parameters of a running backup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1237">(PR #1237)</a></li>
-<li>Added <code class="docutils literal"><span class="pre">header</span></code> parameter to blobstore backup URLs for setting custom HTTP headers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1237">(PR #1237)</a></li>
-<li>Added the <code class="docutils literal"><span class="pre">maintenance</span></code> command to <code class="docutils literal"><span class="pre">fdbcli</span></code>. This command will stop data distribution from moving data away from processes with a specified zoneID. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1397">(PR #1397)</a></li>
-<li>Added the <code class="docutils literal"><span class="pre">three_data_hall_fallback</span></code> configuration, which can be used to drop storage replicas in a dead data hall. [6.1.1] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1422">(PR #1422)</a></li>
+<li><p>Improved replication mechanism using a new hierarchical technique that significantly reduces the frequency of data loss events even when multiple fault-tolerance zones permanently fail at the same time. After upgrading to 6.1 clusters will experience a low level of background data movement to store data in accordance with the new policy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/964">(PR #964)</a>.</p></li>
+<li><p>Added a background actor to remove redundant teams from team collection so that the healthy team number is guaranteed to not exceed the desired number. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1139">(PR #1139)</a></p></li>
+<li><p>Get read version, read, and commit requests are counted and aggregated by server-side latency in configurable latency bands and output in JSON status. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1084">(PR #1084)</a></p></li>
+<li><p>Added configuration option to choose log spilling implementation <a class="reference external" href="https://github.com/apple/foundationdb/pull/1160">(PR #1160)</a></p></li>
+<li><p>Added configuration option to choose log system implementation <a class="reference external" href="https://github.com/apple/foundationdb/pull/1160">(PR #1160)</a></p></li>
+<li><p>Batch priority transactions are now limited separately by ratekeeper and will be throttled at lower levels of cluster saturation. This makes it possible to run a more intense background load at saturation without significantly affecting normal priority transactions. It is still recommended not to run excessive loads at batch priority. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1198">(PR #1198)</a></p></li>
+<li><p>Restore now requires the destination cluster to be specified explicitly to avoid confusion. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1240">(PR #1240)</a></p></li>
+<li><p>Restore now accepts a timestamp that can be used to determine the restore version if the original cluster is available. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1240">(PR #1240)</a></p></li>
+<li><p>Backup <code class="docutils literal notranslate"><span class="pre">status</span></code> and <code class="docutils literal notranslate"><span class="pre">describe</span></code> commands now have a <code class="docutils literal notranslate"><span class="pre">--json</span></code> output option. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1248">(PR #1248)</a></p></li>
+<li><p>Separated data distribution from the master into its own role. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1062">(PR #1062)</a></p></li>
+<li><p>Separated ratekeeper from the master into its own role. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1176">(PR #1176)</a></p></li>
+<li><p>Added a <code class="docutils literal notranslate"><span class="pre">CompareAndClear</span></code> atomic op that clears a key if its value matches the supplied value. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1105">(PR #1105)</a></p></li>
+<li><p>Added support for IPv6. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1178">(PR #1178)</a></p></li>
+<li><p>FDB can now simultaneously listen to TLS and unencrypted ports to facilitate smoother migration to and from TLS. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1157">(PR #1157)</a></p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">DISABLE_POSIX_KERNEL_AIO</span></code> knob to fallback to libeio instead of kernel async I/O (KAIO) for systems that do not support KAIO or O_DIRECT flag. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1283">(PR #1283)</a></p></li>
+<li><p>Added support for configuring the cluster to use the primary and remote DC’s as satellites. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1320">(PR #1320)</a></p></li>
+<li><p>Added support for restoring multiple key ranges in a single restore job. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1190">(PR #1190)</a></p></li>
+<li><p>Deprecated transaction option <code class="docutils literal notranslate"><span class="pre">TRANSACTION_LOGGING_ENABLE</span></code>. Added two new transaction options <code class="docutils literal notranslate"><span class="pre">DEBUG_TRANSACTION_IDENTIFIER</span></code> and <code class="docutils literal notranslate"><span class="pre">LOG_TRANSACTION</span></code> that sets an identifier for the transaction and logs the transaction to the trace file respectively. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1200">(PR #1200)</a></p></li>
+<li><p>Clients can now specify default transaction timeouts and retry limits for all transactions through a database option. <a class="reference external" href="https://github.com/apple/foundationdb/issues/775">(Issue #775)</a></p></li>
+<li><p>The “timeout”, “max retry delay”, and “retry limit” transaction options are no longer reset when the transaction is reset after a call to <code class="docutils literal notranslate"><span class="pre">onError</span></code> (as of API version 610). <a class="reference external" href="https://github.com/apple/foundationdb/issues/775">(Issue #775)</a></p></li>
+<li><p>Added the <code class="docutils literal notranslate"><span class="pre">force_recovery_with_data_loss</span></code> command to <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. When a cluster is configured with usable_regions=2, this command will force the database to recover in the remote region. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1168">(PR #1168)</a></p></li>
+<li><p>Added a limit to the number of status requests the cluster controller will handle. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1093">(PR #1093)</a> (submitted by tclinken)</p></li>
+<li><p>Added a <code class="docutils literal notranslate"><span class="pre">coordinator</span></code> process class. Processes with this class can only be used as a coordinator, and <code class="docutils literal notranslate"><span class="pre">coordinators</span> <span class="pre">auto</span></code> will prefer to choose processes of this class. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1069">(PR #1069)</a> (submitted by tclinken)</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">consistencycheck</span></code> fdbserver role will check the entire database at most once every week. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1126">(PR #1126)</a></p></li>
+<li><p>Added the metadata version key (<code class="docutils literal notranslate"><span class="pre">\xff/metadataVersion</span></code>). The value of this key is sent with every read version. It is intended to help clients cache rarely changing metadata. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1213">(PR #1213)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">fdbdr</span> <span class="pre">switch</span></code> command verifies a <code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> exists in both directions. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1220">(Issue #1220)</a></p></li>
+<li><p>Transaction logs that cannot commit to disk for more than 5 seconds are marked as degraded. The cluster controller will prefer to recruit transaction logs on other processes before using degraded processes. <a class="reference external" href="https://github.com/apple/foundationdb/issues/690">(Issue #690)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">memory</span></code> storage engine configuration now uses the ssd engine for transaction log spilling. Transaction log spilling only happens when the transaction logs are using too much memory, so using the memory storage engine for this purpose can cause the process to run out of memory. Existing clusters will NOT automatically change their configuration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1314">(PR #1314)</a></p></li>
+<li><p>Trace logs can be output as JSON instead of XML using the <code class="docutils literal notranslate"><span class="pre">--trace_format</span></code> command line option. <a class="reference external" href="https://github.com/apple/foundationdb/pull/976">(PR #976)</a> (by atn34)</p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">modify</span></code> command to fdbbackup for modifying parameters of a running backup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1237">(PR #1237)</a></p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">header</span></code> parameter to blobstore backup URLs for setting custom HTTP headers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1237">(PR #1237)</a></p></li>
+<li><p>Added the <code class="docutils literal notranslate"><span class="pre">maintenance</span></code> command to <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. This command will stop data distribution from moving data away from processes with a specified zoneID. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1397">(PR #1397)</a></p></li>
+<li><p>Added the <code class="docutils literal notranslate"><span class="pre">three_data_hall_fallback</span></code> configuration, which can be used to drop storage replicas in a dead data hall. [6.1.1] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1422">(PR #1422)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id15">
+</section>
+<section id="id15">
 <h3>Performance</h3>
 <ul class="simple">
-<li>Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1311">(PR #1311)</a></li>
-<li>Clients no longer attempt to connect to the master during recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1317">(PR #1317)</a></li>
-<li>Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1485">(PR #1485)</a></li>
-<li>SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 100MB. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1482">(PR #1482)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/1499">(PR #1499)</a></li>
-<li>Reduced the rate at which data is moved between servers, to reduce the impact a failure has on cluster performance. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1499">(PR #1499)</a></li>
-<li>Avoid closing saturated network connections which have not received ping packets. [6.1.7] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1601">(PR #1601)</a></li>
+<li><p>Increased the get read version batch size in the client. This change reduces the load on the proxies when doing many transactions with only a few operations per transaction. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1311">(PR #1311)</a></p></li>
+<li><p>Clients no longer attempt to connect to the master during recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1317">(PR #1317)</a></p></li>
+<li><p>Increase the rate that deleted pages are made available for reuse in the SQLite storage engine. Rename and add knobs to provide more control over this process. [6.1.3] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1485">(PR #1485)</a></p></li>
+<li><p>SQLite page files now grow and shrink in chunks based on a knob which defaults to an effective chunk size of 100MB. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1482">(PR #1482)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/1499">(PR #1499)</a></p></li>
+<li><p>Reduced the rate at which data is moved between servers, to reduce the impact a failure has on cluster performance. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1499">(PR #1499)</a></p></li>
+<li><p>Avoid closing saturated network connections which have not received ping packets. [6.1.7] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1601">(PR #1601)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id17">
+</section>
+<section id="id17">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Python: Creating a <code class="docutils literal"><span class="pre">SingleFloat</span></code> for the tuple layer didn&#8217;t work with integers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1216">(PR #1216)</a></li>
-<li>In some cases, calling <code class="docutils literal"><span class="pre">OnError</span></code> with a non-retryable error would partially reset a transaction. As of API version 610, the transaction will no longer be reset in these cases and will instead put the transaction into an error state. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1298">(PR #1298)</a></li>
-<li>Standardized datetime string format across all backup and restore command options and outputs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1248">(PR #1248)</a></li>
-<li>Read workload status metrics would disappear when a storage server was missing. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1348">(PR #1348)</a></li>
-<li>The <code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code> command could recruit multiple coordinators with the same zone ID. <a class="reference external" href="https://github.com/apple/foundationdb/issues/988">(Issue #988)</a></li>
-<li>The data version of a cluster after a restore could have been lower than the restore version, making versionstamp operations get smaller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1213">(PR #1213)</a></li>
-<li>Fixed a few thread safety issues with slow task profiling. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1085">(PR #1085)</a></li>
-<li>Changing the class of a process would not change its preference for becoming the cluster controller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1350">(PR #1350)</a></li>
-<li>The Go bindings reported an incorrect required version when trying to load an incompatible fdb_c library. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1053">(PR #1053)</a></li>
-<li>The <code class="docutils literal"><span class="pre">include</span></code> command in fdbcli would falsely include all machines with IP addresses that
-have the included IP address as a prefix (for example <code class="docutils literal"><span class="pre">include</span> <span class="pre">1.0.0.1</span></code> would also include
-<code class="docutils literal"><span class="pre">1.0.0.10</span></code>). <a class="reference external" href="https://github.com/apple/foundationdb/pull/1121">(PR #1121)</a></li>
-<li>Restore could crash when reading a file that ends on a block boundary (1MB default). <a class="reference external" href="https://github.com/apple/foundationdb/pull/1205">(PR #1205)</a></li>
-<li>Java: Successful commits and range reads no longer create <code class="docutils literal"><span class="pre">FDBException</span></code> objects, which avoids wasting resources and reduces memory pressure. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1235">(Issue #1235)</a></li>
-<li>Windows: Fixed a crash when deleting files. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1380">(Issue #1380)</a> (by KrzysFR)</li>
-<li>Starting a restore on a tag already in-use would hang and the process would eventually run out of memory. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1394">(PR #1394)</a></li>
-<li>The <code class="docutils literal"><span class="pre">proxy_memory_limit_exceeded</span></code> error was treated as retryable, but <code class="docutils literal"><span class="pre">fdb_error_predicate</span></code> returned that it is not retryable. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1438">(PR #1438)</a>.</li>
-<li>Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. [6.1.3] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1468">(PR #1468)</a>.</li>
-<li>Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1486">(PR #1486)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/1499">(PR #1499)</a></li>
-<li>The <code class="docutils literal"><span class="pre">configure</span></code> command in <code class="docutils literal"><span class="pre">fdbcli</span></code> returned successfully even when the configuration was not changed for some error types. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1509">(PR #1509)</a></li>
-<li>Safety protections in the <code class="docutils literal"><span class="pre">configure</span></code> command in <code class="docutils literal"><span class="pre">fdbcli</span></code> would trigger spuriously when changing between <code class="docutils literal"><span class="pre">three_datacenter</span></code> replication and a region configuration. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1509">(PR #1509)</a></li>
-<li>Status could report an incorrect reason for ongoing data movement. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1544">(PR #1544)</a></li>
-<li>Storage servers were considered failed as soon as they were rebooted, instead of waiting to see if they rejoin the cluster. [6.1.8] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1618">(PR #1618)</a></li>
+<li><p>Python: Creating a <code class="docutils literal notranslate"><span class="pre">SingleFloat</span></code> for the tuple layer didn’t work with integers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1216">(PR #1216)</a></p></li>
+<li><p>In some cases, calling <code class="docutils literal notranslate"><span class="pre">OnError</span></code> with a non-retryable error would partially reset a transaction. As of API version 610, the transaction will no longer be reset in these cases and will instead put the transaction into an error state. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1298">(PR #1298)</a></p></li>
+<li><p>Standardized datetime string format across all backup and restore command options and outputs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1248">(PR #1248)</a></p></li>
+<li><p>Read workload status metrics would disappear when a storage server was missing. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1348">(PR #1348)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">coordinators</span> <span class="pre">auto</span></code> command could recruit multiple coordinators with the same zone ID. <a class="reference external" href="https://github.com/apple/foundationdb/issues/988">(Issue #988)</a></p></li>
+<li><p>The data version of a cluster after a restore could have been lower than the restore version, making versionstamp operations get smaller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1213">(PR #1213)</a></p></li>
+<li><p>Fixed a few thread safety issues with slow task profiling. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1085">(PR #1085)</a></p></li>
+<li><p>Changing the class of a process would not change its preference for becoming the cluster controller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1350">(PR #1350)</a></p></li>
+<li><p>The Go bindings reported an incorrect required version when trying to load an incompatible fdb_c library. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1053">(PR #1053)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">include</span></code> command in fdbcli would falsely include all machines with IP addresses that
+have the included IP address as a prefix (for example <code class="docutils literal notranslate"><span class="pre">include</span> <span class="pre">1.0.0.1</span></code> would also include
+<code class="docutils literal notranslate"><span class="pre">1.0.0.10</span></code>). <a class="reference external" href="https://github.com/apple/foundationdb/pull/1121">(PR #1121)</a></p></li>
+<li><p>Restore could crash when reading a file that ends on a block boundary (1MB default). <a class="reference external" href="https://github.com/apple/foundationdb/pull/1205">(PR #1205)</a></p></li>
+<li><p>Java: Successful commits and range reads no longer create <code class="docutils literal notranslate"><span class="pre">FDBException</span></code> objects, which avoids wasting resources and reduces memory pressure. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1235">(Issue #1235)</a></p></li>
+<li><p>Windows: Fixed a crash when deleting files. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1380">(Issue #1380)</a> (by KrzysFR)</p></li>
+<li><p>Starting a restore on a tag already in-use would hang and the process would eventually run out of memory. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1394">(PR #1394)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">proxy_memory_limit_exceeded</span></code> error was treated as retryable, but <code class="docutils literal notranslate"><span class="pre">fdb_error_predicate</span></code> returned that it is not retryable. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1438">(PR #1438)</a>.</p></li>
+<li><p>Consistency check could report inaccurate shard size estimates if there were enough keys with large values and a small number of keys with small values. [6.1.3] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1468">(PR #1468)</a>.</p></li>
+<li><p>Storage servers could not rejoin the cluster when the proxies were saturated. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1486">(PR #1486)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/1499">(PR #1499)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">configure</span></code> command in <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> returned successfully even when the configuration was not changed for some error types. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1509">(PR #1509)</a></p></li>
+<li><p>Safety protections in the <code class="docutils literal notranslate"><span class="pre">configure</span></code> command in <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> would trigger spuriously when changing between <code class="docutils literal notranslate"><span class="pre">three_datacenter</span></code> replication and a region configuration. [6.1.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1509">(PR #1509)</a></p></li>
+<li><p>Status could report an incorrect reason for ongoing data movement. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1544">(PR #1544)</a></p></li>
+<li><p>Storage servers were considered failed as soon as they were rebooted, instead of waiting to see if they rejoin the cluster. [6.1.8] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1618">(PR #1618)</a></p></li>
 </ul>
-</div>
-<div class="section" id="status">
+</section>
+<section id="status">
 <h3>Status</h3>
 <ul class="simple">
-<li>Report the number of connected coordinators for each client. This aids in monitoring client TLS support when enabling TLS on a live cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1222">(PR #1222)</a></li>
-<li>Degraded processes are reported in <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/issues/690">(Issue #690)</a></li>
+<li><p>Report the number of connected coordinators for each client. This aids in monitoring client TLS support when enabling TLS on a live cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1222">(PR #1222)</a></p></li>
+<li><p>Degraded processes are reported in <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/issues/690">(Issue #690)</a></p></li>
 </ul>
-</div>
-<div class="section" id="bindings">
+</section>
+<section id="bindings">
 <h3>Bindings</h3>
 <ul class="simple">
-<li>API version updated to 610. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-610"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
-<li>The API to create a database has been simplified across the bindings. All changes are backward compatible with previous API versions, with one exception in Java noted below. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>C: <code class="docutils literal"><span class="pre">FDBCluster</span></code> objects and related methods (<code class="docutils literal"><span class="pre">fdb_create_cluster</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_create_database</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_set_option</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_destroy</span></code>, <code class="docutils literal"><span class="pre">fdb_future_get_cluster</span></code>) have been removed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>C: Added <code class="docutils literal"><span class="pre">fdb_create_database</span></code> that creates a new <code class="docutils literal"><span class="pre">FDBDatabase</span></code> object synchronously and removed <code class="docutils literal"><span class="pre">fdb_future_get_database</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>Python: Removed <code class="docutils literal"><span class="pre">fdb.init</span></code>, <code class="docutils literal"><span class="pre">fdb.create_cluster</span></code>, and <code class="docutils literal"><span class="pre">fdb.Cluster</span></code>. <code class="docutils literal"><span class="pre">fdb.open</span></code> no longer accepts a <code class="docutils literal"><span class="pre">database_name</span></code> parameter. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>Java: Deprecated <code class="docutils literal"><span class="pre">FDB.createCluster</span></code> and <code class="docutils literal"><span class="pre">Cluster</span></code>. The preferred way to get a <code class="docutils literal"><span class="pre">Database</span></code> is by using <code class="docutils literal"><span class="pre">FDB.open</span></code>, which should work in both new and old API versions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>Java: Removed <code class="docutils literal"><span class="pre">Cluster(long</span> <span class="pre">cPtr,</span> <span class="pre">Executor</span> <span class="pre">executor)</span></code> constructor. This is API breaking for any code that has subclassed the <code class="docutils literal"><span class="pre">Cluster</span></code> class and is not protected by API versioning. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>Java: Several methods relevant to read-only transactions have been moved into the <code class="docutils literal"><span class="pre">ReadTransaction</span></code> interface.</li>
-<li>Java: Tuples now cache previous hash codes and equality checking no longer requires packing the underlying Tuples. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1166">(PR #1166)</a></li>
-<li>Java: Tuple performance has been improved to use fewer allocations when packing and unpacking. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1206">(Issue #1206)</a></li>
-<li>Java: Unpacking a Tuple with a byte array or string that is missing the end-of-string character now throws an error. <a class="reference external" href="https://github.com/apple/foundationdb/issues/671">(Issue #671)</a></li>
-<li>Java: Unpacking a Tuple constrained to a subset of the underlying array now throws an error when it encounters a truncated integer. <a class="reference external" href="https://github.com/apple/foundationdb/issues/672">(Issue #672)</a></li>
-<li>Ruby: Removed <code class="docutils literal"><span class="pre">FDB.init</span></code>, <code class="docutils literal"><span class="pre">FDB.create_cluster</span></code>, and <code class="docutils literal"><span class="pre">FDB.Cluster</span></code>. <code class="docutils literal"><span class="pre">FDB.open</span></code> no longer accepts a <code class="docutils literal"><span class="pre">database_name</span></code> parameter. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>Golang: Deprecated <code class="docutils literal"><span class="pre">fdb.StartNetwork</span></code>, <code class="docutils literal"><span class="pre">fdb.Open</span></code>, <code class="docutils literal"><span class="pre">fdb.MustOpen</span></code>, and <code class="docutils literal"><span class="pre">fdb.CreateCluster</span></code> and added <code class="docutils literal"><span class="pre">fdb.OpenDatabase</span></code> and <code class="docutils literal"><span class="pre">fdb.MustOpenDatabase</span></code>. The preferred way to start the network and get a <code class="docutils literal"><span class="pre">Database</span></code> is by using <code class="docutils literal"><span class="pre">FDB.OpenDatabase</span></code> or <code class="docutils literal"><span class="pre">FDB.OpenDefault</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
-<li>Flow: Removed <code class="docutils literal"><span class="pre">API::createCluster</span></code> and <code class="docutils literal"><span class="pre">Cluster</span></code> and added <code class="docutils literal"><span class="pre">API::createDatabase</span></code>. The new way to get a <code class="docutils literal"><span class="pre">Database</span></code> is by using <code class="docutils literal"><span class="pre">API::createDatabase</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></li>
-<li>Flow: Changed <code class="docutils literal"><span class="pre">DatabaseContext</span></code> to <code class="docutils literal"><span class="pre">Database</span></code>, and <code class="docutils literal"><span class="pre">API::createDatabase</span></code> returns <code class="docutils literal"><span class="pre">Reference&lt;Database&gt;</span></code> instead of <code class="docutils literal"><span class="pre">Reference&lt;&lt;DatabaseContext&gt;</span></code>.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></li>
-<li>Flow: Converted <code class="docutils literal"><span class="pre">Transaction</span></code> into an interface and moved its implementation into an internal class. Transactions should now be created using <code class="docutils literal"><span class="pre">Database::createTransaction(db)</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></li>
-<li>Flow: Added <code class="docutils literal"><span class="pre">ReadTransaction</span></code> interface that allows only read operations on a transaction. The <code class="docutils literal"><span class="pre">Transaction</span></code> interface inherits from <code class="docutils literal"><span class="pre">ReadTransaction</span></code> and can be used when a <code class="docutils literal"><span class="pre">ReadTransaction</span></code> is required. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></li>
-<li>Flow: Changed <code class="docutils literal"><span class="pre">Transaction::setVersion</span></code> to <code class="docutils literal"><span class="pre">Transaction::setReadVersion</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></li>
-<li>Flow: On update to this version of the Flow bindings, client code will fail to build due to the changes in the API, irrespective of the API version used. Client code must be updated to use the new bindings API. These changes affect the bindings only and won&#8217;t impact compatibility with different versions of the cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></li>
-<li>Golang: Added <code class="docutils literal"><span class="pre">fdb.Printable</span></code> to print a human-readable string for a given byte array. Add <code class="docutils literal"><span class="pre">Key.String()</span></code>, which converts the <code class="docutils literal"><span class="pre">Key</span></code> to a <code class="docutils literal"><span class="pre">string</span></code> using the <code class="docutils literal"><span class="pre">Printable</span></code> function. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1010">(PR #1010)</a> (submitted by pjvds)</li>
-<li>Golang: Tuples now support <code class="docutils literal"><span class="pre">Versionstamp</span></code> operations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1187">(PR #1187)</a> (submitted by ryanworl)</li>
-<li>Python: Python signal handling didn&#8217;t work when waiting on a future. In particular, pressing Ctrl-C would not successfully interrupt the program. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1138">(PR #1138)</a></li>
+<li><p>API version updated to 610. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-610"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</p></li>
+<li><p>The API to create a database has been simplified across the bindings. All changes are backward compatible with previous API versions, with one exception in Java noted below. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>C: <code class="docutils literal notranslate"><span class="pre">FDBCluster</span></code> objects and related methods (<code class="docutils literal notranslate"><span class="pre">fdb_create_cluster</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_create_database</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_set_option</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_destroy</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_future_get_cluster</span></code>) have been removed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>C: Added <code class="docutils literal notranslate"><span class="pre">fdb_create_database</span></code> that creates a new <code class="docutils literal notranslate"><span class="pre">FDBDatabase</span></code> object synchronously and removed <code class="docutils literal notranslate"><span class="pre">fdb_future_get_database</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>Python: Removed <code class="docutils literal notranslate"><span class="pre">fdb.init</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.create_cluster</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdb.Cluster</span></code>. <code class="docutils literal notranslate"><span class="pre">fdb.open</span></code> no longer accepts a <code class="docutils literal notranslate"><span class="pre">database_name</span></code> parameter. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>Java: Deprecated <code class="docutils literal notranslate"><span class="pre">FDB.createCluster</span></code> and <code class="docutils literal notranslate"><span class="pre">Cluster</span></code>. The preferred way to get a <code class="docutils literal notranslate"><span class="pre">Database</span></code> is by using <code class="docutils literal notranslate"><span class="pre">FDB.open</span></code>, which should work in both new and old API versions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>Java: Removed <code class="docutils literal notranslate"><span class="pre">Cluster(long</span> <span class="pre">cPtr,</span> <span class="pre">Executor</span> <span class="pre">executor)</span></code> constructor. This is API breaking for any code that has subclassed the <code class="docutils literal notranslate"><span class="pre">Cluster</span></code> class and is not protected by API versioning. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>Java: Several methods relevant to read-only transactions have been moved into the <code class="docutils literal notranslate"><span class="pre">ReadTransaction</span></code> interface.</p></li>
+<li><p>Java: Tuples now cache previous hash codes and equality checking no longer requires packing the underlying Tuples. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1166">(PR #1166)</a></p></li>
+<li><p>Java: Tuple performance has been improved to use fewer allocations when packing and unpacking. <a class="reference external" href="https://github.com/apple/foundationdb/issues/1206">(Issue #1206)</a></p></li>
+<li><p>Java: Unpacking a Tuple with a byte array or string that is missing the end-of-string character now throws an error. <a class="reference external" href="https://github.com/apple/foundationdb/issues/671">(Issue #671)</a></p></li>
+<li><p>Java: Unpacking a Tuple constrained to a subset of the underlying array now throws an error when it encounters a truncated integer. <a class="reference external" href="https://github.com/apple/foundationdb/issues/672">(Issue #672)</a></p></li>
+<li><p>Ruby: Removed <code class="docutils literal notranslate"><span class="pre">FDB.init</span></code>, <code class="docutils literal notranslate"><span class="pre">FDB.create_cluster</span></code>, and <code class="docutils literal notranslate"><span class="pre">FDB.Cluster</span></code>. <code class="docutils literal notranslate"><span class="pre">FDB.open</span></code> no longer accepts a <code class="docutils literal notranslate"><span class="pre">database_name</span></code> parameter. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>Golang: Deprecated <code class="docutils literal notranslate"><span class="pre">fdb.StartNetwork</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.Open</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.MustOpen</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdb.CreateCluster</span></code> and added <code class="docutils literal notranslate"><span class="pre">fdb.OpenDatabase</span></code> and <code class="docutils literal notranslate"><span class="pre">fdb.MustOpenDatabase</span></code>. The preferred way to start the network and get a <code class="docutils literal notranslate"><span class="pre">Database</span></code> is by using <code class="docutils literal notranslate"><span class="pre">FDB.OpenDatabase</span></code> or <code class="docutils literal notranslate"><span class="pre">FDB.OpenDefault</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></p></li>
+<li><p>Flow: Removed <code class="docutils literal notranslate"><span class="pre">API::createCluster</span></code> and <code class="docutils literal notranslate"><span class="pre">Cluster</span></code> and added <code class="docutils literal notranslate"><span class="pre">API::createDatabase</span></code>. The new way to get a <code class="docutils literal notranslate"><span class="pre">Database</span></code> is by using <code class="docutils literal notranslate"><span class="pre">API::createDatabase</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></p></li>
+<li><p>Flow: Changed <code class="docutils literal notranslate"><span class="pre">DatabaseContext</span></code> to <code class="docutils literal notranslate"><span class="pre">Database</span></code>, and <code class="docutils literal notranslate"><span class="pre">API::createDatabase</span></code> returns <code class="docutils literal notranslate"><span class="pre">Reference&lt;Database&gt;</span></code> instead of <code class="docutils literal notranslate"><span class="pre">Reference&lt;&lt;DatabaseContext&gt;</span></code>.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></p></li>
+<li><p>Flow: Converted <code class="docutils literal notranslate"><span class="pre">Transaction</span></code> into an interface and moved its implementation into an internal class. Transactions should now be created using <code class="docutils literal notranslate"><span class="pre">Database::createTransaction(db)</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></p></li>
+<li><p>Flow: Added <code class="docutils literal notranslate"><span class="pre">ReadTransaction</span></code> interface that allows only read operations on a transaction. The <code class="docutils literal notranslate"><span class="pre">Transaction</span></code> interface inherits from <code class="docutils literal notranslate"><span class="pre">ReadTransaction</span></code> and can be used when a <code class="docutils literal notranslate"><span class="pre">ReadTransaction</span></code> is required. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></p></li>
+<li><p>Flow: Changed <code class="docutils literal notranslate"><span class="pre">Transaction::setVersion</span></code> to <code class="docutils literal notranslate"><span class="pre">Transaction::setReadVersion</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></p></li>
+<li><p>Flow: On update to this version of the Flow bindings, client code will fail to build due to the changes in the API, irrespective of the API version used. Client code must be updated to use the new bindings API. These changes affect the bindings only and won’t impact compatibility with different versions of the cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1215">(PR #1215)</a></p></li>
+<li><p>Golang: Added <code class="docutils literal notranslate"><span class="pre">fdb.Printable</span></code> to print a human-readable string for a given byte array. Add <code class="docutils literal notranslate"><span class="pre">Key.String()</span></code>, which converts the <code class="docutils literal notranslate"><span class="pre">Key</span></code> to a <code class="docutils literal notranslate"><span class="pre">string</span></code> using the <code class="docutils literal notranslate"><span class="pre">Printable</span></code> function. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1010">(PR #1010)</a> (submitted by pjvds)</p></li>
+<li><p>Golang: Tuples now support <code class="docutils literal notranslate"><span class="pre">Versionstamp</span></code> operations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1187">(PR #1187)</a> (submitted by ryanworl)</p></li>
+<li><p>Python: Python signal handling didn’t work when waiting on a future. In particular, pressing Ctrl-C would not successfully interrupt the program. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1138">(PR #1138)</a></p></li>
 </ul>
-</div>
-<div class="section" id="other-changes">
+</section>
+<section id="other-changes">
 <h3>Other Changes</h3>
 <ul class="simple">
-<li>Migrated to Boost 1.67. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1242">(PR #1242)</a></li>
-<li>IPv4 address in trace log filename is no longer zero-padded. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1157">(PR #1157)</a></li>
-<li>The <code class="docutils literal"><span class="pre">process_behind</span></code> error can now be thrown by clients and is treated as retryable. [6.1.1] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1438">(PR #1438)</a>.</li>
+<li><p>Migrated to Boost 1.67. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1242">(PR #1242)</a></p></li>
+<li><p>IPv4 address in trace log filename is no longer zero-padded. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1157">(PR #1157)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">process_behind</span></code> error can now be thrown by clients and is treated as retryable. [6.1.1] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1438">(PR #1438)</a>.</p></li>
 </ul>
-</div>
-<div class="section" id="fixes-only-impacting-6-1-0">
+</section>
+<section id="fixes-only-impacting-6-1-0">
 <h3>Fixes only impacting 6.1.0+</h3>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">consistencycheck</span></code> fdbserver role would repeatedly exit. [6.1.1] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1437">(PR #1437)</a></li>
-<li>The <code class="docutils literal"><span class="pre">consistencycheck</span></code> fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1452">(PR #1452)</a></li>
-<li>The background actor which removes redundant teams could leave data unbalanced. [6.1.3] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1479">(PR #1479)</a></li>
-<li>The transaction log spill-by-reference policy could read too much data from disk. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1527">(PR #1527)</a></li>
-<li>Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1541">(PR #1541)</a></li>
-<li>TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1545">(PR #1545)</a></li>
-<li>Fix PR #1545 to work on Windows and Linux. [6.1.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1556">(PR #1556)</a></li>
-<li>Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1556">(PR #1556)</a></li>
-<li>The TLog&#8217;s disk queue files would grow indefinitely after a storage server was removed from the cluster. [6.1.8] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1617">(PR #1617)</a></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">consistencycheck</span></code> fdbserver role would repeatedly exit. [6.1.1] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1437">(PR #1437)</a></p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">consistencycheck</span></code> fdbserver role could proceed at a very slow rate after inserting data into an empty database. [6.1.2] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1452">(PR #1452)</a></p></li>
+<li><p>The background actor which removes redundant teams could leave data unbalanced. [6.1.3] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1479">(PR #1479)</a></p></li>
+<li><p>The transaction log spill-by-reference policy could read too much data from disk. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1527">(PR #1527)</a></p></li>
+<li><p>Memory tracking trace events could cause the program to crash when called from inside a trace event. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1541">(PR #1541)</a></p></li>
+<li><p>TLogs will replace a large file with an empty file rather than doing a large truncate operation. [6.1.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1545">(PR #1545)</a></p></li>
+<li><p>Fix PR #1545 to work on Windows and Linux. [6.1.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1556">(PR #1556)</a></p></li>
+<li><p>Adding a read conflict range for the metadata version key no longer requires read access to the system keys. [6.1.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1556">(PR #1556)</a></p></li>
+<li><p>The TLog’s disk queue files would grow indefinitely after a storage server was removed from the cluster. [6.1.8] <a class="reference external" href="https://github.com/apple/foundationdb/pull/1617">(PR #1617)</a></p></li>
 </ul>
-</div>
-<div class="section" id="earlier-release-notes">
+</section>
+<section id="earlier-release-notes">
 <h3>Earlier release notes</h3>
 <ul class="simple">
-<li><a class="reference internal" href="release-notes-600.html"><span class="doc">6.0 (API Version 600)</span></a></li>
-<li><a class="reference internal" href="release-notes-520.html"><span class="doc">5.2 (API Version 520)</span></a></li>
-<li><a class="reference internal" href="release-notes-510.html"><span class="doc">5.1 (API Version 510)</span></a></li>
-<li><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></li>
-<li><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></li>
-<li><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></li>
-<li><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></li>
-<li><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></li>
-<li><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></li>
-<li><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></li>
-<li><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></li>
-<li><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></li>
-<li><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></li>
-<li><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></li>
-<li><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></li>
-<li><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></li>
-<li><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></li>
-<li><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></li>
-<li><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></li>
+<li><p><a class="reference internal" href="release-notes-600.html"><span class="doc">6.0 (API Version 600)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-520.html"><span class="doc">5.2 (API Version 520)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-510.html"><span class="doc">5.1 (API Version 510)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></p></li>
 </ul>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -429,7 +544,7 @@ have the included IP address as a prefix (for example <code class="docutils lite
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

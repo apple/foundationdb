@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Benchmarking &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Benchmarking &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="DTrace Probes" href="dtrace-probes.html" />
     <link rel="prev" title="Performance" href="performance.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -152,17 +267,17 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="benchmarking">
+  <section id="benchmarking">
 <h1>Benchmarking</h1>
 <p>The goal of this guide is to help you understand how we approach testing FoundationDB using different client concurrencies and cluster sizes.</p>
-<div class="section" id="single-core-write-test-1">
+<section id="single-core-write-test-1">
 <h2>Single-core Write Test #1</h2>
-<p>FoundationDB can go <a class="reference internal" href="performance.html"><span class="doc">really fast</span></a>, but first let&#8217;s take a look at how slow we can make it...</p>
-<p>Let&#8217;s set up a minimal FoundationDB database, using just a <strong>single CPU core</strong>. We&#8217;ll load <strong>1 million rows</strong> with <strong>16-byte keys</strong> and <strong>random 8-100 byte</strong> values and check out how it performs.</p>
-<p>We&#8217;ll start with writes:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
+<p>FoundationDB can go <a class="reference internal" href="performance.html"><span class="doc">really fast</span></a>, but first let’s take a look at how slow we can make it…</p>
+<p>Let’s set up a minimal FoundationDB database, using just a <strong>single CPU core</strong>. We’ll load <strong>1 million rows</strong> with <strong>16-byte keys</strong> and <strong>random 8-100 byte</strong> values and check out how it performs.</p>
+<p>We’ll start with writes:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
     <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
     <span class="n">Write</span> <span class="n">a</span> <span class="n">random</span> <span class="n">key</span> <span class="n">to</span> <span class="n">a</span> <span class="n">new</span> <span class="n">random</span> <span class="n">value</span>
     <span class="n">Commit</span>
@@ -170,13 +285,13 @@
 <span class="n">Result</span><span class="p">:</span> <span class="mi">917</span> <span class="n">writes</span><span class="o">/</span><span class="n">second</span>
 </pre></div>
 </div>
-<p>If you do this, you&#8217;ll find that FoundationDB is <em>quite slow</em>.</p>
-<p>Why? The biggest reason is that FoundationDB is <em>ultra-safe</em> by default. When FoundationDB commits a transaction, it blocks until the transaction is durably logged and fsync&#8217;ed to disk. (In this case we are using a <strong>single SATA SSD</strong>.) FoundationDB is optimized for efficient processing of large, sustained workloads at millisecond latencies, rather than these type of synthetic tests that would benefit from ultra-low write latencies.</p>
-</div>
-<div class="section" id="single-core-write-test-2">
+<p>If you do this, you’ll find that FoundationDB is <em>quite slow</em>.</p>
+<p>Why? The biggest reason is that FoundationDB is <em>ultra-safe</em> by default. When FoundationDB commits a transaction, it blocks until the transaction is durably logged and fsync’ed to disk. (In this case we are using a <strong>single SATA SSD</strong>.) FoundationDB is optimized for efficient processing of large, sustained workloads at millisecond latencies, rather than these type of synthetic tests that would benefit from ultra-low write latencies.</p>
+</section>
+<section id="single-core-write-test-2">
 <h2>Single-core Write Test #2</h2>
-<p>So, can it go faster? Well, Test #1 only runs the FoundationDB process at about 3% CPU on a single core, so we might be able to pull something off. Let&#8217;s try another strategy:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
+<p>So, can it go faster? Well, Test #1 only runs the FoundationDB process at about 3% CPU on a single core, so we might be able to pull something off. Let’s try another strategy:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
     <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
     <span class="n">Write</span> <span class="mi">10</span> <span class="n">random</span> <span class="n">keys</span> <span class="n">to</span> <span class="n">new</span> <span class="n">random</span> <span class="n">values</span>
     <span class="n">Commit</span>
@@ -185,11 +300,11 @@
 </pre></div>
 </div>
 <p>But FoundationDB CPU utilization is still only at 5%! Looks like we can do even more.</p>
-</div>
-<div class="section" id="single-core-write-test-3">
+</section>
+<section id="single-core-write-test-3">
 <h2>Single-core Write Test #3</h2>
-<p>Here&#8217;s the final strategy for testing writes against FoundationDB running on a single core:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
+<p>Here’s the final strategy for testing writes against FoundationDB running on a single core:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
     <span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
         <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
         <span class="n">Write</span> <span class="mi">10</span> <span class="n">random</span> <span class="n">keys</span> <span class="n">to</span> <span class="n">new</span> <span class="n">random</span> <span class="n">values</span>
@@ -199,11 +314,11 @@
 </pre></div>
 </div>
 <p>This is 50x faster than our first simple loop! We have achieved this without sacrificing any safety, and still only using a single core. This shows how efficiently FoundationDB handles real-world concurrent workloads—in this case 100 parallel clients. A lot of this can be attributed to the <a class="reference internal" href="flow.html"><span class="doc">Flow programming language</span></a> that we developed specifically for these use cases.</p>
-</div>
-<div class="section" id="single-core-read-test">
+</section>
+<section id="single-core-read-test">
 <h2>Single-core Read Test</h2>
-<p>Let&#8217;s take what we learned and test read speed:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
+<p>Let’s take what we learned and test read speed:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
     <span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
         <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
         <span class="n">Read</span> <span class="mi">10</span> <span class="n">random</span> <span class="n">keys</span>
@@ -212,11 +327,11 @@
 </pre></div>
 </div>
 <p>This test delivers an impressive result while achieving a 0.6 ms average read latency. Again, this is only using one core and doing transactional reads from a fully durable database (albeit without any concurrent writes). Note that a commit will have no impact for a read-only transaction and so is not necessary here.</p>
-</div>
-<div class="section" id="single-core-90-10-test">
+</section>
+<section id="single-core-90-10-test">
 <h2>Single-core 90/10 Test</h2>
-<p>Let&#8217;s put it all together into a test with 90% reads and 10% writes:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
+<p>Let’s put it all together into a test with 90% reads and 10% writes:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
     <span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
         <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
         <span class="n">Read</span> <span class="mi">9</span> <span class="n">random</span> <span class="n">keys</span>
@@ -227,11 +342,11 @@
 </pre></div>
 </div>
 <p>This is all done from the <strong>single core database</strong>. Since FoundationDB has a lock-free design, performance remains high even with 100 concurrent clients doing ACID transactions on the same keys.</p>
-</div>
-<div class="section" id="single-core-range-read-test">
+</section>
+<section id="single-core-range-read-test">
 <h2>Single-core Range Read Test</h2>
-<p>Let&#8217;s check a final performance figure before cranking up the cluster size. FoundationDB is an ordered datastore so let&#8217;s see how fast we can read concurrent ranges:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
+<p>Let’s check a final performance figure before cranking up the cluster size. FoundationDB is an ordered datastore so let’s see how fast we can read concurrent ranges:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">100</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
     <span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
         <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
         <span class="n">Perform</span> <span class="n">a</span> <span class="n">random</span> <span class="mi">1000</span><span class="o">-</span><span class="n">key</span> <span class="nb">range</span> <span class="n">read</span>
@@ -240,13 +355,13 @@
 </pre></div>
 </div>
 <p>FoundationDB supports efficient range reads. Ordering keys in your data model to maximize range reads is obviously an important optimization you can use!</p>
-<p>Now it&#8217;s time to make our FoundationDB cluster a little bigger.</p>
-</div>
-<div class="section" id="machine-write-test">
+<p>Now it’s time to make our FoundationDB cluster a little bigger.</p>
+</section>
+<section id="machine-write-test">
 <h2>12-machine Write Test</h2>
-<p>We&#8217;re going to move to using a <strong>modest 12-machine cluster</strong>. Each machine is pretty basic, with a 4-core processor and a single SATA SSD. We&#8217;ll put a FoundationDB server process on each core, yielding a 48-core cluster. (You could also build something like this with just a couple modern dual-socket machines.) Finally, let&#8217;s increase the database size to <strong>100,000,000 key-value pairs</strong> and raise the stakes by throwing <strong>3,200 parallel clients (!)</strong> at the cluster. Oh, and let&#8217;s make it fault-tolerant by enabling <strong>2x replication</strong>.</p>
-<p>We&#8217;ll start with random writes:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">3</span><span class="p">,</span><span class="mi">200</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
+<p>We’re going to move to using a <strong>modest 12-machine cluster</strong>. Each machine is pretty basic, with a 4-core processor and a single SATA SSD. We’ll put a FoundationDB server process on each core, yielding a 48-core cluster. (You could also build something like this with just a couple modern dual-socket machines.) Finally, let’s increase the database size to <strong>100,000,000 key-value pairs</strong> and raise the stakes by throwing <strong>3,200 parallel clients (!)</strong> at the cluster. Oh, and let’s make it fault-tolerant by enabling <strong>2x replication</strong>.</p>
+<p>We’ll start with random writes:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">3</span><span class="p">,</span><span class="mi">200</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
     <span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
         <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
         <span class="n">Write</span> <span class="mi">10</span> <span class="n">random</span> <span class="n">keys</span>
@@ -255,11 +370,11 @@
 <span class="n">Result</span><span class="p">:</span> <span class="mi">720</span><span class="p">,</span><span class="mi">000</span> <span class="n">writes</span><span class="o">/</span><span class="n">second</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="machine-read-test">
+</section>
+<section id="machine-read-test">
 <h2>12-machine Read Test</h2>
-<p>Now let&#8217;s turn to reads:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">3</span><span class="p">,</span><span class="mi">200</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
+<p>Now let’s turn to reads:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">3</span><span class="p">,</span><span class="mi">200</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
     <span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
         <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
         <span class="n">Read</span> <span class="mi">10</span> <span class="n">random</span> <span class="n">keys</span>
@@ -268,11 +383,11 @@
 </pre></div>
 </div>
 <p>This is exceptional performance for a random-read workload from a transactional database and about half the speed on the same hardware of a dedicated caching layer like memcached. Note that performance is significantly less than the linear extrapolation.</p>
-</div>
-<div class="section" id="machine-90-10-test">
+</section>
+<section id="machine-90-10-test">
 <h2>12-machine 90/10 Test</h2>
-<p>Let&#8217;s put both together into a test with 90% reads and 10% writes:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">3</span><span class="p">,</span><span class="mi">200</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
+<p>Let’s put both together into a test with 90% reads and 10% writes:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Start</span> <span class="mi">3</span><span class="p">,</span><span class="mi">200</span> <span class="n">parallel</span> <span class="n">clients</span><span class="p">,</span> <span class="n">each</span> <span class="n">doing</span><span class="p">:</span>
     <span class="n">Loop</span> <span class="k">for</span> <span class="mi">1</span> <span class="n">minute</span><span class="p">:</span>
         <span class="n">Start</span> <span class="n">a</span> <span class="n">transaction</span>
         <span class="n">Read</span> <span class="mi">9</span> <span class="n">random</span> <span class="n">keys</span>
@@ -282,21 +397,21 @@
 <span class="n">Result</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span><span class="mi">390</span><span class="p">,</span><span class="mi">000</span> <span class="n">operations</span><span class="o">/</span><span class="n">second</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="next-steps">
+</section>
+<section id="next-steps">
 <h2>Next steps</h2>
 <p>So how should you go about benchmarking FoundationDB for your own system?</p>
-<p>Begin with the peak throughput your system needs to handle. From here, use the data on our <a class="reference internal" href="performance.html"><span class="doc">performance page</span></a> as a starting point for your cluster configuration and workload design. From our numbers for per-core throughput, you can derive an initial estimate of the number of cores you&#8217;ll need. Construct a workload that reflects your pattern of reads and writes, making sure to use a large enough number of operations per transaction and/or clients to achieve high concurrency.</p>
+<p>Begin with the peak throughput your system needs to handle. From here, use the data on our <a class="reference internal" href="performance.html"><span class="doc">performance page</span></a> as a starting point for your cluster configuration and workload design. From our numbers for per-core throughput, you can derive an initial estimate of the number of cores you’ll need. Construct a workload that reflects your pattern of reads and writes, making sure to use a large enough number of operations per transaction and/or clients to achieve high concurrency.</p>
 <p>To find bottlenecks there are several tools at your disposal:</p>
 <ul class="simple">
-<li>You can find several useful metrics in the trace files that FoundationDB emits</li>
-<li>Your standard Linux operating system tools (like perf) might come in handy</li>
-<li>FoundationDB also emits dtrace probes (<a class="reference internal" href="dtrace-probes.html"><span class="doc">DTrace Probes</span></a>) that you can look at using perf or System Tap</li>
+<li><p>You can find several useful metrics in the trace files that FoundationDB emits</p></li>
+<li><p>Your standard Linux operating system tools (like perf) might come in handy</p></li>
+<li><p>FoundationDB also emits dtrace probes (<a class="reference internal" href="dtrace-probes.html"><span class="doc">DTrace Probes</span></a>) that you can look at using perf or System Tap</p></li>
 </ul>
 <div class="toctree-wrapper compound">
 </div>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -318,7 +433,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,43 +1,29 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Testing Storage Server (TSS) &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Testing Storage Server (TSS) &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -50,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,7 +53,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul>
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -158,95 +273,95 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="testing-storage-server-tss">
+  <section id="testing-storage-server-tss">
 <span id="testing-storage-server"></span><h1>Testing Storage Server (TSS)</h1>
 <p>This document covers the operation and architecture of the Testing Storage Server feature, or TSS for short.</p>
-<div class="section" id="summary">
+<section id="summary">
 <span id="tss-introduction"></span><h2>Summary</h2>
-<p>The TSS feature allows FoundationDB to run an &#8220;untrusted&#8221; storage engine (the <em>testing storage engine</em>) directly in a QA or production environment with identical workload to the current storage engine, with zero impact on durability or correctness, and minimal impact on performance.</p>
+<p>The TSS feature allows FoundationDB to run an “untrusted” storage engine (the <em>testing storage engine</em>) directly in a QA or production environment with identical workload to the current storage engine, with zero impact on durability or correctness, and minimal impact on performance.</p>
 <p>This allows a FoundationDB cluster operator to validate the correctness and performance of a different storage engine on the exact cluster workload before migrating data to the different storage engine.</p>
 <p>A Testing Storage Server is paired to a normal Storage Server. Both servers in a new pair start empty and take on exactly the same data and serve exactly the same read requests. The SS and TSS responses are compared client-side to ensure that they match, and performance metrics are recorded for the pair.</p>
-</div>
-<div class="section" id="configuring-tss">
+</section>
+<section id="configuring-tss">
 <h2>Configuring TSS</h2>
 <p>You can configure TSS via the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a>.</p>
 <p>Because of the performance overhead of duplicating and comparing read requests, it is recommended to configure the number of TSS processes to a small percentage of the number of storage processes in the cluster (at most 5% - 10%). It is also recommended to add enough servers to the cluster before enabling TSS to end up with the same number of normal Storage processes as the cluster had before enabling TSS.</p>
 <p>Because TSS recruitment only pairs <em>new</em> storage processes, you must add processes to the cluster and/or enable the <em>perpetual wiggle</em> to actually start recruiting TSS processes.</p>
-<div class="section" id="example-commands">
+<section id="example-commands">
 <h3>Example commands</h3>
-<p>Set the desired TSS processes count to 4, using the redwood storage engine: <code class="docutils literal"><span class="pre">configure</span> <span class="pre">tss</span> <span class="pre">ssd-redwood-1-experimental</span> <span class="pre">count=4</span></code>.</p>
-<p>Change the desired TSS process count to 2: <code class="docutils literal"><span class="pre">configure</span> <span class="pre">tss</span> <span class="pre">count=2</span></code>.</p>
-<p>Disable TSS on the cluster: <code class="docutils literal"><span class="pre">configure</span> <span class="pre">tss</span> <span class="pre">count=0</span></code>.</p>
-</div>
-</div>
-<div class="section" id="monitoring-tss">
+<p>Set the desired TSS processes count to 4, using the redwood storage engine: <code class="docutils literal notranslate"><span class="pre">configure</span> <span class="pre">tss</span> <span class="pre">ssd-redwood-1-experimental</span> <span class="pre">count=4</span></code>.</p>
+<p>Change the desired TSS process count to 2: <code class="docutils literal notranslate"><span class="pre">configure</span> <span class="pre">tss</span> <span class="pre">count=2</span></code>.</p>
+<p>Disable TSS on the cluster: <code class="docutils literal notranslate"><span class="pre">configure</span> <span class="pre">tss</span> <span class="pre">count=0</span></code>.</p>
+</section>
+</section>
+<section id="monitoring-tss">
 <h2>Monitoring TSS</h2>
-<p>The <code class="docutils literal"><span class="pre">status</span></code> command in the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a> will show the current and desired number of TSS processes in the cluster, and the full status JSON will include the full TSS configuration parameters.</p>
-<div class="section" id="trace-events">
+<p>The <code class="docutils literal notranslate"><span class="pre">status</span></code> command in the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a> will show the current and desired number of TSS processes in the cluster, and the full status JSON will include the full TSS configuration parameters.</p>
+<section id="trace-events">
 <h3>Trace Events</h3>
-<p>Whenever a client detects a <em>TSS Mismatch</em>, or when the SS and TSS response differ, and the difference can only be explained by different storage engine contents, it will emit an error-level trace event with a type starting with <code class="docutils literal"><span class="pre">TSSMismatch</span></code>, with a different type for each read request. This trace event will include all of the information necessary to investigate the mismatch, such as the TSS storage ID, the full request data, and the summarized replies (full keys and checksummed values) from both the SS and TSS.</p>
-<p>Each client emits a <code class="docutils literal"><span class="pre">TSSClientMetrics</span></code> trace event for each TSS pair in the cluster that it has sent requests to recently, similar to the <code class="docutils literal"><span class="pre">TransactionMetrics</span></code> trace event.
+<p>Whenever a client detects a <em>TSS Mismatch</em>, or when the SS and TSS response differ, and the difference can only be explained by different storage engine contents, it will emit an error-level trace event with a type starting with <code class="docutils literal notranslate"><span class="pre">TSSMismatch</span></code>, with a different type for each read request. This trace event will include all of the information necessary to investigate the mismatch, such as the TSS storage ID, the full request data, and the summarized replies (full keys and checksummed values) from both the SS and TSS.</p>
+<p>Each client emits a <code class="docutils literal notranslate"><span class="pre">TSSClientMetrics</span></code> trace event for each TSS pair in the cluster that it has sent requests to recently, similar to the <code class="docutils literal notranslate"><span class="pre">TransactionMetrics</span></code> trace event.
 It contains the TSS storage ID, and latency statistics for each type of read request. It also includes a count of any mismatches, and a histogram of error codes received by the SS and TSS to ensure the storage engines have similar error rates and types.</p>
-<p>The <code class="docutils literal"><span class="pre">StorageMetrics</span></code> trace event emitted by storage servers includes the storage ID of its pair if part of a TSS pairing, and includes a <code class="docutils literal"><span class="pre">TSSJointID</span></code> detail with a unique id for the SS/TSS pair that enables correlating the separate StorageMetrics events from the SS and TSS.</p>
-</div>
-<div class="section" id="quarantined-tss">
+<p>The <code class="docutils literal notranslate"><span class="pre">StorageMetrics</span></code> trace event emitted by storage servers includes the storage ID of its pair if part of a TSS pairing, and includes a <code class="docutils literal notranslate"><span class="pre">TSSJointID</span></code> detail with a unique id for the SS/TSS pair that enables correlating the separate StorageMetrics events from the SS and TSS.</p>
+</section>
+<section id="quarantined-tss">
 <h3>Quarantined TSS</h3>
-<p>If a <em>TSS Mismatch</em> is detected for a given TSS, instead of killing the TSS, it will be put into a <em>quarantined</em> state. In this state, the TSS doesn&#8217;t respond to any data requests, but is still recruited on the worker, preventing a new storage process from replacing it.
-This is so that the cluster operator can investigate the storage engine file of the TSS&#8217;s <em>testing storage engine</em> to determine the cause of the data inconsistency.</p>
-<p>You can also manually quarantine a TSS, or dispose of a quarantined TSS once you&#8217;re done investigating using the <code class="docutils literal"><span class="pre">tssq</span></code> command in the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a>.</p>
+<p>If a <em>TSS Mismatch</em> is detected for a given TSS, instead of killing the TSS, it will be put into a <em>quarantined</em> state. In this state, the TSS doesn’t respond to any data requests, but is still recruited on the worker, preventing a new storage process from replacing it.
+This is so that the cluster operator can investigate the storage engine file of the TSS’s <em>testing storage engine</em> to determine the cause of the data inconsistency.</p>
+<p>You can also manually quarantine a TSS, or dispose of a quarantined TSS once you’re done investigating using the <code class="docutils literal notranslate"><span class="pre">tssq</span></code> command in the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a>.</p>
 <p>The typical flow of operations would be</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">tssq</span> <span class="pre">start</span> <span class="pre">&lt;StorageUID&gt;</span></code>: manually quarantines a TSS process, if it is not already quarantined.</li>
-<li><code class="docutils literal"><span class="pre">tssq</span> <span class="pre">list</span></code>: lists all TSS processes currently in quarantine to see if any were automatically quarantined.</li>
-<li>Investigate the quarantined TSS to determine the cause of the mismatch.</li>
-<li><code class="docutils literal"><span class="pre">tssq</span> <span class="pre">stop</span> <span class="pre">&lt;StorageUID&gt;</span></code>: remove a TSS process from quarantine, disposing of the TSS and allowing Data Distribution to recruit a new storage process on the worker.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tssq</span> <span class="pre">start</span> <span class="pre">&lt;StorageUID&gt;</span></code>: manually quarantines a TSS process, if it is not already quarantined.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tssq</span> <span class="pre">list</span></code>: lists all TSS processes currently in quarantine to see if any were automatically quarantined.</p></li>
+<li><p>Investigate the quarantined TSS to determine the cause of the mismatch.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tssq</span> <span class="pre">stop</span> <span class="pre">&lt;StorageUID&gt;</span></code>: remove a TSS process from quarantine, disposing of the TSS and allowing Data Distribution to recruit a new storage process on the worker.</p></li>
 </ul>
-<p>The Storage Consistency Check will also check TSS processes against the rest of that shard&#8217;s team, and fail if there is a mismatch, but it will not automatically quarantine the offending TSS.</p>
-</div>
-<div class="section" id="other-failure-types">
+<p>The Storage Consistency Check will also check TSS processes against the rest of that shard’s team, and fail if there is a mismatch, but it will not automatically quarantine the offending TSS.</p>
+</section>
+<section id="other-failure-types">
 <h3>Other Failure Types</h3>
 <p>The TSS feature is designed to insulate the cluster from an incorrect storage engine, but it is also designed to insulate the cluster as much as possible from a poor-performing storage engine.</p>
 <p>Read Requests to TSS processes are never on the critical path for a client transaction, so a slow-responding TSS will not affect client latencies.</p>
 <p>If the TSS falls behind its pair for ingesting new mutations or processing data movements, it will be killed by the cluster.</p>
-</div>
-</div>
-<div class="section" id="architecture-overview">
+</section>
+</section>
+<section id="architecture-overview">
 <h2>Architecture Overview</h2>
-<div class="section" id="tss-mapping">
+<section id="tss-mapping">
 <h3>TSS Mapping</h3>
-<p>The <em>TSS Mapping</em>, the mapping containing the (SS Storage ID, TSS Storage ID) pairs for all active TSS pairs in the cluster, is stored in the system keyspace under <code class="docutils literal"><span class="pre">\xff/tss/</span></code>.</p>
-<p>This information is lazily propagated to clients in the <code class="docutils literal"><span class="pre">KeyServerLocationsRequest</span></code> from the Commit Proxies, which read the TSS mapping from the Transaction State Store.</p>
+<p>The <em>TSS Mapping</em>, the mapping containing the (SS Storage ID, TSS Storage ID) pairs for all active TSS pairs in the cluster, is stored in the system keyspace under <code class="docutils literal notranslate"><span class="pre">\xff/tss/</span></code>.</p>
+<p>This information is lazily propagated to clients in the <code class="docutils literal notranslate"><span class="pre">KeyServerLocationsRequest</span></code> from the Commit Proxies, which read the TSS mapping from the Transaction State Store.</p>
 <p>Clients will use this mapping to duplicate any request to a storage server that has a TSS pair.</p>
-<p>Other cluster components that need the full, up-to-date TSS mapping (MoveKeys, ConsistencyCheck, etc...) read it directly from the system keyspace as part of a transaction.</p>
-</div>
-<div class="section" id="recruitment">
+<p>Other cluster components that need the full, up-to-date TSS mapping (MoveKeys, ConsistencyCheck, etc…) read it directly from the system keyspace as part of a transaction.</p>
+</section>
+<section id="recruitment">
 <h3>Recruitment</h3>
 <p>TSS Pair recruitment is designed to use the <em>Perpetual Storage Wiggle</em>, but will also work if multiple storage processes are added to the cluster.</p>
 <p>When Data Distribution detects a deficit of TSS processes in the cluster, it will begin recruiting a TSS pair.
 The pair recruitment logic is as follows:</p>
 <ul class="simple">
-<li>Once DD gets a candidate worker from the Cluster Controller, hold that worker as a desired TSS process.</li>
-<li>Once DD gets a second candidate worker from the Cluster Controller, initialize that worker as a normal SS.</li>
-<li>Once the second candidate worker is successfully initialized, initialize the first candidate worker as a TSS, passing it the storage ID, starting tag + version, and other information from its SS pair. Because the TSS reads from the same tag starting at the same version, it is guaranteed to receive the same mutations and data movements as its pair.</li>
+<li><p>Once DD gets a candidate worker from the Cluster Controller, hold that worker as a desired TSS process.</p></li>
+<li><p>Once DD gets a second candidate worker from the Cluster Controller, initialize that worker as a normal SS.</p></li>
+<li><p>Once the second candidate worker is successfully initialized, initialize the first candidate worker as a TSS, passing it the storage ID, starting tag + version, and other information from its SS pair. Because the TSS reads from the same tag starting at the same version, it is guaranteed to receive the same mutations and data movements as its pair.</p></li>
 </ul>
 <p>One implication of this is, during TSS recruitment, the cluster is effectively down one storage process until a second storage process becomes available.
 While clusters should be able to handle being down a single storage process anyway to tolerate machine failure, an active TSS recruitment will be cancelled if the lack of that single storage process is causing the cluster to be unhealthy. Similarly, if the cluster is unhealthy and unable to find new teams to replicate data to, any existing TSS processes may be killed to make room for new storage servers.</p>
-</div>
-<div class="section" id="tss-process">
+</section>
+<section id="tss-process">
 <h3>TSS Process</h3>
 <p>A TSS process is almost identical to a normal Storage process, with the exception that it does not pop its tag from the TLog mutation stream, and it listens to and processes private mutations for both itself and its SS pair.</p>
-</div>
-</div>
-<div class="section" id="caveats">
+</section>
+</section>
+<section id="caveats">
 <h2>Caveats</h2>
 <p>Despite its usefulness, the TSS feature does not give a perfect performance comparison of the storage engine(s) under test.</p>
 <p>Because it is only enabled on a small percentage of the cluster and only compares single storage processes for the same workload, it may miss potential aggregate performance problems, such as the testing storage engine overall consuming more cpu/memory, especially on a host with many storage instances.</p>
 <p>TSS testing using the recommended small number of TSS pairs may also miss performance pathologies from workloads not experienced by the specific storage teams with TSS pairs in their membership.</p>
 <p>TSS testing is not a substitute for full-cluster performance and correctness testing or simulation testing.</p>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -268,7 +383,7 @@ While clusters should be able to handle being down a single storage process anyw
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

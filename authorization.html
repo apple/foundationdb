@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Authorization &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Monitored Metrics" href="monitored-metrics.html" />
+    <link rel="prev" title="Transport Layer Security" href="tls.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="administration.html">Administration</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Authorization</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a><ul>
+<li><a class="reference internal" href="#privilege-levels">Privilege Levels</a></li>
+<li><a class="reference internal" href="#access-control">Access Control</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#enabling-clients-to-use-authorization-tokens">Enabling Clients to use Authorization Tokens</a></li>
+<li><a class="reference internal" href="#public-key-rotation">Public Key Rotation</a></li>
+<li><a class="reference internal" href="#token-caching">Token Caching</a></li>
+<li><a class="reference internal" href="#allowing-untrusted-clients-to-access-tenant-data-without-tokens">Allowing Untrusted Clients to Access Tenant Data Without Tokens</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="tls.html" title="Previous Chapter: Transport Layer Security"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Transport Lay...</span>
+    </a>
+  </li>
+  <li>
+    <a href="monitored-metrics.html" title="Next Chapter: Monitored Metrics"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Monitored Metrics &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Authorization</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a><ul>
+<li><a class="reference internal" href="#privilege-levels">Privilege Levels</a></li>
+<li><a class="reference internal" href="#access-control">Access Control</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#enabling-clients-to-use-authorization-tokens">Enabling Clients to use Authorization Tokens</a></li>
+<li><a class="reference internal" href="#public-key-rotation">Public Key Rotation</a></li>
+<li><a class="reference internal" href="#token-caching">Token Caching</a></li>
+<li><a class="reference internal" href="#allowing-untrusted-clients-to-access-tenant-data-without-tokens">Allowing Untrusted Clients to Access Tenant Data Without Tokens</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="authorization">
+<h1>Authorization</h1>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Authorization is currently experimental and is not recommended for use in production.</p>
+</div>
+<section id="introduction">
+<h2>Introduction</h2>
+<p><a class="reference internal" href="tenants.html#multi-tenancy"><span class="std std-ref">Multi-tenant</span></a> database implies a couple of new concepts that did not previously exist in FoundationDB.
+The first is the concept of privilege levels: we have <em>data-plane clients</em> whose typical workload is limited to accessing a tenant keyspace.
+On the other hand, we have <em>control-plane clients</em> or <em>administrators</em> who may read or update cluster-wide configurations through system keyspace.
+These operations also include creation and deletion of tenants.
+The second is access control: with multiple tenant keyspaces, it comes naturally that we would want to restrict database access of a client to a subset of them.</p>
+<section id="privilege-levels">
+<h3>Privilege Levels</h3>
+<p>Authorization feature extends FoundationDB’s existing TLS policy to distinguish administrators from data-plane clients,
+making TLS configuration a prerequisite for enabling authorization.
+There are only two privilege levels: <em>trusted</em> versus <em>untrusted</em> clients.
+Trusted clients are authorized to perform any operation that pre-authorization FoundationDB clients used to perform, including those accessing the system keyspace.
+Untrusted clients may only request what is necessary to access tenant keyspaces for which they are authorized.
+Untrusted clients are blocked from accessing anything in the system keyspace or issuing management operations that modify the cluster in any way.</p>
+<p>In order to be considered a trusted client, a client needs to be <a class="reference internal" href="tls.html#configuring-tls"><span class="std std-ref">configured with a valid chain of X.509 certificates and a private key</span></a>,
+and its certificate chain must be trusted by the server. In other words, a client must successfully complete a mutual TLS authentication.
+Additionally, if the server was configured with trusted IP subnets, i.e. run with one or more <code class="docutils literal notranslate"><span class="pre">--trusted-subnet-SUBNET_NAME</span></code> followed by a CIDR block describing the subnet,
+then the client’s IP as seen from the server must belong to at least one of the subnets.</p>
+<p>Choosing to respond with an empty certificate chain during <a class="reference external" href="https://www.rfc-editor.org/rfc/rfc5246#section-7.4.6">client authentication</a> marks the client as untrusted.
+If the server specifies a list of trusted subnets and the client’s server-facing IP is not part of any of the subnets,
+then the client is untrusted even if it successfully completes a mutual TLS authentication.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Presenting a bad or untrusted certificate chain causes the server to break the client connection and eventually throttle the client.
+It does not let the client connect untrusted.</p>
+</div>
+</section>
+<section id="access-control">
+<h3>Access Control</h3>
+<p>To restrict untrusted client’s database access to a subset of tenant keyspaces, authorization feature allows database administrators
+to grant tenant-scoped access in the form of <a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519">JSON Web Tokens</a>.
+Token verification is performed against a set of named public keys written in <a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7517#section-5">JWK Set</a> format.
+A token’s header part must contain the <a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.4">key identifier</a> of the public key which shall be used to verify the token itself.
+Below is the list of token fields recognized by FoundationDB.
+Note that some of the fields are <em>recognized</em> by FoundationDB but not <em>actively used</em> in enforcing security, pending future implementation.
+Those fields are marked as <strong>NOT required</strong>.</p>
+<table class="docutils align-left" id="id2">
+<caption><span class="caption-text">JSON Web Token Fields supported by FoundationDB</span></caption>
+<thead>
+<tr class="row-odd"><th class="head"><p>Containing Part</p></th>
+<th class="head"><p>Field Name</p></th>
+<th class="head"><p>Required</p></th>
+<th class="head"><p>Purpose</p></th>
+<th class="head"><p>Reference</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Header</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">typ</span></code></p></td>
+<td><p>Yes</p></td>
+<td><p>Type of JSON Web Signature. Must be <code class="docutils literal notranslate"><span class="pre">JWT</span></code>.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-5.1">RFC7519 Section 5.1</a></p></td>
+</tr>
+<tr class="row-odd"><td><p>Header</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">alg</span></code></p></td>
+<td><p>Yes</p></td>
+<td><p>Algorithm used to generate the signature. Only
+<code class="docutils literal notranslate"><span class="pre">ES256</span></code> and <code class="docutils literal notranslate"><span class="pre">RS256</span></code> are supported.
+Must match the <code class="docutils literal notranslate"><span class="pre">alg</span></code> attribute of public key.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7515#section-4.1.1">RFC7515 Section 4.1.1</a></p></td>
+</tr>
+<tr class="row-even"><td><p>Header</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">kid</span></code></p></td>
+<td><p>Yes</p></td>
+<td><p>Name of public key with which to verify the token.
+Must match the <code class="docutils literal notranslate"><span class="pre">kid</span></code> attribute of public key.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7515#section-4.1.4">RFC7515 Section 4.1.4</a></p></td>
+</tr>
+<tr class="row-odd"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">exp</span></code></p></td>
+<td><p>Yes</p></td>
+<td><p>Timestamp after which token is not accepted.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1.4">RFC7519 Section 4.1.4</a></p></td>
+</tr>
+<tr class="row-even"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nbf</span></code></p></td>
+<td><p>Yes</p></td>
+<td><p>Timestamp before which token is not accepted.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1.5">RFC7519 Section 4.1.5</a></p></td>
+</tr>
+<tr class="row-odd"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">iat</span></code></p></td>
+<td><p>Yes</p></td>
+<td><p>Timestamp at which token was issued.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1.6">RFC7519 Section 4.1.6</a></p></td>
+</tr>
+<tr class="row-even"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">tenants</span></code></p></td>
+<td><p>Yes</p></td>
+<td><p>Tenants names for which token holder is authorized.
+Must be an array.</p></td>
+<td><p>N/A</p></td>
+</tr>
+<tr class="row-odd"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">iss</span></code></p></td>
+<td><p>No</p></td>
+<td><p>Issuer of the token.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1.1">RFC7519 Section 4.1.1</a></p></td>
+</tr>
+<tr class="row-even"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">sub</span></code></p></td>
+<td><p>No</p></td>
+<td><p>Subject of the token.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1.2">RFC7519 Section 4.1.2</a></p></td>
+</tr>
+<tr class="row-odd"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">aud</span></code></p></td>
+<td><p>No</p></td>
+<td><p>Intended recipients of the token. Must be an array.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1.3">RFC7519 Section 4.1.3</a></p></td>
+</tr>
+<tr class="row-even"><td><p>Claim</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">jti</span></code></p></td>
+<td><p>No</p></td>
+<td><p>String that uniquely identifies a token.</p></td>
+<td><p><a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1.7">RFC7519 Section 4.1.7</a></p></td>
+</tr>
+</tbody>
+</table>
+<p>Public keys with which to verify the token must be serialized in <a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7517#section-5">JWK Set</a> format and stored in a file.
+The location of the key set file must be passed as command line argument <code class="docutils literal notranslate"><span class="pre">--authorization-public-key-file</span></code> to the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> executable.
+Public keys in the set must be either <a class="reference external" href="https://datatracker.ietf.org/doc/html/rfc7518#section-6.3">RSA</a> public keys
+containing <code class="docutils literal notranslate"><span class="pre">n</span></code> and <code class="docutils literal notranslate"><span class="pre">e</span></code> parameters, each containing <a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7518#section-2">Base64urlUInt</a>-encoded modulus and exponent,
+or <a class="reference external" href="https://datatracker.ietf.org/doc/html/rfc7518#section-6.2">Elliptic Curve</a> public keys on a <code class="docutils literal notranslate"><span class="pre">P-256</span></code> curve,
+where <code class="docutils literal notranslate"><span class="pre">crv</span></code> parameter is set to <code class="docutils literal notranslate"><span class="pre">P-256</span></code> and <code class="docutils literal notranslate"><span class="pre">x</span></code> and <code class="docutils literal notranslate"><span class="pre">y</span></code> parameters contain
+<a class="reference external" href="https://datatracker.ietf.org/doc/html/rfc4648#section-5">base64url</a>-encoded affine coordinates.
+In addition, each public key JSON object in set must contain <code class="docutils literal notranslate"><span class="pre">kty</span></code> (set to either <code class="docutils literal notranslate"><span class="pre">EC</span></code> or <code class="docutils literal notranslate"><span class="pre">RSA</span></code>) field to indicate public key algorithm,
+along with <code class="docutils literal notranslate"><span class="pre">kid</span></code>, and <code class="docutils literal notranslate"><span class="pre">alg</span></code> fields to be compared against their token header counterparts.
+Private keys are strongly recommended against being included in the public key set and, if found, are excluded from consideration.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>By design, FoundationDB authorization feature does not support revocation of outstanding tokens.
+Use extra caution in signing tokens with long token durations.</p>
+</div>
+</section>
+</section>
+<section id="enabling-clients-to-use-authorization-tokens">
+<h2>Enabling Clients to use Authorization Tokens</h2>
+<p>In order to use an untrusted client with an authorization token, a client must be configured to trust the server’s CA,
+but must not be configured to use the client’s own certificates and keys.
+More concretely, the client’s <code class="docutils literal notranslate"><span class="pre">TLS_CA_FILE</span></code> must include the server’s root CA certificate,
+but the client must not be configured with its own <code class="docutils literal notranslate"><span class="pre">TLS_CERTIFICATE_FILE</span></code> or <code class="docutils literal notranslate"><span class="pre">TLS_KEY_FILE</span></code>, neither programmatically nor by environment variable.
+Before performing a tenant data read or update, a client must set <code class="docutils literal notranslate"><span class="pre">AUTHORIZATION_TOKEN</span></code> transaction option with the token string as argument.
+It is the client’s responsibility to keep the token up-to-date, by timely assigning a new token to the transaction object.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The TLS authentication mode of an untrusted client is similar to how typical web browsers connect to TLS-enabled web services.
+They authenticate the server using their bundle of trusted root CA certificates,
+but they do not authenticate themselves to the server.</p>
+</div>
+</section>
+<section id="public-key-rotation">
+<h2>Public Key Rotation</h2>
+<p>FoundationDB’s internal public key set automatically refreshes itself based on the key set file’s latest content every <code class="docutils literal notranslate"><span class="pre">PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS</span></code> seconds.
+The in-memory set of public keys does not update unless the key file holds a correct <a class="reference external" href="https://www.rfc-editor.org/rfc/rfc7517#section-5">JWK Set</a>.</p>
+</section>
+<section id="token-caching">
+<h2>Token Caching</h2>
+<p>In a single-threaded runtime environment such as FoundationDB, it is important not to let the main thread be overloaded with computationally expensive operations,
+such as token signature verification. FoundationDB internally caches the tokens that are considered valid at the time of verification in a fixed-size cache,
+whose size may be configured using <code class="docutils literal notranslate"><span class="pre">TOKEN_CACHE_SIZE</span></code> knob.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Token cache is independent of the active public key set. Once the token reaches the cache, it is valid until its expiration time,
+regardless of any key rotation that takes place thereafter.</p>
+</div>
+</section>
+<section id="allowing-untrusted-clients-to-access-tenant-data-without-tokens">
+<h2>Allowing Untrusted Clients to Access Tenant Data Without Tokens</h2>
+<p>Rolling out a public key distribution infrastructure and an authorization-enabled FoundationDB cluster in lockstep might not be feasible with large scale distributed systems.
+To support incremental rollout, authorization feature introduces <code class="docutils literal notranslate"><span class="pre">ALLOW_TOKENLESS_TENANT_ACCESS</span></code> boolean knob,
+which preserves the TLS-based privilege level policy without untrusted clients having to set authorization tokens to their transactions in order to access tenant data.
+With this knob active, any authorization token assigned to the client transaction is simply ignored.</p>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/authorization.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Nov 30, 2022.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Error Codes &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Error Codes &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Special Keys" href="special-keys.html" />
     <link rel="prev" title="C API" href="api-c.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="api-reference.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -128,387 +243,382 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="error-codes">
+  <section id="error-codes">
 <span id="developer-guide-error-codes"></span><h1>Error Codes</h1>
 <p>FoundationDB may return the following error codes from API functions. If you need to check for specific errors (for example, to implement custom retry logic), you must use the numerical code, since the other fields are particularly likely to change unexpectedly. Error handling logic should also be prepared for new error codes which are not listed here.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="36%" />
-<col width="4%" />
-<col width="61%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Name</th>
-<th class="head">Code</th>
-<th class="head">Description</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Code</p></th>
+<th class="head"><p>Description</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>success</td>
-<td>0</td>
-<td>Success</td>
-</tr>
-<tr class="row-odd"><td>operation_failed</td>
-<td>1000</td>
-<td>Operation failed</td>
-</tr>
-<tr class="row-even"><td>timed_out</td>
-<td>1004</td>
-<td>Operation timed out</td>
-</tr>
-<tr class="row-odd"><td>transaction_too_old</td>
-<td>1007</td>
-<td>Transaction is too old to perform reads or be committed</td>
-</tr>
-<tr class="row-even"><td>future_version</td>
-<td>1009</td>
-<td>Request for future version</td>
-</tr>
-<tr class="row-odd"><td>not_committed</td>
-<td>1020</td>
-<td>Transaction not committed due to conflict with another transaction</td>
-</tr>
-<tr class="row-even"><td>commit_unknown_result</td>
-<td>1021</td>
-<td>Transaction may or may not have committed</td>
-</tr>
-<tr class="row-odd"><td>transaction_cancelled</td>
-<td>1025</td>
-<td>Operation aborted because the transaction was cancelled</td>
-</tr>
-<tr class="row-even"><td>transaction_timed_out</td>
-<td>1031</td>
-<td>Operation aborted because the transaction timed out</td>
-</tr>
-<tr class="row-odd"><td>too_many_watches</td>
-<td>1032</td>
-<td>Too many watches currently set</td>
-</tr>
-<tr class="row-even"><td>watches_disabled</td>
-<td>1034</td>
-<td>Watches cannot be set if read your writes is disabled</td>
-</tr>
-<tr class="row-odd"><td>accessed_unreadable</td>
-<td>1036</td>
-<td>Read or wrote an unreadable key</td>
-</tr>
-<tr class="row-even"><td>process_behind</td>
-<td>1037</td>
-<td>Storage process does not have recent mutations</td>
-</tr>
-<tr class="row-odd"><td>database_locked</td>
-<td>1038</td>
-<td>Database is locked</td>
-</tr>
-<tr class="row-even"><td>cluster_version_changed</td>
-<td>1039</td>
-<td>Cluster has been upgraded to a new protocol version</td>
-</tr>
-<tr class="row-odd"><td>external_client_already_loaded</td>
-<td>1040</td>
-<td>External client has already been loaded</td>
-</tr>
-<tr class="row-even"><td>proxy_memory_limit_exceeded</td>
-<td>1042</td>
-<td>CommitProxy commit memory limit exceeded</td>
-</tr>
-<tr class="row-odd"><td>batch_transaction_throttled</td>
-<td>1051</td>
-<td>Batch GRV request rate limit exceeded</td>
-</tr>
-<tr class="row-even"><td>operation_cancelled</td>
-<td>1101</td>
-<td>Asynchronous operation cancelled</td>
-</tr>
-<tr class="row-odd"><td>future_released</td>
-<td>1102</td>
-<td>Future has been released</td>
-</tr>
-<tr class="row-even"><td>tag_throttled</td>
-<td>1213</td>
-<td>Transaction tag is being throttled</td>
-</tr>
-<tr class="row-odd"><td>platform_error</td>
-<td>1500</td>
-<td>Platform error</td>
-</tr>
-<tr class="row-even"><td>large_alloc_failed</td>
-<td>1501</td>
-<td>Large block allocation failed</td>
-</tr>
-<tr class="row-odd"><td>performance_counter_error</td>
-<td>1502</td>
-<td>QueryPerformanceCounter error</td>
-</tr>
-<tr class="row-even"><td>io_error</td>
-<td>1510</td>
-<td>Disk i/o operation failed</td>
-</tr>
-<tr class="row-odd"><td>file_not_found</td>
-<td>1511</td>
-<td>File not found</td>
+<tbody>
+<tr class="row-even"><td><p>success</p></td>
+<td><p>0</p></td>
+<td><p>Success</p></td>
+</tr>
+<tr class="row-odd"><td><p>operation_failed</p></td>
+<td><p>1000</p></td>
+<td><p>Operation failed</p></td>
+</tr>
+<tr class="row-even"><td><p>timed_out</p></td>
+<td><p>1004</p></td>
+<td><p>Operation timed out</p></td>
+</tr>
+<tr class="row-odd"><td><p>transaction_too_old</p></td>
+<td><p>1007</p></td>
+<td><p>Transaction is too old to perform reads or be committed</p></td>
+</tr>
+<tr class="row-even"><td><p>future_version</p></td>
+<td><p>1009</p></td>
+<td><p>Request for future version</p></td>
+</tr>
+<tr class="row-odd"><td><p>not_committed</p></td>
+<td><p>1020</p></td>
+<td><p>Transaction not committed due to conflict with another transaction</p></td>
+</tr>
+<tr class="row-even"><td><p>commit_unknown_result</p></td>
+<td><p>1021</p></td>
+<td><p>Transaction may or may not have committed</p></td>
+</tr>
+<tr class="row-odd"><td><p>transaction_cancelled</p></td>
+<td><p>1025</p></td>
+<td><p>Operation aborted because the transaction was cancelled</p></td>
+</tr>
+<tr class="row-even"><td><p>transaction_timed_out</p></td>
+<td><p>1031</p></td>
+<td><p>Operation aborted because the transaction timed out</p></td>
+</tr>
+<tr class="row-odd"><td><p>too_many_watches</p></td>
+<td><p>1032</p></td>
+<td><p>Too many watches currently set</p></td>
+</tr>
+<tr class="row-even"><td><p>watches_disabled</p></td>
+<td><p>1034</p></td>
+<td><p>Watches cannot be set if read your writes is disabled</p></td>
+</tr>
+<tr class="row-odd"><td><p>accessed_unreadable</p></td>
+<td><p>1036</p></td>
+<td><p>Read or wrote an unreadable key</p></td>
+</tr>
+<tr class="row-even"><td><p>process_behind</p></td>
+<td><p>1037</p></td>
+<td><p>Storage process does not have recent mutations</p></td>
+</tr>
+<tr class="row-odd"><td><p>database_locked</p></td>
+<td><p>1038</p></td>
+<td><p>Database is locked</p></td>
+</tr>
+<tr class="row-even"><td><p>cluster_version_changed</p></td>
+<td><p>1039</p></td>
+<td><p>Cluster has been upgraded to a new protocol version</p></td>
+</tr>
+<tr class="row-odd"><td><p>external_client_already_loaded</p></td>
+<td><p>1040</p></td>
+<td><p>External client has already been loaded</p></td>
+</tr>
+<tr class="row-even"><td><p>proxy_memory_limit_exceeded</p></td>
+<td><p>1042</p></td>
+<td><p>CommitProxy commit memory limit exceeded</p></td>
+</tr>
+<tr class="row-odd"><td><p>batch_transaction_throttled</p></td>
+<td><p>1051</p></td>
+<td><p>Batch GRV request rate limit exceeded</p></td>
+</tr>
+<tr class="row-even"><td><p>operation_cancelled</p></td>
+<td><p>1101</p></td>
+<td><p>Asynchronous operation cancelled</p></td>
+</tr>
+<tr class="row-odd"><td><p>future_released</p></td>
+<td><p>1102</p></td>
+<td><p>Future has been released</p></td>
+</tr>
+<tr class="row-even"><td><p>tag_throttled</p></td>
+<td><p>1213</p></td>
+<td><p>Transaction tag is being throttled</p></td>
+</tr>
+<tr class="row-odd"><td><p>platform_error</p></td>
+<td><p>1500</p></td>
+<td><p>Platform error</p></td>
+</tr>
+<tr class="row-even"><td><p>large_alloc_failed</p></td>
+<td><p>1501</p></td>
+<td><p>Large block allocation failed</p></td>
+</tr>
+<tr class="row-odd"><td><p>performance_counter_error</p></td>
+<td><p>1502</p></td>
+<td><p>QueryPerformanceCounter error</p></td>
+</tr>
+<tr class="row-even"><td><p>io_error</p></td>
+<td><p>1510</p></td>
+<td><p>Disk i/o operation failed</p></td>
+</tr>
+<tr class="row-odd"><td><p>file_not_found</p></td>
+<td><p>1511</p></td>
+<td><p>File not found</p></td>
 </tr>
-<tr class="row-even"><td>bind_failed</td>
-<td>1512</td>
-<td>Unable to bind to network</td>
+<tr class="row-even"><td><p>bind_failed</p></td>
+<td><p>1512</p></td>
+<td><p>Unable to bind to network</p></td>
 </tr>
-<tr class="row-odd"><td>file_not_readable</td>
-<td>1513</td>
-<td>File could not be read</td>
+<tr class="row-odd"><td><p>file_not_readable</p></td>
+<td><p>1513</p></td>
+<td><p>File could not be read</p></td>
 </tr>
-<tr class="row-even"><td>file_not_writable</td>
-<td>1514</td>
-<td>File could not be written</td>
+<tr class="row-even"><td><p>file_not_writable</p></td>
+<td><p>1514</p></td>
+<td><p>File could not be written</p></td>
 </tr>
-<tr class="row-odd"><td>no_cluster_file_found</td>
-<td>1515</td>
-<td>No cluster file found in current directory or default location</td>
+<tr class="row-odd"><td><p>no_cluster_file_found</p></td>
+<td><p>1515</p></td>
+<td><p>No cluster file found in current directory or default location</p></td>
 </tr>
-<tr class="row-even"><td>file_too_large</td>
-<td>1516</td>
-<td>File too large to be read</td>
+<tr class="row-even"><td><p>file_too_large</p></td>
+<td><p>1516</p></td>
+<td><p>File too large to be read</p></td>
 </tr>
-<tr class="row-odd"><td>client_invalid_operation</td>
-<td>2000</td>
-<td>Invalid API call</td>
+<tr class="row-odd"><td><p>client_invalid_operation</p></td>
+<td><p>2000</p></td>
+<td><p>Invalid API call</p></td>
 </tr>
-<tr class="row-even"><td>commit_read_incomplete</td>
-<td>2002</td>
-<td>Commit with incomplete read</td>
+<tr class="row-even"><td><p>commit_read_incomplete</p></td>
+<td><p>2002</p></td>
+<td><p>Commit with incomplete read</p></td>
 </tr>
-<tr class="row-odd"><td>test_specification_invalid</td>
-<td>2003</td>
-<td>Invalid test specification</td>
+<tr class="row-odd"><td><p>test_specification_invalid</p></td>
+<td><p>2003</p></td>
+<td><p>Invalid test specification</p></td>
 </tr>
-<tr class="row-even"><td>key_outside_legal_range</td>
-<td>2004</td>
-<td>Key outside legal range</td>
+<tr class="row-even"><td><p>key_outside_legal_range</p></td>
+<td><p>2004</p></td>
+<td><p>Key outside legal range</p></td>
 </tr>
-<tr class="row-odd"><td>inverted_range</td>
-<td>2005</td>
-<td>Range begin key larger than end key</td>
+<tr class="row-odd"><td><p>inverted_range</p></td>
+<td><p>2005</p></td>
+<td><p>Range begin key larger than end key</p></td>
 </tr>
-<tr class="row-even"><td>invalid_option_value</td>
-<td>2006</td>
-<td>Option set with an invalid value</td>
+<tr class="row-even"><td><p>invalid_option_value</p></td>
+<td><p>2006</p></td>
+<td><p>Option set with an invalid value</p></td>
 </tr>
-<tr class="row-odd"><td>invalid_option</td>
-<td>2007</td>
-<td>Option not valid in this context</td>
+<tr class="row-odd"><td><p>invalid_option</p></td>
+<td><p>2007</p></td>
+<td><p>Option not valid in this context</p></td>
 </tr>
-<tr class="row-even"><td>network_not_setup</td>
-<td>2008</td>
-<td>Action not possible before the network is configured</td>
+<tr class="row-even"><td><p>network_not_setup</p></td>
+<td><p>2008</p></td>
+<td><p>Action not possible before the network is configured</p></td>
 </tr>
-<tr class="row-odd"><td>network_already_setup</td>
-<td>2009</td>
-<td>Network can be configured only once</td>
+<tr class="row-odd"><td><p>network_already_setup</p></td>
+<td><p>2009</p></td>
+<td><p>Network can be configured only once</p></td>
 </tr>
-<tr class="row-even"><td>read_version_already_set</td>
-<td>2010</td>
-<td>Transaction already has a read version set</td>
+<tr class="row-even"><td><p>read_version_already_set</p></td>
+<td><p>2010</p></td>
+<td><p>Transaction already has a read version set</p></td>
 </tr>
-<tr class="row-odd"><td>version_invalid</td>
-<td>2011</td>
-<td>Version not valid</td>
+<tr class="row-odd"><td><p>version_invalid</p></td>
+<td><p>2011</p></td>
+<td><p>Version not valid</p></td>
 </tr>
-<tr class="row-even"><td>range_limits_invalid</td>
-<td>2012</td>
-<td>Range limits not valid</td>
+<tr class="row-even"><td><p>range_limits_invalid</p></td>
+<td><p>2012</p></td>
+<td><p>Range limits not valid</p></td>
 </tr>
-<tr class="row-odd"><td>invalid_database_name</td>
-<td>2013</td>
-<td>Database name must be &#8216;DB&#8217;</td>
+<tr class="row-odd"><td><p>invalid_database_name</p></td>
+<td><p>2013</p></td>
+<td><p>Database name must be ‘DB’</p></td>
 </tr>
-<tr class="row-even"><td>attribute_not_found</td>
-<td>2014</td>
-<td>Attribute not found in string</td>
+<tr class="row-even"><td><p>attribute_not_found</p></td>
+<td><p>2014</p></td>
+<td><p>Attribute not found in string</p></td>
 </tr>
-<tr class="row-odd"><td>future_not_set</td>
-<td>2015</td>
-<td>Future not ready</td>
+<tr class="row-odd"><td><p>future_not_set</p></td>
+<td><p>2015</p></td>
+<td><p>Future not ready</p></td>
 </tr>
-<tr class="row-even"><td>future_not_error</td>
-<td>2016</td>
-<td>Future not an error</td>
+<tr class="row-even"><td><p>future_not_error</p></td>
+<td><p>2016</p></td>
+<td><p>Future not an error</p></td>
 </tr>
-<tr class="row-odd"><td>used_during_commit</td>
-<td>2017</td>
-<td>Operation issued while a commit was outstanding</td>
+<tr class="row-odd"><td><p>used_during_commit</p></td>
+<td><p>2017</p></td>
+<td><p>Operation issued while a commit was outstanding</p></td>
 </tr>
-<tr class="row-even"><td>invalid_mutation_type</td>
-<td>2018</td>
-<td>Unrecognized atomic mutation type</td>
+<tr class="row-even"><td><p>invalid_mutation_type</p></td>
+<td><p>2018</p></td>
+<td><p>Unrecognized atomic mutation type</p></td>
 </tr>
-<tr class="row-odd"><td>transaction_invalid_version</td>
-<td>2020</td>
-<td>Transaction does not have a valid commit version</td>
-</tr>
-<tr class="row-even"><td>no_commit_version</td>
-<td>2021</td>
-<td>Transaction is read-only and therefore does not have a commit version</td>
-</tr>
-<tr class="row-odd"><td>environment_variable_network_option_failed</td>
-<td>2022</td>
-<td>Environment variable network option could not be set</td>
-</tr>
-<tr class="row-even"><td>transaction_read_only</td>
-<td>2023</td>
-<td>Attempted to commit a transaction specified as read-only</td>
-</tr>
-<tr class="row-odd"><td>invalid_cache_eviction_policy</td>
-<td>2024</td>
-<td>Invalid cache eviction policy, only random and lru are supported</td>
-</tr>
-<tr class="row-even"><td>network_cannot_be_restarted</td>
-<td>2025</td>
-<td>Network can only be started once</td>
-</tr>
-<tr class="row-odd"><td>blocked_from_network_thread</td>
-<td>2026</td>
-<td>Detected a deadlock in a callback called from the network thread</td>
-</tr>
-<tr class="row-even"><td>incompatible_protocol_version</td>
-<td>2100</td>
-<td>Incompatible protocol version</td>
-</tr>
-<tr class="row-odd"><td>transaction_too_large</td>
-<td>2101</td>
-<td>Transaction exceeds byte limit</td>
-</tr>
-<tr class="row-even"><td>key_too_large</td>
-<td>2102</td>
-<td>Key length exceeds limit</td>
-</tr>
-<tr class="row-odd"><td>value_too_large</td>
-<td>2103</td>
-<td>Value length exceeds limit</td>
-</tr>
-<tr class="row-even"><td>connection_string_invalid</td>
-<td>2104</td>
-<td>Connection string invalid</td>
-</tr>
-<tr class="row-odd"><td>address_in_use</td>
-<td>2105</td>
-<td>Local address in use</td>
-</tr>
-<tr class="row-even"><td>invalid_local_address</td>
-<td>2106</td>
-<td>Invalid local address</td>
-</tr>
-<tr class="row-odd"><td>tls_error</td>
-<td>2107</td>
-<td>TLS error</td>
-</tr>
-<tr class="row-even"><td>unsupported_operation</td>
-<td>2108</td>
-<td>Operation is not supported</td>
-</tr>
-<tr class="row-odd"><td>too_many_tags</td>
-<td>2109</td>
-<td>Too many tags set on transaction</td>
-</tr>
-<tr class="row-even"><td>tag_too_long</td>
-<td>2110</td>
-<td>Tag set on transaction is too long</td>
-</tr>
-<tr class="row-odd"><td>too_many_tag_throttles</td>
-<td>2111</td>
-<td>Too many tag throttles have been created</td>
-</tr>
-<tr class="row-even"><td>special_keys_cross_module_read</td>
-<td>2112</td>
-<td>Special key space range read crosses modules.
-Refer to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_RELAXED</span></code> transaction option for more details.</td>
-</tr>
-<tr class="row-odd"><td>special_keys_no_module_found</td>
-<td>2113</td>
-<td>Special key space range read does not intersect a module.
-Refer to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_RELAXED</span></code> transaction option for more details.</td>
-</tr>
-<tr class="row-even"><td>special_keys_write_disabled</td>
-<td>2114</td>
-<td>Special key space is not allowed to write by default. Refer
-to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_ENABLE_WRITES</span></code> transaction option for more details.</td>
-</tr>
-<tr class="row-odd"><td>special_keys_no_write_module_found</td>
-<td>2115</td>
-<td>Special key space key or keyrange in set or clear does not intersect a module.</td>
-</tr>
-<tr class="row-even"><td>special_keys_cross_module_write</td>
-<td>2116</td>
-<td>Special key space clear crosses modules</td>
-</tr>
-<tr class="row-odd"><td>special_keys_api_failure</td>
-<td>2117</td>
-<td>Api call through special keys failed. For more information, read the
-<code class="docutils literal"><span class="pre">0xff0xff/error_message</span></code> key</td>
-</tr>
-<tr class="row-even"><td>tenant_name_required</td>
-<td>2130</td>
-<td>Tenant name must be specified to access data in the cluster</td>
-</tr>
-<tr class="row-odd"><td>tenant_not_found</td>
-<td>2131</td>
-<td>Tenant does not exist</td>
-</tr>
-<tr class="row-even"><td>tenant_already_exists</td>
-<td>2132</td>
-<td>A tenant with the given name already exists</td>
-</tr>
-<tr class="row-odd"><td>tenant_not_empty</td>
-<td>2133</td>
-<td>Cannot delete a non-empty tenant</td>
-</tr>
-<tr class="row-even"><td>invalid_tenant_name</td>
-<td>2134</td>
-<td>Tenant name cannot begin with xff</td>
-</tr>
-<tr class="row-odd"><td>tenant_prefix_allocator_conflict</td>
-<td>2135</td>
-<td>The database already has keys stored at the prefix allocated for the tenant</td>
-</tr>
-<tr class="row-even"><td>tenants_disabled</td>
-<td>2136</td>
-<td>Tenants have been disabled in the cluster</td>
-</tr>
-<tr class="row-odd"><td>unknown_tenant</td>
-<td>2137</td>
-<td>Tenant is not available from this server</td>
-</tr>
-<tr class="row-even"><td>api_version_unset</td>
-<td>2200</td>
-<td>API version is not set</td>
-</tr>
-<tr class="row-odd"><td>api_version_already_set</td>
-<td>2201</td>
-<td>API version may be set only once</td>
-</tr>
-<tr class="row-even"><td>api_version_invalid</td>
-<td>2202</td>
-<td>API version not valid</td>
-</tr>
-<tr class="row-odd"><td>api_version_not_supported</td>
-<td>2203</td>
-<td>API version not supported</td>
-</tr>
-<tr class="row-even"><td>exact_mode_without_limits</td>
-<td>2210</td>
-<td>EXACT streaming mode requires limits, but none were given</td>
-</tr>
-<tr class="row-odd"><td>unknown_error</td>
-<td>4000</td>
-<td>An unknown error occurred</td>
-</tr>
-<tr class="row-even"><td>internal_error</td>
-<td>4100</td>
-<td>An internal error occurred</td>
+<tr class="row-odd"><td><p>transaction_invalid_version</p></td>
+<td><p>2020</p></td>
+<td><p>Transaction does not have a valid commit version</p></td>
+</tr>
+<tr class="row-even"><td><p>no_commit_version</p></td>
+<td><p>2021</p></td>
+<td><p>Transaction is read-only and therefore does not have a commit version</p></td>
+</tr>
+<tr class="row-odd"><td><p>environment_variable_network_option_failed</p></td>
+<td><p>2022</p></td>
+<td><p>Environment variable network option could not be set</p></td>
+</tr>
+<tr class="row-even"><td><p>transaction_read_only</p></td>
+<td><p>2023</p></td>
+<td><p>Attempted to commit a transaction specified as read-only</p></td>
+</tr>
+<tr class="row-odd"><td><p>invalid_cache_eviction_policy</p></td>
+<td><p>2024</p></td>
+<td><p>Invalid cache eviction policy, only random and lru are supported</p></td>
+</tr>
+<tr class="row-even"><td><p>network_cannot_be_restarted</p></td>
+<td><p>2025</p></td>
+<td><p>Network can only be started once</p></td>
+</tr>
+<tr class="row-odd"><td><p>blocked_from_network_thread</p></td>
+<td><p>2026</p></td>
+<td><p>Detected a deadlock in a callback called from the network thread</p></td>
+</tr>
+<tr class="row-even"><td><p>incompatible_protocol_version</p></td>
+<td><p>2100</p></td>
+<td><p>Incompatible protocol version</p></td>
+</tr>
+<tr class="row-odd"><td><p>transaction_too_large</p></td>
+<td><p>2101</p></td>
+<td><p>Transaction exceeds byte limit</p></td>
+</tr>
+<tr class="row-even"><td><p>key_too_large</p></td>
+<td><p>2102</p></td>
+<td><p>Key length exceeds limit</p></td>
+</tr>
+<tr class="row-odd"><td><p>value_too_large</p></td>
+<td><p>2103</p></td>
+<td><p>Value length exceeds limit</p></td>
+</tr>
+<tr class="row-even"><td><p>connection_string_invalid</p></td>
+<td><p>2104</p></td>
+<td><p>Connection string invalid</p></td>
+</tr>
+<tr class="row-odd"><td><p>address_in_use</p></td>
+<td><p>2105</p></td>
+<td><p>Local address in use</p></td>
+</tr>
+<tr class="row-even"><td><p>invalid_local_address</p></td>
+<td><p>2106</p></td>
+<td><p>Invalid local address</p></td>
+</tr>
+<tr class="row-odd"><td><p>tls_error</p></td>
+<td><p>2107</p></td>
+<td><p>TLS error</p></td>
+</tr>
+<tr class="row-even"><td><p>unsupported_operation</p></td>
+<td><p>2108</p></td>
+<td><p>Operation is not supported</p></td>
+</tr>
+<tr class="row-odd"><td><p>too_many_tags</p></td>
+<td><p>2109</p></td>
+<td><p>Too many tags set on transaction</p></td>
+</tr>
+<tr class="row-even"><td><p>tag_too_long</p></td>
+<td><p>2110</p></td>
+<td><p>Tag set on transaction is too long</p></td>
+</tr>
+<tr class="row-odd"><td><p>too_many_tag_throttles</p></td>
+<td><p>2111</p></td>
+<td><p>Too many tag throttles have been created</p></td>
+</tr>
+<tr class="row-even"><td><p>special_keys_cross_module_read</p></td>
+<td><p>2112</p></td>
+<td><p>Special key space range read crosses modules.
+Refer to the <code class="docutils literal notranslate"><span class="pre">SPECIAL_KEY_SPACE_RELAXED</span></code> transaction option for more details.</p></td>
+</tr>
+<tr class="row-odd"><td><p>special_keys_no_module_found</p></td>
+<td><p>2113</p></td>
+<td><p>Special key space range read does not intersect a module.
+Refer to the <code class="docutils literal notranslate"><span class="pre">SPECIAL_KEY_SPACE_RELAXED</span></code> transaction option for more details.</p></td>
+</tr>
+<tr class="row-even"><td><p>special_keys_write_disabled</p></td>
+<td><p>2114</p></td>
+<td><p>Special key space is not allowed to write by default. Refer
+to the <code class="docutils literal notranslate"><span class="pre">SPECIAL_KEY_SPACE_ENABLE_WRITES</span></code> transaction option for more details.</p></td>
+</tr>
+<tr class="row-odd"><td><p>special_keys_no_write_module_found</p></td>
+<td><p>2115</p></td>
+<td><p>Special key space key or keyrange in set or clear does not intersect a module.</p></td>
+</tr>
+<tr class="row-even"><td><p>special_keys_cross_module_write</p></td>
+<td><p>2116</p></td>
+<td><p>Special key space clear crosses modules</p></td>
+</tr>
+<tr class="row-odd"><td><p>special_keys_api_failure</p></td>
+<td><p>2117</p></td>
+<td><p>Api call through special keys failed. For more information, read the
+<code class="docutils literal notranslate"><span class="pre">0xff0xff/error_message</span></code> key</p></td>
+</tr>
+<tr class="row-even"><td><p>tenant_name_required</p></td>
+<td><p>2130</p></td>
+<td><p>Tenant name must be specified to access data in the cluster</p></td>
+</tr>
+<tr class="row-odd"><td><p>tenant_not_found</p></td>
+<td><p>2131</p></td>
+<td><p>Tenant does not exist</p></td>
+</tr>
+<tr class="row-even"><td><p>tenant_already_exists</p></td>
+<td><p>2132</p></td>
+<td><p>A tenant with the given name already exists</p></td>
+</tr>
+<tr class="row-odd"><td><p>tenant_not_empty</p></td>
+<td><p>2133</p></td>
+<td><p>Cannot delete a non-empty tenant</p></td>
+</tr>
+<tr class="row-even"><td><p>invalid_tenant_name</p></td>
+<td><p>2134</p></td>
+<td><p>Tenant name cannot begin with xff</p></td>
+</tr>
+<tr class="row-odd"><td><p>tenant_prefix_allocator_conflict</p></td>
+<td><p>2135</p></td>
+<td><p>The database already has keys stored at the prefix allocated for the tenant</p></td>
+</tr>
+<tr class="row-even"><td><p>tenants_disabled</p></td>
+<td><p>2136</p></td>
+<td><p>Tenants have been disabled in the cluster</p></td>
+</tr>
+<tr class="row-odd"><td><p>unknown_tenant</p></td>
+<td><p>2137</p></td>
+<td><p>Tenant is not available from this server</p></td>
+</tr>
+<tr class="row-even"><td><p>api_version_unset</p></td>
+<td><p>2200</p></td>
+<td><p>API version is not set</p></td>
+</tr>
+<tr class="row-odd"><td><p>api_version_already_set</p></td>
+<td><p>2201</p></td>
+<td><p>API version may be set only once</p></td>
+</tr>
+<tr class="row-even"><td><p>api_version_invalid</p></td>
+<td><p>2202</p></td>
+<td><p>API version not valid</p></td>
+</tr>
+<tr class="row-odd"><td><p>api_version_not_supported</p></td>
+<td><p>2203</p></td>
+<td><p>API version not supported</p></td>
+</tr>
+<tr class="row-even"><td><p>exact_mode_without_limits</p></td>
+<td><p>2210</p></td>
+<td><p>EXACT streaming mode requires limits, but none were given</p></td>
+</tr>
+<tr class="row-odd"><td><p>unknown_error</p></td>
+<td><p>4000</p></td>
+<td><p>An unknown error occurred</p></td>
+</tr>
+<tr class="row-even"><td><p>internal_error</p></td>
+<td><p>4100</p></td>
+<td><p>An internal error occurred</p></td>
 </tr>
 </tbody>
 </table>
-</div>
+</section>
 
 
     </div>
@@ -530,7 +640,7 @@ to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_ENABLE
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Release Notes &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    '../',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="../_static/jquery.js"></script>
-    <script type="text/javascript" src="../_static/underscore.js"></script>
-    <script type="text/javascript" src="../_static/doctools.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Release Notes &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="../_static/doctools.js"></script>
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Release Notes" href="release-notes-520.html" />
     <link rel="prev" title="Release Notes" href="release-notes-500.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="../_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="../index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="../earlier-release-notes.html">Earlier Release Notes</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -216,240 +331,240 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="release-notes">
+  <section id="release-notes">
 <h1>Release Notes</h1>
-<div class="section" id="id1">
+<section id="id1">
 <h2>5.1.7</h2>
-<div class="section" id="fixes">
+<section id="fixes">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>fdbdr switch could take a long time to complete if the two clusters were not created at the same time. &lt;<a class="reference external" href="rdar://problem/37551521">rdar://problem/37551521</a>&gt;</li>
+<li><p>fdbdr switch could take a long time to complete if the two clusters were not created at the same time. &lt;<a class="reference external" href="rdar://problem/37551521">rdar://problem/37551521</a>&gt;</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id2">
+</section>
+</section>
+<section id="id2">
 <h2>5.1.6</h2>
-<div class="section" id="id3">
+<section id="id3">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Expiring a backup could cause the fdbbackup process to hang indefinitely. &lt;<a class="reference external" href="rdar://problem/39382121">rdar://problem/39382121</a>&gt;</li>
+<li><p>Expiring a backup could cause the fdbbackup process to hang indefinitely. &lt;<a class="reference external" href="rdar://problem/39382121">rdar://problem/39382121</a>&gt;</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id4">
+</section>
+</section>
+<section id="id4">
 <h2>5.1.5</h2>
-<div class="section" id="id5">
+<section id="id5">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>The consistency check calculated the size of the database inefficiently. &lt;<a class="reference external" href="rdar://problem/38385230">rdar://problem/38385230</a>&gt;</li>
-<li>Could not create new directories with the Python and Ruby implementations of the directory layer. &lt;<a class="reference external" href="rdar://problem/38911902">rdar://problem/38911902</a>&gt; &lt;<a class="reference external" href="rdar://problem/38477474">rdar://problem/38477474</a>&gt;</li>
-<li>fdbcli could erroneously report that it was incompatible with some processes in the cluster. &lt;<a class="reference external" href="rdar://problem/39353867">rdar://problem/39353867</a>&gt;</li>
-<li>The commit commmand in fdbcli did not wait for the result of the commit before continuing to the next command.</li>
+<li><p>The consistency check calculated the size of the database inefficiently. &lt;<a class="reference external" href="rdar://problem/38385230">rdar://problem/38385230</a>&gt;</p></li>
+<li><p>Could not create new directories with the Python and Ruby implementations of the directory layer. &lt;<a class="reference external" href="rdar://problem/38911902">rdar://problem/38911902</a>&gt; &lt;<a class="reference external" href="rdar://problem/38477474">rdar://problem/38477474</a>&gt;</p></li>
+<li><p>fdbcli could erroneously report that it was incompatible with some processes in the cluster. &lt;<a class="reference external" href="rdar://problem/39353867">rdar://problem/39353867</a>&gt;</p></li>
+<li><p>The commit commmand in fdbcli did not wait for the result of the commit before continuing to the next command.</p></li>
 </ul>
-</div>
-<div class="section" id="other-changes">
+</section>
+<section id="other-changes">
 <h3>Other Changes</h3>
 <ul class="simple">
-<li>renamed the <code class="docutils literal"><span class="pre">multi_dc</span></code> replication mode to <code class="docutils literal"><span class="pre">three_datacenter</span></code>.</li>
+<li><p>renamed the <code class="docutils literal notranslate"><span class="pre">multi_dc</span></code> replication mode to <code class="docutils literal notranslate"><span class="pre">three_datacenter</span></code>.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id6">
+</section>
+</section>
+<section id="id6">
 <h2>5.1.4</h2>
-<div class="section" id="id7">
+<section id="id7">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>The master would recover twice when a new cluster controller was elected. &lt;<a class="reference external" href="rdar://problem/38305649">rdar://problem/38305649</a>&gt;</li>
-<li>The cluster controller could be elected on a storage process after restarting all processes in a cluster. &lt;<a class="reference external" href="rdar://problem/37946424">rdar://problem/37946424</a>&gt;</li>
-<li>Allow backup expiration to succeed if the backup is too new to be restorable. &lt;<a class="reference external" href="rdar://problem/38237313">rdar://problem/38237313</a>&gt;</li>
-<li>Process metric collection in status could sometimes fail. &lt;<a class="reference external" href="rdar://problem/38311829">rdar://problem/38311829</a>&gt;</li>
+<li><p>The master would recover twice when a new cluster controller was elected. &lt;<a class="reference external" href="rdar://problem/38305649">rdar://problem/38305649</a>&gt;</p></li>
+<li><p>The cluster controller could be elected on a storage process after restarting all processes in a cluster. &lt;<a class="reference external" href="rdar://problem/37946424">rdar://problem/37946424</a>&gt;</p></li>
+<li><p>Allow backup expiration to succeed if the backup is too new to be restorable. &lt;<a class="reference external" href="rdar://problem/38237313">rdar://problem/38237313</a>&gt;</p></li>
+<li><p>Process metric collection in status could sometimes fail. &lt;<a class="reference external" href="rdar://problem/38311829">rdar://problem/38311829</a>&gt;</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id8">
+</section>
+</section>
+<section id="id8">
 <h2>5.1.3</h2>
-<div class="section" id="id9">
+<section id="id9">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>The backup agents ran out of memory when heavily loaded. &lt;<a class="reference external" href="rdar://problem/37509745">rdar://problem/37509745</a>&gt;</li>
-<li>Storage servers were not marked as failed until after their files were deleted. &lt;<a class="reference external" href="rdar://problem/38266562">rdar://problem/38266562</a>&gt;</li>
-<li>The consistency check requested too many shards in the same request from the proxy. &lt;<a class="reference external" href="rdar://problem/37326268">rdar://problem/37326268</a>&gt;</li>
-<li>Client knobs for blob send/receive were reversed in meaning. &lt;<a class="reference external" href="rdar://problem/37945529">rdar://problem/37945529</a>&gt;</li>
-<li>fdbbackup status provides more information on reported errors. &lt;<a class="reference external" href="rdar://problem/36200858">rdar://problem/36200858</a>&gt; &lt;<a class="reference external" href="rdar://problem/37461836">rdar://problem/37461836</a>&gt;</li>
+<li><p>The backup agents ran out of memory when heavily loaded. &lt;<a class="reference external" href="rdar://problem/37509745">rdar://problem/37509745</a>&gt;</p></li>
+<li><p>Storage servers were not marked as failed until after their files were deleted. &lt;<a class="reference external" href="rdar://problem/38266562">rdar://problem/38266562</a>&gt;</p></li>
+<li><p>The consistency check requested too many shards in the same request from the proxy. &lt;<a class="reference external" href="rdar://problem/37326268">rdar://problem/37326268</a>&gt;</p></li>
+<li><p>Client knobs for blob send/receive were reversed in meaning. &lt;<a class="reference external" href="rdar://problem/37945529">rdar://problem/37945529</a>&gt;</p></li>
+<li><p>fdbbackup status provides more information on reported errors. &lt;<a class="reference external" href="rdar://problem/36200858">rdar://problem/36200858</a>&gt; &lt;<a class="reference external" href="rdar://problem/37461836">rdar://problem/37461836</a>&gt;</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id10">
+</section>
+</section>
+<section id="id10">
 <h2>5.1.2</h2>
-<div class="section" id="id11">
+<section id="id11">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Backup did not incrementally delete mutations from the mutation log. &lt;<a class="reference external" href="rdar://problem/37609229">rdar://problem/37609229</a>&gt;</li>
-<li>fdbcli status misreported completed backup/DR as running. &lt;<a class="reference external" href="rdar://problem/37608661">rdar://problem/37608661</a>&gt;</li>
-<li>Stopped producing the &#8220;fdbblob&#8221; alias for fdbbackup. &lt;<a class="reference external" href="rdar://problem/37244632">rdar://problem/37244632</a>&gt;</li>
+<li><p>Backup did not incrementally delete mutations from the mutation log. &lt;<a class="reference external" href="rdar://problem/37609229">rdar://problem/37609229</a>&gt;</p></li>
+<li><p>fdbcli status misreported completed backup/DR as running. &lt;<a class="reference external" href="rdar://problem/37608661">rdar://problem/37608661</a>&gt;</p></li>
+<li><p>Stopped producing the “fdbblob” alias for fdbbackup. &lt;<a class="reference external" href="rdar://problem/37244632">rdar://problem/37244632</a>&gt;</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id12">
+</section>
+</section>
+<section id="id12">
 <h2>5.1.1</h2>
-<div class="section" id="id13">
+<section id="id13">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Bindings: Disposing a transaction during a commit resulted in a broken promise from <code class="docutils literal"><span class="pre">get_versionstamp</span></code>. &lt;<a class="reference external" href="rdar://problem/35835272">rdar://problem/35835272</a>&gt;</li>
-<li>Bindings: Calling <code class="docutils literal"><span class="pre">create_cluster</span></code> before initializing the network would result in a crash. &lt;<a class="reference external" href="rdar://problem/35563243">rdar://problem/35563243</a>&gt;</li>
-<li>Latest restorable version of a running backup was not being updated in backup layer status. &lt;<a class="reference external" href="rdar://problem/37288715">rdar://problem/37288715</a>&gt;</li>
-<li>Backup layer status would sometimes show an error or an incorrect value for the recent blob bandwidth metric. &lt;<a class="reference external" href="rdar://problem/37288943">rdar://problem/37288943</a>&gt;</li>
-<li>Backup deletions were not deleting all of the files related to the backup. &lt;<a class="reference external" href="rdar://problem/37756550">rdar://problem/37756550</a>&gt;</li>
-<li>The cluster controller was sharing a process with the master even when better locations existed. &lt;<a class="reference external" href="rdar://problem/37318611">rdar://problem/37318611</a>&gt;</li>
-<li>Blob credentials files were being opened in read-write mode.</li>
-<li>Sometimes fdbbackup did not write log files even when <code class="docutils literal"><span class="pre">--log</span></code> was passed on the command line. &lt;<a class="reference external" href="rdar://problem/36259384">rdar://problem/36259384</a>&gt;</li>
+<li><p>Bindings: Disposing a transaction during a commit resulted in a broken promise from <code class="docutils literal notranslate"><span class="pre">get_versionstamp</span></code>. &lt;<a class="reference external" href="rdar://problem/35835272">rdar://problem/35835272</a>&gt;</p></li>
+<li><p>Bindings: Calling <code class="docutils literal notranslate"><span class="pre">create_cluster</span></code> before initializing the network would result in a crash. &lt;<a class="reference external" href="rdar://problem/35563243">rdar://problem/35563243</a>&gt;</p></li>
+<li><p>Latest restorable version of a running backup was not being updated in backup layer status. &lt;<a class="reference external" href="rdar://problem/37288715">rdar://problem/37288715</a>&gt;</p></li>
+<li><p>Backup layer status would sometimes show an error or an incorrect value for the recent blob bandwidth metric. &lt;<a class="reference external" href="rdar://problem/37288943">rdar://problem/37288943</a>&gt;</p></li>
+<li><p>Backup deletions were not deleting all of the files related to the backup. &lt;<a class="reference external" href="rdar://problem/37756550">rdar://problem/37756550</a>&gt;</p></li>
+<li><p>The cluster controller was sharing a process with the master even when better locations existed. &lt;<a class="reference external" href="rdar://problem/37318611">rdar://problem/37318611</a>&gt;</p></li>
+<li><p>Blob credentials files were being opened in read-write mode.</p></li>
+<li><p>Sometimes fdbbackup did not write log files even when <code class="docutils literal notranslate"><span class="pre">--log</span></code> was passed on the command line. &lt;<a class="reference external" href="rdar://problem/36259384">rdar://problem/36259384</a>&gt;</p></li>
 </ul>
-</div>
-<div class="section" id="performance">
+</section>
+<section id="performance">
 <h3>Performance</h3>
 <ul class="simple">
-<li>Backup file uploads will respond to server-side throttling in the middle of a chunk upload rather than only between chunks. &lt;<a class="reference external" href="rdar://problem/37245992">rdar://problem/37245992</a>&gt;</li>
+<li><p>Backup file uploads will respond to server-side throttling in the middle of a chunk upload rather than only between chunks. &lt;<a class="reference external" href="rdar://problem/37245992">rdar://problem/37245992</a>&gt;</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id14">
+</section>
+</section>
+<section id="id14">
 <h2>5.1.0</h2>
-<div class="section" id="features">
+<section id="features">
 <h3>Features</h3>
 <ul class="simple">
-<li>Backups continually write snapshots at a configured interval, reducing restore times for long running backups. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</li>
-<li>Old backup snapshots and associated logs can be deleted from a backup. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</li>
-<li>Backup files are stored in a deep folder structure. &lt;<a class="reference external" href="rdar://problem/27723412">rdar://problem/27723412</a>&gt;</li>
-<li>Restore allows you to specify an approximate time instead of a version. &lt;<a class="reference external" href="rdar://problem/34557380">rdar://problem/34557380</a>&gt;</li>
-<li>Backup and DR agents can be paused from <code class="docutils literal"><span class="pre">fdbbackup</span></code> and <code class="docutils literal"><span class="pre">fdbdr</span></code> respectively. &lt;<a class="reference external" href="rdar://problem/34776039">rdar://problem/34776039</a>&gt;</li>
-<li>Added byte min and byte max atomic operations. &lt;<a class="reference external" href="rdar://problem/29255441">rdar://problem/29255441</a>&gt;</li>
-<li>The behavior of atomic &#8220;and&#8221; and &#8220;min&#8221; operations has changed when the key doesn&#8217;t exist in the database. If the key is not present, then an &#8220;and&#8221; or &#8220;min&#8221; is now equivalent to a set. &lt;<a class="reference external" href="rdar://problem/29255441">rdar://problem/29255441</a>&gt;</li>
-<li>Exception messages are more descriptive. &lt;<a class="reference external" href="rdar://problem/33665340">rdar://problem/33665340</a>&gt;</li>
-<li>Clients can view a sample of committed mutations. &lt;<a class="reference external" href="rdar://problem/33324935">rdar://problem/33324935</a>&gt;</li>
-<li>When switching to a DR cluster, the commit versions on that cluster will be higher than the versions on the primary cluster. &lt;<a class="reference external" href="rdar://problem/33572665">rdar://problem/33572665</a>&gt;</li>
-<li>Added a read-only lock aware transaction option. &lt;<a class="reference external" href="rdar://problem/34579176">rdar://problem/34579176</a>&gt;</li>
-<li>Automatically suppress trace log events which occur too frequently. &lt;<a class="reference external" href="rdar://problem/33764208">rdar://problem/33764208</a>&gt;</li>
-<li>Added a new <code class="docutils literal"><span class="pre">multi_dc</span></code> replication mode designed for cross data center deployments. &lt;<a class="reference external" href="rdar://problem/36489132">rdar://problem/36489132</a>&gt;</li>
+<li><p>Backups continually write snapshots at a configured interval, reducing restore times for long running backups. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</p></li>
+<li><p>Old backup snapshots and associated logs can be deleted from a backup. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</p></li>
+<li><p>Backup files are stored in a deep folder structure. &lt;<a class="reference external" href="rdar://problem/27723412">rdar://problem/27723412</a>&gt;</p></li>
+<li><p>Restore allows you to specify an approximate time instead of a version. &lt;<a class="reference external" href="rdar://problem/34557380">rdar://problem/34557380</a>&gt;</p></li>
+<li><p>Backup and DR agents can be paused from <code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code> and <code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> respectively. &lt;<a class="reference external" href="rdar://problem/34776039">rdar://problem/34776039</a>&gt;</p></li>
+<li><p>Added byte min and byte max atomic operations. &lt;<a class="reference external" href="rdar://problem/29255441">rdar://problem/29255441</a>&gt;</p></li>
+<li><p>The behavior of atomic “and” and “min” operations has changed when the key doesn’t exist in the database. If the key is not present, then an “and” or “min” is now equivalent to a set. &lt;<a class="reference external" href="rdar://problem/29255441">rdar://problem/29255441</a>&gt;</p></li>
+<li><p>Exception messages are more descriptive. &lt;<a class="reference external" href="rdar://problem/33665340">rdar://problem/33665340</a>&gt;</p></li>
+<li><p>Clients can view a sample of committed mutations. &lt;<a class="reference external" href="rdar://problem/33324935">rdar://problem/33324935</a>&gt;</p></li>
+<li><p>When switching to a DR cluster, the commit versions on that cluster will be higher than the versions on the primary cluster. &lt;<a class="reference external" href="rdar://problem/33572665">rdar://problem/33572665</a>&gt;</p></li>
+<li><p>Added a read-only lock aware transaction option. &lt;<a class="reference external" href="rdar://problem/34579176">rdar://problem/34579176</a>&gt;</p></li>
+<li><p>Automatically suppress trace log events which occur too frequently. &lt;<a class="reference external" href="rdar://problem/33764208">rdar://problem/33764208</a>&gt;</p></li>
+<li><p>Added a new <code class="docutils literal notranslate"><span class="pre">multi_dc</span></code> replication mode designed for cross data center deployments. &lt;<a class="reference external" href="rdar://problem/36489132">rdar://problem/36489132</a>&gt;</p></li>
 </ul>
-</div>
-<div class="section" id="id15">
+</section>
+<section id="id15">
 <h3>Performance</h3>
 <ul class="simple">
-<li>The data distribution algorithm can split the system keyspace. &lt;<a class="reference external" href="rdar://problem/29932360">rdar://problem/29932360</a>&gt;</li>
-<li>Improved load balancing when servers are located across multiple data centers. &lt;<a class="reference external" href="rdar://problem/34213649">rdar://problem/34213649</a>&gt;</li>
-<li>Improved read latencies after recoveries by only making servers responsible for keys if they have finished copying the data from other servers. &lt;<a class="reference external" href="rdar://problem/34697182">rdar://problem/34697182</a>&gt;</li>
-<li>Improved recovery times by waiting until a process has finished recovering its data from disk before letting it be recruited for new roles. &lt;<a class="reference external" href="rdar://problem/32000146">rdar://problem/32000146</a>&gt; &lt;<a class="reference external" href="rdar://problem/34212951">rdar://problem/34212951</a>&gt;</li>
-<li>Improved 95% read version latencies by reducing the number of logs required to confirm that a proxy has not been replaced. &lt;<a class="reference external" href="rdar://problem/33196298">rdar://problem/33196298</a>&gt;</li>
-<li>Stopped the transaction logs from copying unneeded data after multiple successive recoveries. &lt;<a class="reference external" href="rdar://problem/36488946">rdar://problem/36488946</a>&gt;</li>
-<li>Significantly improved the performance of range reads. &lt;<a class="reference external" href="rdar://problem/33926224">rdar://problem/33926224</a>&gt;</li>
-<li>The cluster controller prefers to be recruited on stateless class processes and will not put other stateless roles on the same process. &lt;<a class="reference external" href="rdar://problem/35155324">rdar://problem/35155324</a>&gt;</li>
-<li>Excluded servers no longer take on stateless roles. &lt;<a class="reference external" href="rdar://problem/27110802">rdar://problem/27110802</a>&gt;</li>
-<li>Stateless roles will be proactively moved off of excluded processes. &lt;<a class="reference external" href="rdar://problem/27110802">rdar://problem/27110802</a>&gt; &lt;<a class="reference external" href="rdar://problem/35155044">rdar://problem/35155044</a>&gt;</li>
-<li>Dramatically improved restore speeds of large disk queue files. &lt;<a class="reference external" href="rdar://problem/35567320">rdar://problem/35567320</a>&gt;</li>
-<li>Clients get key location information directly from the proxies, significantly reducing the latency of worst case read patterns. &lt;<a class="reference external" href="rdar://problem/35953920">rdar://problem/35953920</a>&gt;</li>
-<li>Reduced the amount of work incompatible clients generate for coordinators and the cluster controller. In particular, this reduces the load on the cluster caused by using the multi-version client. &lt;<a class="reference external" href="rdar://problem/30897631">rdar://problem/30897631</a>&gt;</li>
-<li>Pop partially recovered mutations from the transaction log to save disk space after multiple successive recoveries. &lt;<a class="reference external" href="rdar://problem/33755270">rdar://problem/33755270</a>&gt;</li>
-<li>Stopped using network checksums when also using TLS. &lt;<a class="reference external" href="rdar://problem/32157852">rdar://problem/32157852</a>&gt;</li>
-<li>Improved cluster performance after recoveries by prioritizing processing new mutations on the logs over copying data from the previous logs. &lt;<a class="reference external" href="rdar://problem/36489337">rdar://problem/36489337</a>&gt;</li>
-<li>Backup agents prefer reading from servers in the same data center. &lt;<a class="reference external" href="rdar://problem/34213617">rdar://problem/34213617</a>&gt;</li>
+<li><p>The data distribution algorithm can split the system keyspace. &lt;<a class="reference external" href="rdar://problem/29932360">rdar://problem/29932360</a>&gt;</p></li>
+<li><p>Improved load balancing when servers are located across multiple data centers. &lt;<a class="reference external" href="rdar://problem/34213649">rdar://problem/34213649</a>&gt;</p></li>
+<li><p>Improved read latencies after recoveries by only making servers responsible for keys if they have finished copying the data from other servers. &lt;<a class="reference external" href="rdar://problem/34697182">rdar://problem/34697182</a>&gt;</p></li>
+<li><p>Improved recovery times by waiting until a process has finished recovering its data from disk before letting it be recruited for new roles. &lt;<a class="reference external" href="rdar://problem/32000146">rdar://problem/32000146</a>&gt; &lt;<a class="reference external" href="rdar://problem/34212951">rdar://problem/34212951</a>&gt;</p></li>
+<li><p>Improved 95% read version latencies by reducing the number of logs required to confirm that a proxy has not been replaced. &lt;<a class="reference external" href="rdar://problem/33196298">rdar://problem/33196298</a>&gt;</p></li>
+<li><p>Stopped the transaction logs from copying unneeded data after multiple successive recoveries. &lt;<a class="reference external" href="rdar://problem/36488946">rdar://problem/36488946</a>&gt;</p></li>
+<li><p>Significantly improved the performance of range reads. &lt;<a class="reference external" href="rdar://problem/33926224">rdar://problem/33926224</a>&gt;</p></li>
+<li><p>The cluster controller prefers to be recruited on stateless class processes and will not put other stateless roles on the same process. &lt;<a class="reference external" href="rdar://problem/35155324">rdar://problem/35155324</a>&gt;</p></li>
+<li><p>Excluded servers no longer take on stateless roles. &lt;<a class="reference external" href="rdar://problem/27110802">rdar://problem/27110802</a>&gt;</p></li>
+<li><p>Stateless roles will be proactively moved off of excluded processes. &lt;<a class="reference external" href="rdar://problem/27110802">rdar://problem/27110802</a>&gt; &lt;<a class="reference external" href="rdar://problem/35155044">rdar://problem/35155044</a>&gt;</p></li>
+<li><p>Dramatically improved restore speeds of large disk queue files. &lt;<a class="reference external" href="rdar://problem/35567320">rdar://problem/35567320</a>&gt;</p></li>
+<li><p>Clients get key location information directly from the proxies, significantly reducing the latency of worst case read patterns. &lt;<a class="reference external" href="rdar://problem/35953920">rdar://problem/35953920</a>&gt;</p></li>
+<li><p>Reduced the amount of work incompatible clients generate for coordinators and the cluster controller. In particular, this reduces the load on the cluster caused by using the multi-version client. &lt;<a class="reference external" href="rdar://problem/30897631">rdar://problem/30897631</a>&gt;</p></li>
+<li><p>Pop partially recovered mutations from the transaction log to save disk space after multiple successive recoveries. &lt;<a class="reference external" href="rdar://problem/33755270">rdar://problem/33755270</a>&gt;</p></li>
+<li><p>Stopped using network checksums when also using TLS. &lt;<a class="reference external" href="rdar://problem/32157852">rdar://problem/32157852</a>&gt;</p></li>
+<li><p>Improved cluster performance after recoveries by prioritizing processing new mutations on the logs over copying data from the previous logs. &lt;<a class="reference external" href="rdar://problem/36489337">rdar://problem/36489337</a>&gt;</p></li>
+<li><p>Backup agents prefer reading from servers in the same data center. &lt;<a class="reference external" href="rdar://problem/34213617">rdar://problem/34213617</a>&gt;</p></li>
 </ul>
-</div>
-<div class="section" id="id16">
+</section>
+<section id="id16">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>New databases immediately configured into <code class="docutils literal"><span class="pre">three_data_hall</span></code> would not respect the <code class="docutils literal"><span class="pre">three_data_hall</span></code> constraint. &lt;<a class="reference external" href="rdar://problem/34415440">rdar://problem/34415440</a>&gt;</li>
-<li>Exclude considered the free space of non-storage processes when determining if an exclude was safe.</li>
-<li><code class="docutils literal"><span class="pre">fdbmonitor</span></code> failed to start processes after fork failure. &lt;<a class="reference external" href="rdar://problem/34743257">rdar://problem/34743257</a>&gt;</li>
-<li><code class="docutils literal"><span class="pre">fdbmonitor</span></code> will only stop processes when the configuration file is deleted if <code class="docutils literal"><span class="pre">kill_on_configuration_change</span></code> is set. &lt;<a class="reference external" href="rdar://problem/35497412">rdar://problem/35497412</a>&gt;</li>
-<li>The data distribution algorithm would hang indefinitely when asked to build storage teams with more than three servers.</li>
-<li>Mutations from a restore could continue to be applied for a very short amount of time after a restore was successfully aborted.</li>
+<li><p>New databases immediately configured into <code class="docutils literal notranslate"><span class="pre">three_data_hall</span></code> would not respect the <code class="docutils literal notranslate"><span class="pre">three_data_hall</span></code> constraint. &lt;<a class="reference external" href="rdar://problem/34415440">rdar://problem/34415440</a>&gt;</p></li>
+<li><p>Exclude considered the free space of non-storage processes when determining if an exclude was safe.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> failed to start processes after fork failure. &lt;<a class="reference external" href="rdar://problem/34743257">rdar://problem/34743257</a>&gt;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> will only stop processes when the configuration file is deleted if <code class="docutils literal notranslate"><span class="pre">kill_on_configuration_change</span></code> is set. &lt;<a class="reference external" href="rdar://problem/35497412">rdar://problem/35497412</a>&gt;</p></li>
+<li><p>The data distribution algorithm would hang indefinitely when asked to build storage teams with more than three servers.</p></li>
+<li><p>Mutations from a restore could continue to be applied for a very short amount of time after a restore was successfully aborted.</p></li>
 </ul>
-</div>
-<div class="section" id="extremely-rare-bug-fixes">
+</section>
+<section id="extremely-rare-bug-fixes">
 <h3>Extremely Rare Bug Fixes</h3>
 <ul class="simple">
-<li>Storage servers did not properly handle rollbacks to versions before their restored version.</li>
-<li>A newly recruited transaction log configured with the memory storage engine could crash on startup.</li>
-<li>The data distribution algorithm could split a key range so that one part did not have any data.</li>
-<li>Storage servers could update to an incorrect version after a master failure.</li>
-<li>The disk queue could report a commit as successful before the sync of the disk queue files completed.</li>
-<li>A disk queue which was shutdown before completing its first commit could become unrecoverable.</li>
+<li><p>Storage servers did not properly handle rollbacks to versions before their restored version.</p></li>
+<li><p>A newly recruited transaction log configured with the memory storage engine could crash on startup.</p></li>
+<li><p>The data distribution algorithm could split a key range so that one part did not have any data.</p></li>
+<li><p>Storage servers could update to an incorrect version after a master failure.</p></li>
+<li><p>The disk queue could report a commit as successful before the sync of the disk queue files completed.</p></li>
+<li><p>A disk queue which was shutdown before completing its first commit could become unrecoverable.</p></li>
 </ul>
-</div>
-<div class="section" id="status">
+</section>
+<section id="status">
 <h3>Status</h3>
 <ul class="simple">
-<li>If a cluster cannot recover because too many transaction logs are missing, status lists the missing logs. &lt;<a class="reference external" href="rdar://problem/34965531">rdar://problem/34965531</a>&gt;</li>
-<li>The list of connected clients includes their trace log groups. &lt;<a class="reference external" href="rdar://problem/33779874">rdar://problem/33779874</a>&gt;</li>
-<li>Status reports if a cluster is being used as a DR destination. &lt;<a class="reference external" href="rdar://problem/34971187">rdar://problem/34971187</a>&gt;</li>
+<li><p>If a cluster cannot recover because too many transaction logs are missing, status lists the missing logs. &lt;<a class="reference external" href="rdar://problem/34965531">rdar://problem/34965531</a>&gt;</p></li>
+<li><p>The list of connected clients includes their trace log groups. &lt;<a class="reference external" href="rdar://problem/33779874">rdar://problem/33779874</a>&gt;</p></li>
+<li><p>Status reports if a cluster is being used as a DR destination. &lt;<a class="reference external" href="rdar://problem/34971187">rdar://problem/34971187</a>&gt;</p></li>
 </ul>
-</div>
-<div class="section" id="bindings">
+</section>
+<section id="bindings">
 <h3>Bindings</h3>
 <ul class="simple">
-<li>API version updated to 510. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-510"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
-<li>Add versionstamp support to the Tuple layer in Java and Python. &lt;<a class="reference external" href="rdar://problem/25560444">rdar://problem/25560444</a>&gt;</li>
+<li><p>API version updated to 510. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-510"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</p></li>
+<li><p>Add versionstamp support to the Tuple layer in Java and Python. &lt;<a class="reference external" href="rdar://problem/25560444">rdar://problem/25560444</a>&gt;</p></li>
 </ul>
-</div>
-<div class="section" id="java">
+</section>
+<section id="java">
 <h3>Java</h3>
 <ul class="simple">
-<li>API versions prior to 510 are no longer supported.</li>
-<li>The bindings have been moved to the package <code class="docutils literal"><span class="pre">com.apple.foundationdb</span></code> from <code class="docutils literal"><span class="pre">com.apple.cie.foundationdb</span></code>. &lt;<a class="reference external" href="rdar://problem/33271641">rdar://problem/33271641</a>&gt;</li>
-<li>We no longer offer a version of the Java bindings with our custom futures library or support Java versions less than 8. The bindings that use completable futures have been renamed to <code class="docutils literal"><span class="pre">fdb-java</span></code>. &lt;<a class="reference external" href="rdar://problem/35029630">rdar://problem/35029630</a>&gt;</li>
-<li>Finalizers now log a warning to stderr if an object with native resources is not closed. This can be disabled by calling <code class="docutils literal"><span class="pre">FDB.setUnclosedWarning()</span></code>. &lt;<a class="reference external" href="rdar://problem/35421530">rdar://problem/35421530</a>&gt;</li>
-<li>Implementers of the <code class="docutils literal"><span class="pre">Disposable</span></code> interface now implement <code class="docutils literal"><span class="pre">AutoCloseable</span></code> instead, with <code class="docutils literal"><span class="pre">close()</span></code> replacing <code class="docutils literal"><span class="pre">dispose()</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">AutoCloseable</span></code> objects will continue to be closed in object finalizers, but this behavior is being deprecated. All <code class="docutils literal"><span class="pre">AutoCloseable</span></code> objects should be explicitly closed. &lt;<a class="reference external" href="rdar://problem/35421530">rdar://problem/35421530</a>&gt;</li>
-<li><code class="docutils literal"><span class="pre">AsyncIterator</span></code> is no longer closeable. &lt;<a class="reference external" href="rdar://problem/35595971">rdar://problem/35595971</a>&gt;</li>
-<li><code class="docutils literal"><span class="pre">getBoundaryKeys()</span></code> now returns a <code class="docutils literal"><span class="pre">CloseableAsyncIterable</span></code> rather than an <code class="docutils literal"><span class="pre">AsyncIterator</span></code>. &lt;<a class="reference external" href="rdar://problem/35421530">rdar://problem/35421530</a>&gt;</li>
-<li><code class="docutils literal"><span class="pre">Transaction.getRange()</span></code> no longer initiates a range read immediately. Instead, the read is issued by a call to <code class="docutils literal"><span class="pre">AsyncIterable.asList()</span></code> or <code class="docutils literal"><span class="pre">AsyncIterable.iterator()</span></code>. &lt;<a class="reference external" href="rdar://problem/35595971">rdar://problem/35595971</a>&gt;</li>
-<li>Added <code class="docutils literal"><span class="pre">hashCode()</span></code> method to <code class="docutils literal"><span class="pre">Subspace</span></code>. &lt;<a class="reference external" href="rdar://problem/35125601">rdar://problem/35125601</a>&gt;</li>
-<li>Added thread names to threads created by our default executor. &lt;<a class="reference external" href="rdar://problem/36077166">rdar://problem/36077166</a>&gt;</li>
-<li>The network thread by default will be named <code class="docutils literal"><span class="pre">fdb-network-thread</span></code>. &lt;<a class="reference external" href="rdar://problem/36077166">rdar://problem/36077166</a>&gt;</li>
-<li>Added an overload of <code class="docutils literal"><span class="pre">whileTrue()</span></code> which takes a <code class="docutils literal"><span class="pre">Supplier</span></code>. &lt;<a class="reference external" href="rdar://problem/35096338">rdar://problem/35096338</a>&gt;</li>
-<li>Added experimental support for enabling native callbacks from external threads. &lt;<a class="reference external" href="rdar://problem/33300740">rdar://problem/33300740</a>&gt;</li>
-<li>Fix: Converting the result of <code class="docutils literal"><span class="pre">Transaction.getRange()</span></code> to a list would issue an unneeded range read. &lt;<a class="reference external" href="rdar://problem/35325444">rdar://problem/35325444</a>&gt;</li>
-<li>Fix: range iterators failed to close underlying native resources. &lt;<a class="reference external" href="rdar://problem/35595971">rdar://problem/35595971</a>&gt;</li>
-<li>Fix: various objects internal to the bindings were not properly closed. &lt;<a class="reference external" href="rdar://problem/35541447">rdar://problem/35541447</a>&gt;</li>
+<li><p>API versions prior to 510 are no longer supported.</p></li>
+<li><p>The bindings have been moved to the package <code class="docutils literal notranslate"><span class="pre">com.apple.foundationdb</span></code> from <code class="docutils literal notranslate"><span class="pre">com.apple.cie.foundationdb</span></code>. &lt;<a class="reference external" href="rdar://problem/33271641">rdar://problem/33271641</a>&gt;</p></li>
+<li><p>We no longer offer a version of the Java bindings with our custom futures library or support Java versions less than 8. The bindings that use completable futures have been renamed to <code class="docutils literal notranslate"><span class="pre">fdb-java</span></code>. &lt;<a class="reference external" href="rdar://problem/35029630">rdar://problem/35029630</a>&gt;</p></li>
+<li><p>Finalizers now log a warning to stderr if an object with native resources is not closed. This can be disabled by calling <code class="docutils literal notranslate"><span class="pre">FDB.setUnclosedWarning()</span></code>. &lt;<a class="reference external" href="rdar://problem/35421530">rdar://problem/35421530</a>&gt;</p></li>
+<li><p>Implementers of the <code class="docutils literal notranslate"><span class="pre">Disposable</span></code> interface now implement <code class="docutils literal notranslate"><span class="pre">AutoCloseable</span></code> instead, with <code class="docutils literal notranslate"><span class="pre">close()</span></code> replacing <code class="docutils literal notranslate"><span class="pre">dispose()</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AutoCloseable</span></code> objects will continue to be closed in object finalizers, but this behavior is being deprecated. All <code class="docutils literal notranslate"><span class="pre">AutoCloseable</span></code> objects should be explicitly closed. &lt;<a class="reference external" href="rdar://problem/35421530">rdar://problem/35421530</a>&gt;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AsyncIterator</span></code> is no longer closeable. &lt;<a class="reference external" href="rdar://problem/35595971">rdar://problem/35595971</a>&gt;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">getBoundaryKeys()</span></code> now returns a <code class="docutils literal notranslate"><span class="pre">CloseableAsyncIterable</span></code> rather than an <code class="docutils literal notranslate"><span class="pre">AsyncIterator</span></code>. &lt;<a class="reference external" href="rdar://problem/35421530">rdar://problem/35421530</a>&gt;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Transaction.getRange()</span></code> no longer initiates a range read immediately. Instead, the read is issued by a call to <code class="docutils literal notranslate"><span class="pre">AsyncIterable.asList()</span></code> or <code class="docutils literal notranslate"><span class="pre">AsyncIterable.iterator()</span></code>. &lt;<a class="reference external" href="rdar://problem/35595971">rdar://problem/35595971</a>&gt;</p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">hashCode()</span></code> method to <code class="docutils literal notranslate"><span class="pre">Subspace</span></code>. &lt;<a class="reference external" href="rdar://problem/35125601">rdar://problem/35125601</a>&gt;</p></li>
+<li><p>Added thread names to threads created by our default executor. &lt;<a class="reference external" href="rdar://problem/36077166">rdar://problem/36077166</a>&gt;</p></li>
+<li><p>The network thread by default will be named <code class="docutils literal notranslate"><span class="pre">fdb-network-thread</span></code>. &lt;<a class="reference external" href="rdar://problem/36077166">rdar://problem/36077166</a>&gt;</p></li>
+<li><p>Added an overload of <code class="docutils literal notranslate"><span class="pre">whileTrue()</span></code> which takes a <code class="docutils literal notranslate"><span class="pre">Supplier</span></code>. &lt;<a class="reference external" href="rdar://problem/35096338">rdar://problem/35096338</a>&gt;</p></li>
+<li><p>Added experimental support for enabling native callbacks from external threads. &lt;<a class="reference external" href="rdar://problem/33300740">rdar://problem/33300740</a>&gt;</p></li>
+<li><p>Fix: Converting the result of <code class="docutils literal notranslate"><span class="pre">Transaction.getRange()</span></code> to a list would issue an unneeded range read. &lt;<a class="reference external" href="rdar://problem/35325444">rdar://problem/35325444</a>&gt;</p></li>
+<li><p>Fix: range iterators failed to close underlying native resources. &lt;<a class="reference external" href="rdar://problem/35595971">rdar://problem/35595971</a>&gt;</p></li>
+<li><p>Fix: various objects internal to the bindings were not properly closed. &lt;<a class="reference external" href="rdar://problem/35541447">rdar://problem/35541447</a>&gt;</p></li>
 </ul>
-</div>
-<div class="section" id="id17">
+</section>
+<section id="id17">
 <h3>Other Changes</h3>
 <ul class="simple">
-<li>Backups made prior to 5.1 can no longer be restored. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</li>
-<li>Backup now uses a hostname in the connection string instead of a list of IPs when backing up to blob storage. This hostname is resolved using DNS. &lt;<a class="reference external" href="rdar://problem/34093405">rdar://problem/34093405</a>&gt;</li>
-<li><code class="docutils literal"><span class="pre">fdbblob</span></code> functionality has been moved to <code class="docutils literal"><span class="pre">fdbbackup</span></code>. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</li>
-<li><code class="docutils literal"><span class="pre">fdbcli</span></code> will warn the user if it is used to connect to an incompatible cluster. &lt;<a class="reference external" href="rdar://problem/33363571">rdar://problem/33363571</a>&gt;</li>
-<li>Cluster files that do not match the current connection string are no longer corrected automatically. &lt;<a class="reference external" href="rdar://problem/35129575">rdar://problem/35129575</a>&gt;</li>
-<li>Improved computation of available memory on pre-3.14 kernels. &lt;<a class="reference external" href="rdar://problem/35336487">rdar://problem/35336487</a>&gt;</li>
-<li>Stopped reporting blob storage connection credentials in <code class="docutils literal"><span class="pre">fdbbackup</span></code> status output. &lt;<a class="reference external" href="rdar://problem/31483629">rdar://problem/31483629</a>&gt;</li>
+<li><p>Backups made prior to 5.1 can no longer be restored. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</p></li>
+<li><p>Backup now uses a hostname in the connection string instead of a list of IPs when backing up to blob storage. This hostname is resolved using DNS. &lt;<a class="reference external" href="rdar://problem/34093405">rdar://problem/34093405</a>&gt;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbblob</span></code> functionality has been moved to <code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code>. &lt;<a class="reference external" href="rdar://problem/25512772">rdar://problem/25512772</a>&gt;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> will warn the user if it is used to connect to an incompatible cluster. &lt;<a class="reference external" href="rdar://problem/33363571">rdar://problem/33363571</a>&gt;</p></li>
+<li><p>Cluster files that do not match the current connection string are no longer corrected automatically. &lt;<a class="reference external" href="rdar://problem/35129575">rdar://problem/35129575</a>&gt;</p></li>
+<li><p>Improved computation of available memory on pre-3.14 kernels. &lt;<a class="reference external" href="rdar://problem/35336487">rdar://problem/35336487</a>&gt;</p></li>
+<li><p>Stopped reporting blob storage connection credentials in <code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code> status output. &lt;<a class="reference external" href="rdar://problem/31483629">rdar://problem/31483629</a>&gt;</p></li>
 </ul>
-</div>
-<div class="section" id="earlier-release-notes">
+</section>
+<section id="earlier-release-notes">
 <h3>Earlier release notes</h3>
 <ul class="simple">
-<li><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></li>
-<li><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></li>
-<li><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></li>
-<li><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></li>
-<li><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></li>
-<li><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></li>
-<li><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></li>
-<li><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></li>
-<li><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></li>
-<li><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></li>
-<li><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></li>
-<li><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></li>
-<li><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></li>
-<li><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></li>
-<li><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></li>
-<li><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></li>
+<li><p><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></p></li>
 </ul>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -471,7 +586,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

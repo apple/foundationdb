@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Using FoundationDB Clients &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Using FoundationDB Clients &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Transaction Tagging" href="transaction-tagging.html" />
     <link rel="prev" title="Client Testing" href="client-testing.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="client-design.html">Client Design</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -168,131 +283,127 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="using-foundationdb-clients">
+  <section id="using-foundationdb-clients">
 <h1>Using FoundationDB Clients</h1>
-<div class="section" id="versioning">
+<section id="versioning">
 <span id="id1"></span><h2>Versioning</h2>
 <p>FoundationDB supports a robust versioning system for both its API and binaries. This system allows clusters to be upgraded with minimal changes to both application code and FoundationDB binaries. The API and the FoundationDB binaries are each released in numbered versions. Each version of the binaries has a corresponding API version.</p>
-<div class="section" id="api-versions">
+<section id="api-versions">
 <span id="id2"></span><h3>API versions</h3>
 <p>In general, a given client will support both its corresponding API version <em>and earlier API versions</em>. A client selects the API version it will use by explicitly specifying the version number upon initialization. The purpose of this design is to allow the server, client libraries, or bindings to be upgraded without having to modify application code. You can therefore upgrade to more recent packages (and so receive their various improvements) without having to change application code.</p>
-</div>
-<div class="section" id="binary-versions">
+</section>
+<section id="binary-versions">
 <h3>Binary versions</h3>
 <p>By default, client and server binaries installed for a given cluster must have the same version. However, there is also a multi-version feature that allows a client to connect to a cluster whose server processes have a different version. This feature works by loading a separate client library that is version-compatible with the cluster, which then proxies all API calls.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">The interaction between API versions and binary versions follows a simple rule: <em>the API version cannot be set higher than that supported by the client library in use</em>, including any client library loaded using the multi-version feature.</p>
+<p class="admonition-title">Note</p>
+<p>The interaction between API versions and binary versions follows a simple rule: <em>the API version cannot be set higher than that supported by the client library in use</em>, including any client library loaded using the multi-version feature.</p>
 </div>
 <p>For more details, see <a class="reference internal" href="api-python.html#api-python-versioning"><span class="std std-ref">API versioning</span></a> and <a class="reference internal" href="#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a>.</p>
-</div>
-</div>
-<div class="section" id="cluster-file">
+</section>
+</section>
+<section id="cluster-file">
 <h2>Cluster file</h2>
-<p>FoundationDB servers and clients use a cluster file (typically named <code class="docutils literal"><span class="pre">fdb.cluster</span></code>) to connect to a cluster. The contents of the cluster file are the same for all processes that connect to the cluster. When connecting to a cluster, the <a class="reference internal" href="api-reference.html"><span class="doc">client APIs</span></a> allow a cluster file to either be explicitly provided or automatically determined by default. For example, using the Python API:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s1">&#39;/path/to/specific/file&#39;</span><span class="p">)</span>
+<p>FoundationDB servers and clients use a cluster file (typically named <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code>) to connect to a cluster. The contents of the cluster file are the same for all processes that connect to the cluster. When connecting to a cluster, the <a class="reference internal" href="api-reference.html"><span class="doc">client APIs</span></a> allow a cluster file to either be explicitly provided or automatically determined by default. For example, using the Python API:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s1">&#39;/path/to/specific/file&#39;</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>uses only the specified file and errors if it is invalid. In contrast:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 </pre></div>
 </div>
-<p>checks the <code class="docutils literal"><span class="pre">FDB_CLUSTER_FILE</span></code> environment variable, then the current working directory, then the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default file</span></a>. FoundationDB&#8217;s procedure for determining a cluster file is described in <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">Specifying a cluster file</span></a>.</p>
-</div>
-<div class="section" id="installing-foundationdb-client-binaries">
+<p>checks the <code class="docutils literal notranslate"><span class="pre">FDB_CLUSTER_FILE</span></code> environment variable, then the current working directory, then the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default file</span></a>. FoundationDB’s procedure for determining a cluster file is described in <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">Specifying a cluster file</span></a>.</p>
+</section>
+<section id="installing-foundationdb-client-binaries">
 <span id="installing-client-binaries"></span><h2>Installing FoundationDB client binaries</h2>
-<p>To access a FoundationDB cluster from a machine that won&#8217;t need to run the server, you can install just the FoundationDB client binaries (available for download at <a class="reference internal" href="downloads.html"><span class="doc">Downloads</span></a>).</p>
+<p>To access a FoundationDB cluster from a machine that won’t need to run the server, you can install just the FoundationDB client binaries (available for download at <a class="reference internal" href="downloads.html"><span class="doc">Downloads</span></a>).</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">Unless using the <a class="reference internal" href="#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a>, the installed client and server packages must have the same version. When upgrading a FoundationDB cluster, be sure also to upgrade all clients to the same version.</p>
+<p class="admonition-title">Warning</p>
+<p>Unless using the <a class="reference internal" href="#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a>, the installed client and server packages must have the same version. When upgrading a FoundationDB cluster, be sure also to upgrade all clients to the same version.</p>
 </div>
-<p>If you don&#8217;t already have a FoundationDB cluster to connect to, you should instead follow the instructions in <a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a> or <a class="reference internal" href="getting-started-linux.html"><span class="doc">Getting Started on Linux</span></a>.</p>
+<p>If you don’t already have a FoundationDB cluster to connect to, you should instead follow the instructions in <a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a> or <a class="reference internal" href="getting-started-linux.html"><span class="doc">Getting Started on Linux</span></a>.</p>
 <p>To install on <strong>Ubuntu</strong> use the dpkg command:</p>
-<pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_7.1.25-1_amd64.deb
-</pre>
+<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_7.2.0-1_amd64.deb</pre>
 <p>To install on <strong>RHEL/CentOS</strong> use the rpm command:</p>
-<pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.1.25-1.el7.x86_64.rpm
-</pre>
-<p>To install on <strong>macOS</strong>, run the installer as in <a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a>, but deselect the &#8220;FoundationDB Server&#8221; feature.</p>
-<p>The client binaries include the <code class="docutils literal"><span class="pre">fdbcli</span></code> tool and language bindings for C.  Other language bindings must be installed separately.</p>
-<p>Clients will also need a <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> to connect to a FoundationDB cluster.  You should copy the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file from the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default location</span></a> on one of your FoundationDB servers to the default location on the client machine.</p>
-</div>
-<div class="section" id="multi-version-client">
+<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.2.0-1.el7.x86_64.rpm</pre>
+<p>To install on <strong>macOS</strong>, run the installer as in <a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a>, but deselect the “FoundationDB Server” feature.</p>
+<p>The client binaries include the <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> tool and language bindings for C.  Other language bindings must be installed separately.</p>
+<p>Clients will also need a <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> to connect to a FoundationDB cluster.  You should copy the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file from the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default location</span></a> on one of your FoundationDB servers to the default location on the client machine.</p>
+</section>
+<section id="multi-version-client">
 <span id="multi-version-client-api"></span><h2>Multi-version client</h2>
 <p>The FoundationDB client library supports connecting to clusters with server processes running at a different version than the client. To do so, it must have access to a version of the client compatible with the cluster, which it loads and then proxies API calls through.</p>
-<p>To make use of the multi-version client capabilities, you must set at least one of two network options (<code class="docutils literal"><span class="pre">EXTERNAL_CLIENT_LIBRARY</span></code> and/or <code class="docutils literal"><span class="pre">EXTERNAL_CLIENT_DIRECTORY</span></code>) that specify the location of these additional client libraries. The client library will start a new <a class="reference internal" href="#client-network-thread"><span class="std std-ref">network thread</span></a> for each external client and attempt to make connections to the cluster over all of them (as well as the local library). When making API calls, the library will use the version that is able to communicate with the cluster (choosing an arbitrary one if there are multiple compatible clients), and it will also automatically switch to the appropriate client should the cluster&#8217;s protocol version change. Each loaded library will generate its own <a class="reference internal" href="#client-trace-logging-multi-version-client"><span class="std std-ref">trace files</span></a>, if enabled.</p>
-<p>The multi-version client API adds a new <code class="docutils literal"><span class="pre">cluster_version_changed</span></code> error that is used to cancel operations performed by the client when it switches to using a different version of the client library. This error is a retryable one, meaning that all standard retry loops will automatically rerun a transaction that fails with <code class="docutils literal"><span class="pre">cluster_version_changed</span></code>.</p>
+<p>To make use of the multi-version client capabilities, you must set at least one of two network options (<code class="docutils literal notranslate"><span class="pre">EXTERNAL_CLIENT_LIBRARY</span></code> and/or <code class="docutils literal notranslate"><span class="pre">EXTERNAL_CLIENT_DIRECTORY</span></code>) that specify the location of these additional client libraries. The client library will start a new <a class="reference internal" href="#client-network-thread"><span class="std std-ref">network thread</span></a> for each external client and attempt to make connections to the cluster over all of them (as well as the local library). When making API calls, the library will use the version that is able to communicate with the cluster (choosing an arbitrary one if there are multiple compatible clients), and it will also automatically switch to the appropriate client should the cluster’s protocol version change. Each loaded library will generate its own <a class="reference internal" href="#client-trace-logging-multi-version-client"><span class="std std-ref">trace files</span></a>, if enabled.</p>
+<p>The multi-version client API adds a new <code class="docutils literal notranslate"><span class="pre">cluster_version_changed</span></code> error that is used to cancel operations performed by the client when it switches to using a different version of the client library. This error is a retryable one, meaning that all standard retry loops will automatically rerun a transaction that fails with <code class="docutils literal notranslate"><span class="pre">cluster_version_changed</span></code>.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">Setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
+<p class="admonition-title">Warning</p>
+<p>Setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">You should avoid including multiple protocol-compatible clients in the external client libraries list. While the client will still work, it will consume more resources than necessary. Additionally, different patch releases of the same version (e.g. <code class="docutils literal"><span class="pre">x.y.z</span></code> and <code class="docutils literal"><span class="pre">x.y.w</span></code>) are protocol compatible, and including multiple may result in not using the most recent compatible client.</p>
+<p class="admonition-title">Warning</p>
+<p>You should avoid including multiple protocol-compatible clients in the external client libraries list. While the client will still work, it will consume more resources than necessary. Additionally, different patch releases of the same version (e.g. <code class="docutils literal notranslate"><span class="pre">x.y.z</span></code> and <code class="docutils literal notranslate"><span class="pre">x.y.w</span></code>) are protocol compatible, and including multiple may result in not using the most recent compatible client.</p>
 </div>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">It is recommended that you not include more external clients than necessary. For example, a client that has been upgraded to a newer version than its cluster may need to include a single external client that matches the version of the cluster, but it generally won&#8217;t require a copy of every prior version.</p>
+<p class="admonition-title">Note</p>
+<p>It is recommended that you not include more external clients than necessary. For example, a client that has been upgraded to a newer version than its cluster may need to include a single external client that matches the version of the cluster, but it generally won’t require a copy of every prior version.</p>
 </div>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">If <code class="docutils literal"><span class="pre">cluster_version_changed</span></code> is thrown during commit, it should be interpreted similarly to <code class="docutils literal"><span class="pre">commit_unknown_result</span></code>. The commit may or may not have been completed.</p>
+<p class="admonition-title">Note</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">cluster_version_changed</span></code> is thrown during commit, it should be interpreted similarly to <code class="docutils literal notranslate"><span class="pre">commit_unknown_result</span></code>. The commit may or may not have been completed.</p>
 </div>
-</div>
-<div class="section" id="setting-network-options-with-environment-variables">
+</section>
+<section id="setting-network-options-with-environment-variables">
 <span id="network-options-using-environment-variables"></span><h2>Setting network options with environment variables</h2>
 <p>Client network options can be set automatically upon client startup using specially crafted environment variables. To set a particular network option, add a variable of the following form to your environment:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">FDB_NETWORK_OPTION_</span><span class="o">&lt;</span><span class="n">UPPERCASE_OPTION_NAME</span><span class="o">&gt;</span> <span class="o">=</span> <span class="n">value</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">FDB_NETWORK_OPTION_</span><span class="o">&lt;</span><span class="n">UPPERCASE_OPTION_NAME</span><span class="o">&gt;</span> <span class="o">=</span> <span class="n">value</span>
 </pre></div>
 </div>
 <p>For example, you can enable trace logging for a client by setting the following environment variable:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">FDB_NETWORK_OPTION_TRACE_ENABLE</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">FDB_NETWORK_OPTION_TRACE_ENABLE</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
 </pre></div>
 </div>
-<p>If you want to set the same option multiple times (e.g. to add multiple client libraries, for instance), you can separate the values with the default path separator on your system (<code class="docutils literal"><span class="pre">:</span></code> on Linux/macOS, <code class="docutils literal"><span class="pre">;</span></code> on Windows). For example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY</span> <span class="o">=</span> <span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">dir1</span><span class="p">:</span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">dir2</span><span class="p">:</span><span class="o">...</span>
+<p>If you want to set the same option multiple times (e.g. to add multiple client libraries, for instance), you can separate the values with the default path separator on your system (<code class="docutils literal notranslate"><span class="pre">:</span></code> on Linux/macOS, <code class="docutils literal notranslate"><span class="pre">;</span></code> on Windows). For example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY</span> <span class="o">=</span> <span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">dir1</span><span class="p">:</span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">dir2</span><span class="p">:</span><span class="o">...</span>
 </pre></div>
 </div>
 <p>Network options specified using environment variables are set at the end of the call to set the API version. They will be applied in the order of the corresponding option codes assigned to the options. If there is an error reading the appropriate environment variables or if the option cannot be set with the specified value, then the call to set the API version may return an error. In that case, you may attempt to set the API version again, but you must do so with the same version as the attempt that failed.</p>
-</div>
-<div class="section" id="client-network-thread">
+</section>
+<section id="client-network-thread">
 <span id="id3"></span><h2>Client network thread</h2>
 <p>FoundationDB clients start a thread that is used to serialize operations and communicate with the cluster. This thread is commonly referred to as the network thread, and most operations performed by a client (such as reads, writes, and commits) will take place on this thread. It is important that a client application does not block on this thread, such as by issuing a blocking call in a callback from a FoundationDB operation. Some client language bindings (e.g. Java) will protect you from this risk by notifying the application that an operation has completed from a different thread automatically.</p>
-<p>A client process can have <em>only one</em> network thread for the entire lifetime of that process. While it&#8217;s possible to stop the network thread, it is not possible to restart it.</p>
-<div class="section" id="performance">
+<p>A client process can have <em>only one</em> network thread for the entire lifetime of that process. While it’s possible to stop the network thread, it is not possible to restart it.</p>
+<section id="performance">
 <span id="client-network-thread-performance"></span><h3>Performance</h3>
 <p>Because it can have only a single network thread, a client process may become limited in its throughput by the amount of work that can be performed on that thread. A client with a saturated network thread may begin to experience increased latencies while it struggles to keep up. If a client application needs to support higher throughput than a single network thread can provide, then more network threads can be started by running additional client processes.</p>
-<p>If you suspect that a client process&#8217;s workload may be saturating the network thread, this can be confirmed by checking whether the network thread is running with high CPU usage. In the <a class="reference internal" href="#client-trace-logging"><span class="std std-ref">client trace logs</span></a>, the <code class="docutils literal"><span class="pre">ProcessMetrics</span></code> trace event has a field for <code class="docutils literal"><span class="pre">MainThreadCPUSeconds</span></code> that indicates the number of seconds out of <code class="docutils literal"><span class="pre">Elapsed</span></code> that the network thread was busy. You can also attempt to identify a busy thread from any tool that reports the CPU activity of threads in your process.</p>
+<p>If you suspect that a client process’s workload may be saturating the network thread, this can be confirmed by checking whether the network thread is running with high CPU usage. In the <a class="reference internal" href="#client-trace-logging"><span class="std std-ref">client trace logs</span></a>, the <code class="docutils literal notranslate"><span class="pre">ProcessMetrics</span></code> trace event has a field for <code class="docutils literal notranslate"><span class="pre">MainThreadCPUSeconds</span></code> that indicates the number of seconds out of <code class="docutils literal notranslate"><span class="pre">Elapsed</span></code> that the network thread was busy. You can also attempt to identify a busy thread from any tool that reports the CPU activity of threads in your process.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">FoundationDB 6.3 introduced <a class="reference internal" href="#multi-threaded-client"><span class="std std-ref">multi-threaded client</span></a>, and can alternatively be used to scale clients.</p>
+<p class="admonition-title">Note</p>
+<p>FoundationDB 6.3 introduced <a class="reference internal" href="#multi-threaded-client"><span class="std std-ref">multi-threaded client</span></a>, and can alternatively be used to scale clients.</p>
 </div>
-</div>
-</div>
-<div class="section" id="multi-threaded-client">
+</section>
+</section>
+<section id="multi-threaded-client">
 <span id="id4"></span><h2>Multi-threaded Client</h2>
 <p>FoundationDB client library can start multiple worker threads for each version of client that is loaded.</p>
-<p>Currently, each database object is associated with exactly one of the threads, so a user would need at least <code class="docutils literal"><span class="pre">N</span></code> database objects to make use of <code class="docutils literal"><span class="pre">N</span></code> threads. Additionally, some language bindings (e.g. the python bindings) cache database objects by cluster file, so users may need multiple cluster files to make use of multiple threads. This may be improved in the future.</p>
-<p>Clients can be configured to use worker-threads by setting the <code class="docutils literal"><span class="pre">FDBNetworkOptions::CLIENT_THREADS_PER_VERSION</span></code> option.</p>
+<p>Currently, each database object is associated with exactly one of the threads, so a user would need at least <code class="docutils literal notranslate"><span class="pre">N</span></code> database objects to make use of <code class="docutils literal notranslate"><span class="pre">N</span></code> threads. Additionally, some language bindings (e.g. the python bindings) cache database objects by cluster file, so users may need multiple cluster files to make use of multiple threads. This may be improved in the future.</p>
+<p>Clients can be configured to use worker-threads by setting the <code class="docutils literal notranslate"><span class="pre">FDBNetworkOptions::CLIENT_THREADS_PER_VERSION</span></code> option.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">In order to use the multi-threaded client feature, you must configure at
+<p class="admonition-title">Warning</p>
+<p>In order to use the multi-threaded client feature, you must configure at
 least one external client. See <a class="reference internal" href="#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a> for how to configure an external client.</p>
 </div>
-</div>
-<div class="section" id="client-trace-logging">
+</section>
+<section id="client-trace-logging">
 <span id="id5"></span><h2>Client trace logging</h2>
-<p>By default, clients do not generate trace logs. In order to enable them, the <code class="docutils literal"><span class="pre">TRACE_ENABLE</span></code> network option must be set on your client. See the documentation for your language binding for instructions on how to do this.</p>
-<div class="section" id="client-trace-logging-multi-version-client">
+<p>By default, clients do not generate trace logs. In order to enable them, the <code class="docutils literal notranslate"><span class="pre">TRACE_ENABLE</span></code> network option must be set on your client. See the documentation for your language binding for instructions on how to do this.</p>
+<section id="client-trace-logging-multi-version-client">
 <span id="id6"></span><h3>Multi-version client API</h3>
-<p>When trace logs are enabled while using the <a class="reference internal" href="#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, separate files will be generated for the primary client library and each of the loaded external clients. The <code class="docutils literal"><span class="pre">ClientStart</span></code> event can be used to identify the version of the client that generated a particular log file. Most of the relevant logs will be found in the version that matches the cluster&#8217;s version, but for some types of issues with startup or upgrades (particularly those related to the multi-version client itself), relevant logs can be found in the logs for the primary client as well.</p>
-</div>
-</div>
-</div>
+<p>When trace logs are enabled while using the <a class="reference internal" href="#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, separate files will be generated for the primary client library and each of the loaded external clients. The <code class="docutils literal notranslate"><span class="pre">ClientStart</span></code> event can be used to identify the version of the client that generated a particular log file. Most of the relevant logs will be found in the version that matches the cluster’s version, but for some types of issues with startup or upgrades (particularly those related to the multi-version client itself), relevant logs can be found in the logs for the primary client as well.</p>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -314,7 +425,7 @@ least one external client. See <a class="reference internal" href="#multi-versio
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

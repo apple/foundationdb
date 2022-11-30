@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>API Version Upgrade Guide &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>API Version Upgrade Guide &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Tenants" href="tenants.html" />
     <link rel="prev" title="Transaction profiling and analyzing" href="transaction-profiler-analyzer.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="client-design.html">Client Design</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -83,50 +198,54 @@
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">API Version Upgrade Guide</a><ul>
 <li><a class="reference internal" href="#overview">Overview</a></li>
-<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
+<li><a class="reference internal" href="#api-version-720">API version 720</a><ul>
 <li><a class="reference internal" href="#general">General</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
 <li><a class="reference internal" href="#id1">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#id2">General</a></li>
 <li><a class="reference internal" href="#python-bindings">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-630">API version 630</a><ul>
-<li><a class="reference internal" href="#id2">General</a></li>
+<li><a class="reference internal" href="#id3">General</a></li>
 <li><a class="reference internal" href="#c-bindings">C bindings</a></li>
-<li><a class="reference internal" href="#id3">Python bindings</a></li>
+<li><a class="reference internal" href="#id4">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-620">API version 620</a><ul>
-<li><a class="reference internal" href="#id4">C bindings</a></li>
+<li><a class="reference internal" href="#id5">C bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-610">API version 610</a><ul>
-<li><a class="reference internal" href="#id5">General</a></li>
-<li><a class="reference internal" href="#id6">C bindings</a></li>
-<li><a class="reference internal" href="#id7">Python bindings</a></li>
+<li><a class="reference internal" href="#id6">General</a></li>
+<li><a class="reference internal" href="#id7">C bindings</a></li>
+<li><a class="reference internal" href="#id8">Python bindings</a></li>
 <li><a class="reference internal" href="#java-bindings">Java bindings</a></li>
 <li><a class="reference internal" href="#ruby-bindings">Ruby bindings</a></li>
 <li><a class="reference internal" href="#go-bindings">Go bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-600">API version 600</a><ul>
-<li><a class="reference internal" href="#id8">General</a></li>
+<li><a class="reference internal" href="#id9">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-520">API version 520</a><ul>
-<li><a class="reference internal" href="#id9">General</a></li>
+<li><a class="reference internal" href="#id10">General</a></li>
 <li><a class="reference internal" href="#java-and-python-bindings">Java and Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-510">API version 510</a><ul>
-<li><a class="reference internal" href="#id10">General</a></li>
-<li><a class="reference internal" href="#id11">Java bindings</a></li>
+<li><a class="reference internal" href="#id11">General</a></li>
+<li><a class="reference internal" href="#id12">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-500">API version 500</a><ul>
-<li><a class="reference internal" href="#id12">Java bindings</a></li>
+<li><a class="reference internal" href="#id13">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-460">API version 460</a></li>
@@ -135,23 +254,23 @@
 <li><a class="reference internal" href="#api-version-430">API version 430</a></li>
 <li><a class="reference internal" href="#api-version-420">API version 420</a></li>
 <li><a class="reference internal" href="#api-version-410">API version 410</a><ul>
-<li><a class="reference internal" href="#id13">General</a></li>
+<li><a class="reference internal" href="#id14">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
-<li><a class="reference internal" href="#id14">Java bindings</a></li>
+<li><a class="reference internal" href="#id15">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
-<li><a class="reference internal" href="#id15">General</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
 <li><a class="reference internal" href="#id16">General</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
+<li><a class="reference internal" href="#id17">General</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#api-version-100">API version 100</a><ul>
-<li><a class="reference internal" href="#id17">Java bindings</a></li>
+<li><a class="reference internal" href="#id18">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#older-api-versions">Older API versions</a></li>
@@ -200,50 +319,54 @@
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">API Version Upgrade Guide</a><ul>
 <li><a class="reference internal" href="#overview">Overview</a></li>
-<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
+<li><a class="reference internal" href="#api-version-720">API version 720</a><ul>
 <li><a class="reference internal" href="#general">General</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#api-version-710">API version 710</a><ul>
 <li><a class="reference internal" href="#id1">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-700">API version 700</a><ul>
+<li><a class="reference internal" href="#id2">General</a></li>
 <li><a class="reference internal" href="#python-bindings">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-630">API version 630</a><ul>
-<li><a class="reference internal" href="#id2">General</a></li>
+<li><a class="reference internal" href="#id3">General</a></li>
 <li><a class="reference internal" href="#c-bindings">C bindings</a></li>
-<li><a class="reference internal" href="#id3">Python bindings</a></li>
+<li><a class="reference internal" href="#id4">Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-620">API version 620</a><ul>
-<li><a class="reference internal" href="#id4">C bindings</a></li>
+<li><a class="reference internal" href="#id5">C bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-610">API version 610</a><ul>
-<li><a class="reference internal" href="#id5">General</a></li>
-<li><a class="reference internal" href="#id6">C bindings</a></li>
-<li><a class="reference internal" href="#id7">Python bindings</a></li>
+<li><a class="reference internal" href="#id6">General</a></li>
+<li><a class="reference internal" href="#id7">C bindings</a></li>
+<li><a class="reference internal" href="#id8">Python bindings</a></li>
 <li><a class="reference internal" href="#java-bindings">Java bindings</a></li>
 <li><a class="reference internal" href="#ruby-bindings">Ruby bindings</a></li>
 <li><a class="reference internal" href="#go-bindings">Go bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-600">API version 600</a><ul>
-<li><a class="reference internal" href="#id8">General</a></li>
+<li><a class="reference internal" href="#id9">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-520">API version 520</a><ul>
-<li><a class="reference internal" href="#id9">General</a></li>
+<li><a class="reference internal" href="#id10">General</a></li>
 <li><a class="reference internal" href="#java-and-python-bindings">Java and Python bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-510">API version 510</a><ul>
-<li><a class="reference internal" href="#id10">General</a></li>
-<li><a class="reference internal" href="#id11">Java bindings</a></li>
+<li><a class="reference internal" href="#id11">General</a></li>
+<li><a class="reference internal" href="#id12">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-500">API version 500</a><ul>
-<li><a class="reference internal" href="#id12">Java bindings</a></li>
+<li><a class="reference internal" href="#id13">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-460">API version 460</a></li>
@@ -252,23 +375,23 @@
 <li><a class="reference internal" href="#api-version-430">API version 430</a></li>
 <li><a class="reference internal" href="#api-version-420">API version 420</a></li>
 <li><a class="reference internal" href="#api-version-410">API version 410</a><ul>
-<li><a class="reference internal" href="#id13">General</a></li>
+<li><a class="reference internal" href="#id14">General</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
-<li><a class="reference internal" href="#id14">Java bindings</a></li>
+<li><a class="reference internal" href="#id15">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
-<li><a class="reference internal" href="#id15">General</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
 <li><a class="reference internal" href="#id16">General</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
+<li><a class="reference internal" href="#id17">General</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#api-version-100">API version 100</a><ul>
-<li><a class="reference internal" href="#id17">Java bindings</a></li>
+<li><a class="reference internal" href="#id18">Java bindings</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#older-api-versions">Older API versions</a></li>
@@ -278,249 +401,258 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="api-version-upgrade-guide">
+  <section id="api-version-upgrade-guide">
 <h1>API Version Upgrade Guide</h1>
-<div class="section" id="overview">
+<section id="overview">
 <h2>Overview</h2>
 <p>This document provides an overview of changes that an application developer may need to make or effects that they should consider when upgrading the API version in their code. For each version, a list is provided that details the relevant changes when upgrading to that version from a prior version. To upgrade across multiple versions, make sure you apply changes from each version starting after your start version up to and including your target version.</p>
 <p>For more details about API versions, see <a class="reference internal" href="api-general.html#api-versions"><span class="std std-ref">API versions</span></a>.</p>
-</div>
-<div class="section" id="api-version-710">
+</section>
+<section id="api-version-720">
+<span id="api-version-upgrade-guide-720"></span><h2>API version 720</h2>
+<section id="general">
+<h3>General</h3>
+<ul class="simple">
+<li><p>Special keys <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/profiling/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code> are removed in 7.2 and the functionalities they provide are now covered by the global configuration module.</p></li>
+</ul>
+</section>
+</section>
+<section id="api-version-710">
 <span id="api-version-upgrade-guide-710"></span><h2>API version 710</h2>
-<div class="section" id="general">
+<section id="id1">
 <h3>General</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> API is replaced by <code class="docutils literal"><span class="pre">fdb_transaction_get_mapped_range</span></code> in version 710. The function <code class="docutils literal"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> is not supported in any API version.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> API is replaced by <code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_mapped_range</span></code> in version 710. The function <code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> is not supported in any API version.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-700">
+</section>
+</section>
+<section id="api-version-700">
 <span id="api-version-upgrade-guide-700"></span><h2>API version 700</h2>
-<div class="section" id="id1">
+<section id="id2">
 <h3>General</h3>
 <ul class="simple">
-<li>Committing a transaction will no longer partially reset it. In particular, getting the read version from a transaction that has committed or failed to commit with an error will return the original read version.</li>
+<li><p>Committing a transaction will no longer partially reset it. In particular, getting the read version from a transaction that has committed or failed to commit with an error will return the original read version.</p></li>
 </ul>
-</div>
-<div class="section" id="python-bindings">
+</section>
+<section id="python-bindings">
 <h3>Python bindings</h3>
 <ul class="simple">
-<li>The function <code class="docutils literal"><span class="pre">get_estimated_range_size_bytes</span></code> will now throw an error if the <code class="docutils literal"><span class="pre">begin_key</span></code> or <code class="docutils literal"><span class="pre">end_key</span></code> is <code class="docutils literal"><span class="pre">None</span></code>.</li>
+<li><p>The function <code class="docutils literal notranslate"><span class="pre">get_estimated_range_size_bytes</span></code> will now throw an error if the <code class="docutils literal notranslate"><span class="pre">begin_key</span></code> or <code class="docutils literal notranslate"><span class="pre">end_key</span></code> is <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-630">
+</section>
+</section>
+<section id="api-version-630">
 <span id="api-version-upgrade-guide-630"></span><h2>API version 630</h2>
-<div class="section" id="id2">
+<section id="id3">
 <h3>General</h3>
 <ul class="simple">
-<li>In previous api versions, a get range starting at <code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces</span></code> ignored its arguments and returned keys outside the range requested. In api version 630, you can get similar behavior by reading from <code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces/</span></code> to <code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces0</span></code> and stripping the prefix <code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces/</span></code> from each key in the result.</li>
-<li>The <code class="docutils literal"><span class="pre">get_addresses_for_key</span></code> function now returns strings that include the port in the address. Prior to API version 630, this required using the <code class="docutils literal"><span class="pre">INCLUDE_PORT_IN_ADDRESS</span></code> option, which has now been deprecated.</li>
-<li>The <code class="docutils literal"><span class="pre">ENABLE_SLOW_TASK_PROFILING</span></code> network option has been replaced by <code class="docutils literal"><span class="pre">ENABLE_RUN_LOOP_PROFILING</span></code> and is now deprecated.</li>
+<li><p>In previous api versions, a get range starting at <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code> ignored its arguments and returned keys outside the range requested. In api version 630, you can get similar behavior by reading from <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces/</span></code> to <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces0</span></code> and stripping the prefix <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces/</span></code> from each key in the result.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">get_addresses_for_key</span></code> function now returns strings that include the port in the address. Prior to API version 630, this required using the <code class="docutils literal notranslate"><span class="pre">INCLUDE_PORT_IN_ADDRESS</span></code> option, which has now been deprecated.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">ENABLE_SLOW_TASK_PROFILING</span></code> network option has been replaced by <code class="docutils literal notranslate"><span class="pre">ENABLE_RUN_LOOP_PROFILING</span></code> and is now deprecated.</p></li>
 </ul>
-</div>
-<div class="section" id="c-bindings">
+</section>
+<section id="c-bindings">
 <h3>C bindings</h3>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">FDBKeyValue</span></code> struct&#8217;s <code class="docutils literal"><span class="pre">key</span></code> and <code class="docutils literal"><span class="pre">value</span></code> members have changed type from <code class="docutils literal"><span class="pre">void*</span></code> to <code class="docutils literal"><span class="pre">uint8_t*</span></code>.</li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">FDBKeyValue</span></code> struct’s <code class="docutils literal notranslate"><span class="pre">key</span></code> and <code class="docutils literal notranslate"><span class="pre">value</span></code> members have changed type from <code class="docutils literal notranslate"><span class="pre">void*</span></code> to <code class="docutils literal notranslate"><span class="pre">uint8_t*</span></code>.</p></li>
 </ul>
-</div>
-<div class="section" id="id3">
+</section>
+<section id="id4">
 <h3>Python bindings</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">&#64;fdb.transactional</span></code> decorated functions will now throw an error if they return a generator. Previously, it was very easy to write these generators in a way that resulted them committing or retrying earlier than intended.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code> decorated functions will now throw an error if they return a generator. Previously, it was very easy to write these generators in a way that resulted them committing or retrying earlier than intended.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-620">
+</section>
+</section>
+<section id="api-version-620">
 <span id="api-version-upgrade-guide-620"></span><h2>API version 620</h2>
-<div class="section" id="id4">
+<section id="id5">
 <h3>C bindings</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">fdb_future_get_version</span></code> has been renamed to <code class="docutils literal"><span class="pre">fdb_future_get_int64</span></code>.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdb_future_get_version</span></code> has been renamed to <code class="docutils literal notranslate"><span class="pre">fdb_future_get_int64</span></code>.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-610">
+</section>
+</section>
+<section id="api-version-610">
 <span id="api-version-upgrade-guide-610"></span><h2>API version 610</h2>
-<div class="section" id="id5">
+<section id="id6">
 <h3>General</h3>
 <ul class="simple">
-<li>The concept of opening a cluster has been removed from the API. Instead, databases are opened directly. See binding specific notes for the details as they apply to your language binding.</li>
-<li>The <code class="docutils literal"><span class="pre">TIMEOUT</span></code>, <code class="docutils literal"><span class="pre">MAX_RETRY_DELAY</span></code>, and <code class="docutils literal"><span class="pre">RETRY_LIMIT</span></code> transaction options are no longer reset by calls to <code class="docutils literal"><span class="pre">onError</span></code>.</li>
-<li>Calling <code class="docutils literal"><span class="pre">onError</span></code> with a non-retryable error will now put a transaction into an error state. Previously, this would partially reset the transaction.</li>
-<li>The <code class="docutils literal"><span class="pre">TRANSACTION_LOGGING_ENABLE</span></code> option has been deprecated. Its behavior can be replicated by setting the <code class="docutils literal"><span class="pre">DEBUG_TRANSACTION_IDENTIFIER</span></code> and <code class="docutils literal"><span class="pre">LOG_TRANSACTION</span></code> options.</li>
+<li><p>The concept of opening a cluster has been removed from the API. Instead, databases are opened directly. See binding specific notes for the details as they apply to your language binding.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">TIMEOUT</span></code>, <code class="docutils literal notranslate"><span class="pre">MAX_RETRY_DELAY</span></code>, and <code class="docutils literal notranslate"><span class="pre">RETRY_LIMIT</span></code> transaction options are no longer reset by calls to <code class="docutils literal notranslate"><span class="pre">onError</span></code>.</p></li>
+<li><p>Calling <code class="docutils literal notranslate"><span class="pre">onError</span></code> with a non-retryable error will now put a transaction into an error state. Previously, this would partially reset the transaction.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">TRANSACTION_LOGGING_ENABLE</span></code> option has been deprecated. Its behavior can be replicated by setting the <code class="docutils literal notranslate"><span class="pre">DEBUG_TRANSACTION_IDENTIFIER</span></code> and <code class="docutils literal notranslate"><span class="pre">LOG_TRANSACTION</span></code> options.</p></li>
 </ul>
-</div>
-<div class="section" id="id6">
+</section>
+<section id="id7">
 <h3>C bindings</h3>
 <ul class="simple">
-<li>Creating a database is now done by calling <code class="docutils literal"><span class="pre">fdb_create_database</span></code>, which is a synchronous operation.</li>
-<li>The <code class="docutils literal"><span class="pre">FDBCluster</span></code> type has been eliminated and the following functions have been removed: <code class="docutils literal"><span class="pre">fdb_create_cluster</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_create_database</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_set_option</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_destroy</span></code>, <code class="docutils literal"><span class="pre">fdb_future_get_cluster</span></code>, and <code class="docutils literal"><span class="pre">fdb_future_get_database</span></code>.</li>
+<li><p>Creating a database is now done by calling <code class="docutils literal notranslate"><span class="pre">fdb_create_database</span></code>, which is a synchronous operation.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">FDBCluster</span></code> type has been eliminated and the following functions have been removed: <code class="docutils literal notranslate"><span class="pre">fdb_create_cluster</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_create_database</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_set_option</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_cluster_destroy</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_future_get_cluster</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdb_future_get_database</span></code>.</p></li>
 </ul>
-</div>
-<div class="section" id="id7">
+</section>
+<section id="id8">
 <h3>Python bindings</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">fdb.open</span></code> no longer accepts a <code class="docutils literal"><span class="pre">database_name</span></code> parameter.</li>
-<li>Removed <code class="docutils literal"><span class="pre">fdb.init</span></code>, <code class="docutils literal"><span class="pre">fdb.create_cluster</span></code>, and <code class="docutils literal"><span class="pre">fdb.Cluster</span></code>. <code class="docutils literal"><span class="pre">fdb.open</span></code> should be used instead.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdb.open</span></code> no longer accepts a <code class="docutils literal notranslate"><span class="pre">database_name</span></code> parameter.</p></li>
+<li><p>Removed <code class="docutils literal notranslate"><span class="pre">fdb.init</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.create_cluster</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdb.Cluster</span></code>. <code class="docutils literal notranslate"><span class="pre">fdb.open</span></code> should be used instead.</p></li>
 </ul>
-</div>
-<div class="section" id="java-bindings">
+</section>
+<section id="java-bindings">
 <h3>Java bindings</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">FDB.createCluster</span></code> and  the <code class="docutils literal"><span class="pre">Cluster</span></code> class have been deprecated. <code class="docutils literal"><span class="pre">FDB.open</span></code> should be used instead.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">FDB.createCluster</span></code> and  the <code class="docutils literal notranslate"><span class="pre">Cluster</span></code> class have been deprecated. <code class="docutils literal notranslate"><span class="pre">FDB.open</span></code> should be used instead.</p></li>
 </ul>
-</div>
-<div class="section" id="ruby-bindings">
+</section>
+<section id="ruby-bindings">
 <h3>Ruby bindings</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">FDB.open</span></code> no longer accepts a <code class="docutils literal"><span class="pre">database_name</span></code> parameter.</li>
-<li>Removed <code class="docutils literal"><span class="pre">FDB.init</span></code>, <code class="docutils literal"><span class="pre">FDB.create_cluster</span></code>, and <code class="docutils literal"><span class="pre">FDB.Cluster</span></code>. <code class="docutils literal"><span class="pre">FDB.open</span></code> should be used instead.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">FDB.open</span></code> no longer accepts a <code class="docutils literal notranslate"><span class="pre">database_name</span></code> parameter.</p></li>
+<li><p>Removed <code class="docutils literal notranslate"><span class="pre">FDB.init</span></code>, <code class="docutils literal notranslate"><span class="pre">FDB.create_cluster</span></code>, and <code class="docutils literal notranslate"><span class="pre">FDB.Cluster</span></code>. <code class="docutils literal notranslate"><span class="pre">FDB.open</span></code> should be used instead.</p></li>
 </ul>
-</div>
-<div class="section" id="go-bindings">
+</section>
+<section id="go-bindings">
 <h3>Go bindings</h3>
 <ul class="simple">
-<li>Added <code class="docutils literal"><span class="pre">fdb.OpenDatabase</span></code> and <code class="docutils literal"><span class="pre">fdb.MustOpenDatabase</span></code> to open a connection to the database by specifying a cluster file.</li>
-<li>Deprecated <code class="docutils literal"><span class="pre">fdb.StartNetwork</span></code>, <code class="docutils literal"><span class="pre">fdb.Open</span></code>, <code class="docutils literal"><span class="pre">fdb.MustOpen</span></code>, and <code class="docutils literal"><span class="pre">fdb.CreateCluster</span></code>. <code class="docutils literal"><span class="pre">fdb.OpenDatabase</span></code> or <code class="docutils literal"><span class="pre">fdb.OpenDefault</span></code> should be used instead.</li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">fdb.OpenDatabase</span></code> and <code class="docutils literal notranslate"><span class="pre">fdb.MustOpenDatabase</span></code> to open a connection to the database by specifying a cluster file.</p></li>
+<li><p>Deprecated <code class="docutils literal notranslate"><span class="pre">fdb.StartNetwork</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.Open</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.MustOpen</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdb.CreateCluster</span></code>. <code class="docutils literal notranslate"><span class="pre">fdb.OpenDatabase</span></code> or <code class="docutils literal notranslate"><span class="pre">fdb.OpenDefault</span></code> should be used instead.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-600">
+</section>
+</section>
+<section id="api-version-600">
 <span id="api-version-upgrade-guide-600"></span><h2>API version 600</h2>
-<div class="section" id="id8">
+<section id="id9">
 <h3>General</h3>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">TLS_PLUGIN</span></code> option is now a no-op and has been deprecated. TLS support is now included in the published binaries.</li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">TLS_PLUGIN</span></code> option is now a no-op and has been deprecated. TLS support is now included in the published binaries.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-520">
+</section>
+</section>
+<section id="api-version-520">
 <span id="api-version-upgrade-guide-520"></span><h2>API version 520</h2>
-<div class="section" id="id9">
+<section id="id10">
 <h3>General</h3>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code> atomic operation now uses four bytes instead of two to specify the versionstamp offset.</li>
-<li>The <code class="docutils literal"><span class="pre">SET_VERSIONSTAMPED_VALUE</span></code> atomic operation now requires a four byte versionstamp offset to be specified at the end of the value, similar to the behavior with <code class="docutils literal"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code>.</li>
-<li>The <code class="docutils literal"><span class="pre">READ_AHEAD_DISABLE</span></code> option has been deprecated.</li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code> atomic operation now uses four bytes instead of two to specify the versionstamp offset.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">SET_VERSIONSTAMPED_VALUE</span></code> atomic operation now requires a four byte versionstamp offset to be specified at the end of the value, similar to the behavior with <code class="docutils literal notranslate"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code>.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">READ_AHEAD_DISABLE</span></code> option has been deprecated.</p></li>
 </ul>
-</div>
-<div class="section" id="java-and-python-bindings">
+</section>
+<section id="java-and-python-bindings">
 <h3>Java and Python bindings</h3>
 <ul class="simple">
-<li>Tuples packed with versionstamps will be encoded with four byte offsets instead of two.</li>
+<li><p>Tuples packed with versionstamps will be encoded with four byte offsets instead of two.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-510">
+</section>
+</section>
+<section id="api-version-510">
 <span id="api-version-upgrade-guide-510"></span><h2>API version 510</h2>
-<div class="section" id="id10">
+<section id="id11">
 <h3>General</h3>
 <ul class="simple">
-<li>The atomic operations <code class="docutils literal"><span class="pre">AND</span></code> and <code class="docutils literal"><span class="pre">MIN</span></code> have changed behavior when used on a key that isn&#8217;t present in the database. Previously, these operations would set an unset key to a value of equal length with the specified value but containing all null bytes (0x00). Now, an unset key will be set with the value passed to the operation (equivalent to a set).</li>
+<li><p>The atomic operations <code class="docutils literal notranslate"><span class="pre">AND</span></code> and <code class="docutils literal notranslate"><span class="pre">MIN</span></code> have changed behavior when used on a key that isn’t present in the database. Previously, these operations would set an unset key to a value of equal length with the specified value but containing all null bytes (0x00). Now, an unset key will be set with the value passed to the operation (equivalent to a set).</p></li>
 </ul>
-</div>
-<div class="section" id="id11">
+</section>
+<section id="id12">
 <h3>Java bindings</h3>
 <ul class="simple">
-<li>Note: the Java bindings as of 5.1 no longer support API versions older that 510.</li>
-<li>The Java bindings have moved packages from <code class="docutils literal"><span class="pre">com.apple.cie.foundationdb</span></code> to <code class="docutils literal"><span class="pre">com.apple.foundationdb</span></code>.</li>
-<li>The version of the Java bindings using our custom futures library has been deprecated and is no longer being maintained. The Java bindings using <code class="docutils literal"><span class="pre">CompletableFuture</span></code> are the only ones that remain.</li>
-<li>Finalizers now log a warning to <code class="docutils literal"><span class="pre">stderr</span></code> if an object with native resources is not closed. This can be disabled by calling <code class="docutils literal"><span class="pre">FDB.setUnclosedWarning()</span></code>.</li>
-<li>Implementers of the <code class="docutils literal"><span class="pre">Disposable</span></code> interface now implement <code class="docutils literal"><span class="pre">AutoCloseable</span></code> instead, with <code class="docutils literal"><span class="pre">close()</span></code> replacing <code class="docutils literal"><span class="pre">dispose()</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">AutoCloseable</span></code> objects will continue to be closed in object finalizers, but this behavior is being deprecated. All <code class="docutils literal"><span class="pre">AutoCloseable</span></code> objects should be explicitly closed.</li>
-<li><code class="docutils literal"><span class="pre">AsyncIterator</span></code> is no longer closeable.</li>
-<li><code class="docutils literal"><span class="pre">getBoundaryKeys()</span></code> now returns a <code class="docutils literal"><span class="pre">CloseableAsyncIterable</span></code> rather than an <code class="docutils literal"><span class="pre">AsyncIterator</span></code>.</li>
+<li><p>Note: the Java bindings as of 5.1 no longer support API versions older that 510.</p></li>
+<li><p>The Java bindings have moved packages from <code class="docutils literal notranslate"><span class="pre">com.apple.cie.foundationdb</span></code> to <code class="docutils literal notranslate"><span class="pre">com.apple.foundationdb</span></code>.</p></li>
+<li><p>The version of the Java bindings using our custom futures library has been deprecated and is no longer being maintained. The Java bindings using <code class="docutils literal notranslate"><span class="pre">CompletableFuture</span></code> are the only ones that remain.</p></li>
+<li><p>Finalizers now log a warning to <code class="docutils literal notranslate"><span class="pre">stderr</span></code> if an object with native resources is not closed. This can be disabled by calling <code class="docutils literal notranslate"><span class="pre">FDB.setUnclosedWarning()</span></code>.</p></li>
+<li><p>Implementers of the <code class="docutils literal notranslate"><span class="pre">Disposable</span></code> interface now implement <code class="docutils literal notranslate"><span class="pre">AutoCloseable</span></code> instead, with <code class="docutils literal notranslate"><span class="pre">close()</span></code> replacing <code class="docutils literal notranslate"><span class="pre">dispose()</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AutoCloseable</span></code> objects will continue to be closed in object finalizers, but this behavior is being deprecated. All <code class="docutils literal notranslate"><span class="pre">AutoCloseable</span></code> objects should be explicitly closed.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AsyncIterator</span></code> is no longer closeable.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">getBoundaryKeys()</span></code> now returns a <code class="docutils literal notranslate"><span class="pre">CloseableAsyncIterable</span></code> rather than an <code class="docutils literal notranslate"><span class="pre">AsyncIterator</span></code>.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-500">
+</section>
+</section>
+<section id="api-version-500">
 <span id="api-version-upgrade-guide-500"></span><h2>API version 500</h2>
-<div class="section" id="id12">
+<section id="id13">
 <h3>Java bindings</h3>
 <ul class="simple">
-<li>Note: the Java bindings as of 5.0 no longer support API versions older than 500.</li>
-<li><code class="docutils literal"><span class="pre">FDB.open</span></code> and <code class="docutils literal"><span class="pre">Cluster.openDatabase</span></code> no longer take a DB name parameter.</li>
-<li><code class="docutils literal"><span class="pre">Transaction.onError</span></code> invalidates its transaction and asynchronously return a new replacement <code class="docutils literal"><span class="pre">Transaction</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">Transaction.reset</span></code> has been removed.</li>
+<li><p>Note: the Java bindings as of 5.0 no longer support API versions older than 500.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">FDB.open</span></code> and <code class="docutils literal notranslate"><span class="pre">Cluster.openDatabase</span></code> no longer take a DB name parameter.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Transaction.onError</span></code> invalidates its transaction and asynchronously return a new replacement <code class="docutils literal notranslate"><span class="pre">Transaction</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Transaction.reset</span></code> has been removed.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-460">
+</section>
+</section>
+<section id="api-version-460">
 <span id="api-version-upgrade-guide-460"></span><h2>API version 460</h2>
 <p>There are no behavior changes in this API version.</p>
-</div>
-<div class="section" id="api-version-450">
+</section>
+<section id="api-version-450">
 <span id="api-version-upgrade-guide-450"></span><h2>API version 450</h2>
 <p>There are no behavior changes in this API version.</p>
-</div>
-<div class="section" id="api-version-440">
+</section>
+<section id="api-version-440">
 <span id="api-version-upgrade-guide-440"></span><h2>API version 440</h2>
 <p>There are no behavior changes in this API version.</p>
-</div>
-<div class="section" id="api-version-430">
+</section>
+<section id="api-version-430">
 <span id="api-version-upgrade-guide-430"></span><h2>API version 430</h2>
 <p>There are no behavior changes in this API version.</p>
-</div>
-<div class="section" id="api-version-420">
+</section>
+<section id="api-version-420">
 <span id="api-version-upgrade-guide-420"></span><h2>API version 420</h2>
 <p>There are no behavior changes in this API version.</p>
-</div>
-<div class="section" id="api-version-410">
+</section>
+<section id="api-version-410">
 <span id="api-version-upgrade-guide-410"></span><h2>API version 410</h2>
-<div class="section" id="id13">
+<section id="id14">
 <h3>General</h3>
 <ul class="simple">
-<li>Transactions no longer reset after a successful commit.</li>
+<li><p>Transactions no longer reset after a successful commit.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-400">
+</section>
+</section>
+<section id="api-version-400">
 <span id="api-version-upgrade-guide-400"></span><h2>API version 400</h2>
-<div class="section" id="id14">
+<section id="id15">
 <h3>Java bindings</h3>
 <ul class="simple">
-<li>The Java bindings have moved packages from <code class="docutils literal"><span class="pre">com.foundationdb</span></code> to <code class="docutils literal"><span class="pre">com.apple.cie.foundationdb</span></code>.</li>
+<li><p>The Java bindings have moved packages from <code class="docutils literal notranslate"><span class="pre">com.foundationdb</span></code> to <code class="docutils literal notranslate"><span class="pre">com.apple.cie.foundationdb</span></code>.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-300">
+</section>
+</section>
+<section id="api-version-300">
 <span id="api-version-upgrade-guide-300"></span><h2>API version 300</h2>
-<div class="section" id="id15">
+<section id="id16">
 <h3>General</h3>
 <ul class="simple">
-<li>Snapshot reads now see the effects of prior writes within the same transaction. The previous behavior can be achieved using the <code class="docutils literal"><span class="pre">SNAPSHOT_RYW_DISABLE</span></code> transaction option.</li>
-<li>The transaction size limit now includes the size of conflict ranges in its calculation. The size of a conflict range is the sum of the lengths of its begin and end keys.</li>
-<li>Adding conflict ranges or watches in the system keyspace (beginning with <code class="docutils literal"><span class="pre">\xFF</span></code>) now requires setting the <code class="docutils literal"><span class="pre">READ_SYSTEM_KEYS</span></code> or <code class="docutils literal"><span class="pre">ACCESS_SYSTEM_KEYS</span></code> option.</li>
+<li><p>Snapshot reads now see the effects of prior writes within the same transaction. The previous behavior can be achieved using the <code class="docutils literal notranslate"><span class="pre">SNAPSHOT_RYW_DISABLE</span></code> transaction option.</p></li>
+<li><p>The transaction size limit now includes the size of conflict ranges in its calculation. The size of a conflict range is the sum of the lengths of its begin and end keys.</p></li>
+<li><p>Adding conflict ranges or watches in the system keyspace (beginning with <code class="docutils literal notranslate"><span class="pre">\xFF</span></code>) now requires setting the <code class="docutils literal notranslate"><span class="pre">READ_SYSTEM_KEYS</span></code> or <code class="docutils literal notranslate"><span class="pre">ACCESS_SYSTEM_KEYS</span></code> option.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-200">
+</section>
+</section>
+<section id="api-version-200">
 <span id="api-version-upgrade-guide-200"></span><h2>API version 200</h2>
-<div class="section" id="id16">
+<section id="id17">
 <h3>General</h3>
 <ul class="simple">
-<li>Read version requests will now fail when the transaction is reset or has experienced another error.</li>
+<li><p>Read version requests will now fail when the transaction is reset or has experienced another error.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="api-version-100">
+</section>
+</section>
+<section id="api-version-100">
 <span id="api-version-upgrade-guide-100"></span><h2>API version 100</h2>
-<div class="section" id="id17">
+<section id="id18">
 <h3>Java bindings</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">Transaction.clearRangeStartsWith</span></code> has been deprecated. <code class="docutils literal"><span class="pre">Transaction.clear(Range)</span></code> should be used instead.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Transaction.clearRangeStartsWith</span></code> has been deprecated. <code class="docutils literal notranslate"><span class="pre">Transaction.clear(Range)</span></code> should be used instead.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="older-api-versions">
+</section>
+</section>
+<section id="older-api-versions">
 <h2>Older API versions</h2>
 <p>API versions from the beta and alpha releases of Foundationdb (pre-100) are not documented here. See <a class="reference internal" href="release-notes/release-notes-023.html"><span class="doc">Release Notes</span></a> for details about changes in those releases.</p>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -542,7 +674,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

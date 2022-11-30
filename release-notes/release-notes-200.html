@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Release Notes &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    '../',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="../_static/jquery.js"></script>
-    <script type="text/javascript" src="../_static/underscore.js"></script>
-    <script type="text/javascript" src="../_static/doctools.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Release Notes &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="../_static/doctools.js"></script>
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Release Notes" href="release-notes-300.html" />
     <link rel="prev" title="Release Notes" href="release-notes-100.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="../_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="../index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="../earlier-release-notes.html">Earlier Release Notes</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -262,330 +377,330 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="release-notes">
+  <section id="release-notes">
 <h1>Release Notes</h1>
-<div class="section" id="id1">
+<section id="id1">
 <h2>2.0.10</h2>
 <p>Release 2.0.10 is protocol-compatible with all prior 2.0.x releases. Users should continue to employ the bindings released with 2.0.0, with the exception of the following bindings:</p>
 <ul class="simple">
-<li>Java - updated to 2.0.8</li>
-<li>PHP - updated to 2.0.8</li>
-<li>Python - updated to 2.0.6</li>
+<li><p>Java - updated to 2.0.8</p></li>
+<li><p>PHP - updated to 2.0.8</p></li>
+<li><p>Python - updated to 2.0.6</p></li>
 </ul>
-<div class="section" id="fixes">
+<section id="fixes">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Clients running long enough to execute 2<sup>32</sup> internal tasks could experience a reordering of client operations. The outcome of this reordering is undefined and could include crashes or incorrect behavior.</li>
-<li>The <code class="docutils literal"><span class="pre">fdbcli</span></code> command-line interface would incorrectly report an internal error when running <code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code> if there weren&#8217;t enough machines in the cluster.</li>
+<li><p>Clients running long enough to execute 2<sup>32</sup> internal tasks could experience a reordering of client operations. The outcome of this reordering is undefined and could include crashes or incorrect behavior.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command-line interface would incorrectly report an internal error when running <code class="docutils literal notranslate"><span class="pre">coordinators</span> <span class="pre">auto</span></code> if there weren’t enough machines in the cluster.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id2">
+</section>
+</section>
+<section id="id2">
 <h2>2.0.9</h2>
 <p>Release 2.0.9 is protocol-compatible with all prior 2.0.x releases. Users should continue to employ the bindings released with 2.0.0, with the exception of the following bindings:</p>
 <ul class="simple">
-<li>Java - updated to 2.0.8</li>
-<li>PHP - updated to 2.0.8</li>
-<li>Python - updated to 2.0.6</li>
+<li><p>Java - updated to 2.0.8</p></li>
+<li><p>PHP - updated to 2.0.8</p></li>
+<li><p>Python - updated to 2.0.6</p></li>
 </ul>
-<div class="section" id="id3">
+<section id="id3">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Long-running clusters using the <code class="docutils literal"><span class="pre">ssd</span></code> storage engine could eventually deprioritize failure monitoring, causing busy machines to be considered down.</li>
+<li><p>Long-running clusters using the <code class="docutils literal notranslate"><span class="pre">ssd</span></code> storage engine could eventually deprioritize failure monitoring, causing busy machines to be considered down.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id4">
+</section>
+</section>
+<section id="id4">
 <h2>2.0.8</h2>
 <p>Release 2.0.8 is protocol-compatible with all prior 2.0.x releases. Users should continue to employ the bindings released with 2.0.0, with the exception of the following bindings:</p>
 <ul class="simple">
-<li>Java - updated to 2.0.8</li>
-<li>PHP - updated to 2.0.8</li>
-<li>Python - updated to 2.0.6</li>
+<li><p>Java - updated to 2.0.8</p></li>
+<li><p>PHP - updated to 2.0.8</p></li>
+<li><p>Python - updated to 2.0.6</p></li>
 </ul>
-<div class="section" id="id5">
+<section id="id5">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Resetting a transaction did not release its memory.</li>
-<li>Windows: FoundationDB client applications could crash when starting up due to a race condition.</li>
-<li>Ubuntu: Ubuntu software center reported that the FoundationDB package was of bad quality.</li>
+<li><p>Resetting a transaction did not release its memory.</p></li>
+<li><p>Windows: FoundationDB client applications could crash when starting up due to a race condition.</p></li>
+<li><p>Ubuntu: Ubuntu software center reported that the FoundationDB package was of bad quality.</p></li>
 </ul>
-</div>
-<div class="section" id="php">
+</section>
+<section id="php">
 <h3>PHP</h3>
 <ul class="simple">
-<li>Package updated to support PHP 5.4+ (instead of 5.3+).</li>
-<li>Fix: <code class="docutils literal"><span class="pre">get_boundary_keys()</span></code> could fail to complete successfully if certain retryable errors were encountered.</li>
-<li>Fix: Bindings set error reporting level, which could interfere with clients that used alternate settings.</li>
+<li><p>Package updated to support PHP 5.4+ (instead of 5.3+).</p></li>
+<li><p>Fix: <code class="docutils literal notranslate"><span class="pre">get_boundary_keys()</span></code> could fail to complete successfully if certain retryable errors were encountered.</p></li>
+<li><p>Fix: Bindings set error reporting level, which could interfere with clients that used alternate settings.</p></li>
 </ul>
-</div>
-<div class="section" id="java">
+</section>
+<section id="java">
 <h3>Java</h3>
 <ul class="simple">
-<li>Fix: Calling <code class="docutils literal"><span class="pre">getRange</span></code> on a <code class="docutils literal"><span class="pre">Transaction</span></code> could leak memory.</li>
+<li><p>Fix: Calling <code class="docutils literal notranslate"><span class="pre">getRange</span></code> on a <code class="docutils literal notranslate"><span class="pre">Transaction</span></code> could leak memory.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id6">
+</section>
+</section>
+<section id="id6">
 <h2>2.0.7</h2>
 <p>Release 2.0.7 is protocol-compatible with all prior 2.0.x releases. Users should continue to employ the bindings released with 2.0.0, with the exception of the following bindings:</p>
 <ul class="simple">
-<li>Java - updated to 2.0.4</li>
-<li>PHP - updated to 2.0.6</li>
-<li>Python - updated to 2.0.6</li>
+<li><p>Java - updated to 2.0.4</p></li>
+<li><p>PHP - updated to 2.0.6</p></li>
+<li><p>Python - updated to 2.0.6</p></li>
 </ul>
-<div class="section" id="id7">
+<section id="id7">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Updated FDBGnuTLS plugin with GnuTLS 3.2.15, incorporating the fix for <a class="reference external" href="http://gnutls.org/security.html#GNUTLS-SA-2014-3">GNUTLS-SA-2014-3</a>.</li>
-<li>Linux and Mac OS X: Processes configured with a 5-digit port number would listen on the wrong port.</li>
+<li><p>Updated FDBGnuTLS plugin with GnuTLS 3.2.15, incorporating the fix for <a class="reference external" href="http://gnutls.org/security.html#GNUTLS-SA-2014-3">GNUTLS-SA-2014-3</a>.</p></li>
+<li><p>Linux and Mac OS X: Processes configured with a 5-digit port number would listen on the wrong port.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id8">
+</section>
+</section>
+<section id="id8">
 <h2>2.0.6</h2>
 <p>Release 2.0.6 is protocol-compatible with all prior 2.0.x releases. Users should continue to employ the bindings released with 2.0.0, with the exception of the following bindings:</p>
 <ul class="simple">
-<li>Java - updated to 2.0.4</li>
-<li>PHP - updated to 2.0.6</li>
-<li>Python - updated to 2.0.6</li>
+<li><p>Java - updated to 2.0.4</p></li>
+<li><p>PHP - updated to 2.0.6</p></li>
+<li><p>Python - updated to 2.0.6</p></li>
 </ul>
-<div class="section" id="id9">
+<section id="id9">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Memory storage engine files could grow very large in an idle database.</li>
+<li><p>Memory storage engine files could grow very large in an idle database.</p></li>
 </ul>
-</div>
-<div class="section" id="performance">
+</section>
+<section id="performance">
 <h3>Performance</h3>
 <ul class="simple">
-<li>When disk bound, the storage server would use up to 90% of the disk IOPS on data balancing rather than processing new writes. As a result, the system could perform at about 10% of its maximum speed while restoring durability after a machine failure. The storage server can now use at most 50% of its disk IOPS on data balancing.</li>
+<li><p>When disk bound, the storage server would use up to 90% of the disk IOPS on data balancing rather than processing new writes. As a result, the system could perform at about 10% of its maximum speed while restoring durability after a machine failure. The storage server can now use at most 50% of its disk IOPS on data balancing.</p></li>
 </ul>
-</div>
-<div class="section" id="id10">
+</section>
+<section id="id10">
 <h3>PHP</h3>
 <ul class="simple">
-<li>Fix: <code class="docutils literal"><span class="pre">get_boundary_keys()</span></code> would throw an error if passed a transaction.</li>
-<li>Fix: Options which take an integer parameter would not use the value supplied.</li>
+<li><p>Fix: <code class="docutils literal notranslate"><span class="pre">get_boundary_keys()</span></code> would throw an error if passed a transaction.</p></li>
+<li><p>Fix: Options which take an integer parameter would not use the value supplied.</p></li>
 </ul>
-</div>
-<div class="section" id="python">
+</section>
+<section id="python">
 <h3>Python</h3>
 <ul class="simple">
-<li>Fix: Python 3 compatibility was broken.</li>
-<li>Fix: Choosing a custom Python path in the Windows installer would install to the wrong location.</li>
+<li><p>Fix: Python 3 compatibility was broken.</p></li>
+<li><p>Fix: Choosing a custom Python path in the Windows installer would install to the wrong location.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id11">
+</section>
+</section>
+<section id="id11">
 <h2>2.0.5</h2>
 <p>Release 2.0.5 is protocol-compatible with 2.0.0, 2.0.1, 2.0.2, 2.0.3, and 2.0.4. Users should continue to employ the bindings released with 2.0.0, with the exception of the Java bindings, which have been updated to 2.0.4, and the PHP bindings, which have been updated to 2.0.5.</p>
-<div class="section" id="id12">
+<section id="id12">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Clients and servers that specified a cluster file as a filename only (without path) could crash when the coordinators were changed.</li>
+<li><p>Clients and servers that specified a cluster file as a filename only (without path) could crash when the coordinators were changed.</p></li>
 </ul>
-</div>
-<div class="section" id="id13">
+</section>
+<section id="id13">
 <h3>PHP</h3>
 <ul class="simple">
-<li>Directory layer partitions created with the PHP bindings were incompatible with other language bindings. Contact us if you have data stored in a directory partition created by PHP that can&#8217;t easily be restored and needs to be migrated.</li>
+<li><p>Directory layer partitions created with the PHP bindings were incompatible with other language bindings. Contact us if you have data stored in a directory partition created by PHP that can’t easily be restored and needs to be migrated.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id14">
+</section>
+</section>
+<section id="id14">
 <h2>2.0.4</h2>
 <p>Release 2.0.4 is protocol-compatible with 2.0.0, 2.0.1, 2.0.2, and 2.0.3. Users should continue to employ the bindings released with 2.0.0, with the exception of the Java bindings, which have been updated to 2.0.4.</p>
-<div class="section" id="id15">
+<section id="id15">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Clearing a key larger than the legal limit of 10 kB caused the database to crash and become unreadable.</li>
-<li>Explicitly added write conflict ranges were ignored when read-your-writes was disabled.</li>
+<li><p>Clearing a key larger than the legal limit of 10 kB caused the database to crash and become unreadable.</p></li>
+<li><p>Explicitly added write conflict ranges were ignored when read-your-writes was disabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id16">
+</section>
+<section id="id16">
 <h3>Java</h3>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">ByteArrayUtil.compareUnsigned()</span></code> failed to return in some circumstances.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ByteArrayUtil.compareUnsigned()</span></code> failed to return in some circumstances.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id17">
+</section>
+</section>
+<section id="id17">
 <h2>2.0.3</h2>
 <p>Release 2.0.3 is protocol-compatible with 2.0.0, 2.0.1, and 2.0.2. There are no updates to the language bindings, so users should continue to employ the bindings released with 2.0.0.</p>
-<div class="section" id="id18">
+<section id="id18">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Updated FDBGnuTLS plugin with GnuTLS 3.2.12, incorporating fixes for <a class="reference external" href="http://gnutls.org/security.html#GNUTLS-SA-2014-1">GNUTLS-SA-2014-1</a> and <a class="reference external" href="http://gnutls.org/security.html#GNUTLS-SA-2014-2">GNUTLS-SA-2014-2</a>.</li>
-<li>When inserting a large number of keys close to the key size limit, server logs were unexpectedly verbose.</li>
+<li><p>Updated FDBGnuTLS plugin with GnuTLS 3.2.12, incorporating fixes for <a class="reference external" href="http://gnutls.org/security.html#GNUTLS-SA-2014-1">GNUTLS-SA-2014-1</a> and <a class="reference external" href="http://gnutls.org/security.html#GNUTLS-SA-2014-2">GNUTLS-SA-2014-2</a>.</p></li>
+<li><p>When inserting a large number of keys close to the key size limit, server logs were unexpectedly verbose.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id19">
+</section>
+</section>
+<section id="id19">
 <h2>2.0.2</h2>
 <p>Release 2.0.2 is protocol-compatible with 2.0.0 and 2.0.1. There are no updates to the language bindings, so users should continue to employ the bindings released with 2.0.0.</p>
-<div class="section" id="id20">
+<section id="id20">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>Windows: Possible database corruption when the FoundationDB service is stopped but unable to kill its child processes.</li>
+<li><p>Windows: Possible database corruption when the FoundationDB service is stopped but unable to kill its child processes.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id21">
+</section>
+</section>
+<section id="id21">
 <h2>2.0.1</h2>
 <p>Release 2.0.1 is protocol-compatible with 2.0.0. There are no updates to the language bindings, so users should continue to employ the bindings released with 2.0.0.</p>
-<div class="section" id="id22">
+<section id="id22">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>In some cases, a server reincluded after previous exclusion would not participate in data distribution.</li>
-<li>Clients could not reliably connect to multiple clusters.</li>
-<li>The calculation of usable disk space on Linux and Mac OS X improperly included space reserved for superuser.</li>
+<li><p>In some cases, a server reincluded after previous exclusion would not participate in data distribution.</p></li>
+<li><p>Clients could not reliably connect to multiple clusters.</p></li>
+<li><p>The calculation of usable disk space on Linux and Mac OS X improperly included space reserved for superuser.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="id23">
+</section>
+</section>
+<section id="id23">
 <h2>2.0.0</h2>
-<div class="section" id="new-language-support">
+<section id="new-language-support">
 <h3>New language support</h3>
 <ul class="simple">
-<li><a class="reference external" href="../godoc/fdb.html">Go</a></li>
-<li>PHP</li>
+<li><p><a class="reference external" href="../godoc/fdb.html">Go</a></p></li>
+<li><p>PHP</p></li>
 </ul>
-</div>
-<div class="section" id="new-layers-available-in-all-languages">
+</section>
+<section id="new-layers-available-in-all-languages">
 <h3>New layers available in all languages</h3>
 <ul class="simple">
-<li>The <a class="reference internal" href="../developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">Subspace</span></a> layer provides a recommended way to define subspaces of keys by managing key prefixes.</li>
-<li>The <a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a> layer provides a tool to manage related subspaces as virtual directories. Recommended as a convenient and high-performance way to organize and layout different kinds of data within a single FoundationDB database.</li>
+<li><p>The <a class="reference internal" href="../developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">Subspace</span></a> layer provides a recommended way to define subspaces of keys by managing key prefixes.</p></li>
+<li><p>The <a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a> layer provides a tool to manage related subspaces as virtual directories. Recommended as a convenient and high-performance way to organize and layout different kinds of data within a single FoundationDB database.</p></li>
 </ul>
-</div>
-<div class="section" id="security">
+</section>
+<section id="security">
 <h3>Security</h3>
 <ul class="simple">
-<li>Added certificate-based <a class="reference internal" href="../tls.html"><span class="doc">Transport Layer Security</span></a> to encrypt network traffic.</li>
+<li><p>Added certificate-based <a class="reference internal" href="../tls.html"><span class="doc">Transport Layer Security</span></a> to encrypt network traffic.</p></li>
 </ul>
-</div>
-<div class="section" id="monitoring">
+</section>
+<section id="monitoring">
 <h3>Monitoring</h3>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">fdbcli</span></code> command-line interface reports information and warnings about available memory.</li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command-line interface reports information and warnings about available memory.</p></li>
 </ul>
-</div>
-<div class="section" id="id24">
+</section>
+<section id="id24">
 <h3>Performance</h3>
 <ul class="simple">
-<li>Improved client CPU performance overall.</li>
-<li>Greatly improved client CPU performance for range-read operations.</li>
-<li>Greatly improved concurrency when issuing writes between reads.</li>
-<li>Snapshot reads are now fully cached.</li>
-<li>Trade off: <code class="docutils literal"><span class="pre">get_key</span></code> is cached, but <code class="docutils literal"><span class="pre">get_key</span></code> now also retrieves the value of the key, using network bandwidth. (Using <code class="docutils literal"><span class="pre">OPTION_RYW_DISABLE</span></code> will avoid both the cache and the network bandwidth.)</li>
-<li>Windows: Improved latencies.</li>
+<li><p>Improved client CPU performance overall.</p></li>
+<li><p>Greatly improved client CPU performance for range-read operations.</p></li>
+<li><p>Greatly improved concurrency when issuing writes between reads.</p></li>
+<li><p>Snapshot reads are now fully cached.</p></li>
+<li><p>Trade off: <code class="docutils literal notranslate"><span class="pre">get_key</span></code> is cached, but <code class="docutils literal notranslate"><span class="pre">get_key</span></code> now also retrieves the value of the key, using network bandwidth. (Using <code class="docutils literal notranslate"><span class="pre">OPTION_RYW_DISABLE</span></code> will avoid both the cache and the network bandwidth.)</p></li>
+<li><p>Windows: Improved latencies.</p></li>
 </ul>
-</div>
-<div class="section" id="id25">
+</section>
+<section id="id25">
 <h3>Fixes</h3>
 <ul class="simple">
-<li>In rare cases when many keys very close to the maximum key size are inserted, the database could become unavailable.</li>
-<li><code class="docutils literal"><span class="pre">GetReadVersion</span></code> did not properly throw <code class="docutils literal"><span class="pre">transaction_cancelled</span></code> when called on a transaction that had been cancelled.</li>
-<li>When using the <code class="docutils literal"><span class="pre">access_system_keys</span></code> option, a <code class="docutils literal"><span class="pre">get_range_startswith(\xff)</span></code> would incorrectly return no results.</li>
-<li><code class="docutils literal"><span class="pre">get_range_startswith</span></code>, when invoked using a key ending in the byte <code class="docutils literal"><span class="pre">\xff</span></code>, could return results outside the desired range.</li>
-<li>Linux: A process could become unresponsive if unable to find a TCP network device in <code class="docutils literal"><span class="pre">/proc/net/snmp</span></code>.</li>
-<li>Destroying client threads leaked memory.</li>
-<li>Database availability could be unnecessarily compromised in certain rare, low-disk conditions on a &#8220;transaction&#8221; class machine.</li>
-<li>Writing a zero-byte value to the key <code class="docutils literal"><span class="pre">''</span></code> caused the database to crash.</li>
-<li>Mac OS X: Power loss could cause data corruption.</li>
+<li><p>In rare cases when many keys very close to the maximum key size are inserted, the database could become unavailable.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GetReadVersion</span></code> did not properly throw <code class="docutils literal notranslate"><span class="pre">transaction_cancelled</span></code> when called on a transaction that had been cancelled.</p></li>
+<li><p>When using the <code class="docutils literal notranslate"><span class="pre">access_system_keys</span></code> option, a <code class="docutils literal notranslate"><span class="pre">get_range_startswith(\xff)</span></code> would incorrectly return no results.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">get_range_startswith</span></code>, when invoked using a key ending in the byte <code class="docutils literal notranslate"><span class="pre">\xff</span></code>, could return results outside the desired range.</p></li>
+<li><p>Linux: A process could become unresponsive if unable to find a TCP network device in <code class="docutils literal notranslate"><span class="pre">/proc/net/snmp</span></code>.</p></li>
+<li><p>Destroying client threads leaked memory.</p></li>
+<li><p>Database availability could be unnecessarily compromised in certain rare, low-disk conditions on a “transaction” class machine.</p></li>
+<li><p>Writing a zero-byte value to the key <code class="docutils literal notranslate"><span class="pre">''</span></code> caused the database to crash.</p></li>
+<li><p>Mac OS X: Power loss could cause data corruption.</p></li>
 </ul>
-</div>
-<div class="section" id="other-changes">
+</section>
+<section id="other-changes">
 <h3>Other changes</h3>
 <ul class="simple">
-<li>To avoid confusing situations, any use of a transaction that is currently committing will cause both the commit and the use to throw a <code class="docutils literal"><span class="pre">used_during_commit</span></code> error.</li>
-<li>The <code class="docutils literal"><span class="pre">FDB_CLUSTER_FILE</span></code> environment variable can point to a cluster file that takes precedence over both the current working directory and (e.g., in Linux) <code class="docutils literal"><span class="pre">/etc/foundationdb/fdb.cluster</span></code>.</li>
-<li>Disabled unloading the <code class="docutils literal"><span class="pre">fdb_c</span></code> library to prevent consequent unavoidable race conditions.</li>
-<li>Discontinued testing and support for Ubuntu 11.04. We continue to support Ubuntu 11.10 and later.</li>
+<li><p>To avoid confusing situations, any use of a transaction that is currently committing will cause both the commit and the use to throw a <code class="docutils literal notranslate"><span class="pre">used_during_commit</span></code> error.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">FDB_CLUSTER_FILE</span></code> environment variable can point to a cluster file that takes precedence over both the current working directory and (e.g., in Linux) <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/fdb.cluster</span></code>.</p></li>
+<li><p>Disabled unloading the <code class="docutils literal notranslate"><span class="pre">fdb_c</span></code> library to prevent consequent unavoidable race conditions.</p></li>
+<li><p>Discontinued testing and support for Ubuntu 11.04. We continue to support Ubuntu 11.10 and later.</p></li>
 </ul>
-</div>
-<div class="section" id="bindings">
+</section>
+<section id="bindings">
 <h3>Bindings</h3>
 <ul class="simple">
-<li>API version updated to 200. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-200"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
+<li><p>API version updated to 200. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-200"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</p></li>
 </ul>
-</div>
-<div class="section" id="id26">
+</section>
+<section id="id26">
 <h3>Java</h3>
 <ul class="simple">
-<li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
-<li>In most cases, exceptions thrown in synchronous-style Java programs will have the original calling line of code in the backtrace.</li>
-<li>Native resources are handled in a safer and more efficient manner.</li>
-<li>Fix: <code class="docutils literal"><span class="pre">AsyncUtil.whenReady</span></code> crashed when the future being waited on was an error.</li>
-<li>Fix: Calling <code class="docutils literal"><span class="pre">strinc</span></code> on an empty string or a string containing only <code class="docutils literal"><span class="pre">\xff</span></code> bytes threw an exception.</li>
-<li>Fix: Trailing null bytes on the result of <code class="docutils literal"><span class="pre">strinc</span></code> are removed.</li>
+<li><p>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</p></li>
+<li><p>In most cases, exceptions thrown in synchronous-style Java programs will have the original calling line of code in the backtrace.</p></li>
+<li><p>Native resources are handled in a safer and more efficient manner.</p></li>
+<li><p>Fix: <code class="docutils literal notranslate"><span class="pre">AsyncUtil.whenReady</span></code> crashed when the future being waited on was an error.</p></li>
+<li><p>Fix: Calling <code class="docutils literal notranslate"><span class="pre">strinc</span></code> on an empty string or a string containing only <code class="docutils literal notranslate"><span class="pre">\xff</span></code> bytes threw an exception.</p></li>
+<li><p>Fix: Trailing null bytes on the result of <code class="docutils literal notranslate"><span class="pre">strinc</span></code> are removed.</p></li>
 </ul>
-</div>
-<div class="section" id="node">
+</section>
+<section id="node">
 <h3>Node</h3>
 <ul class="simple">
-<li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
-<li>Support for the Promise/A+ specification with supporting utilities.</li>
-<li>Futures can take multiple callbacks. Callbacks can be added if the original function was called with a callback. The Future type is exposed in our binding.</li>
-<li>Added <code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code> support.</li>
-<li>Node prints a stack trace if an error occurs in a callback from V8.</li>
-<li>Snapshot transactions can be used in retry loops.</li>
-<li>The methods <code class="docutils literal"><span class="pre">db.setAndWatch</span></code> and <code class="docutils literal"><span class="pre">db.clearAndWatch</span></code> now return an object with a watch member instead of a future.</li>
-<li>Fix: Could not use the <code class="docutils literal"><span class="pre">'this'</span></code> pointer with the retry decorator.</li>
-<li>Fix: Node transactional decorator didn&#8217;t return a result to the caller if the function was called with a transaction.</li>
-<li>Fix: The program could sometimes crash when watches were manually cancelled.</li>
+<li><p>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</p></li>
+<li><p>Support for the Promise/A+ specification with supporting utilities.</p></li>
+<li><p>Futures can take multiple callbacks. Callbacks can be added if the original function was called with a callback. The Future type is exposed in our binding.</p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal notranslate"><span class="pre">as_foundationdb_value</span></code> support.</p></li>
+<li><p>Node prints a stack trace if an error occurs in a callback from V8.</p></li>
+<li><p>Snapshot transactions can be used in retry loops.</p></li>
+<li><p>The methods <code class="docutils literal notranslate"><span class="pre">db.setAndWatch</span></code> and <code class="docutils literal notranslate"><span class="pre">db.clearAndWatch</span></code> now return an object with a watch member instead of a future.</p></li>
+<li><p>Fix: Could not use the <code class="docutils literal notranslate"><span class="pre">'this'</span></code> pointer with the retry decorator.</p></li>
+<li><p>Fix: Node transactional decorator didn’t return a result to the caller if the function was called with a transaction.</p></li>
+<li><p>Fix: The program could sometimes crash when watches were manually cancelled.</p></li>
 </ul>
-</div>
-<div class="section" id="ruby">
+</section>
+<section id="ruby">
 <h3>Ruby</h3>
 <ul class="simple">
-<li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
-<li>Tuple and subspace range assume the empty tuple if none is passed.</li>
-<li>Added <code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code> support.</li>
-<li>Snapshot transactions can be used in retry loops.</li>
-<li>Allow specifying the API version multiple times, so long as the same version is used each time.</li>
-<li>Fix: <code class="docutils literal"><span class="pre">FDB.options.set_trace_enable</span></code> threw an exception when passed a <code class="docutils literal"><span class="pre">nil</span></code> value.</li>
+<li><p>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</p></li>
+<li><p>Tuple and subspace range assume the empty tuple if none is passed.</p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal notranslate"><span class="pre">as_foundationdb_value</span></code> support.</p></li>
+<li><p>Snapshot transactions can be used in retry loops.</p></li>
+<li><p>Allow specifying the API version multiple times, so long as the same version is used each time.</p></li>
+<li><p>Fix: <code class="docutils literal notranslate"><span class="pre">FDB.options.set_trace_enable</span></code> threw an exception when passed a <code class="docutils literal notranslate"><span class="pre">nil</span></code> value.</p></li>
 </ul>
-</div>
-<div class="section" id="id27">
+</section>
+<section id="id27">
 <h3>Python</h3>
 <ul class="simple">
-<li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
-<li>Snapshot transactions can be used in retry loops.</li>
-<li>Support for gevent 1.0.</li>
-<li>Renamed the bitwise atomic operations (<code class="docutils literal"><span class="pre">and</span></code>, <code class="docutils literal"><span class="pre">or</span></code>, <code class="docutils literal"><span class="pre">xor</span></code>) to <code class="docutils literal"><span class="pre">bit_and</span></code>, <code class="docutils literal"><span class="pre">bit_or</span></code>, <code class="docutils literal"><span class="pre">bit_xor</span></code>. Added aliases for backwards compatibility.</li>
-<li>Fix: <code class="docutils literal"><span class="pre">get_range_startswith</span></code> didn&#8217;t work with <code class="docutils literal"><span class="pre">as_foundationdb_key</span></code></li>
-<li>Fix: <code class="docutils literal"><span class="pre">fdb.locality.get_boundary_keys</span></code> and <code class="docutils literal"><span class="pre">fdb.locality.get_addresses_for_key</span></code> did not support <code class="docutils literal"><span class="pre">as_foundationdb_key</span></code>.</li>
+<li><p>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</p></li>
+<li><p>Snapshot transactions can be used in retry loops.</p></li>
+<li><p>Support for gevent 1.0.</p></li>
+<li><p>Renamed the bitwise atomic operations (<code class="docutils literal notranslate"><span class="pre">and</span></code>, <code class="docutils literal notranslate"><span class="pre">or</span></code>, <code class="docutils literal notranslate"><span class="pre">xor</span></code>) to <code class="docutils literal notranslate"><span class="pre">bit_and</span></code>, <code class="docutils literal notranslate"><span class="pre">bit_or</span></code>, <code class="docutils literal notranslate"><span class="pre">bit_xor</span></code>. Added aliases for backwards compatibility.</p></li>
+<li><p>Fix: <code class="docutils literal notranslate"><span class="pre">get_range_startswith</span></code> didn’t work with <code class="docutils literal notranslate"><span class="pre">as_foundationdb_key</span></code></p></li>
+<li><p>Fix: <code class="docutils literal notranslate"><span class="pre">fdb.locality.get_boundary_keys</span></code> and <code class="docutils literal notranslate"><span class="pre">fdb.locality.get_addresses_for_key</span></code> did not support <code class="docutils literal notranslate"><span class="pre">as_foundationdb_key</span></code>.</p></li>
 </ul>
-</div>
-<div class="section" id="c">
+</section>
+<section id="c">
 <h3>C</h3>
 <ul class="simple">
-<li>Support for API version 200 and backwards compatibility with previous API versions.</li>
+<li><p>Support for API version 200 and backwards compatibility with previous API versions.</p></li>
 </ul>
-</div>
-<div class="section" id="net">
+</section>
+<section id="net">
 <h3>.NET</h3>
 <ul class="simple">
-<li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
+<li><p>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</p></li>
 </ul>
-</div>
-<div class="section" id="earlier-release-notes">
+</section>
+<section id="earlier-release-notes">
 <h3>Earlier release notes</h3>
 <ul class="simple">
-<li><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></li>
-<li><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></li>
-<li><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></li>
-<li><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></li>
-<li><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></li>
-<li><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></li>
+<li><p><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></p></li>
 </ul>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -607,7 +722,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

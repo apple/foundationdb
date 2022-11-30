@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Architecture &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Architecture &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Performance" href="performance.html" />
     <link rel="prev" title="Technical Overview" href="technical-overview.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -176,20 +291,24 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="architecture">
+  <section id="architecture">
 <h1>Architecture</h1>
 <p>FoundationDB makes your architecture flexible and easy to operate. Your applications can send their data directly to the FoundationDB or to a <a class="reference internal" href="layer-concept.html"><span class="doc">layer</span></a>, a user-written module that can provide a new data model, compatibility with existing systems, or even serve as an entire framework. In both cases, all data is stored in a single place via an ordered, transactional key-value API.</p>
 <p>The following diagram details the logical architecture.</p>
 <p><img alt="image0" src="_images/Architecture.png" /></p>
-<div class="section" id="detailed-foundationdb-architecture">
+<section id="detailed-foundationdb-architecture">
 <h2>Detailed FoundationDB Architecture</h2>
 <p>The FoundationDB architecture chooses a decoupled design, where
 processes are assigned different heterogeneous roles (e.g.,
-Coordinators, Storage Servers, Master). Scaling the database is achieved
-by horizontally expanding the number of processes for separate roles:</p>
-<div class="section" id="coordinators">
+Coordinators, Storage Servers, Master). Cluster attempts to recruit
+different roles as separate processes, however, it is possible that
+multiple Stateless roles gets colocated (recruited) on a single
+process to meet the cluster recruitment goals. Scaling the database
+is achieved by horizontally expanding the number of processes for
+separate roles:</p>
+<section id="coordinators">
 <h3>Coordinators</h3>
 <p>All clients and servers connect to a FoundationDB cluster with a cluster
 file, which contains the IP:PORT of the coordinators. Both the clients
@@ -198,16 +317,16 @@ The servers will attempt to become the cluster controller if one does
 not exist, and register with the cluster controller once one has been
 elected. Clients use the cluster controller to keep an up-to-date list
 of GRV proxies and commit proxies.</p>
-</div>
-<div class="section" id="cluster-controller">
+</section>
+<section id="cluster-controller">
 <h3>Cluster Controller</h3>
 <p>The cluster controller is a singleton elected by a majority of
 coordinators. It is the entry point for all processes in the cluster. It
 is responsible for determining when a process has failed, telling
 processes which roles they should become, and passing system information
 between all of the processes.</p>
-</div>
-<div class="section" id="master">
+</section>
+<section id="master">
 <h3>Master</h3>
 <p>The master is responsible for coordinating the transition of the write
 sub-system from one generation to the next. The write sub-system
@@ -220,8 +339,8 @@ proxies.</p>
 the same process. Since 6.2, both have become a singleton in the
 cluster. The life time is no longer tied with Master.</p>
 <p><img alt="image1" src="_images/architecture-1.jpeg" /></p>
-</div>
-<div class="section" id="grv-proxies">
+</section>
+<section id="grv-proxies">
 <h3>GRV Proxies</h3>
 <p>The GRV proxies are responsible for providing read versions, communicating
 with ratekeeper to control the rate providing read versions. To provide a
@@ -229,20 +348,20 @@ read version, a GRV proxy will ask all master to see the largest committed
 version at this point in time, while simultaneously checking that the
 transaction logs have not been stopped. Ratekeeper will artificially slow
 down the rate at which the GRV proxy provides read versions.</p>
-</div>
-<div class="section" id="commit-proxies">
+</section>
+<section id="commit-proxies">
 <h3>Commit Proxies</h3>
 <p>The proxies are responsible for committing transactions, report committed
 versions to master and tracking the storage servers responsible for each
 range of keys.</p>
 <p>Commits are accomplished by:</p>
 <ul class="simple">
-<li>Get a commit version from the master.</li>
-<li>Use the resolvers to determine if the transaction conflicts with
-previously committed transactions.</li>
-<li>Make the transaction durable on the transaction logs.</li>
+<li><p>Get a commit version from the master.</p></li>
+<li><p>Use the resolvers to determine if the transaction conflicts with
+previously committed transactions.</p></li>
+<li><p>Make the transaction durable on the transaction logs.</p></li>
 </ul>
-<p>The key space starting with the <code class="docutils literal"><span class="pre">\xff</span></code> byte is reserved for system
+<p>The key space starting with the <code class="docutils literal notranslate"><span class="pre">\xff</span></code> byte is reserved for system
 metadata. All mutations committed into this key space are distributed to
 all of the commit proxies through the resolvers. This metadata includes a
 mapping between key ranges and the storage servers which have the data
@@ -250,8 +369,8 @@ for that range of keys. The commit proxies provides this information to
 clients on-demand. The clients cache this mapping; if they ask a storage
 server for a key it does not have, they will clear their cache and get a
 more up-to-date list of servers from the commit proxies.</p>
-</div>
-<div class="section" id="transaction-logs">
+</section>
+<section id="transaction-logs">
 <h3>Transaction Logs</h3>
 <p>The transaction logs make mutations durable to disk for fast commit
 latencies. The logs receive commits from the commit proxy in version order,
@@ -266,8 +385,8 @@ failed, mutations bound for that storage server will build up on the
 logs. Once data distribution makes a different storage server
 responsible for all of the missing storage server’s data we will discard
 the log data bound for the failed server.</p>
-</div>
-<div class="section" id="resolvers">
+</section>
+<section id="resolvers">
 <h3>Resolvers</h3>
 <p>The resolvers are responsible determining conflicts between
 transactions. A transaction conflicts if it reads a key that has been
@@ -275,22 +394,22 @@ written between the transaction’s read version and commit version. The
 resolver does this by holding the last 5 seconds of committed writes in
 memory, and comparing a new transaction’s reads against this set of
 commits.</p>
-</div>
-<div class="section" id="storage-servers">
+</section>
+<section id="storage-servers">
 <h3>Storage Servers</h3>
 <p>The vast majority of processes in a cluster are storage servers. Storage
 servers are assigned ranges of key, and are responsible to storing all
 of the data for that range. They keep 5 seconds of mutations in memory,
 and an on disk copy of the data as of 5 second ago. Clients must read at
 a version within the last 5 seconds, or they will get a
-<code class="docutils literal"><span class="pre">transaction_too_old</span></code> error. The SSD storage engine stores the data in
+<code class="docutils literal notranslate"><span class="pre">transaction_too_old</span></code> error. The SSD storage engine stores the data in
 a B-tree based on SQLite. The memory storage engine store the data in
 memory with an append only log that is only read from disk if the
 process is rebooted. In the upcoming FoundationDB 7.0 release, the
 B-tree storage engine will be replaced with a brand new <em>Redwood</em>
 engine.</p>
-</div>
-<div class="section" id="data-distributor">
+</section>
+<section id="data-distributor">
 <h3>Data Distributor</h3>
 <p>Data distributor manages the lifetime of storage servers, decides which
 storage server is responsible for which data range, and ensures data is
@@ -298,24 +417,24 @@ evenly distributed across all storage servers (SS). Data distributor as
 a singleton in the cluster is recruited and monitored by Cluster
 Controller. See <a class="reference external" href="https://github.com/apple/foundationdb/blob/main/design/data-distributor-internals.md">internal
 documentation</a>.</p>
-</div>
-<div class="section" id="ratekeeper">
+</section>
+<section id="ratekeeper">
 <h3>Ratekeeper</h3>
 <p>Ratekeeper monitors system load and slows down client transaction rate
 when the cluster is close to saturation by lowering the rate at which
 the proxy provides read versions. Ratekeeper as a singleton in the
 cluster is recruited and monitored by Cluster Controller.</p>
-</div>
-<div class="section" id="clients">
+</section>
+<section id="clients">
 <h3>Clients</h3>
 <p>A client links with specific language bindings (i.e., client libraries)
 in order to communicate with a FoundationDB cluster. The language
 bindings support loading multiple versions of C libraries, allowing the
 client communicates with older version of the FoundationDB clusters.
 Currently, C, Go, Python, Java, Ruby bindings are officially supported.</p>
-</div>
-</div>
-<div class="section" id="transaction-processing">
+</section>
+</section>
+<section id="transaction-processing">
 <h2>Transaction Processing</h2>
 <p>A database transaction in FoundationDB starts by a client contacting one
 of the GRV proxies to obtain a read version, which is guaranteed to be
@@ -340,7 +459,7 @@ writes (i.e., transaction commits). Because clients directly issue reads
 to sharded storage servers, reads scale linearly to the number of
 storage servers. Similarly, writes are scaled by adding more processes
 to Commit Proxies, Resolvers, and Log Servers in the transaction system.</p>
-<div class="section" id="determine-read-version">
+<section id="determine-read-version">
 <h3>Determine Read Version</h3>
 <p>When a client requests a read version from a GRV proxy, the GRV proxy asks
 master for the latest committed version, and checks a set of transaction
@@ -349,7 +468,7 @@ the maximum committed version as the read version to the client.</p>
 <p><img alt="image2" src="_images/architecture-2.jpeg" /></p>
 <p>The reason for the GRV proxy to contact master for the latest committed
 versions is to because master is a central place to keep the largest of
-all commit proxies&#8217; committed version.</p>
+all commit proxies’ committed version.</p>
 <p>The reason for checking a set of transaction logs satisfying replication
 policy are live is to ensure the GRV proxy is not replaced with newer
 generation of GRV proxies. This is because GRV proxy is a stateless role
@@ -367,29 +486,30 @@ expensive, it still requires the master to get a transaction budget from the
 Ratekeeper, batches requests, and potentially maintains thousands of network
 connections from clients.</p>
 <p><img alt="image3" src="_images/architecture-3.jpeg" /></p>
-</div>
-<div class="section" id="transaction-commit">
+</section>
+<section id="transaction-commit">
 <h3>Transaction Commit</h3>
 <p>A client transaction commits in the following steps:</p>
 <ol class="arabic simple">
-<li>A client sends a transaction to a commit proxy.</li>
-<li>The commit proxy asks the master for a commit version.</li>
-<li>The master sends back a commit version that is higher than any commit
-version seen before.</li>
-<li>The commit proxy sends the read and write conflict ranges to the resolver(s)
-with the commit version included.</li>
-<li>The resolver responds back with whether the transaction has any
+<li><p>A client sends a transaction to a commit proxy.</p></li>
+<li><p>The commit proxy asks the master for a commit version.</p></li>
+<li><p>The master sends back a commit version that is higher than any commit
+version seen before.</p></li>
+<li><p>The commit proxy sends the read and write conflict ranges to the resolver(s)
+with the commit version included.</p></li>
+<li><p>The resolver responds back with whether the transaction has any
 conflicts with previous transactions by sorting transactions
 according to their commit versions and computing if such a serial
-execution order is conflict-free.<ul>
-<li>If there are conflicts, the commit proxy responds back to the client with
-a not_committed error.</li>
-<li>If there are no conflicts, the commit proxy sends the mutations and
-commit version of this transaction to the transaction logs.</li>
+execution order is conflict-free.</p>
+<ul class="simple">
+<li><p>If there are conflicts, the commit proxy responds back to the client with
+a not_committed error.</p></li>
+<li><p>If there are no conflicts, the commit proxy sends the mutations and
+commit version of this transaction to the transaction logs.</p></li>
 </ul>
 </li>
-<li>Once the mutations are durable on the logs, the commit proxy responds back
-success to the user.</li>
+<li><p>Once the mutations are durable on the logs, the commit proxy responds back
+success to the user.</p></li>
 </ol>
 <p>Note the commit proxy sends each resolver their respective key ranges, if
 any one of the resolvers detects a conflict then the transaction is not
@@ -405,27 +525,27 @@ transactions, which also limits the chance of this type of false
 conflict.</p>
 <p><img alt="image4" src="_images/architecture-4.jpeg" /></p>
 <p><img alt="image5" src="_images/architecture-5.jpeg" /></p>
-</div>
-<div class="section" id="background-work">
+</section>
+<section id="background-work">
 <h3>Background Work</h3>
 <p>There are a number of background work happening besides the transaction
 processing:</p>
 <ul class="simple">
-<li><strong>Ratekeeper</strong> collects statistic information from GRV proxies, Commit
+<li><p><strong>Ratekeeper</strong> collects statistic information from GRV proxies, Commit
 proxies, transaction logs, and storage servers and compute the target
-transaction rate for the cluster.</li>
-<li><strong>Data distribution</strong> monitors all storage servers and perform load
+transaction rate for the cluster.</p></li>
+<li><p><strong>Data distribution</strong> monitors all storage servers and perform load
 balancing operations to evenly distribute data among all storage
-servers.</li>
-<li><strong>Storage servers</strong> pull mutations from transaction logs, write them
-into storage engine to persist on disks.</li>
-<li><strong>Commit proxies</strong> periodically send empty commits to transaction logs to
+servers.</p></li>
+<li><p><strong>Storage servers</strong> pull mutations from transaction logs, write them
+into storage engine to persist on disks.</p></li>
+<li><p><strong>Commit proxies</strong> periodically send empty commits to transaction logs to
 keep commit versions increasing, in case there is no client generated
-transactions.</li>
+transactions.</p></li>
 </ul>
 <p><img alt="image6" src="_images/architecture-6.jpeg" /></p>
-</div>
-<div class="section" id="transaction-system-recovery">
+</section>
+<section id="transaction-system-recovery">
 <h3>Transaction System Recovery</h3>
 <p>The transaction system implements the write pipeline of the FoundationDB
 cluster and its performance is critical to the transaction commit
@@ -461,21 +581,21 @@ That is, for any transactions that the Commit Proxies may have sent back
 commit response, their logs are persisted in multiple Log Servers (e.g.,
 three servers if replication degree is 3).</p>
 <p>Finally, a recovery will <em>fast forward</em> time by 90 seconds, which would
-abort any in-progress client transactions with <code class="docutils literal"><span class="pre">transaction_too_old</span></code>
+abort any in-progress client transactions with <code class="docutils literal notranslate"><span class="pre">transaction_too_old</span></code>
 error. During retry, these client transactions will find the new
 generation of transaction system and commit.</p>
 <p><strong>``commit_result_unknown`` error:</strong> If a recovery happened while a
 transaction is committing (i.e., a commit proxy has sent mutations to
 transaction logs). A client would have received
-<code class="docutils literal"><span class="pre">commit_result_unknown</span></code>, and then retried the transaction. It’s
+<code class="docutils literal notranslate"><span class="pre">commit_result_unknown</span></code>, and then retried the transaction. It’s
 completely permissible for FDB to commit both the first attempt, and the
-second retry, as <code class="docutils literal"><span class="pre">commit_result_unknown</span></code> means the transaction may or
+second retry, as <code class="docutils literal notranslate"><span class="pre">commit_result_unknown</span></code> means the transaction may or
 may not have committed. This is why it’s strongly recommended that
 transactions should be idempotent, so that they handle
-<code class="docutils literal"><span class="pre">commit_result_unknown</span></code> correctly.</p>
-</div>
-</div>
-<div class="section" id="resources">
+<code class="docutils literal notranslate"><span class="pre">commit_result_unknown</span></code> correctly.</p>
+</section>
+</section>
+<section id="resources">
 <h2>Resources</h2>
 <p><a class="reference external" href="https://forums.foundationdb.org/t/technical-overview-of-the-database/135/26">Forum
 Post</a></p>
@@ -487,8 +607,8 @@ Presentation</a></p>
 Documentation</a></p>
 <p><a class="reference external" href="https://github.com/apple/foundationdb/blob/main/design/recovery-internals.md">Recovery
 Documentation</a></p>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -510,7 +630,7 @@ Documentation</a></p>
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

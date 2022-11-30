@@ -109,7 +109,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(710)
+    fdb.api_version(720)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -194,10 +194,6 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
        |option-tls-key-bytes|
     
-    .. method :: fdb.options.set_tls_verify_peers(verification_pattern)
-
-       |option-tls-verify-peers|
-    
     .. method :: fdb.options.set_tls_ca_bytes(ca_bundle)
 
        |option-tls-ca-bytes|
@@ -209,10 +205,6 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_tls_password(password)
 
        |option-tls-password|
-
-    .. method :: fdb.options.set_disable_multi_version_client_api()
-
-       |option-disable-multi-version-client-api|
 
     .. method :: fdb.options.set_disable_local_client()
 
@@ -760,10 +752,6 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 
 Committing
 ----------
-
-.. decorator:: transactional()
-
-    The ``transactional`` decorator makes it easy to write transactional functions which accept a :class:`Database`, :class`Tenant`, or :class:`Transaction` as a parameter and automatically commit. See :func:`@fdb.transactional <transactional>` for explanation and examples.
 
 .. method :: Transaction.commit()
 

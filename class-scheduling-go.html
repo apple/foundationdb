@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Class Scheduling in Go &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Class Scheduling in Go &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Managing Large Values and Blobs" href="largeval.html" />
     <link rel="prev" title="Class Scheduling in Java" href="class-scheduling-java.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="tutorials.html">Tutorials</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -180,18 +295,18 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="class-scheduling-in-go">
+  <section id="class-scheduling-in-go">
 <h1>Class Scheduling in Go</h1>
 <p>This tutorial provides a walkthrough of designing and building a simple application in Go using FoundationDB. In this tutorial, we use a few simple data modeling techniques. For a more in-depth discussion of data modeling in FoundationDB, see <a class="reference internal" href="data-modeling.html"><span class="doc">Data Modeling</span></a>.</p>
 <p>The concepts in this tutorial are applicable to all the <a class="reference internal" href="api-reference.html"><span class="doc">languages</span></a> supported by FoundationDB. If you prefer, you can see a version of this tutorial in <a class="reference internal" href="class-scheduling.html"><span class="doc">Python</span></a>, <a class="reference internal" href="class-scheduling-ruby.html"><span class="doc">Ruby</span></a>, or <a class="reference internal" href="class-scheduling-java.html"><span class="doc">Java</span></a>.</p>
-<div class="section" id="first-steps">
+<section id="first-steps">
 <span id="class-sched-go-first-steps"></span><h2>First steps</h2>
-<p>Let&#8217;s begin with &#8220;Hello world.&#8221;</p>
+<p>Let’s begin with “Hello world.”</p>
 <p>If you have not yet installed FoundationDB, see <a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a> or <a class="reference internal" href="getting-started-linux.html"><span class="doc">Getting Started on Linux</span></a>.</p>
-<p>We&#8217;ll start by importing the basic FoundationDB package, as well as the <code class="docutils literal"><span class="pre">log</span></code> and <code class="docutils literal"><span class="pre">format</span></code> packages:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="p">(</span><span class="w"></span>
+<p>We’ll start by importing the basic FoundationDB package, as well as the <code class="docutils literal notranslate"><span class="pre">log</span></code> and <code class="docutils literal notranslate"><span class="pre">format</span></code> packages:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="p">(</span><span class="w"></span>
 <span class="w">  </span><span class="s">&quot;github.com/apple/foundationdb/bindings/go/src/fdb&quot;</span><span class="w"></span>
 <span class="w">  </span><span class="s">&quot;log&quot;</span><span class="w"></span>
 <span class="w">  </span><span class="s">&quot;fmt&quot;</span><span class="w"></span>
@@ -199,15 +314,15 @@
 </pre></div>
 </div>
 <p>Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">710</span><span class="p">)</span><span class="w"></span>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">720</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a>.</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="nx">db</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustOpenDefault</span><span class="p">()</span><span class="w"></span>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="nx">db</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustOpenDefault</span><span class="p">()</span><span class="w"></span>
 </pre></div>
 </div>
-<p>We&#8217;re ready to use the database. First, let&#8217;s write a key-value pair.</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">e</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>We’re ready to use the database. First, let’s write a key-value pair.</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">e</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="nx">tr</span><span class="p">.</span><span class="nx">Set</span><span class="p">(</span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Key</span><span class="p">(</span><span class="s">&quot;hello&quot;</span><span class="p">),</span><span class="w"> </span><span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&quot;world&quot;</span><span class="p">))</span><span class="w"></span>
 <span class="w">    </span><span class="k">return</span><span class="w"></span>
 <span class="p">})</span><span class="w"></span>
@@ -217,7 +332,7 @@
 </pre></div>
 </div>
 <p>When this function returns without error, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We’ll see later how to do multiple operations in a single transaction. For now, let’s read back the data:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="nx">ret</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">e</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="nx">ret</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">e</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="nx">ret</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">tr</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Key</span><span class="p">(</span><span class="s">&quot;hello&quot;</span><span class="p">)).</span><span class="nx">MustGet</span><span class="p">()</span><span class="w"></span>
 <span class="w">    </span><span class="k">return</span><span class="w"></span>
 <span class="p">})</span><span class="w"></span>
@@ -229,8 +344,8 @@
 <span class="nx">fmt</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;hello, %s\n&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">string</span><span class="p">(</span><span class="nx">v</span><span class="p">))</span><span class="w"></span>
 </pre></div>
 </div>
-<p>If this is all working, it looks like we are ready to start building a real application. For reference, here&#8217;s the full code for &#8220;hello world&#8221;:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span><span class="w"></span>
+<p>If this is all working, it looks like we are ready to start building a real application. For reference, here’s the full code for “hello world”:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span><span class="w"></span>
 
 <span class="kn">import</span><span class="w"> </span><span class="p">(</span><span class="w"></span>
 <span class="w">    </span><span class="s">&quot;github.com/apple/foundationdb/bindings/go/src/fdb&quot;</span><span class="w"></span>
@@ -240,7 +355,7 @@
 
 <span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="c1">// Different API versions may expose different runtime behaviors.</span><span class="w"></span>
-<span class="w">    </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">710</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">720</span><span class="p">)</span><span class="w"></span>
 
 <span class="w">    </span><span class="c1">// Open the default database from the system cluster</span><span class="w"></span>
 <span class="w">    </span><span class="nx">db</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustOpenDefault</span><span class="p">()</span><span class="w"></span>
@@ -266,36 +381,36 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="class-scheduling-application">
+</section>
+<section id="class-scheduling-application">
 <h2>Class scheduling application</h2>
-<p>Let&#8217;s say we&#8217;ve been asked to build a class scheduling system for students and administrators. We&#8217;ll walk through the design and implementation of this application. Instead of typing everything in as you follow along, look at the <a class="reference internal" href="#class-sched-go-appendix"><span class="std std-ref">Appendix: classScheduling.go</span></a> for a finished version of the program. You may want to refer to this code as we walk through the tutorial.</p>
-<div class="section" id="requirements">
+<p>Let’s say we’ve been asked to build a class scheduling system for students and administrators. We’ll walk through the design and implementation of this application. Instead of typing everything in as you follow along, look at the <a class="reference internal" href="#class-sched-go-appendix"><span class="std std-ref">Appendix: classScheduling.go</span></a> for a finished version of the program. You may want to refer to this code as we walk through the tutorial.</p>
+<section id="requirements">
 <h3>Requirements</h3>
-<p>We&#8217;ll need to let users list available classes and track which students have signed up for which classes. Here&#8217;s a first cut at the functions we&#8217;ll need to implement:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">availableClasses</span><span class="p">()</span>       <span class="o">//</span> <span class="n">returns</span> <span class="nb">list</span> <span class="n">of</span> <span class="n">classes</span>
+<p>We’ll need to let users list available classes and track which students have signed up for which classes. Here’s a first cut at the functions we’ll need to implement:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">availableClasses</span><span class="p">()</span>       <span class="o">//</span> <span class="n">returns</span> <span class="nb">list</span> <span class="n">of</span> <span class="n">classes</span>
 <span class="n">signup</span><span class="p">(</span><span class="n">studentID</span><span class="p">,</span> <span class="n">class</span><span class="p">)</span> <span class="o">//</span> <span class="n">signs</span> <span class="n">up</span> <span class="n">a</span> <span class="n">student</span> <span class="k">for</span> <span class="n">a</span> <span class="k">class</span>
 <span class="nc">drop</span><span class="p">(</span><span class="n">studentID</span><span class="p">,</span> <span class="n">class</span><span class="p">)</span>   <span class="o">//</span> <span class="n">drops</span> <span class="n">a</span> <span class="n">student</span> <span class="kn">from</span> <span class="nn">a</span> <span class="k">class</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="data-model">
+</section>
+<section id="data-model">
 <span id="class-sched-go-data-model"></span><h3>Data model</h3>
-<p>First, we need to design a <a class="reference internal" href="data-modeling.html"><span class="doc">data model</span></a>. A data model is just a method for storing our application data using keys and values in FoundationDB. We seem to have two main types of data: (1) a list of classes and (2) a record of which students will attend which classes. Let&#8217;s keep attending data like this:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">//</span> <span class="p">(</span><span class="s2">&quot;attends&quot;</span><span class="p">,</span> <span class="n">student</span><span class="p">,</span> <span class="n">class</span><span class="p">)</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<p>First, we need to design a <a class="reference internal" href="data-modeling.html"><span class="doc">data model</span></a>. A data model is just a method for storing our application data using keys and values in FoundationDB. We seem to have two main types of data: (1) a list of classes and (2) a record of which students will attend which classes. Let’s keep attending data like this:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">//</span> <span class="p">(</span><span class="s2">&quot;attends&quot;</span><span class="p">,</span> <span class="n">student</span><span class="p">,</span> <span class="n">class</span><span class="p">)</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
 </pre></div>
 </div>
-<p>We&#8217;ll just store the key with a blank value to indicate that a student is signed up for a particular class. For this application, we&#8217;re going to think about a key-value pair&#8217;s key as a <a class="reference internal" href="data-modeling.html#data-modeling-tuples"><span class="std std-ref">tuple</span></a>. Encoding a tuple of data elements into a key is a very common pattern for an ordered key-value store.</p>
-<p>We&#8217;ll keep data about classes like this:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">//</span> <span class="p">(</span><span class="s2">&quot;class&quot;</span><span class="p">,</span> <span class="n">class_name</span><span class="p">)</span> <span class="o">=</span> <span class="n">seatsAvailable</span>
+<p>We’ll just store the key with a blank value to indicate that a student is signed up for a particular class. For this application, we’re going to think about a key-value pair’s key as a <a class="reference internal" href="data-modeling.html#data-modeling-tuples"><span class="std std-ref">tuple</span></a>. Encoding a tuple of data elements into a key is a very common pattern for an ordered key-value store.</p>
+<p>We’ll keep data about classes like this:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">//</span> <span class="p">(</span><span class="s2">&quot;class&quot;</span><span class="p">,</span> <span class="n">class_name</span><span class="p">)</span> <span class="o">=</span> <span class="n">seatsAvailable</span>
 </pre></div>
 </div>
-<p>Similarly, each such key will represent an available class. We&#8217;ll use <code class="docutils literal"><span class="pre">seatsAvailable</span></code> to record the number of seats available.</p>
-</div>
-<div class="section" id="directories-and-subspaces">
+<p>Similarly, each such key will represent an available class. We’ll use <code class="docutils literal notranslate"><span class="pre">seatsAvailable</span></code> to record the number of seats available.</p>
+</section>
+<section id="directories-and-subspaces">
 <h3>Directories and Subspaces</h3>
 <p>FoundationDB includes a few modules that make it easy to model data using this approach:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="p">(</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="p">(</span>
   <span class="s2">&quot;github.com/apple/foundationdb/bindings/go/src/fdb&quot;</span>
   <span class="s2">&quot;github.com/apple/foundationdb/bindings/go/src/fdb/directory&quot;</span>
   <span class="s2">&quot;github.com/apple/foundationdb/bindings/go/src/fdb/subspace&quot;</span>
@@ -303,24 +418,24 @@
 <span class="p">)</span>
 </pre></div>
 </div>
-<p>The <code class="xref py py-mod docutils literal"><span class="pre">directory</span></code> module lets us open a <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directory</span></a> in the database:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">schedulingDir</span><span class="p">,</span> <span class="n">err</span> <span class="o">:=</span> <span class="n">directory</span><span class="o">.</span><span class="n">CreateOrOpen</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">[]</span><span class="n">string</span><span class="p">{</span><span class="s2">&quot;scheduling&quot;</span><span class="p">},</span> <span class="n">nil</span><span class="p">)</span>
+<p>The <code class="xref py py-mod docutils literal notranslate"><span class="pre">directory</span></code> module lets us open a <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directory</span></a> in the database:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">schedulingDir</span><span class="p">,</span> <span class="n">err</span> <span class="o">:=</span> <span class="n">directory</span><span class="o">.</span><span class="n">CreateOrOpen</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">[]</span><span class="n">string</span><span class="p">{</span><span class="s2">&quot;scheduling&quot;</span><span class="p">},</span> <span class="n">nil</span><span class="p">)</span>
 <span class="k">if</span> <span class="n">err</span> <span class="o">!=</span> <span class="n">nil</span> <span class="p">{</span>
   <span class="n">log</span><span class="o">.</span><span class="n">Fatal</span><span class="p">(</span><span class="n">err</span><span class="p">)</span>
 <span class="p">}</span>
 </pre></div>
 </div>
-<p>The <code class="xref py py-func docutils literal"><span class="pre">CreateOrOpen()</span></code> function returns a <a class="reference internal" href="developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">subspace</span></a> where we&#8217;ll store our application data. Each subspace has a fixed prefix it uses when defining keys. The prefix corresponds to the first element of a tuple. We decided that we wanted <code class="docutils literal"><span class="pre">&quot;attends&quot;</span></code> and  <code class="docutils literal"><span class="pre">&quot;class&quot;</span></code> as our prefixes, so we&#8217;ll create new subspaces for them within the <code class="docutils literal"><span class="pre">scheduling</span></code> subspace.:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">courseSS</span> <span class="o">=</span> <span class="n">schedulingDir</span><span class="o">.</span><span class="n">Sub</span><span class="p">(</span><span class="s2">&quot;class&quot;</span><span class="p">)</span>
+<p>The <code class="xref py py-func docutils literal notranslate"><span class="pre">CreateOrOpen()</span></code> function returns a <a class="reference internal" href="developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">subspace</span></a> where we’ll store our application data. Each subspace has a fixed prefix it uses when defining keys. The prefix corresponds to the first element of a tuple. We decided that we wanted <code class="docutils literal notranslate"><span class="pre">&quot;attends&quot;</span></code> and  <code class="docutils literal notranslate"><span class="pre">&quot;class&quot;</span></code> as our prefixes, so we’ll create new subspaces for them within the <code class="docutils literal notranslate"><span class="pre">scheduling</span></code> subspace.:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">courseSS</span> <span class="o">=</span> <span class="n">schedulingDir</span><span class="o">.</span><span class="n">Sub</span><span class="p">(</span><span class="s2">&quot;class&quot;</span><span class="p">)</span>
 <span class="n">attendSS</span> <span class="o">=</span> <span class="n">schedulingDir</span><span class="o">.</span><span class="n">Sub</span><span class="p">(</span><span class="s2">&quot;attends&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>Subspaces have a <code class="xref py py-func docutils literal"><span class="pre">Pack()</span></code> function for defining keys. To store the records for our data model, we can use <code class="docutils literal"><span class="pre">attendSS.Pack(tuple.Tuple{studentID,</span> <span class="pre">class})</span></code> and <code class="docutils literal"><span class="pre">courseSS.Pack(tuple.Tuple{class})</span></code>.</p>
-</div>
-<div class="section" id="transactions">
+<p>Subspaces have a <code class="xref py py-func docutils literal notranslate"><span class="pre">Pack()</span></code> function for defining keys. To store the records for our data model, we can use <code class="docutils literal notranslate"><span class="pre">attendSS.Pack(tuple.Tuple{studentID,</span> <span class="pre">class})</span></code> and <code class="docutils literal notranslate"><span class="pre">courseSS.Pack(tuple.Tuple{class})</span></code>.</p>
+</section>
+<section id="transactions">
 <h3>Transactions</h3>
-<p>We&#8217;re going to rely on the powerful guarantees of transactions to help keep all of our modifications straight, so let&#8217;s look at how the FoundationDB Go API lets you write a transactional function. We use <code class="xref py py-func docutils literal"><span class="pre">Transact()</span></code> to execute a code block transactionally. For example, to <code class="docutils literal"><span class="pre">signup</span></code> a <code class="docutils literal"><span class="pre">studentID</span></code> for a <code class="docutils literal"><span class="pre">class</span></code>, we might use:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>We’re going to rely on the powerful guarantees of transactions to help keep all of our modifications straight, so let’s look at how the FoundationDB Go API lets you write a transactional function. We use <code class="xref py py-func docutils literal notranslate"><span class="pre">Transact()</span></code> to execute a code block transactionally. For example, to <code class="docutils literal notranslate"><span class="pre">signup</span></code> a <code class="docutils literal notranslate"><span class="pre">studentID</span></code> for a <code class="docutils literal notranslate"><span class="pre">class</span></code>, we might use:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="nx">tr</span><span class="p">.</span><span class="nx">Set</span><span class="p">(</span><span class="nx">attendSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="p">}),</span><span class="w"> </span><span class="p">[]</span><span class="kt">byte</span><span class="p">{})</span><span class="w"></span>
 <span class="w">    </span><span class="k">return</span><span class="w"></span>
@@ -329,10 +444,10 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>A function using this approach takes a parameter of type <code class="docutils literal"><span class="pre">Transactor</span></code>. When <em>calling</em> such a function, you can pass an argument of type <code class="docutils literal"><span class="pre">Database</span></code> or <code class="docutils literal"><span class="pre">Transaction</span></code>. The function to be executed transactionally is parameterized by the <code class="docutils literal"><span class="pre">Transaction</span></code> it will use to do reads and writes.</p>
-<p>When using a <code class="docutils literal"><span class="pre">Database</span></code>, <code class="xref py py-func docutils literal"><span class="pre">Transact()</span></code> <em>automatically creates a transaction and implements a retry loop</em> to ensure that the transaction eventually commits. If you instead pass a <code class="docutils literal"><span class="pre">Transaction</span></code>, that transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits functions using this pattern to be composed into larger transactions.</p>
-<p>Without the <code class="xref py py-func docutils literal"><span class="pre">Transact()</span></code> method, signup would look something like:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">db</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Database</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>A function using this approach takes a parameter of type <code class="docutils literal notranslate"><span class="pre">Transactor</span></code>. When <em>calling</em> such a function, you can pass an argument of type <code class="docutils literal notranslate"><span class="pre">Database</span></code> or <code class="docutils literal notranslate"><span class="pre">Transaction</span></code>. The function to be executed transactionally is parameterized by the <code class="docutils literal notranslate"><span class="pre">Transaction</span></code> it will use to do reads and writes.</p>
+<p>When using a <code class="docutils literal notranslate"><span class="pre">Database</span></code>, <code class="xref py py-func docutils literal notranslate"><span class="pre">Transact()</span></code> <em>automatically creates a transaction and implements a retry loop</em> to ensure that the transaction eventually commits. If you instead pass a <code class="docutils literal notranslate"><span class="pre">Transaction</span></code>, that transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits functions using this pattern to be composed into larger transactions.</p>
+<p>Without the <code class="xref py py-func docutils literal notranslate"><span class="pre">Transact()</span></code> method, signup would look something like:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">db</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Database</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">tr</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">d</span><span class="p">.</span><span class="nx">CreateTransaction</span><span class="p">()</span><span class="w"></span>
 <span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="k">return</span><span class="w"></span>
@@ -374,17 +489,17 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>Furthermore, this version can only be called with a <code class="docutils literal"><span class="pre">Database</span></code>, making it impossible to compose larger transactional functions by calling one from another.</p>
-<p>Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the <code class="docutils literal"><span class="pre">SetRetryLimit</span></code> or <code class="docutils literal"><span class="pre">SetTimeout</span></code> transaction options or at the database level with the <code class="docutils literal"><span class="pre">SetTransactionRetryLimit</span></code> or <code class="docutils literal"><span class="pre">SetTransactionTimeout</span></code> database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">Options</span><span class="p">()</span><span class="o">.</span><span class="n">SetTransactionTimeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span>  <span class="o">//</span> <span class="mi">60</span><span class="p">,</span><span class="mi">000</span> <span class="n">ms</span> <span class="o">=</span> <span class="mi">1</span> <span class="n">minute</span>
+<p>Furthermore, this version can only be called with a <code class="docutils literal notranslate"><span class="pre">Database</span></code>, making it impossible to compose larger transactional functions by calling one from another.</p>
+<p>Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the <code class="docutils literal notranslate"><span class="pre">SetRetryLimit</span></code> or <code class="docutils literal notranslate"><span class="pre">SetTimeout</span></code> transaction options or at the database level with the <code class="docutils literal notranslate"><span class="pre">SetTransactionRetryLimit</span></code> or <code class="docutils literal notranslate"><span class="pre">SetTransactionTimeout</span></code> database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">Options</span><span class="p">()</span><span class="o">.</span><span class="n">SetTransactionTimeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span>  <span class="o">//</span> <span class="mi">60</span><span class="p">,</span><span class="mi">000</span> <span class="n">ms</span> <span class="o">=</span> <span class="mi">1</span> <span class="n">minute</span>
 <span class="n">db</span><span class="o">.</span><span class="n">Options</span><span class="p">()</span><span class="o">.</span><span class="n">SetTransactionRetryLimit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="making-some-sample-classes">
+</section>
+<section id="making-some-sample-classes">
 <h3>Making some sample classes</h3>
-<p>Let&#8217;s make some sample classes and put them in the <code class="docutils literal"><span class="pre">classNames</span></code> variable. We&#8217;ll make individual classes from combinations of class types, levels, and times:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">var</span><span class="w"> </span><span class="nx">levels</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&quot;intro&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;for dummies&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;remedial&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;101&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;201&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;301&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;mastery&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;lab&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;seminar&quot;</span><span class="p">}</span><span class="w"></span>
+<p>Let’s make some sample classes and put them in the <code class="docutils literal notranslate"><span class="pre">classNames</span></code> variable. We’ll make individual classes from combinations of class types, levels, and times:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">var</span><span class="w"> </span><span class="nx">levels</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&quot;intro&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;for dummies&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;remedial&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;101&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;201&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;301&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;mastery&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;lab&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;seminar&quot;</span><span class="p">}</span><span class="w"></span>
 <span class="kd">var</span><span class="w"> </span><span class="nx">types</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&quot;chem&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;bio&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;cs&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;geometry&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;calc&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;alg&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;film&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;music&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;art&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;dance&quot;</span><span class="p">}</span><span class="w"></span>
 <span class="kd">var</span><span class="w"> </span><span class="nx">times</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&quot;2:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;3:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;4:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;5:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;6:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;7:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;8:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;9:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;10:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;11:00&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">                     </span><span class="s">&quot;12:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;13:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;14:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;15:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;16:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;17:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;18:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;19:00&quot;</span><span class="p">}</span><span class="w"></span>
@@ -400,11 +515,11 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="initializing-the-database">
+</section>
+<section id="initializing-the-database">
 <h3>Initializing the database</h3>
 <p>Next, we initialize the database with our class list:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">db</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">tr</span><span class="p">.</span><span class="nx">ClearRange</span><span class="p">(</span><span class="nx">schedulingDir</span><span class="p">)</span><span class="w"></span>
 
 <span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">classes</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
@@ -416,11 +531,11 @@
 </pre></div>
 </div>
 <p>After this code is run, the database will contain all of the sample classes we created above.</p>
-</div>
-<div class="section" id="listing-available-classes">
+</section>
+<section id="listing-available-classes">
 <h3>Listing available classes</h3>
-<p>Before students can do anything else, they need to be able to retrieve a list of available classes from the database. Because FoundationDB sorts its data by key and therefore has efficient range-read capability, we can retrieve all of the classes in a single database call. We find this range of keys with <code class="xref py py-func docutils literal"><span class="pre">GetRange()</span></code>:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">availableClasses</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ac</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>Before students can do anything else, they need to be able to retrieve a list of available classes from the database. Because FoundationDB sorts its data by key and therefore has efficient range-read capability, we can retrieve all of the classes in a single database call. We find this range of keys with <code class="xref py py-func docutils literal notranslate"><span class="pre">GetRange()</span></code>:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">availableClasses</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ac</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">r</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">ReadTransact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">rtr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">ReadTransaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nx">classes</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="w"></span>
 <span class="w">    </span><span class="nx">ri</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">rtr</span><span class="p">.</span><span class="nx">GetRange</span><span class="p">(</span><span class="nx">courseSS</span><span class="p">,</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">RangeOptions</span><span class="p">{}).</span><span class="nx">Iterator</span><span class="p">()</span><span class="w"></span>
@@ -441,12 +556,12 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>The <code class="xref py py-func docutils literal"><span class="pre">GetRange()</span></code> function returns the key-values specified by its range. In this case, we use the subspace <code class="docutils literal"><span class="pre">courseSS</span></code> to get all the classes.</p>
-</div>
-<div class="section" id="signing-up-for-a-class">
+<p>The <code class="xref py py-func docutils literal notranslate"><span class="pre">GetRange()</span></code> function returns the key-values specified by its range. In this case, we use the subspace <code class="docutils literal notranslate"><span class="pre">courseSS</span></code> to get all the classes.</p>
+</section>
+<section id="signing-up-for-a-class">
 <h3>Signing up for a class</h3>
-<p>We finally get to the crucial function (which we saw before when looking at <code class="xref py py-func docutils literal"><span class="pre">Transact()</span></code>). A student has decided on a class (by name) and wants to sign up. The <code class="docutils literal"><span class="pre">signup</span></code> function will take a <code class="docutils literal"><span class="pre">studentID</span></code> and a <code class="docutils literal"><span class="pre">class</span></code>:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>We finally get to the crucial function (which we saw before when looking at <code class="xref py py-func docutils literal notranslate"><span class="pre">Transact()</span></code>). A student has decided on a class (by name) and wants to sign up. The <code class="docutils literal notranslate"><span class="pre">signup</span></code> function will take a <code class="docutils literal notranslate"><span class="pre">studentID</span></code> and a <code class="docutils literal notranslate"><span class="pre">class</span></code>:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">SCKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">attendSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 
 <span class="w">  </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
@@ -458,11 +573,11 @@
 </pre></div>
 </div>
 <p>We simply insert the appropriate record (with a blank value).</p>
-</div>
-<div class="section" id="dropping-a-class">
+</section>
+<section id="dropping-a-class">
 <h3>Dropping a class</h3>
 <p>Dropping a class is similar to signing up:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">drop</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">drop</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">SCKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">attendSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 
 <span class="w">  </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
@@ -473,16 +588,16 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>Of course, to actually drop the student from the class, we need to be able to delete a record from the database.  We do this with the <code class="xref py py-func docutils literal"><span class="pre">Clear()</span></code> function.</p>
-</div>
-<div class="section" id="done">
+<p>Of course, to actually drop the student from the class, we need to be able to delete a record from the database.  We do this with the <code class="xref py py-func docutils literal notranslate"><span class="pre">Clear()</span></code> function.</p>
+</section>
+<section id="done">
 <h3>Done?</h3>
-<p>We report back to the project leader that our application is done&#8212;students can sign up for, drop, and list classes. Unfortunately, we learn that a new problem has been discovered: popular classes are being over-subscribed. Our application now needs to enforce the class size constraint as students add and drop classes.</p>
-</div>
-<div class="section" id="seats-are-limited">
+<p>We report back to the project leader that our application is done—students can sign up for, drop, and list classes. Unfortunately, we learn that a new problem has been discovered: popular classes are being over-subscribed. Our application now needs to enforce the class size constraint as students add and drop classes.</p>
+</section>
+<section id="seats-are-limited">
 <h3>Seats are limited!</h3>
-<p>Let&#8217;s go back to the data model. Remember that we stored the number of seats in the class in the value of the key-value entry in the class list. Let&#8217;s refine that a bit to track the <em>remaining</em> number of seats in the class. The initialization can work the same way (in our example, all classes initially have 100 seats), but the <code class="docutils literal"><span class="pre">availableClasses</span></code>, <code class="docutils literal"><span class="pre">signup</span></code>, and <code class="docutils literal"><span class="pre">drop</span></code> functions are going to have to change. Let&#8217;s start with <code class="docutils literal"><span class="pre">availableClasses</span></code>:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">availableClasses</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ac</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>Let’s go back to the data model. Remember that we stored the number of seats in the class in the value of the key-value entry in the class list. Let’s refine that a bit to track the <em>remaining</em> number of seats in the class. The initialization can work the same way (in our example, all classes initially have 100 seats), but the <code class="docutils literal notranslate"><span class="pre">availableClasses</span></code>, <code class="docutils literal notranslate"><span class="pre">signup</span></code>, and <code class="docutils literal notranslate"><span class="pre">drop</span></code> functions are going to have to change. Let’s start with <code class="docutils literal notranslate"><span class="pre">availableClasses</span></code>:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">availableClasses</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ac</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">r</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">ReadTransact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">rtr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">ReadTransaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nx">classes</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="w"></span>
 <span class="w">    </span><span class="nx">ri</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">rtr</span><span class="p">.</span><span class="nx">GetRange</span><span class="p">(</span><span class="nx">courseSS</span><span class="p">,</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">RangeOptions</span><span class="p">{}).</span><span class="nx">Iterator</span><span class="p">()</span><span class="w"></span>
@@ -509,8 +624,8 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>This is easy &#8211; we simply add a condition to check that the value is non-zero. Let&#8217;s check out <code class="docutils literal"><span class="pre">signup</span></code> next:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>This is easy – we simply add a condition to check that the value is non-zero. Let’s check out <code class="docutils literal notranslate"><span class="pre">signup</span></code> next:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">SCKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">attendSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 <span class="w">  </span><span class="nx">classKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">courseSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 
@@ -537,22 +652,22 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>We now have to check that we aren&#8217;t already signed up, since we don&#8217;t want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don&#8217;t push the counter into the negative. If there is a seat remaining, we decrement the counter.</p>
-</div>
-<div class="section" id="concurrency-and-consistency">
+<p>We now have to check that we aren’t already signed up, since we don’t want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don’t push the counter into the negative. If there is a seat remaining, we decrement the counter.</p>
+</section>
+<section id="concurrency-and-consistency">
 <h3>Concurrency and consistency</h3>
-<p>The <code class="docutils literal"><span class="pre">signup</span></code> function is starting to get a bit complex; it now reads and writes a few different key-value pairs in the database. One of the tricky issues in this situation is what happens as multiple clients/students read and modify the database at the same time. Couldn&#8217;t two students both see one remaining seat and sign up at the same time?</p>
-<p>These are tricky issues without simple answers&#8212;unless you have transactions! Because these functions are defined as FoundationDB transactions, we can have a simple answer: Each transactional function behaves as if it is the only one modifying the database. There is no way for a transaction to &#8216;see&#8217; another transaction change the database, and each transaction ensures that either all of its modifications occur or none of them do.</p>
-<p>Looking deeper, it is, of course, possible for two transactions to conflict. For example, if two people both see a class with one seat and sign up at the same time, FoundationDB must allow only one to succeed. This causes one of the transactions to fail to commit (which can also be caused by network outages, crashes, etc.). To ensure correct operation, applications need to handle this situation, usually via retrying the transaction. In this case, the conflicting transaction will be retried automatically by the <code class="xref py py-func docutils literal"><span class="pre">Transact()</span></code> function and will eventually lead to the correct result, a &#8216;No remaining seats&#8217; error.</p>
-</div>
-<div class="section" id="idempotence">
+<p>The <code class="docutils literal notranslate"><span class="pre">signup</span></code> function is starting to get a bit complex; it now reads and writes a few different key-value pairs in the database. One of the tricky issues in this situation is what happens as multiple clients/students read and modify the database at the same time. Couldn’t two students both see one remaining seat and sign up at the same time?</p>
+<p>These are tricky issues without simple answers—unless you have transactions! Because these functions are defined as FoundationDB transactions, we can have a simple answer: Each transactional function behaves as if it is the only one modifying the database. There is no way for a transaction to ‘see’ another transaction change the database, and each transaction ensures that either all of its modifications occur or none of them do.</p>
+<p>Looking deeper, it is, of course, possible for two transactions to conflict. For example, if two people both see a class with one seat and sign up at the same time, FoundationDB must allow only one to succeed. This causes one of the transactions to fail to commit (which can also be caused by network outages, crashes, etc.). To ensure correct operation, applications need to handle this situation, usually via retrying the transaction. In this case, the conflicting transaction will be retried automatically by the <code class="xref py py-func docutils literal notranslate"><span class="pre">Transact()</span></code> function and will eventually lead to the correct result, a ‘No remaining seats’ error.</p>
+</section>
+<section id="idempotence">
 <h3>Idempotence</h3>
 <p>Occasionally, a transaction might be retried even after it succeeds (for example, if the client loses contact with the cluster at just the wrong moment). This can cause problems if transactions are not written to be idempotent, i.e. to have the same effect if committed twice as if committed once. There are generic design patterns for <a class="reference internal" href="developer-guide.html#developer-guide-unknown-results"><span class="std std-ref">making any transaction idempotent</span></a>, but many transactions are naturally idempotent. For example, all of the transactions in this tutorial are idempotent.</p>
-</div>
-<div class="section" id="dropping-with-limited-seats">
+</section>
+<section id="dropping-with-limited-seats">
 <h3>Dropping with limited seats</h3>
-<p>Let&#8217;s finish up the limited seats feature by modifying the drop function:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">drop</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>Let’s finish up the limited seats feature by modifying the drop function:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">drop</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">SCKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">attendSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 <span class="w">  </span><span class="nx">classKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">courseSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 
@@ -575,12 +690,12 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>This case is easier than signup because there are no constraints we can hit. We just need to make sure the student is in the class and to &#8220;give back&#8221; one seat when the student drops.</p>
-</div>
-<div class="section" id="more-features">
+<p>This case is easier than signup because there are no constraints we can hit. We just need to make sure the student is in the class and to “give back” one seat when the student drops.</p>
+</section>
+<section id="more-features">
 <h3>More features?!</h3>
-<p>Of course, as soon as our new version of the system goes live, we hear of a trick that certain students are using. They are signing up for all classes immediately, and only later dropping those that they don&#8217;t want to take. This has led to an unusable system, and we have been asked to fix it. We decide to limit students to five classes:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>Of course, as soon as our new version of the system goes live, we hear of a trick that certain students are using. They are signing up for all classes immediately, and only later dropping those that they don’t want to take. This has led to an unusable system, and we have been asked to fix it. We decide to limit students to five classes:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">signup</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">SCKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">attendSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 <span class="w">  </span><span class="nx">classKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">courseSS</span><span class="p">.</span><span class="nx">Pack</span><span class="p">(</span><span class="nx">tuple</span><span class="p">.</span><span class="nx">Tuple</span><span class="p">{</span><span class="nx">class</span><span class="p">})</span><span class="w"></span>
 
@@ -614,12 +729,12 @@
 </pre></div>
 </div>
 <p>Fortunately, we decided on a data model that keeps all of the attending records for a single student together. With this approach, we can use a single range read to retrieve all the classes that a student attends. We simply return an error if the number of classes has reached the limit of five.</p>
-</div>
-<div class="section" id="composing-transactions">
+</section>
+<section id="composing-transactions">
 <h3>Composing transactions</h3>
-<p>Oh, just one last feature, we&#8217;re told. We have students that are trying to switch from one popular class to another. By the time they drop one class to free up a slot for themselves, the open slot in the other class is gone. By the time they see this and try to re-add their old class, that slot is gone too! So, can we make it so that a student can switch from one class to another without this worry?</p>
-<p>Fortunately, we have FoundationDB, and this sounds an awful lot like the transactional property of atomicity&#8212;the all-or-nothing behavior that we already rely on. All we need to do is to <em>compose</em> the <code class="docutils literal"><span class="pre">drop</span></code> and <code class="docutils literal"><span class="pre">signup</span></code> functions into a new <code class="docutils literal"><span class="pre">swap</span></code> function. This makes the <code class="docutils literal"><span class="pre">swap</span></code> function exceptionally easy:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">swap</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">oldClass</span><span class="p">,</span><span class="w"> </span><span class="nx">newClass</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>Oh, just one last feature, we’re told. We have students that are trying to switch from one popular class to another. By the time they drop one class to free up a slot for themselves, the open slot in the other class is gone. By the time they see this and try to re-add their old class, that slot is gone too! So, can we make it so that a student can switch from one class to another without this worry?</p>
+<p>Fortunately, we have FoundationDB, and this sounds an awful lot like the transactional property of atomicity—the all-or-nothing behavior that we already rely on. All we need to do is to <em>compose</em> the <code class="docutils literal notranslate"><span class="pre">drop</span></code> and <code class="docutils literal notranslate"><span class="pre">signup</span></code> functions into a new <code class="docutils literal notranslate"><span class="pre">swap</span></code> function. This makes the <code class="docutils literal notranslate"><span class="pre">swap</span></code> function exceptionally easy:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kd">func</span><span class="w"> </span><span class="nx">swap</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transactor</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">oldClass</span><span class="p">,</span><span class="w"> </span><span class="nx">newClass</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">t</span><span class="p">.</span><span class="nx">Transact</span><span class="p">(</span><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tr</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">Transaction</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ret</span><span class="w"> </span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">drop</span><span class="p">(</span><span class="nx">tr</span><span class="p">,</span><span class="w"> </span><span class="nx">studentID</span><span class="p">,</span><span class="w"> </span><span class="nx">oldClass</span><span class="p">)</span><span class="w"></span>
 <span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
@@ -633,30 +748,30 @@
 </pre></div>
 </div>
 <p>The simplicity of this implementation belies the sophistication of what FoundationDB is taking care of for us.</p>
-<p>By dropping the old class and signing up for the new one inside a single transaction, we ensure that either both steps happen, or that neither happens. The first notable thing about the <code class="docutils literal"><span class="pre">swap</span></code> function is that it is transactional, but it also calls the transactional functions <code class="docutils literal"><span class="pre">signup</span></code> and <code class="docutils literal"><span class="pre">drop</span></code>. Because these transactional functions can accept either a <code class="docutils literal"><span class="pre">Database</span></code> or an existing <code class="docutils literal"><span class="pre">Transaction</span></code> as their <code class="docutils literal"><span class="pre">db</span></code> parameter, the <code class="docutils literal"><span class="pre">switchClass</span></code> function can be called with a database by a simple client, and a new transaction will be automatically created. However, once this transaction is created and passed in as <code class="docutils literal"><span class="pre">tr</span></code>, the calls to <code class="docutils literal"><span class="pre">drop</span></code> and <code class="docutils literal"><span class="pre">signup</span></code> both share the same <code class="docutils literal"><span class="pre">tr</span></code>. This ensures that they see each other&#8217;s modifications to the database, and all of the changes that both of them make in sequence are made transactionally when the <code class="docutils literal"><span class="pre">switchClass</span></code> function returns. This compositional capability is very powerful.</p>
-<p>Also note that, if an exception is raised, for example, in <code class="docutils literal"><span class="pre">signup</span></code>, the exception is not caught by <code class="docutils literal"><span class="pre">swap</span></code> and so will be thrown to the calling function. In this case, the transaction object (owned by the <code class="xref py py-func docutils literal"><span class="pre">Transact()</span></code> function) is destroyed, automatically rolling back all database modifications, leaving the database completely unchanged by the half-executed function.</p>
-</div>
-<div class="section" id="are-we-done">
+<p>By dropping the old class and signing up for the new one inside a single transaction, we ensure that either both steps happen, or that neither happens. The first notable thing about the <code class="docutils literal notranslate"><span class="pre">swap</span></code> function is that it is transactional, but it also calls the transactional functions <code class="docutils literal notranslate"><span class="pre">signup</span></code> and <code class="docutils literal notranslate"><span class="pre">drop</span></code>. Because these transactional functions can accept either a <code class="docutils literal notranslate"><span class="pre">Database</span></code> or an existing <code class="docutils literal notranslate"><span class="pre">Transaction</span></code> as their <code class="docutils literal notranslate"><span class="pre">db</span></code> parameter, the <code class="docutils literal notranslate"><span class="pre">switchClass</span></code> function can be called with a database by a simple client, and a new transaction will be automatically created. However, once this transaction is created and passed in as <code class="docutils literal notranslate"><span class="pre">tr</span></code>, the calls to <code class="docutils literal notranslate"><span class="pre">drop</span></code> and <code class="docutils literal notranslate"><span class="pre">signup</span></code> both share the same <code class="docutils literal notranslate"><span class="pre">tr</span></code>. This ensures that they see each other’s modifications to the database, and all of the changes that both of them make in sequence are made transactionally when the <code class="docutils literal notranslate"><span class="pre">switchClass</span></code> function returns. This compositional capability is very powerful.</p>
+<p>Also note that, if an exception is raised, for example, in <code class="docutils literal notranslate"><span class="pre">signup</span></code>, the exception is not caught by <code class="docutils literal notranslate"><span class="pre">swap</span></code> and so will be thrown to the calling function. In this case, the transaction object (owned by the <code class="xref py py-func docutils literal notranslate"><span class="pre">Transact()</span></code> function) is destroyed, automatically rolling back all database modifications, leaving the database completely unchanged by the half-executed function.</p>
+</section>
+<section id="are-we-done">
 <h3>Are we done?</h3>
 <p>Yep, we’re done and ready to deploy. If you want to see this entire application in one place plus some multithreaded testing code to simulate concurrency, look at the <a class="reference internal" href="#class-sched-go-appendix"><span class="std std-ref">Appendix: classScheduling.go</span></a>, below.</p>
-</div>
-<div class="section" id="deploying-and-scaling">
+</section>
+<section id="deploying-and-scaling">
 <h3>Deploying and scaling</h3>
 <p>Since we store all state for this application in FoundationDB, deploying and scaling this solution up is impressively painless. Just run a web server, the UI, this back end, and point the whole thing at FoundationDB. We can run as many computers with this setup as we want, and they can all hit the database at the same time because of the transactional integrity of FoundationDB. Also, since all of the state in the system is stored in the database, any of these computers can fail without any lasting consequences.</p>
-</div>
-</div>
-<div class="section" id="next-steps">
+</section>
+</section>
+<section id="next-steps">
 <h2>Next steps</h2>
 <ul class="simple">
-<li>See <a class="reference internal" href="data-modeling.html"><span class="doc">Data Modeling</span></a> for guidance on using tuple and subspaces to enable effective storage and retrieval of data.</li>
-<li>See <a class="reference internal" href="developer-guide.html"><span class="doc">Developer Guide</span></a> for general guidance on development using FoundationDB.</li>
-<li>See the <a class="reference internal" href="api-reference.html"><span class="doc">API References</span></a> for detailed API documentation.</li>
+<li><p>See <a class="reference internal" href="data-modeling.html"><span class="doc">Data Modeling</span></a> for guidance on using tuple and subspaces to enable effective storage and retrieval of data.</p></li>
+<li><p>See <a class="reference internal" href="developer-guide.html"><span class="doc">Developer Guide</span></a> for general guidance on development using FoundationDB.</p></li>
+<li><p>See the <a class="reference internal" href="api-reference.html"><span class="doc">API References</span></a> for detailed API documentation.</p></li>
 </ul>
-</div>
-<div class="section" id="appendix-classscheduling-go">
+</section>
+<section id="appendix-classscheduling-go">
 <span id="class-sched-go-appendix"></span><h2>Appendix: classScheduling.go</h2>
-<p>Here&#8217;s the code for the scheduling tutorial:</p>
-<div class="highlight-go"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span><span class="w"></span>
+<p>Here’s the code for the scheduling tutorial:</p>
+<div class="highlight-go notranslate"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nx">main</span><span class="w"></span>
 
 <span class="kn">import</span><span class="w"> </span><span class="p">(</span><span class="w"></span>
 <span class="w">  </span><span class="s">&quot;github.com/apple/foundationdb/bindings/go/src/fdb&quot;</span><span class="w"></span>
@@ -770,7 +885,7 @@
 <span class="p">}</span><span class="w"></span>
 
 <span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">  </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">710</span><span class="p">)</span><span class="w"></span>
+<span class="w">  </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustAPIVersion</span><span class="p">(</span><span class="mi">720</span><span class="p">)</span><span class="w"></span>
 <span class="w">  </span><span class="nx">db</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">fdb</span><span class="p">.</span><span class="nx">MustOpenDefault</span><span class="p">()</span><span class="w"></span>
 <span class="w">  </span><span class="nx">db</span><span class="p">.</span><span class="nx">Options</span><span class="p">().</span><span class="nx">SetTransactionTimeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span><span class="w">  </span><span class="c1">// 60,000 ms = 1 minute</span><span class="w"></span>
 <span class="w">  </span><span class="nx">db</span><span class="p">.</span><span class="nx">Options</span><span class="p">().</span><span class="nx">SetTransactionRetryLimit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span><span class="w"></span>
@@ -889,8 +1004,8 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -912,7 +1027,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

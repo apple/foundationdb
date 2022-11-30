@@ -131,6 +131,9 @@ min_free_space_ratio                Running out of space (approaching 5% limit).
 log_server_min_free_space           Log server running out of space (approaching 100MB limit).
 log_server_min_free_space_ratio     Log server running out of space (approaching 5% limit).
 storage_server_durability_lag       Storage server durable version falling behind.
+storage_server_list_fetch_failed    Unable to fetch storage server list.
+blob_worker_lag                     Blob worker granule version falling behind.
+blob_worker_missing                 No blob workers are reporting metrics.
 =================================== ====================================================
 
 The JSON path ``cluster.qos.throttled_tags``, when it exists, is an Object containing ``"auto"`` , ``"manual"`` and ``"recommended"``.  The possible fields for those object are in the following table:

@@ -1,45 +1,31 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Transport Layer Security &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Transport Layer Security &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Monitored Metrics" href="monitored-metrics.html" />
+    <link rel="next" title="Authorization" href="authorization.html" />
     <link rel="prev" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="administration.html">Administration</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -134,7 +249,7 @@
     </a>
   </li>
   <li>
-    <a href="monitored-metrics.html" title="Next Chapter: Monitored Metrics"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Monitored Metrics &raquo;</span>
+    <a href="authorization.html" title="Next Chapter: Authorization"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Authorization &raquo;</span>
     </a>
   </li>
               
@@ -206,47 +321,47 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="transport-layer-security">
+  <section id="transport-layer-security">
 <h1>Transport Layer Security</h1>
-<div class="section" id="introduction">
+<section id="introduction">
 <h2>Introduction</h2>
 <p>Transport Layer Security (TLS) and its predecessor, Secure Sockets Layer (SSL), are protocols designed to provide communication security over public networks. Users exchange a symmetric session key that is used to encrypt data exchanged between the parties.</p>
-<p>By default, a FoundationDB cluster uses <em>unencrypted</em> connections among client and server processes. This document describes the <a class="reference external" href="http://en.wikipedia.org/wiki/Transport_Layer_Security">Transport Layer Security</a> (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on <a class="reference external" href="https://www.libressl.org/">LibreSSL</a>. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster&#8217;s machines must all enable TLS in order for TLS to be used.</p>
-</div>
-<div class="section" id="setting-up-foundationdb-to-use-tls">
+<p>By default, a FoundationDB cluster uses <em>unencrypted</em> connections among client and server processes. This document describes the <a class="reference external" href="http://en.wikipedia.org/wiki/Transport_Layer_Security">Transport Layer Security</a> (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on <a class="reference external" href="https://www.libressl.org/">LibreSSL</a>. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster’s machines must all enable TLS in order for TLS to be used.</p>
+</section>
+<section id="setting-up-foundationdb-to-use-tls">
 <h2>Setting Up FoundationDB to use TLS</h2>
-<div class="section" id="enabling-tls-in-a-new-cluster">
+<section id="enabling-tls-in-a-new-cluster">
 <span id="enable-tls"></span><h3>Enabling TLS in a new cluster</h3>
-<p>To set a new cluster to use TLS, use the <code class="docutils literal"><span class="pre">-t</span></code> flag on <code class="docutils literal"><span class="pre">make_public.py</span></code>:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make_public.py -t
+<p>To set a new cluster to use TLS, use the <code class="docutils literal notranslate"><span class="pre">-t</span></code> flag on <code class="docutils literal notranslate"><span class="pre">make_public.py</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make_public.py -t
 /etc/foundationdb/fdb.cluster is now using address 10.0.1.1 (TLS enabled)
 </pre></div>
 </div>
 <p>This will configure the new cluster to communicate with TLS.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">Depending on your operating system, version and configuration, there may be a firewall in place that prevents external access to certain ports. If necessary, please consult the appropriate documentation for your OS and ensure that all machines in your cluster can reach the ports configured in your <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a>.</p>
+<p class="admonition-title">Note</p>
+<p>Depending on your operating system, version and configuration, there may be a firewall in place that prevents external access to certain ports. If necessary, please consult the appropriate documentation for your OS and ensure that all machines in your cluster can reach the ports configured in your <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a>.</p>
 </div>
-</div>
-</div>
-<div class="section" id="converting-an-existing-cluster-to-use-tls-since-v6-1">
+</section>
+</section>
+<section id="converting-an-existing-cluster-to-use-tls-since-v6-1">
 <span id="converting-existing-cluster-after-6-1"></span><h2>Converting an existing cluster to use TLS (since v6.1)</h2>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">Release 6.2 removed the &#8220;connected_coordinators&#8221; field from status.</p>
+<p class="admonition-title">Warning</p>
+<p>Release 6.2 removed the “connected_coordinators” field from status.</p>
 </div>
 <p>Since version 6.1, FoundationDB clusters can be converted to TLS without downtime. FoundationDB server can listen to TLS and unencrypted traffic simultaneously on two separate ports. As a result, FDB clusters can live migrate to TLS:</p>
 <ol class="arabic">
-<li><p class="first">Restart each FoundationDB server individually, but with an additional listen address for TLS traffic:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fdbserver</span> <span class="o">-</span><span class="n">C</span> <span class="n">fdb</span><span class="o">.</span><span class="n">cluster</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4600</span><span class="p">:</span><span class="n">tls</span>
+<li><p>Restart each FoundationDB server individually, but with an additional listen address for TLS traffic:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fdbserver</span> <span class="o">-</span><span class="n">C</span> <span class="n">fdb</span><span class="o">.</span><span class="n">cluster</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4600</span><span class="p">:</span><span class="n">tls</span>
 </pre></div>
 </div>
 <p>Since, the server still listens to unencrypted traffic and the cluster file still contains the old address, rest of the processes will be able to talk to this new process.</p>
 </li>
-<li><p class="first">Once all processes are listening to both TLS and unencrypted traffic, switch one or more coordinator to use TLS. Therefore, if the old coordinator list was <code class="docutils literal"><span class="pre">127.0.0.1:4500,127.0.0.1:4501,127.0.0.1:4502</span></code>, the new one would be something like <code class="docutils literal"><span class="pre">127.0.0.1:4600:tls,127.0.0.1:4501,127.0.0.1:4502</span></code>. Switching few coordinators to TLS at a time allows a smoother migration and a window to find out clients who do not yet have TLS configured. The number of coordinators each client can connect to can be seen via  <code class="docutils literal"><span class="pre">fdbstatus</span></code> (look for <code class="docutils literal"><span class="pre">connected_coordinators</span></code> field in <code class="docutils literal"><span class="pre">clients</span></code>):</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="s2">&quot;clients&quot;</span> <span class="p">:</span> <span class="p">{</span>
+<li><p>Once all processes are listening to both TLS and unencrypted traffic, switch one or more coordinator to use TLS. Therefore, if the old coordinator list was <code class="docutils literal notranslate"><span class="pre">127.0.0.1:4500,127.0.0.1:4501,127.0.0.1:4502</span></code>, the new one would be something like <code class="docutils literal notranslate"><span class="pre">127.0.0.1:4600:tls,127.0.0.1:4501,127.0.0.1:4502</span></code>. Switching few coordinators to TLS at a time allows a smoother migration and a window to find out clients who do not yet have TLS configured. The number of coordinators each client can connect to can be seen via  <code class="docutils literal notranslate"><span class="pre">fdbstatus</span></code> (look for <code class="docutils literal notranslate"><span class="pre">connected_coordinators</span></code> field in <code class="docutils literal notranslate"><span class="pre">clients</span></code>):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="s2">&quot;clients&quot;</span> <span class="p">:</span> <span class="p">{</span>
     <span class="s2">&quot;count&quot;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
     <span class="s2">&quot;supported_versions&quot;</span> <span class="p">:</span> <span class="p">[</span>
         <span class="p">{</span>
@@ -269,336 +384,306 @@
 </pre></div>
 </div>
 </li>
-<li><p class="first">If there exist a client (e.g., the client 127.0.0.1:42918 in the above example) that cannot connect to all coordinators after a coordinator is switched to TLS, it mean the client does not set up its TLS correctly. System operator should notify the client to correct the client&#8217;s TLS configuration. Otherwise, when all coordinators are switched to TLS ports, the client will loose connection.</p>
-</li>
-<li><p class="first">Repeat (2) and (3) until all the addresses in coordinator list are TLS.</p>
-</li>
-<li><p class="first">Restart each FoundationDB server, but only with one public address that listens to TLS traffic only.</p>
-</li>
+<li><p>If there exist a client (e.g., the client 127.0.0.1:42918 in the above example) that cannot connect to all coordinators after a coordinator is switched to TLS, it mean the client does not set up its TLS correctly. System operator should notify the client to correct the client’s TLS configuration. Otherwise, when all coordinators are switched to TLS ports, the client will loose connection.</p></li>
+<li><p>Repeat (2) and (3) until all the addresses in coordinator list are TLS.</p></li>
+<li><p>Restart each FoundationDB server, but only with one public address that listens to TLS traffic only.</p></li>
 </ol>
-</div>
-<div class="section" id="converting-an-existing-cluster-to-use-tls-v6-1">
+</section>
+<section id="converting-an-existing-cluster-to-use-tls-v6-1">
 <span id="converting-existing-cluster-before-6-1"></span><h2>Converting an existing cluster to use TLS (&lt; v6.1)</h2>
 <p>Enabling TLS on an existing (non-TLS) cluster cannot be accomplished without downtime because all processes must have TLS enabled to communicate. At startup, each server process enables TLS if the addresses in its cluster file are TLS-enabled. As a result, server processes must be stopped and restarted to convert them to use TLS. To convert the cluster to TLS in the most conservative way:</p>
 <ol class="arabic simple">
-<li>Stop all FoundationDB clients and <a class="reference internal" href="administration.html#administration-running-foundationdb"><span class="std std-ref">server processes</span></a> in the cluster.</li>
-<li>Change all cluster files to have the <code class="docutils literal"><span class="pre">:tls</span></code> suffix for each coordinator.</li>
-<li>Restart the cluster and the clients.</li>
+<li><p>Stop all FoundationDB clients and <a class="reference internal" href="administration.html#administration-running-foundationdb"><span class="std std-ref">server processes</span></a> in the cluster.</p></li>
+<li><p>Change all cluster files to have the <code class="docutils literal notranslate"><span class="pre">:tls</span></code> suffix for each coordinator.</p></li>
+<li><p>Restart the cluster and the clients.</p></li>
 </ol>
-</div>
-<div class="section" id="configuring-tls">
+</section>
+<section id="configuring-tls">
 <span id="id2"></span><h2>Configuring TLS</h2>
 <p>The operation of TLS is configured through five settings. These settings can be provided as command-line options, client options, or environment variables, and are named as follows:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="20%" />
-<col width="16%" />
-<col width="23%" />
-<col width="41%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Command-line Option</th>
-<th class="head">Client Option</th>
-<th class="head">Environment Variable</th>
-<th class="head">Purpose</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Command-line Option</p></th>
+<th class="head"><p>Client Option</p></th>
+<th class="head"><p>Environment Variable</p></th>
+<th class="head"><p>Purpose</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_certificate_file</span></code></td>
-<td><code class="docutils literal"><span class="pre">TLS_cert_path</span></code></td>
-<td><code class="docutils literal"><span class="pre">FDB_TLS_CERTIFICATE_FILE</span></code></td>
-<td>Path to the file from which the local certificates
-can be loaded</td>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tls_certificate_file</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TLS_cert_path</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_CERTIFICATE_FILE</span></code></p></td>
+<td><p>Path to the file from which the local certificates
+can be loaded</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_key_file</span></code></td>
-<td><code class="docutils literal"><span class="pre">TLS_key_path</span></code></td>
-<td><code class="docutils literal"><span class="pre">FDB_TLS_KEY_FILE</span></code></td>
-<td>Path to the file from which to load the private
-key</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">tls_key_file</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TLS_key_path</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_KEY_FILE</span></code></p></td>
+<td><p>Path to the file from which to load the private
+key</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_verify_peers</span></code></td>
-<td><code class="docutils literal"><span class="pre">TLS_verify_peers</span></code></td>
-<td><code class="docutils literal"><span class="pre">FDB_TLS_VERIFY_PEERS</span></code></td>
-<td>The byte-string for the verification of peer
-certificates and sessions</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tls_verify_peers</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TLS_verify_peers</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_VERIFY_PEERS</span></code></p></td>
+<td><p>The byte-string for the verification of peer
+certificates and sessions</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_password</span></code></td>
-<td><code class="docutils literal"><span class="pre">TLS_password</span></code></td>
-<td><code class="docutils literal"><span class="pre">FDB_TLS_PASSWORD</span></code></td>
-<td>The byte-string representing the passcode for
-unencrypting the private key</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">tls_password</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TLS_password</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_PASSWORD</span></code></p></td>
+<td><p>The byte-string representing the passcode for
+unencrypting the private key</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_ca_file</span></code></td>
-<td><code class="docutils literal"><span class="pre">TLS_ca_path</span></code></td>
-<td><code class="docutils literal"><span class="pre">FDB_TLS_CA_FILE</span></code></td>
-<td>Path to the file containing the CA certificates
-to trust</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tls_ca_file</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TLS_ca_path</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_CA_FILE</span></code></p></td>
+<td><p>Path to the file containing the CA certificates
+to trust</p></td>
 </tr>
 </tbody>
 </table>
 <p>The value for each setting can be specified in more than one way.  The actual valued used is determined in the following order:</p>
 <ol class="arabic simple">
-<li>An explicitly specified value as a command-line option or client option, if one is given;</li>
-<li>The value of the environment variable, if one has been set;</li>
-<li>The default value</li>
+<li><p>An explicitly specified value as a command-line option or client option, if one is given;</p></li>
+<li><p>The value of the environment variable, if one has been set;</p></li>
+<li><p>The default value</p></li>
 </ol>
-<p>For the password, rather than using the command-line option, it is recommended to use the environment variable <code class="docutils literal"><span class="pre">FDB_TLS_PASSWORD</span></code>, as command-line options are more visible to other processes running on the same host.</p>
-<p>As with all other command-line options to <code class="docutils literal"><span class="pre">fdbserver</span></code>, the TLS settings can be specified in the <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section of the configuration file</span></a>.</p>
+<p>For the password, rather than using the command-line option, it is recommended to use the environment variable <code class="docutils literal notranslate"><span class="pre">FDB_TLS_PASSWORD</span></code>, as command-line options are more visible to other processes running on the same host.</p>
+<p>As with all other command-line options to <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code>, the TLS settings can be specified in the <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section of the configuration file</span></a>.</p>
 <p>The settings for certificate file, key file, peer verification, password and CA file are interpreted by the software.</p>
-<div class="section" id="default-values">
+<section id="default-values">
 <h3>Default Values</h3>
-<div class="section" id="certificate-file-default-location">
+<section id="certificate-file-default-location">
 <h4>Certificate file default location</h4>
-<p>The default behavior when the certificate or key file is not specified is to look for a file named <code class="docutils literal"><span class="pre">fdb.pem</span></code> in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:</p>
+<p>The default behavior when the certificate or key file is not specified is to look for files named <code class="docutils literal notranslate"><span class="pre">cert.pem</span></code> or  <code class="docutils literal notranslate"><span class="pre">key.pem</span></code> respectively, in system-dependent locations as follows:</p>
 <ul class="simple">
-<li>Linux: <code class="docutils literal"><span class="pre">/etc/foundationdb/fdb.pem</span></code></li>
-<li>macOS: <code class="docutils literal"><span class="pre">/usr/local/etc/foundationdb/fdb.pem</span></code></li>
-<li>Windows: <code class="docutils literal"><span class="pre">C:\ProgramData\foundationdb\fdb.pem</span></code></li>
+<li><p>Linux: <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/cert.pem</span></code> and <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/key.pem</span></code></p></li>
+<li><p>macOS: <code class="docutils literal notranslate"><span class="pre">/usr/local/etc/foundationdb/cert.pem</span></code> and <code class="docutils literal notranslate"><span class="pre">/usr/local/etc/foundationdb/key.pem</span></code></p></li>
+<li><p>Windows: <code class="docutils literal notranslate"><span class="pre">C:\ProgramData\foundationdb\cert.pem</span></code> and <code class="docutils literal notranslate"><span class="pre">C:\ProgramData\foundationdb\key.pem</span></code></p></li>
 </ul>
-</div>
-<div class="section" id="default-peer-verification">
+</section>
+<section id="default-peer-verification">
 <h4>Default Peer Verification</h4>
-<p>The default peer verification is <code class="docutils literal"><span class="pre">Check.Valid=1</span></code>.</p>
-</div>
-<div class="section" id="default-password">
+<p>The default peer verification is <code class="docutils literal notranslate"><span class="pre">Check.Valid=1</span></code>.</p>
+</section>
+<section id="default-password">
 <h4>Default Password</h4>
 <p>There is no default password. If no password is specified, it is assumed that the private key is unencrypted.</p>
-</div>
-</div>
-<div class="section" id="permissions">
+</section>
+</section>
+<section id="permissions">
 <h3>Permissions</h3>
 <p>All files used by TLS must have sufficient read permissions such that the user running the FoundationDB server or client process can access them. It may also be necessary to have similar read permissions on the parent directories of the files used in the TLS configuration.</p>
-</div>
-<div class="section" id="automatic-tls-certificate-refresh">
+</section>
+<section id="automatic-tls-certificate-refresh">
 <h3>Automatic TLS certificate refresh</h3>
 <p>The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:</p>
 <ul class="simple">
-<li>They are changed, judging by the last modified time.</li>
-<li>They are valid certificates.</li>
-<li>The key file matches the certificate file.</li>
+<li><p>They are changed, judging by the last modified time.</p></li>
+<li><p>They are valid certificates.</p></li>
+<li><p>The key file matches the certificate file.</p></li>
 </ul>
-<p>The refresh rate is controlled by <code class="docutils literal"><span class="pre">--knob-tls-cert-refresh-delay-seconds</span></code>. Setting it to 0 will disable the refresh.</p>
-</div>
-</div>
-<div class="section" id="the-default-libressl-based-implementation">
+<p>The refresh rate is controlled by <code class="docutils literal notranslate"><span class="pre">--knob-tls-cert-refresh-delay-seconds</span></code>. Setting it to 0 will disable the refresh.</p>
+</section>
+</section>
+<section id="the-default-libressl-based-implementation">
 <h2>The default LibreSSL-based implementation</h2>
 <p>FoundationDB offers TLS based on the LibreSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.</p>
-<p>For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and the certificates with which it was signed. When a process begins to communicate with a FoundationDB server process, the peer&#8217;s certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.</p>
+<p>For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and the certificates with which it was signed. When a process begins to communicate with a FoundationDB server process, the peer’s certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.</p>
 <p>If the local certificate and chain is invalid, a FoundationDB server process bound to a TLS address will not start. In the case of invalid certificates on a client, the client will be able to start but will be unable to connect any TLS-enabled cluster.</p>
-<div class="section" id="formats">
+<section id="formats">
 <h3>Formats</h3>
 <p>LibreSSL can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.</p>
-</div>
-<div class="section" id="required-files">
+</section>
+<section id="required-files">
 <h3>Required files</h3>
 <p>A single file can contain the information as described in both of the following sections.</p>
-<div class="section" id="the-certificate-file">
+<section id="the-certificate-file">
 <span id="tls-certificate-file"></span><h4>The certificate file</h4>
-<p>A file must be supplied that contains an ordered list of certificates. The first certificate is the process&#8217; own certificate. Each following certificate must sign the one preceding it.</p>
+<p>A file must be supplied that contains an ordered list of certificates. The first certificate is the process’ own certificate. Each following certificate must sign the one preceding it.</p>
 <p>All but the last certificate are provided to peers during TLS handshake as the certificate chain.</p>
 <p>The last certificate in the list is the trusted certificate.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">If the certificate list contains only one certificate, that certificate <em>must</em> be self-signed and will be used as both the certificate chain and the trusted certificate.</p>
+<p class="admonition-title">Note</p>
+<p>If the certificate list contains only one certificate, that certificate <em>must</em> be self-signed and will be used as both the certificate chain and the trusted certificate.</p>
 </div>
 <p>Each of these certificates must be in the form:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">--------</span><span class="n">BEGIN</span> <span class="n">CERTIFICATE</span><span class="o">--------</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">--------</span><span class="n">BEGIN</span> <span class="n">CERTIFICATE</span><span class="o">--------</span>
 <span class="n">xxxxxxxxxxxxxxx</span>
 <span class="o">--------</span><span class="n">END</span> <span class="n">CERTIFICATE</span><span class="o">--------</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="the-key-file">
+</section>
+<section id="the-key-file">
 <span id="tls-key-file"></span><h4>The key file</h4>
-<p>The key file must contain the private key corresponding to the process&#8217; own certificate. The private key must be in PKCS#8 format, which means that it must be surrounded by:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">-----</span><span class="n">BEGIN</span> <span class="n">PRIVATE</span> <span class="n">KEY</span><span class="o">-----</span>
+<p>The key file must contain the private key corresponding to the process’ own certificate. The private key must be in PKCS#8 format, which means that it must be surrounded by:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">-----</span><span class="n">BEGIN</span> <span class="n">PRIVATE</span> <span class="n">KEY</span><span class="o">-----</span>
 <span class="n">xxxxxxxxxxxxxxx</span>
 <span class="o">-----</span><span class="n">END</span> <span class="n">PRIVATE</span> <span class="n">KEY</span><span class="o">-----</span>
 </pre></div>
 </div>
 <p>It can optionally be encrypted by the password provided to tls_password.</p>
-</div>
-</div>
-<div class="section" id="certificate-creation">
+</section>
+</section>
+<section id="certificate-creation">
 <h3>Certificate creation</h3>
 <p>If your organization already makes use of certificates for access control and securing communications, you should ask your security expert for organizational procedure for obtaining and verifying certificates. If the goal of enabling TLS is to make sure that only known machines can join or access the FoundationDB cluster and for securing communications, then creating your own certificates can serve these purposes.</p>
-<p>The following set of commands uses the OpenSSL command-line tools to create a self-signed certificate and private key. The certificate is then joined with the private key in the output <code class="docutils literal"><span class="pre">fdb.pem</span></code> file:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">openssl</span> <span class="n">req</span> <span class="o">-</span><span class="n">x509</span> <span class="o">-</span><span class="n">nodes</span> <span class="o">-</span><span class="n">days</span> <span class="mi">365</span> <span class="o">-</span><span class="n">newkey</span> <span class="n">rsa</span><span class="p">:</span><span class="mi">2048</span> <span class="o">-</span><span class="n">keyout</span> <span class="n">private</span><span class="o">.</span><span class="n">key</span> <span class="o">-</span><span class="n">out</span> <span class="n">cert</span><span class="o">.</span><span class="n">crt</span>
-<span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">cat</span> <span class="n">cert</span><span class="o">.</span><span class="n">crt</span> <span class="n">private</span><span class="o">.</span><span class="n">key</span> <span class="o">&gt;</span> <span class="n">fdb</span><span class="o">.</span><span class="n">pem</span>
+<p>The following set of commands uses the OpenSSL command-line tools to create a self-signed certificate and private key:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">openssl</span> <span class="n">req</span> <span class="o">-</span><span class="n">x509</span> <span class="o">-</span><span class="n">nodes</span> <span class="o">-</span><span class="n">days</span> <span class="mi">365</span> <span class="o">-</span><span class="n">newkey</span> <span class="n">rsa</span><span class="p">:</span><span class="mi">2048</span> <span class="o">-</span><span class="n">keyout</span> <span class="n">key</span><span class="o">.</span><span class="n">pem</span> <span class="o">-</span><span class="n">out</span> <span class="n">cert</span><span class="o">.</span><span class="n">pem</span>
 </pre></div>
 </div>
+<p>Optionally, the certificate can be joined with the private key as supplied as both certificate and key files:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">user</span><span class="nd">@host</span><span class="p">:</span><span class="o">&gt;</span> <span class="n">cat</span> <span class="n">cert</span><span class="o">.</span><span class="n">crt</span> <span class="n">private</span><span class="o">.</span><span class="n">key</span> <span class="o">&gt;</span> <span class="n">fdb</span><span class="o">.</span><span class="n">pem</span>
+</pre></div>
 </div>
-</div>
-<div class="section" id="peer-verification">
+</section>
+</section>
+<section id="peer-verification">
 <h2>Peer verification</h2>
 <p>A FoundationDB server or client will only communicate with peers that present a certificate chain that meets the verification requirements. By default, the only requirement is that the provided certificate chain ends in a certificate signed by the local trusted certificate.</p>
-<div class="section" id="certificate-field-verification">
+<section id="certificate-field-verification">
 <span id="tls-verify-peers"></span><h3>Certificate field verification</h3>
-<p>With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient. You can specify multiple verification strings by providing additional tls_verify_peers command line arguments or concatenating them with <code class="docutils literal"><span class="pre">|</span></code>. All <code class="docutils literal"><span class="pre">,</span></code> or <code class="docutils literal"><span class="pre">|</span></code> in the verify peers fields should be escaped with <code class="docutils literal"><span class="pre">\</span></code>.</p>
-<div class="section" id="turning-down-the-validation">
+<p>With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient. You can specify multiple verification strings by providing additional tls_verify_peers command line arguments or concatenating them with <code class="docutils literal notranslate"><span class="pre">|</span></code>. All <code class="docutils literal notranslate"><span class="pre">,</span></code> or <code class="docutils literal notranslate"><span class="pre">|</span></code> in the verify peers fields should be escaped with <code class="docutils literal notranslate"><span class="pre">\</span></code>.</p>
+<section id="turning-down-the-validation">
 <h4>Turning down the validation</h4>
 <p>If the default checking of the certificate chain is too stringent, the verification string can contain settings to weaken what certificates are accepted.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="26%" />
-<col width="74%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Setting</th>
-<th class="head">Result</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Setting</p></th>
+<th class="head"><p>Result</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">Check.Valid=0</span></code></td>
-<td>Sets the current process to disable all further verification
-of a peer certificate.</td>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">Check.Valid=0</span></code></p></td>
+<td><p>Sets the current process to disable all further verification
+of a peer certificate.</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">Check.Unexpired=0</span></code></td>
-<td>Disables date checking of peer certificates. If the clocks in
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">Check.Unexpired=0</span></code></p></td>
+<td><p>Disables date checking of peer certificates. If the clocks in
 the cluster and between the clients and servers are not to be
-trusted, setting this value to <code class="docutils literal"><span class="pre">0</span></code> can allow communications
-to proceed.</td>
+trusted, setting this value to <code class="docutils literal notranslate"><span class="pre">0</span></code> can allow communications
+to proceed.</p></td>
 </tr>
 </tbody>
 </table>
-</div>
-<div class="section" id="adding-verification-requirements">
+</section>
+<section id="adding-verification-requirements">
 <h4>Adding verification requirements</h4>
-<p>Requirements can be placed on the fields of the Issuer and Subject DNs in the peer&#8217;s own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of <code class="docutils literal"><span class="pre">field[&lt;&gt;]?=value</span></code>. Only certain fields from a DN can be matched against.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="27%" />
-<col width="73%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Field</th>
-<th class="head">Well known name</th>
+<p>Requirements can be placed on the fields of the Issuer and Subject DNs in the peer’s own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of <code class="docutils literal notranslate"><span class="pre">field[&lt;&gt;]?=value</span></code>. Only certain fields from a DN can be matched against.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Field</p></th>
+<th class="head"><p>Well known name</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">CN</span></code></td>
-<td>Common Name</td>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CN</span></code></p></td>
+<td><p>Common Name</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">C</span></code></td>
-<td>Country</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">C</span></code></p></td>
+<td><p>Country</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">L</span></code></td>
-<td>Locality</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">L</span></code></p></td>
+<td><p>Locality</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">ST</span></code></td>
-<td>State</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ST</span></code></p></td>
+<td><p>State</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">O</span></code></td>
-<td>Organization</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">O</span></code></p></td>
+<td><p>Organization</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">OU</span></code></td>
-<td>Organizational Unit</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">OU</span></code></p></td>
+<td><p>Organizational Unit</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">UID</span></code></td>
-<td>Unique Identifier</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">UID</span></code></p></td>
+<td><p>Unique Identifier</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">DC</span></code></td>
-<td>Domain Component</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">DC</span></code></p></td>
+<td><p>Domain Component</p></td>
 </tr>
 </tbody>
 </table>
 <p>The field of each condition may optionally have a DN prefix, which is otherwise considered to be for the Subject DN.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="78%" />
-<col width="22%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Prefix</th>
-<th class="head">DN</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Prefix</p></th>
+<th class="head"><p>DN</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">S.</span></code>, <code class="docutils literal"><span class="pre">Subject.</span></code>, or none</td>
-<td>Subject</td>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">S.</span></code>, <code class="docutils literal notranslate"><span class="pre">Subject.</span></code>, or none</p></td>
+<td><p>Subject</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">I.</span></code>, or <code class="docutils literal"><span class="pre">Issuer.</span></code></td>
-<td>Issuer</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">I.</span></code>, or <code class="docutils literal notranslate"><span class="pre">Issuer.</span></code></p></td>
+<td><p>Issuer</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">R.</span></code>, or <code class="docutils literal"><span class="pre">Root.</span></code></td>
-<td>Root</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">R.</span></code>, or <code class="docutils literal notranslate"><span class="pre">Root.</span></code></p></td>
+<td><p>Root</p></td>
 </tr>
 </tbody>
 </table>
-<p>Additionally, the verification can be restricted to certificates signed by a given root CA with the field <code class="docutils literal"><span class="pre">Root.CN</span></code>. This allows you to have different requirements for different root chains.</p>
-<p>The value of a condition must be specified in a form derived from a subset of <a class="reference external" href="http://www.ietf.org/rfc/rfc4514.txt">RFC 4514</a>. Specifically, the &#8220;raw&#8221; notation (a value starting with the <code class="docutils literal"><span class="pre">#</span></code> character) is not accepted. Other escaping mechanisms, including specifying characters by hex notation, are allowed. The specified field&#8217;s value must exactly match the value in the peer&#8217;s certificate.</p>
-<p>By default, the fields of a peer certificate&#8217;s DNs are not examined.</p>
+<p>Additionally, the verification can be restricted to certificates signed by a given root CA with the field <code class="docutils literal notranslate"><span class="pre">Root.CN</span></code>. This allows you to have different requirements for different root chains.</p>
+<p>The value of a condition must be specified in a form derived from a subset of <a class="reference external" href="http://www.ietf.org/rfc/rfc4514.txt">RFC 4514</a>. Specifically, the “raw” notation (a value starting with the <code class="docutils literal notranslate"><span class="pre">#</span></code> character) is not accepted. Other escaping mechanisms, including specifying characters by hex notation, are allowed. The specified field’s value must exactly match the value in the peer’s certificate.</p>
+<p>By default, the fields of a peer certificate’s DNs are not examined.</p>
 <p>In addition to DNs, restrictions can be placed against X509 extensions. They are specified in the same fashion as DN requirements.  The supported extensions are:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="43%" />
-<col width="57%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Field</th>
-<th class="head">Well known name</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Field</p></th>
+<th class="head"><p>Well known name</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">subjectAltName</span></code></td>
-<td>Subject Alternative Name</td>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">subjectAltName</span></code></p></td>
+<td><p>Subject Alternative Name</p></td>
 </tr>
 </tbody>
 </table>
-<p>Within a subject alternative name requirement, the value specified is required to have the form <code class="docutils literal"><span class="pre">prefix:value</span></code>, where the prefix specifies the type of value being matched against.  The following prefixes are supported:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="18%" />
-<col width="82%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Prefix</th>
-<th class="head">Well known name</th>
+<p>Within a subject alternative name requirement, the value specified is required to have the form <code class="docutils literal notranslate"><span class="pre">prefix:value</span></code>, where the prefix specifies the type of value being matched against.  The following prefixes are supported:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Prefix</p></th>
+<th class="head"><p>Well known name</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>DNS</td>
-<td>Domain Name</td>
+<tbody>
+<tr class="row-even"><td><p>DNS</p></td>
+<td><p>Domain Name</p></td>
 </tr>
-<tr class="row-odd"><td>URI</td>
-<td>Uniform Resource Identifier</td>
+<tr class="row-odd"><td><p>URI</p></td>
+<td><p>Uniform Resource Identifier</p></td>
 </tr>
-<tr class="row-even"><td>IP</td>
-<td>IP Address</td>
+<tr class="row-even"><td><p>IP</p></td>
+<td><p>IP Address</p></td>
 </tr>
-<tr class="row-odd"><td>EMAIL</td>
-<td>Email Address</td>
+<tr class="row-odd"><td><p>EMAIL</p></td>
+<td><p>Email Address</p></td>
 </tr>
 </tbody>
 </table>
 <p>The following operators are supported:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="43%" />
-<col width="57%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Operator</th>
-<th class="head">Match Type</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Operator</p></th>
+<th class="head"><p>Match Type</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">=</span></code></td>
-<td>Exact Match</td>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">=</span></code></p></td>
+<td><p>Exact Match</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">&gt;=</span></code></td>
-<td>Prefix Match</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">&gt;=</span></code></p></td>
+<td><p>Prefix Match</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">&lt;=</span></code></td>
-<td>Suffix Match</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">&lt;=</span></code></p></td>
+<td><p>Suffix Match</p></td>
 </tr>
 </tbody>
 </table>
-</div>
-<div class="section" id="verification-examples">
+</section>
+<section id="verification-examples">
 <h4>Verification Examples</h4>
-<p>Let&#8217;s consider a certificate, whose abridged contents is:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Certificate</span><span class="p">:</span>
+<p>Let’s consider a certificate, whose abridged contents is:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Certificate</span><span class="p">:</span>
     <span class="n">Data</span><span class="p">:</span>
         <span class="n">Version</span><span class="p">:</span> <span class="mi">3</span> <span class="p">(</span><span class="mh">0x2</span><span class="p">)</span>
         <span class="n">Serial</span> <span class="n">Number</span><span class="p">:</span> <span class="mi">12938646789571341173</span> <span class="p">(</span><span class="mh">0xb38f4eb406a5eb75</span><span class="p">)</span>
@@ -612,39 +697,39 @@ to proceed.</td>
 </pre></div>
 </div>
 <p>A verification string of:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Check</span><span class="o">.</span><span class="n">Unexpired</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span><span class="n">I</span><span class="o">.</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">O</span><span class="o">=</span><span class="n">Apple</span> <span class="n">Inc</span><span class="o">.</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Check</span><span class="o">.</span><span class="n">Unexpired</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span><span class="n">I</span><span class="o">.</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">C</span><span class="o">=</span><span class="n">US</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">O</span><span class="o">=</span><span class="n">Apple</span> <span class="n">Inc</span><span class="o">.</span>
 </pre></div>
 </div>
 <p>Would pass, and:</p>
 <ul class="simple">
-<li>Skip the check on all peer certificates that the certificate is not yet expired</li>
-<li>Require that the Issuer has a Country field of <code class="docutils literal"><span class="pre">US</span></code></li>
-<li>Require that the Subject has a Country field of <code class="docutils literal"><span class="pre">US</span></code></li>
-<li>Require that the Subject has a Organization field of <code class="docutils literal"><span class="pre">Apple</span> <span class="pre">Inc.</span></code></li>
+<li><p>Skip the check on all peer certificates that the certificate is not yet expired</p></li>
+<li><p>Require that the Issuer has a Country field of <code class="docutils literal notranslate"><span class="pre">US</span></code></p></li>
+<li><p>Require that the Subject has a Country field of <code class="docutils literal notranslate"><span class="pre">US</span></code></p></li>
+<li><p>Require that the Subject has a Organization field of <code class="docutils literal notranslate"><span class="pre">Apple</span> <span class="pre">Inc.</span></code></p></li>
 </ul>
 <p>A verification string of:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">S</span><span class="o">.</span><span class="n">OU</span><span class="o">&gt;=</span><span class="n">FDB</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">OU</span><span class="o">&lt;=</span><span class="n">Team</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">=</span><span class="n">DNS</span><span class="p">:</span><span class="n">test</span><span class="o">.</span><span class="n">foundationdb</span><span class="o">.</span><span class="n">org</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">S</span><span class="o">.</span><span class="n">OU</span><span class="o">&gt;=</span><span class="n">FDB</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">OU</span><span class="o">&lt;=</span><span class="n">Team</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">=</span><span class="n">DNS</span><span class="p">:</span><span class="n">test</span><span class="o">.</span><span class="n">foundationdb</span><span class="o">.</span><span class="n">org</span>
 </pre></div>
 </div>
 <p>Would pass, and:</p>
 <ul class="simple">
-<li>Require that the Subject has an Organization field that starts with <code class="docutils literal"><span class="pre">FDB</span></code></li>
-<li>Require that the Subject has an Organization field that ends with <code class="docutils literal"><span class="pre">Team</span></code></li>
-<li>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS with a value of <code class="docutils literal"><span class="pre">test.foundationdb.org</span></code>.</li>
+<li><p>Require that the Subject has an Organization field that starts with <code class="docutils literal notranslate"><span class="pre">FDB</span></code></p></li>
+<li><p>Require that the Subject has an Organization field that ends with <code class="docutils literal notranslate"><span class="pre">Team</span></code></p></li>
+<li><p>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS with a value of <code class="docutils literal notranslate"><span class="pre">test.foundationdb.org</span></code>.</p></li>
 </ul>
 <p>A verification string of:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">&gt;=</span><span class="n">DNS</span><span class="p">:</span><span class="n">prod</span><span class="o">.</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">&lt;=</span><span class="n">DNS</span><span class="p">:</span><span class="o">.</span><span class="n">org</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">&gt;=</span><span class="n">DNS</span><span class="p">:</span><span class="n">prod</span><span class="o">.</span><span class="p">,</span><span class="n">S</span><span class="o">.</span><span class="n">subjectAltName</span><span class="o">&lt;=</span><span class="n">DNS</span><span class="p">:</span><span class="o">.</span><span class="n">org</span>
 </pre></div>
 </div>
 <p>Would pass, and:</p>
 <ul class="simple">
-<li>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that begins with the value <code class="docutils literal"><span class="pre">prod.</span></code>.</li>
-<li>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value <code class="docutils literal"><span class="pre">.org</span></code>.</li>
+<li><p>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that begins with the value <code class="docutils literal notranslate"><span class="pre">prod.</span></code>.</p></li>
+<li><p>Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value <code class="docutils literal notranslate"><span class="pre">.org</span></code>.</p></li>
 </ul>
-</div>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -666,7 +751,7 @@ to proceed.</td>
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Data Modeling &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Data Modeling &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Client Testing" href="client-testing.html" />
     <link rel="prev" title="Developer Guide" href="developer-guide.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="client-design.html">Client Design</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -194,66 +309,66 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <span class="target" id="module-fdb"></span><div class="section" id="data-modeling">
+  <section id="data-modeling">
 <h1>Data Modeling</h1>
-<p>FoundationDB&#8217;s core provides a simple data model coupled with powerful transactions. This combination allows building richer data models and libraries that inherit the scalability, performance, and integrity of the database. The goal of data modeling is to design a mapping of data to keys and values that enables effective storage and retrieval. Good decisions will yield an extensible, efficient abstraction. This document covers the fundamentals of data modeling with FoundationDB.</p>
+<p>FoundationDB’s core provides a simple data model coupled with powerful transactions. This combination allows building richer data models and libraries that inherit the scalability, performance, and integrity of the database. The goal of data modeling is to design a mapping of data to keys and values that enables effective storage and retrieval. Good decisions will yield an extensible, efficient abstraction. This document covers the fundamentals of data modeling with FoundationDB.</p>
 <ul class="simple">
-<li>For general guidance on application development using FoundationDB, see <a class="reference internal" href="developer-guide.html"><span class="doc">Developer Guide</span></a>.</li>
-<li>For detailed API documentation specific to each supported language, see <a class="reference internal" href="api-reference.html"><span class="doc">API Reference</span></a>.</li>
+<li><p>For general guidance on application development using FoundationDB, see <a class="reference internal" href="developer-guide.html"><span class="doc">Developer Guide</span></a>.</p></li>
+<li><p>For detailed API documentation specific to each supported language, see <a class="reference internal" href="api-reference.html"><span class="doc">API Reference</span></a>.</p></li>
 </ul>
-<div class="section" id="the-core-data-model">
+<section id="the-core-data-model">
 <h2>The core data model</h2>
-<p>FoundationDB&#8217;s core data model is an ordered key-value store. Also known as an ordered associative array, map, or dictionary, this is a common data structure composed of a collection of key-value pairs in which all keys are unique. Starting with this simple model, an application can create higher-level data models by mapping their elements to individual keys and values.</p>
+<p>FoundationDB’s core data model is an ordered key-value store. Also known as an ordered associative array, map, or dictionary, this is a common data structure composed of a collection of key-value pairs in which all keys are unique. Starting with this simple model, an application can create higher-level data models by mapping their elements to individual keys and values.</p>
 <p>In FoundationDB, both keys and values are simple byte strings. Apart from storage and retrieval, the database does not interpret or depend on the content of values. In contrast, keys are treated as members of a total order, the lexicographic order over the underlying bytes, in which keys are sorted by each byte in order. For example:</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">'0'</span></code> is sorted before <code class="docutils literal"><span class="pre">'1'</span></code></li>
-<li><code class="docutils literal"><span class="pre">'apple'</span></code> is sorted before <code class="docutils literal"><span class="pre">'banana'</span></code></li>
-<li><code class="docutils literal"><span class="pre">'apple'</span></code> is sorted before <code class="docutils literal"><span class="pre">'apple123'</span></code></li>
-<li>keys starting with <code class="docutils literal"><span class="pre">'mytable\'</span></code> are sorted together (e.g. <code class="docutils literal"><span class="pre">'mytable\row1'</span></code>, <code class="docutils literal"><span class="pre">'mytable\row2'</span></code>, ...)</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">'0'</span></code> is sorted before <code class="docutils literal notranslate"><span class="pre">'1'</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">'apple'</span></code> is sorted before <code class="docutils literal notranslate"><span class="pre">'banana'</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">'apple'</span></code> is sorted before <code class="docutils literal notranslate"><span class="pre">'apple123'</span></code></p></li>
+<li><p>keys starting with <code class="docutils literal notranslate"><span class="pre">'mytable\'</span></code> are sorted together (e.g. <code class="docutils literal notranslate"><span class="pre">'mytable\row1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'mytable\row2'</span></code>, …)</p></li>
 </ul>
 <p>The ordering of keys is especially relevant for range operations. An application should structure keys to produce an ordering that allows efficient data retrieval with range reads.</p>
-</div>
-<div class="section" id="encoding-data-types">
+</section>
+<section id="encoding-data-types">
 <span id="id1"></span><h2>Encoding data types</h2>
-<p>Because keys and values in FoundationDB are always byte strings, an application developer must serialize other data types (e.g., integers, floats, arrays) before storing them in the database. For values, the main concerns for serialization are simply CPU and space efficiency. For keys, there&#8217;s an additional consideration: it&#8217;s often important for keys to preserve the order of the data types (whether primitive or composite) they encode. For example:</p>
-<div class="section" id="integers">
+<p>Because keys and values in FoundationDB are always byte strings, an application developer must serialize other data types (e.g., integers, floats, arrays) before storing them in the database. For values, the main concerns for serialization are simply CPU and space efficiency. For keys, there’s an additional consideration: it’s often important for keys to preserve the order of the data types (whether primitive or composite) they encode. For example:</p>
+<section id="integers">
 <h3>Integers</h3>
 <ul class="simple">
-<li>The standard tuple layer provides an order-preserving, signed, variable length encoding.</li>
-<li>For positive integers, a big-endian fixed length encoding is order-preserving.</li>
-<li>For signed integers, a big-endian fixed length two&#8217;s-complement encoding with the most significant (sign) bit inverted is order-preserving.</li>
+<li><p>The standard tuple layer provides an order-preserving, signed, variable length encoding.</p></li>
+<li><p>For positive integers, a big-endian fixed length encoding is order-preserving.</p></li>
+<li><p>For signed integers, a big-endian fixed length two’s-complement encoding with the most significant (sign) bit inverted is order-preserving.</p></li>
 </ul>
-</div>
-<div class="section" id="unicode-strings">
+</section>
+<section id="unicode-strings">
 <h3>Unicode strings</h3>
 <ul class="simple">
-<li>For unicode strings ordered lexicographically by unicode code point, use UTF-8 encoding.  (This approach is used by the tuple layer.)</li>
-<li>For unicode strings ordered by a particular collation (for example, a case insensitive ordering for a particular language), use an appropriate string collation transformation and then apply UTF-8 encoding.  Internationalization or &#8220;locale&#8221; libraries in most environments and programming languages provide a string collation transformation, for example <a class="reference external" href="http://pubs.opengroup.org/onlinepubs/7908799/xsh/wcsxfrm.html">C</a>, <a class="reference external" href="http://www.cplusplus.com/reference/std/locale/collate/transform/">C++</a>, <a class="reference external" href="http://docs.python.org/py3k/library/locale.html#locale.strxfrm">Python</a>, <a class="reference external" href="https://github.com/ninjudd/icunicode#readme">Ruby</a>, <a class="reference external" href="http://docs.oracle.com/javase/1.5.0/docs/api/java/text/Collator.html#getCollationKey(java.lang.String)">Java</a>, the <a class="reference external" href="http://icu-project.org/apiref/icu4c/classCollator.html#ae524fd43a06d4429e2c76bef35874d4c">ICU</a> library, etc.  Usually the output of this function is a unicode string, which needs to be further encoded in a code-point ordered encoding such as UTF-8 to get a byte string.</li>
+<li><p>For unicode strings ordered lexicographically by unicode code point, use UTF-8 encoding.  (This approach is used by the tuple layer.)</p></li>
+<li><p>For unicode strings ordered by a particular collation (for example, a case insensitive ordering for a particular language), use an appropriate string collation transformation and then apply UTF-8 encoding.  Internationalization or “locale” libraries in most environments and programming languages provide a string collation transformation, for example <a class="reference external" href="http://pubs.opengroup.org/onlinepubs/7908799/xsh/wcsxfrm.html">C</a>, <a class="reference external" href="http://www.cplusplus.com/reference/std/locale/collate/transform/">C++</a>, <a class="reference external" href="http://docs.python.org/py3k/library/locale.html#locale.strxfrm">Python</a>, <a class="reference external" href="https://github.com/ninjudd/icunicode#readme">Ruby</a>, <a class="reference external" href="http://docs.oracle.com/javase/1.5.0/docs/api/java/text/Collator.html#getCollationKey(java.lang.String)">Java</a>, the <a class="reference external" href="http://icu-project.org/apiref/icu4c/classCollator.html#ae524fd43a06d4429e2c76bef35874d4c">ICU</a> library, etc.  Usually the output of this function is a unicode string, which needs to be further encoded in a code-point ordered encoding such as UTF-8 to get a byte string.</p></li>
 </ul>
-</div>
-<div class="section" id="floating-point-numbers">
+</section>
+<section id="floating-point-numbers">
 <h3>Floating point numbers</h3>
 <p>The tuple layer provides an order-preserving, signed, fixed length encoding for both single- and double-precision floating point
 numbers based off of the IEEE big-endian encoding with some modifications to make it correctly ordered. Within this representation,
 -0 and +0 are not equal and negative NaN values will sort before all non-NaN values and positive NaN values will sort after
 all non-NaN values. Otherwise, the representation is consistent with the mathematical ordering.</p>
-</div>
-<div class="section" id="composite-types">
+</section>
+<section id="composite-types">
 <h3>Composite types</h3>
-<p>An application&#8217;s data is often represented using composite types, such as structures or records with multiple fields. It&#8217;s very useful for the application to use <em>composite</em> keys to store such data. In FoundationDB, composite keys can be conveniently represented as <em>tuples</em> that are mapped to individual keys for storage.</p>
+<p>An application’s data is often represented using composite types, such as structures or records with multiple fields. It’s very useful for the application to use <em>composite</em> keys to store such data. In FoundationDB, composite keys can be conveniently represented as <em>tuples</em> that are mapped to individual keys for storage.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">For the purpose of illustration, we&#8217;ll use the FoundationDB&#8217;s Python language binding, including the <a class="reference internal" href="api-python.html#fdb.transactional" title="fdb.transactional"><code class="xref py py-func docutils literal"><span class="pre">&#64;fdb.transactional</span></code></a> decorator described in <a class="reference internal" href="api-python.html"><span class="doc">Python API</span></a>. The design patterns illustrated are applicable to all of the <a class="reference internal" href="api-reference.html"><span class="doc">languages</span></a> supported by FoundationDB.</p>
+<p class="admonition-title">Note</p>
+<p>For the purpose of illustration, we’ll use the FoundationDB’s Python language binding, including the <a class="reference internal" href="api-python.html#fdb.transactional" title="fdb.transactional"><code class="xref py py-func docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code></a> decorator described in <a class="reference internal" href="api-python.html"><span class="doc">Python API</span></a>. The design patterns illustrated are applicable to all of the <a class="reference internal" href="api-reference.html"><span class="doc">languages</span></a> supported by FoundationDB.</p>
 </div>
-</div>
-</div>
-<div class="section" id="tuples">
+</section>
+</section>
+<section id="tuples">
 <span id="data-modeling-tuples"></span><h2>Tuples</h2>
-<p>FoundationDB&#8217;s keys are ordered, making tuples a particularly useful tool for data modeling. FoundationDB provides a <a class="reference internal" href="api-python.html#api-python-tuple-layer"><span class="std std-ref">tuple layer</span></a> (available in each language binding) that encodes tuples into keys. This layer lets you store data using a tuple like <code class="docutils literal"><span class="pre">(state,</span> <span class="pre">county)</span></code> as a key. Later, you can perform reads using a prefix like <code class="docutils literal"><span class="pre">(state,)</span></code>. The layer works by preserving the natural ordering of the tuples.</p>
+<p>FoundationDB’s keys are ordered, making tuples a particularly useful tool for data modeling. FoundationDB provides a <a class="reference internal" href="api-python.html#api-python-tuple-layer"><span class="std std-ref">tuple layer</span></a> (available in each language binding) that encodes tuples into keys. This layer lets you store data using a tuple like <code class="docutils literal notranslate"><span class="pre">(state,</span> <span class="pre">county)</span></code> as a key. Later, you can perform reads using a prefix like <code class="docutils literal notranslate"><span class="pre">(state,)</span></code>. The layer works by preserving the natural ordering of the tuples.</p>
 <p>You could implement a naive encoding of tuples of strings into keys by using a tab character as a simple delimiter. You could do this with the following Python code:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">tuple_to_key_with_tab</span><span class="p">(</span><span class="n">tup</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">tuple_to_key_with_tab</span><span class="p">(</span><span class="n">tup</span><span class="p">):</span>
     <span class="k">return</span> <span class="s1">&#39;</span><span class="se">\t</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">tup</span><span class="p">)</span>
 
 <span class="c1"># Example: Order first by state, then by county</span>
@@ -263,14 +378,14 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 </pre></div>
 </div>
 <p>In this example, population figures for the United States are stored using keys formed from the tuple of state and county.</p>
-<p>Of course, this encoding would only work if all the bytes in the individual keys in the tuple were greater than the delimiter byte. Therefore, FoundationDB&#8217;s built-in tuple layer implements a more robust encoding supporting elements of various data types: byte strings, unicode strings, signed integers, floating-point numbers, booleans, UUIDs, null values, and nested tuples.</p>
+<p>Of course, this encoding would only work if all the bytes in the individual keys in the tuple were greater than the delimiter byte. Therefore, FoundationDB’s built-in tuple layer implements a more robust encoding supporting elements of various data types: byte strings, unicode strings, signed integers, floating-point numbers, booleans, UUIDs, null values, and nested tuples.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">The tuple layer&#8217;s encoding is compatible between languages, although some languages are limited in what data types they support. For language-specific documentation of the tuple layer, see the corresponding <a class="reference internal" href="api-reference.html"><span class="doc">API Reference</span></a> documentation.</p>
+<p class="admonition-title">Note</p>
+<p>The tuple layer’s encoding is compatible between languages, although some languages are limited in what data types they support. For language-specific documentation of the tuple layer, see the corresponding <a class="reference internal" href="api-reference.html"><span class="doc">API Reference</span></a> documentation.</p>
 </div>
 <p>Because of its ordering of keys, FoundationDB supports efficient range reads on any set of keys that share a prefix. The tuple layer preserves the ordering of tuples sorted by element from left to right; as a result, the leftmost elements of a tuple will always represent a prefix in keyspace and can be used for range reads. A basic principle of data modeling with the tuple layer is to order tuple elements to facilitate such range reads. The examples below illustrate this principle.</p>
-<p>Sometimes data attributes will have a natural order of containment imposed by your domain. A common example is geographic attributes, such as state and county in the Unites States. By constructing keys from tuples of the form <code class="docutils literal"><span class="pre">(state,</span> <span class="pre">county)</span></code>, where state is the first tuple element, all data for states will be stored in an adjacent range of keys. This ordering allows you to retrieve the populations for all counties in a given state with a single range read. You could use the tuple layer with the following functions:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<p>Sometimes data attributes will have a natural order of containment imposed by your domain. A common example is geographic attributes, such as state and county in the Unites States. By constructing keys from tuples of the form <code class="docutils literal notranslate"><span class="pre">(state,</span> <span class="pre">county)</span></code>, where state is the first tuple element, all data for states will be stored in an adjacent range of keys. This ordering allows you to retrieve the populations for all counties in a given state with a single range read. You could use the tuple layer with the following functions:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">set_county_population</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">county</span><span class="p">,</span> <span class="n">pop</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">state</span><span class="p">,</span> <span class="n">county</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">pop</span><span class="p">)</span>
 
@@ -279,17 +394,17 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="k">return</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">pop</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">pop</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">state</span><span class="p">,))]]</span>
 </pre></div>
 </div>
-<p>Date/timestamp attributes form another example with a natural containment order. If you have attributes of year, month, day, hour, minute, and/or second, you can order them from larger to smaller units in your keys. As a result, you&#8217;ll be able to retrieve temporally contiguous data with range reads, as above.</p>
-</div>
-<div class="section" id="a-few-simple-models">
+<p>Date/timestamp attributes form another example with a natural containment order. If you have attributes of year, month, day, hour, minute, and/or second, you can order them from larger to smaller units in your keys. As a result, you’ll be able to retrieve temporally contiguous data with range reads, as above.</p>
+</section>
+<section id="a-few-simple-models">
 <h2>A few simple models</h2>
-<p>Let&#8217;s begin with a few examples of simple data models built on tuples with <a class="reference internal" href="developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">subspaces</span></a>.</p>
-<div class="section" id="arrays">
+<p>Let’s begin with a few examples of simple data models built on tuples with <a class="reference internal" href="developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">subspaces</span></a>.</p>
+<section id="arrays">
 <h3>Arrays</h3>
 <p>You can easily map arrays to the key-value store using tuples. To model a named, one-dimensional array, you can construct a key for each array element using the array name as the subspace and the array index as the second tuple element.</p>
-<p>For example, suppose you have a <code class="docutils literal"><span class="pre">'temps2012'</span></code> array containing a year&#8217;s worth of daily temperature averages. The temperatures are indexed by an integer ranging from 1 to 365 representing the day. Your keys would then be constructed from tuples of the form <code class="docutils literal"><span class="pre">('temps2012',</span> <span class="pre">day)</span></code>.</p>
+<p>For example, suppose you have a <code class="docutils literal notranslate"><span class="pre">'temps2012'</span></code> array containing a year’s worth of daily temperature averages. The temperatures are indexed by an integer ranging from 1 to 365 representing the day. Your keys would then be constructed from tuples of the form <code class="docutils literal notranslate"><span class="pre">('temps2012',</span> <span class="pre">day)</span></code>.</p>
 <p>To set and get array elements with this technique, you can use Python functions such as:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">array_set</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">array_space</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">array_space</span><span class="p">[</span><span class="n">index</span><span class="p">]]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
@@ -314,18 +429,18 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 </div>
 <p>This approach has a few nice properties:</p>
 <ul class="simple">
-<li>It can be extended to multidimensional arrays simply by adding additional array indexes to the tuples.</li>
-<li>Unassigned elements consume no storage, so sparse arrays are stored efficiently.</li>
+<li><p>It can be extended to multidimensional arrays simply by adding additional array indexes to the tuples.</p></li>
+<li><p>Unassigned elements consume no storage, so sparse arrays are stored efficiently.</p></li>
 </ul>
 <p>The tuple layer makes these properties easy to achieve, and most well-designed data models using tuples will share them.</p>
 <p>An array can only have a single value for each index. Likewise, the key-value store can only have a single value for each key. The simple mapping above takes advantage of this correspondence to store the array value as a physical value. In contrast, some data structures are designed to store multiple values. In these cases, data models can store the logical values within the key itself, as illustrated next.</p>
-</div>
-<div class="section" id="multimaps">
+</section>
+<section id="multimaps">
 <h3>Multimaps</h3>
 <p>A multimap is a generalization of an associative array in which each key may be associated with multiple values. Multimaps are often implemented as associative arrays in which the values are sets rather than primitive data types.</p>
 <p>Suppose you have a multimap that records student enrollment in classes, with students as keys and classes as values. Each student can be enrolled in more than one class, so you need to map the key-value pairs of the multimap (with their multiple values) to the database.</p>
-<p>A simple approach is to use the multimap name (say, <code class="docutils literal"><span class="pre">'enroll'</span></code>) as the subspace and construct a key from a tuple of the form <code class="docutils literal"><span class="pre">('enroll',</span> <span class="pre">student,</span> <span class="pre">class_name)</span></code> for each class in which a student is enrolled. Each class will generate a unique key, allowing as many classes as needed. Moreover, all the data in the multimap will be captured in the key, so you can just use an empty string for its value. Using this approach, you can add a class for a student or get all the student&#8217;s classes with the Python functions:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<p>A simple approach is to use the multimap name (say, <code class="docutils literal notranslate"><span class="pre">'enroll'</span></code>) as the subspace and construct a key from a tuple of the form <code class="docutils literal notranslate"><span class="pre">('enroll',</span> <span class="pre">student,</span> <span class="pre">class_name)</span></code> for each class in which a student is enrolled. Each class will generate a unique key, allowing as many classes as needed. Moreover, all the data in the multimap will be captured in the key, so you can just use an empty string for its value. Using this approach, you can add a class for a student or get all the student’s classes with the Python functions:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">multi_set</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">multi_space</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">multi_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">))]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
 
@@ -350,15 +465,15 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="k">return</span> <span class="n">multi_get</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">enroll_space</span><span class="p">,</span> <span class="n">student</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>The <code class="docutils literal"><span class="pre">range()</span></code> method in <code class="xref py py-func docutils literal"><span class="pre">multi_get()</span></code> returns all keys in the subspace that encode tuples with the specified tuple as a prefix. The <code class="docutils literal"><span class="pre">[-1]</span></code> extracts the last element of the tuple unpacked from the key, which in this case will encode a class.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">range()</span></code> method in <code class="xref py py-func docutils literal notranslate"><span class="pre">multi_get()</span></code> returns all keys in the subspace that encode tuples with the specified tuple as a prefix. The <code class="docutils literal notranslate"><span class="pre">[-1]</span></code> extracts the last element of the tuple unpacked from the key, which in this case will encode a class.</p>
 <p>As this model for multimaps illustrates, data that is treated as a value at one level may be mapped to a key in the database. (The reverse may also occur, as shown in the discussion of indirection below.) Data modeling in FoundationDB is not dictated by how your data is represented in your programming language.</p>
-</div>
-<div class="section" id="tables">
+</section>
+<section id="tables">
 <span id="data-modeling-tables"></span><h3>Tables</h3>
 <p>You can easily use tuples to store data in tabular form with rows and columns. The simplest data model for a table is to make each cell in the table a key-value pair. To do this, you construct a key from a tuple containing the row and column identifiers. As with the array model, unassigned cells in tables constructed using this technique will consume no storage, so sparse tables can be stored efficiently. As a result, a table can safely have a very large number of columns.</p>
 <p>You can make your model row-oriented or column-oriented by placing either the row or column first in the tuple, respectively. Because the lexicographic order sorts tuple elements from left to right, access is optimized for the element placed first. Placing the row first makes it efficient to read all the cells in a particular row; reversing the order makes reading a column more efficient.</p>
 <p>Using the table name as the subspace, we could implement the common row-oriented version in Python as follows:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_set_cell</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">table_space</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">table_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
@@ -381,22 +496,22 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="k">return</span> <span class="n">cols</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="versionstamps">
+</section>
+<section id="versionstamps">
 <h3>Versionstamps</h3>
 <p>A common data model is to index your data with a sequencing prefix to allow log scans or tails of recent data. This index requires a unique, monotonically increasing value, like an AUTO_INCREMENT PRIMARY KEY in SQL. This could be implemented at the client level by reading the value for conflict checks before every increment. A better solution is the versionstamp, which can be generated at commit-time with no read conflict ranges, providing a unique sequence ID in a single conflict-free write.</p>
-<p>Versioning commits provides FoundationDB with MVCC guarantees and transactional integrity. Versionstamps write the transaction&#8217;s commit version as a value to an arbitrary key as part of the same transaction, allowing the client to leverage the version&#8217;s unique and serial properties.  Because the versionstamp is generated at commit-time, the versionstamped key cannot be read in the same transaction that it is written, and the versionstamp&#8217;s value will be unknown until the transaction is committed. After the transaction is committed, the versionstamp can be obtained.</p>
+<p>Versioning commits provides FoundationDB with MVCC guarantees and transactional integrity. Versionstamps write the transaction’s commit version as a value to an arbitrary key as part of the same transaction, allowing the client to leverage the version’s unique and serial properties.  Because the versionstamp is generated at commit-time, the versionstamped key cannot be read in the same transaction that it is written, and the versionstamp’s value will be unknown until the transaction is committed. After the transaction is committed, the versionstamp can be obtained.</p>
 <p>The versionstamp guarantees uniqueness and monotonically increasing values for the entire lifetime of a single FDB cluster. This is even true if the cluster is restored from a backup, as a restored cluster will begin at a higher version than when the backup was taken. Special care must be taken when moving data between two FoundationDB clusters containing versionstamps, as the differing cluster versions might break the monotonicity.</p>
-<p>There are two concepts of versionstamp depending on your context. At the fdb_c client level, or any binding outside of the Tuple layer, the &#8216;versionstamp&#8217; is 10 bytes: the transaction&#8217;s commit version (8 bytes) and transaction batch order (2 bytes). The user can manually add 2 additional bytes to provide application level ordering. The tuple layer provides a useful api for getting and setting both the 10 byte system version and the 2 byte user version. In the context of the Tuple layer, the &#8216;versionstamp&#8217; is all 12 bytes. For examples on how to use the versionstamp in the python binding, see the <a class="reference internal" href="api-python.html"><span class="doc">Python API</span></a> documentation.</p>
-</div>
-</div>
-<div class="section" id="entity-relationship-models">
+<p>There are two concepts of versionstamp depending on your context. At the fdb_c client level, or any binding outside of the Tuple layer, the ‘versionstamp’ is 10 bytes: the transaction’s commit version (8 bytes) and transaction batch order (2 bytes). The user can manually add 2 additional bytes to provide application level ordering. The tuple layer provides a useful api for getting and setting both the 10 byte system version and the 2 byte user version. In the context of the Tuple layer, the ‘versionstamp’ is all 12 bytes. For examples on how to use the versionstamp in the python binding, see the <a class="reference internal" href="api-python.html"><span class="doc">Python API</span></a> documentation.</p>
+</section>
+</section>
+<section id="entity-relationship-models">
 <span id="data-modeling-entity-relationship"></span><h2>Entity-relationship models</h2>
 <p>Entity-relationship models are often used to describe a database at various levels of abstraction. In this methodology, a <em>logical</em> data model consisting of entities, attributes, and relationships is defined before mapping it to a <em>physical</em> data models specifying keys and other implementation features. Entity-relationship models can be easily modeled in FoundationDB using tuples.</p>
-<div class="section" id="attributes">
+<section id="attributes">
 <h3>Attributes</h3>
-<p>Suppose you&#8217;re storing entity-relationship data for users in an <code class="docutils literal"><span class="pre">'ER'</span></code> subspace. You might identify each entity with a unique identifier and define a key for each attribute with the tuple <code class="docutils literal"><span class="pre">('ER',</span> <span class="pre">entity_ID,</span> <span class="pre">attribute)</span></code>. You could then store the user&#8217;s region using the Python functions:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">ER_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;ER&#39;</span><span class="p">,))</span>
+<p>Suppose you’re storing entity-relationship data for users in an <code class="docutils literal notranslate"><span class="pre">'ER'</span></code> subspace. You might identify each entity with a unique identifier and define a key for each attribute with the tuple <code class="docutils literal notranslate"><span class="pre">('ER',</span> <span class="pre">entity_ID,</span> <span class="pre">attribute)</span></code>. You could then store the user’s region using the Python functions:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">ER_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;ER&#39;</span><span class="p">,))</span>
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_attribute_value</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">entity_ID</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
@@ -411,11 +526,11 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="n">add_attribute_value</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">,</span> <span class="s1">&#39;region&#39;</span><span class="p">,</span> <span class="n">region</span><span class="p">)</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="relationships">
+</section>
+<section id="relationships">
 <h3>Relationships</h3>
 <p>Using the pattern we saw above with multimaps, you can store relationships and related entities as an element of the key and use an empty string as the physical value. Suppose your users can belong to one or more groups. To add a user to a group or retrieve all groups to which a user belongs, you can use the Python functions:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_relationship</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">,</span> <span class="n">foreign_key</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">,</span> <span class="n">foreign_key</span><span class="p">))]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
 
@@ -444,15 +559,15 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 </pre></div>
 </div>
 <p>You can extend this code by adding indexes for the related entities (see below) and enforcement of relationship cardinalities (one-to-many, etc.).</p>
-</div>
-</div>
-<div class="section" id="indexes">
+</section>
+</section>
+<section id="indexes">
 <span id="data-modeling-indexes"></span><h2>Indexes</h2>
-<p>A common technique is to store the same data in different ways to allow efficient retrieval for multiple use cases, creating indexes. This technique is especially useful when there are many more reads than writes. For example, you may find it most convenient to store user data based on <code class="docutils literal"><span class="pre">user_ID</span></code> but sometimes need to retrieve users based on their region. An index allows this retrieval to be performed efficiently.</p>
-<p>An index can have a very simple tuple structure consisting of an unique subspace, the relationship being indexed, and a value: <code class="docutils literal"><span class="pre">(subspace_for_index,</span> <span class="pre">relationship,</span> <span class="pre">value)</span></code>. Placing the relationship before the value is what allows efficient retrieval of all the associated values with a single range read.</p>
-<p>With FoundationDB&#8217;s transactions, you can easily build an index and guarantee that it stays in sync with the data: just update the index in the same transaction that updates the data.</p>
-<p>For example, suppose you&#8217;d like to add an index to efficiently look up users by region. You can augment the Python function <code class="xref py py-func docutils literal"><span class="pre">add_user()</span></code> with the index and add a new function for retrieval:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">user_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
+<p>A common technique is to store the same data in different ways to allow efficient retrieval for multiple use cases, creating indexes. This technique is especially useful when there are many more reads than writes. For example, you may find it most convenient to store user data based on <code class="docutils literal notranslate"><span class="pre">user_ID</span></code> but sometimes need to retrieve users based on their region. An index allows this retrieval to be performed efficiently.</p>
+<p>An index can have a very simple tuple structure consisting of an unique subspace, the relationship being indexed, and a value: <code class="docutils literal notranslate"><span class="pre">(subspace_for_index,</span> <span class="pre">relationship,</span> <span class="pre">value)</span></code>. Placing the relationship before the value is what allows efficient retrieval of all the associated values with a single range read.</p>
+<p>With FoundationDB’s transactions, you can easily build an index and guarantee that it stays in sync with the data: just update the index in the same transaction that updates the data.</p>
+<p>For example, suppose you’d like to add an index to efficiently look up users by region. You can augment the Python function <code class="xref py py-func docutils literal notranslate"><span class="pre">add_user()</span></code> with the index and add a new function for retrieval:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">user_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
 <span class="n">region_index</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;region_idx&#39;</span><span class="p">,))</span>
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
@@ -467,12 +582,12 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 </pre></div>
 </div>
 <p>To apply this technique to a real use case, you would add code to your update transaction to delete outdated index entries. Note that this approach lets you add as many indexes as desired by updating all the indexes in the same transaction.</p>
-</div>
-<div class="section" id="composite-models">
+</section>
+<section id="composite-models">
 <h2>Composite models</h2>
-<p>Most of the techniques we&#8217;ve discussed can be freely combined. Let&#8217;s look at adding indexes to our basic data model for tables.</p>
-<p>We&#8217;ve already seen a way to store tabular data in a row-oriented order using table names as subspaces. You can extend this model by simultaneously storing the table in both row-oriented and column-oriented layouts, allowing efficient retrieval of either an entire row or an entire column. We&#8217;ll create nested subspaces for the indexes using the subscripting syntax we saw above:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">table_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;table&#39;</span><span class="p">,))</span>
+<p>Most of the techniques we’ve discussed can be freely combined. Let’s look at adding indexes to our basic data model for tables.</p>
+<p>We’ve already seen a way to store tabular data in a row-oriented order using table names as subspaces. You can extend this model by simultaneously storing the table in both row-oriented and column-oriented layouts, allowing efficient retrieval of either an entire row or an entire column. We’ll create nested subspaces for the indexes using the subscripting syntax we saw above:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">table_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;table&#39;</span><span class="p">,))</span>
 <span class="n">row_index</span> <span class="o">=</span> <span class="n">table_space</span><span class="p">[</span><span class="s1">&#39;row_idx&#39;</span><span class="p">]</span>
 <span class="n">col_index</span> <span class="o">=</span> <span class="n">table_space</span><span class="p">[</span><span class="s1">&#39;col_idx&#39;</span><span class="p">]</span>
 
@@ -502,12 +617,12 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="k">return</span> <span class="n">rows</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="hierarchies">
+</section>
+<section id="hierarchies">
 <span id="data-modeling-hierarchies"></span><h2>Hierarchies</h2>
-<p>Many applications work with hierarchical data represented by nested dictionaries or similar composite data types. Such data is often serialized to or deserialized from a format such as JSON or XML. Looking at a hierarchical object as a tree, you can use a tuple to represent the full path to each leaf (sometimes called  a &#8220;materialized path&#8221;). By storing each full path as a key, you get an index for each leaf. FoundationDB can then efficiently retrieve any individual piece of data or entire sub-tree.</p>
+<p>Many applications work with hierarchical data represented by nested dictionaries or similar composite data types. Such data is often serialized to or deserialized from a format such as JSON or XML. Looking at a hierarchical object as a tree, you can use a tuple to represent the full path to each leaf (sometimes called  a “materialized path”). By storing each full path as a key, you get an index for each leaf. FoundationDB can then efficiently retrieve any individual piece of data or entire sub-tree.</p>
 <p>For example, suppose you have hierarchical data such as the following nested dictionaries and lists:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;user&#39;</span><span class="p">:</span> <span class="p">{</span>  <span class="s1">&#39;jones&#39;</span><span class="p">:</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;user&#39;</span><span class="p">:</span> <span class="p">{</span>  <span class="s1">&#39;jones&#39;</span><span class="p">:</span>
             <span class="p">{</span>   <span class="s1">&#39;friendOf&#39;</span><span class="p">:</span> <span class="s1">&#39;smith&#39;</span><span class="p">,</span>
                 <span class="s1">&#39;group&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;sales&#39;</span><span class="p">,</span> <span class="s1">&#39;service&#39;</span><span class="p">]},</span>
             <span class="s1">&#39;smith&#39;</span><span class="p">:</span>
@@ -516,7 +631,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 </pre></div>
 </div>
 <p>To distinguish the list elements from dictionary elements and preserve the order of the lists, you can just include the index of each list element before it in the tuple. Using this technique, the data above would be converted to the following tuples:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="p">[(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;jones&#39;</span><span class="p">,</span> <span class="s1">&#39;friendOf&#39;</span><span class="p">,</span> <span class="s1">&#39;smith&#39;</span><span class="p">),</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">[(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;jones&#39;</span><span class="p">,</span> <span class="s1">&#39;friendOf&#39;</span><span class="p">,</span> <span class="s1">&#39;smith&#39;</span><span class="p">),</span>
 <span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;jones&#39;</span><span class="p">,</span> <span class="s1">&#39;group&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s1">&#39;sales&#39;</span><span class="p">),</span>
 <span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;jones&#39;</span><span class="p">,</span> <span class="s1">&#39;group&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;service&#39;</span><span class="p">),</span>
 <span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;smith&#39;</span><span class="p">,</span> <span class="s1">&#39;friendOf&#39;</span><span class="p">,</span> <span class="s1">&#39;jones&#39;</span><span class="p">),</span>
@@ -524,9 +639,9 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <span class="p">(</span><span class="s1">&#39;user&#39;</span><span class="p">,</span> <span class="s1">&#39;smith&#39;</span><span class="p">,</span> <span class="s1">&#39;group&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;research&#39;</span><span class="p">)]</span>
 </pre></div>
 </div>
-<p>Suppose you&#8217;d like to use this representation to implement a nested keyspace, i.e., a key-value store in which values can themselves be nested dictionaries or lists. Your application receives a stream of serialized JSON objects in which different objects may contain data about the same entities, so you&#8217;d like to store the data in a common nested keyspace.</p>
-<p>You can deserialize the data using Python&#8217;s standard <code class="docutils literal"><span class="pre">json</span></code> module, generate the corresponding set of paths as tuples, and store each tuple in a <code class="docutils literal"><span class="pre">'hier'</span></code> subspace:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">json</span><span class="o">,</span> <span class="nn">itertools</span>
+<p>Suppose you’d like to use this representation to implement a nested keyspace, i.e., a key-value store in which values can themselves be nested dictionaries or lists. Your application receives a stream of serialized JSON objects in which different objects may contain data about the same entities, so you’d like to store the data in a common nested keyspace.</p>
+<p>You can deserialize the data using Python’s standard <code class="docutils literal notranslate"><span class="pre">json</span></code> module, generate the corresponding set of paths as tuples, and store each tuple in a <code class="docutils literal notranslate"><span class="pre">'hier'</span></code> subspace:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">json</span><span class="o">,</span> <span class="nn">itertools</span>
 
 <span class="n">hier_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;hier&#39;</span><span class="p">,))</span>
 
@@ -553,9 +668,9 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
         <span class="n">tr</span><span class="p">[</span><span class="n">hier_space</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">tup</span><span class="p">)]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
 </pre></div>
 </div>
-<p>You can then retrieve any sub-tree from the nested keyspace by giving the partial path to its root. The partial path will just be a tuple that your query function uses as a key prefix for a range read. For example, to retrieve the data for <code class="docutils literal"><span class="pre">'smith'</span></code> from the hierarchy above, you would use <code class="docutils literal"><span class="pre">('user',</span> <span class="pre">'smith')</span></code>.</p>
+<p>You can then retrieve any sub-tree from the nested keyspace by giving the partial path to its root. The partial path will just be a tuple that your query function uses as a key prefix for a range read. For example, to retrieve the data for <code class="docutils literal notranslate"><span class="pre">'smith'</span></code> from the hierarchy above, you would use <code class="docutils literal notranslate"><span class="pre">('user',</span> <span class="pre">'smith')</span></code>.</p>
 <p>The retrieved data will be a list of tuples. The final step before returning the data is to convert it back to a nested data structure:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">from_tuples</span><span class="p">(</span><span class="n">tuples</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">from_tuples</span><span class="p">(</span><span class="n">tuples</span><span class="p">):</span>
     <span class="n">first</span> <span class="o">=</span> <span class="n">tuples</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># The first tuple will tell us what kind of object we have</span>
 
     <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">first</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span> <span class="k">return</span> <span class="n">first</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># Primitive value</span>
@@ -576,12 +691,12 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
                         <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">hier_space</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="n">prefix</span><span class="p">)]])</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="documents">
+</section>
+<section id="documents">
 <span id="data-modeling-documents"></span><h2>Documents</h2>
-<p>Suppose you&#8217;d like to use the above representation to implement a simple document-oriented data model. As before, your application receives serialized data in JSON, only now you&#8217;d like to store each JSON object as an independent document. To do so, you just need to ensure that each tuple created for that object is stored with a unique identifier for the document. If a <code class="docutils literal"><span class="pre">doc_id</span></code> has not already been supplied, you can randomly generate one.</p>
-<p>To store a path, you can construct a composite key in a <code class="docutils literal"><span class="pre">'doc'</span></code> subspace, with the <code class="docutils literal"><span class="pre">doc_id</span></code> as the next element, followed by the remainder of the path. You can store the leaf (the last element of the tuple) as the value, which enables storage of larger data sizes (see <a class="reference internal" href="#data-modeling-performance-guidelines"><span class="std std-ref">Key and value sizes</span></a>):</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">random</span>
+<p>Suppose you’d like to use the above representation to implement a simple document-oriented data model. As before, your application receives serialized data in JSON, only now you’d like to store each JSON object as an independent document. To do so, you just need to ensure that each tuple created for that object is stored with a unique identifier for the document. If a <code class="docutils literal notranslate"><span class="pre">doc_id</span></code> has not already been supplied, you can randomly generate one.</p>
+<p>To store a path, you can construct a composite key in a <code class="docutils literal notranslate"><span class="pre">'doc'</span></code> subspace, with the <code class="docutils literal notranslate"><span class="pre">doc_id</span></code> as the next element, followed by the remainder of the path. You can store the leaf (the last element of the tuple) as the value, which enables storage of larger data sizes (see <a class="reference internal" href="#data-modeling-performance-guidelines"><span class="std std-ref">Key and value sizes</span></a>):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">random</span>
 
 <span class="n">doc_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;doc&#39;</span><span class="p">,))</span>
 
@@ -601,12 +716,12 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
                         <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">doc_space</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">doc_id</span><span class="p">,))]])</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="indirection">
+</section>
+<section id="indirection">
 <span id="data-modeling-indirection"></span><h2>Indirection</h2>
 <p>It is sometimes beneficial to add a level of indirection to a data model. Instead of using key-value pairs to directly store application data, you can instead store a reference to that data. This approach can be used to model any data structure that would normally use references. You just need to perform any modifications to the data structure in a transaction that leaves it in a consistent state.</p>
 <p>Suppose you want to maintain data in a singly linked list. The application data can use a tuple structure like those of single-valued relationships. Links will be similar but will use node identifiers as their values. Here is an example of removing the next node from the list:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">node_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;node&#39;</span><span class="p">,))</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">node_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;node&#39;</span><span class="p">,))</span>
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">remove_next_node</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">node_ID</span><span class="p">):</span>
@@ -617,45 +732,49 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
         <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">node_space</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">next_ID</span><span class="p">,))]</span>
 </pre></div>
 </div>
-<p>FoundationDB&#8217;s transactional guarantees ensure that, even when multiple clients are concurrently modifying the same linked list, the structure will be maintained in a consistent way.</p>
-</div>
-<div class="section" id="key-and-value-sizes">
+<p>FoundationDB’s transactional guarantees ensure that, even when multiple clients are concurrently modifying the same linked list, the structure will be maintained in a consistent way.</p>
+</section>
+<section id="key-and-value-sizes">
 <span id="data-modeling-performance-guidelines"></span><h2>Key and value sizes</h2>
 <p>How you map your application data to keys and values can have a dramatic impact on performance. Below are some guidelines to consider as you design a data model. (For more general discussion of performance considerations, see <a class="reference internal" href="developer-guide.html#developer-guide-peformance-considerations"><span class="std std-ref">Performance considerations</span></a>.)</p>
 <ul class="simple">
-<li>Structure keys so that range reads can efficiently retrieve the most frequently accessed data.<ul>
-<li>If you perform a range read that is, in total, much more than 1 kB, try to restrict your range as much as you can while still retrieving the needed data.</li>
+<li><p>Structure keys so that range reads can efficiently retrieve the most frequently accessed data.</p>
+<ul>
+<li><p>If you perform a range read that is, in total, much more than 1 kB, try to restrict your range as much as you can while still retrieving the needed data.</p></li>
 </ul>
 </li>
-<li>Structure keys so that no single key needs to be updated too frequently, which can cause transaction conflicts.<ul>
-<li>If a key is updated more than 10-100 times per second, try to split it into multiple keys.</li>
-<li>For example, if a key is storing a counter, split the counter into N separate counters that are randomly incremented by clients. The total value of the counter can then read by adding up the N individual ones.</li>
+<li><p>Structure keys so that no single key needs to be updated too frequently, which can cause transaction conflicts.</p>
+<ul>
+<li><p>If a key is updated more than 10-100 times per second, try to split it into multiple keys.</p></li>
+<li><p>For example, if a key is storing a counter, split the counter into N separate counters that are randomly incremented by clients. The total value of the counter can then read by adding up the N individual ones.</p></li>
 </ul>
 </li>
-<li>Keep key sizes small.<ul>
-<li>Try to keep key sizes below 1 kB. (Performance will be best with key sizes below 32 bytes and <em>cannot</em> be more than 10 kB.)</li>
-<li>When using the tuple layer to encode keys (as is recommended), select short strings or small integers for tuple elements. Small integers will encode to just two bytes.</li>
-<li>If your key sizes are above 1 kB, try either to move data from the key to the value, split the key into multiple keys, or encode the parts of the key more efficiently (remembering to preserve any important ordering).</li>
+<li><p>Keep key sizes small.</p>
+<ul>
+<li><p>Try to keep key sizes below 1 kB. (Performance will be best with key sizes below 32 bytes and <em>cannot</em> be more than 10 kB.)</p></li>
+<li><p>When using the tuple layer to encode keys (as is recommended), select short strings or small integers for tuple elements. Small integers will encode to just two bytes.</p></li>
+<li><p>If your key sizes are above 1 kB, try either to move data from the key to the value, split the key into multiple keys, or encode the parts of the key more efficiently (remembering to preserve any important ordering).</p></li>
 </ul>
 </li>
-<li>Keep value sizes moderate.<ul>
-<li>Try to keep value sizes below 10 kB. (Value sizes <em>cannot</em> be more than 100 kB.)</li>
-<li>If your value sizes are above 10 kB, consider splitting the value across multiple keys.</li>
-<li>If you read values with sizes above 1 kB but use only a part of each value, consider splitting the values using multiple keys.</li>
-<li>If you frequently perform individual reads on a set of values that total to fewer than 200 bytes, try either to combine the values into a single value or to store the values in adjacent keys and use a range read.</li>
+<li><p>Keep value sizes moderate.</p>
+<ul>
+<li><p>Try to keep value sizes below 10 kB. (Value sizes <em>cannot</em> be more than 100 kB.)</p></li>
+<li><p>If your value sizes are above 10 kB, consider splitting the value across multiple keys.</p></li>
+<li><p>If you read values with sizes above 1 kB but use only a part of each value, consider splitting the values using multiple keys.</p></li>
+<li><p>If you frequently perform individual reads on a set of values that total to fewer than 200 bytes, try either to combine the values into a single value or to store the values in adjacent keys and use a range read.</p></li>
 </ul>
 </li>
 </ul>
-<div class="section" id="large-values-and-blobs">
+<section id="large-values-and-blobs">
 <h3>Large Values and Blobs</h3>
 <p>If your keys or values are much larger than the above guidelines, it may be difficult to find a data model that resizes them appropriately. Unstructured data, such as binary large objects, can be especially challenging to segment manually. In this case, a good option is to use our blob layer. See our tutorial on <a class="reference internal" href="largeval.html"><span class="doc">Managing Large Values and Blobs</span></a> for further discussion.</p>
-</div>
-</div>
-<div class="section" id="data-modeling-examples-tutorials">
+</section>
+</section>
+<section id="data-modeling-examples-tutorials">
 <h2>Data modeling examples: tutorials</h2>
 <p>The <a class="reference internal" href="tutorials.html"><span class="doc">Tutorials</span></a> provide examples of data modeling using the tuple layer. They use techniques applicable to all of the <a class="reference internal" href="api-reference.html"><span class="doc">languages</span></a> supported by FoundationDB.</p>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -677,7 +796,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

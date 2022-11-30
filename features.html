@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Features &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Features &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Layer Concept" href="layer-concept.html" />
     <link rel="prev" title="Engineering" href="engineering.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -196,105 +311,105 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="features">
+  <section id="features">
 <h1>Features</h1>
 <p>FoundationDB has an ordered transactional API with useful properties and strong guarantees. Features in the core are deliberately kept to a minimum; data models and other abilities are exposed <a class="reference internal" href="architecture.html"><span class="doc">via layers</span></a>.</p>
-<div class="section" id="the-foundation">
+<section id="the-foundation">
 <h2>The Foundation</h2>
-<div class="section" id="scalable">
+<section id="scalable">
 <h3>Scalable</h3>
 <p>FoundationDB adapts to efficiently support applications with diverse performance requirements. By using a shared-nothing distributed architecture, FoundationDB <em>scales out</em> by adding more machines to a cluster rather than just <em>scaling up</em> by increasing the capacity of a single machine. Best of all, the hard work of managing data redundancy, partitioning, caching, etc., is all handled automatically. Read more about our <a class="reference internal" href="scalability.html"><span class="doc">scalability</span></a>.</p>
-</div>
-<div class="section" id="acid-transactions">
+</section>
+<section id="acid-transactions">
 <h3>ACID transactions</h3>
-<p>All reads and writes in FoundationDB are accomplished using transactions. These transactions are fully ACID (Atomic, Consistent, Isolated, and Durable) and span multiple machines with high performance. FoundationDB&#8217;s isolation is the highest available; transactions appear to occur sequentially. FoundationDB&#8217;s durability is the strongest — all transactions are redundantly stored to disk before they are considered committed.</p>
-</div>
-<div class="section" id="fault-tolerance">
+<p>All reads and writes in FoundationDB are accomplished using transactions. These transactions are fully ACID (Atomic, Consistent, Isolated, and Durable) and span multiple machines with high performance. FoundationDB’s isolation is the highest available; transactions appear to occur sequentially. FoundationDB’s durability is the strongest — all transactions are redundantly stored to disk before they are considered committed.</p>
+</section>
+<section id="fault-tolerance">
 <h3>Fault tolerance</h3>
-<p>A system designed to be distributed across many machines must be highly fault tolerant because the likelihood of hardware and network failures increases with the number of machines involved. FoundationDB has been designed and relentlessly tested to provide exceptionally high levels of fault tolerance. We&#8217;ve gone much further than designing for &#8220;no single point of failure&#8221;. FoundationDB has also been designed and tested to guarantee that all ACID properties are preserved, even under catastrophic failures. Read more about our <a class="reference internal" href="fault-tolerance.html"><span class="doc">fault tolerance</span></a>.</p>
-</div>
-<div class="section" id="replicated-storage">
+<p>A system designed to be distributed across many machines must be highly fault tolerant because the likelihood of hardware and network failures increases with the number of machines involved. FoundationDB has been designed and relentlessly tested to provide exceptionally high levels of fault tolerance. We’ve gone much further than designing for “no single point of failure”. FoundationDB has also been designed and tested to guarantee that all ACID properties are preserved, even under catastrophic failures. Read more about our <a class="reference internal" href="fault-tolerance.html"><span class="doc">fault tolerance</span></a>.</p>
+</section>
+<section id="replicated-storage">
 <h3>Replicated Storage</h3>
 <p>FoundationDB stores each piece of data on multiple servers. If a server containing one of the copies is lost, FoundationDB will automatically heal, finding a new location for the lost copy. For read operations, clients communicate directly to the servers with the replicas, requesting a specific version to ensure a consistent view of the data.</p>
-</div>
-<div class="section" id="ordered-key-value-api">
+</section>
+<section id="ordered-key-value-api">
 <h3>Ordered Key-Value API</h3>
-<p>Simple can be powerful. FoundationDB uses an ordered key-value data model (and richer data models are exposed via <a class="reference internal" href="layer-concept.html"><span class="doc">layers</span></a>). Each &#8220;row&#8221; within the database consists of a key that is used to reference the row and a value which stores data associated with the key. No specific format for the keys or values is required; they are simply binary data. Because keys are kept in lexicographical (sorted) order, ranges of key-value pairs can be read efficiently.</p>
-</div>
-<div class="section" id="watches">
+<p>Simple can be powerful. FoundationDB uses an ordered key-value data model (and richer data models are exposed via <a class="reference internal" href="layer-concept.html"><span class="doc">layers</span></a>). Each “row” within the database consists of a key that is used to reference the row and a value which stores data associated with the key. No specific format for the keys or values is required; they are simply binary data. Because keys are kept in lexicographical (sorted) order, ranges of key-value pairs can be read efficiently.</p>
+</section>
+<section id="watches">
 <h3>Watches</h3>
 <p>Clients can create transactional watches on keys to ensure that they are notified if the value changes. After a watch is registered, FoundationDB efficiently pushes change notifications to clients without polling.</p>
-</div>
-<div class="section" id="atomic-operations">
+</section>
+<section id="atomic-operations">
 <h3>Atomic Operations</h3>
-<p>FoundationDB includes support for specific &#8220;atomic operations&#8221; (e.g. Add) within a transaction to manipulate the value of a key without requiring the client to actually read the value. This makes these operations low-latency and enables a variety of advanced data structures to be implemented more efficiently as layers.</p>
-</div>
-<div class="section" id="oltp-and-olap">
+<p>FoundationDB includes support for specific “atomic operations” (e.g. Add) within a transaction to manipulate the value of a key without requiring the client to actually read the value. This makes these operations low-latency and enables a variety of advanced data structures to be implemented more efficiently as layers.</p>
+</section>
+<section id="oltp-and-olap">
 <h3>OLTP and OLAP</h3>
 <p>FoundationDB is optimized for online transaction processing (OLTP) workloads consisting of many small reads and writes. However, because it is an <em>ordered</em> key-value store, FoundationDB can use range reads to efficiently scan large swaths of data. Thus, FoundationDB can be effectively used for online analytical processing (OLAP) workloads as well.</p>
-</div>
-</div>
-<div class="section" id="performance">
+</section>
+</section>
+<section id="performance">
 <h2>Performance</h2>
-<div class="section" id="low-predictable-latencies">
+<section id="low-predictable-latencies">
 <h3>Low, predictable latencies</h3>
-<p>FoundationDB provides predictable throughput and low-latency random IO, even under workloads with unusual or erratically changing access patterns. Further, both FoundationDB&#8217;s API and implementation have been designed to make it possible to understand the costs of the operations being executed. For example, clearing any range, even the entire database, is a fast operation.
+<p>FoundationDB provides predictable throughput and low-latency random IO, even under workloads with unusual or erratically changing access patterns. Further, both FoundationDB’s API and implementation have been designed to make it possible to understand the costs of the operations being executed. For example, clearing any range, even the entire database, is a fast operation.
 Read more about <a class="reference internal" href="performance.html"><span class="doc">performance</span></a>.</p>
-</div>
-<div class="section" id="load-balancing">
+</section>
+<section id="load-balancing">
 <h3>Load balancing</h3>
 <p>FoundationDB achieves full utilization of a cluster under variable real-world workloads by using two major techniques. First, individual chunks of data are continuously moved from machine to machine to balance the load minute-to-minute. Second, on a faster time scale, individual requests can be redirected from a busy machine to a less-busy peer that also has a copy of the data. These techniques work together to optimize both throughput and latency.</p>
-</div>
-<div class="section" id="bursting">
+</section>
+<section id="bursting">
 <h3>Bursting</h3>
-<p>By deferring background work for later, FoundationDB can provide higher burst write speeds, often up to triple the steady-state speed. This ability to efficiently &#8220;absorb&#8221; work can last several minutes. The capability to buffer bursts of work allows FoundationDB to be provisioned without worrying about instantaneous load peaks, and to keep latencies low even when pushing &#8220;above 100%&#8221; load.</p>
-</div>
-<div class="section" id="distributed-caching">
+<p>By deferring background work for later, FoundationDB can provide higher burst write speeds, often up to triple the steady-state speed. This ability to efficiently “absorb” work can last several minutes. The capability to buffer bursts of work allows FoundationDB to be provisioned without worrying about instantaneous load peaks, and to keep latencies low even when pushing “above 100%” load.</p>
+</section>
+<section id="distributed-caching">
 <h3>Distributed Caching</h3>
-<p>When your database scales out, you don&#8217;t need a separate distributed caching layer: you already have one. FoundationDB uses the aggregate memory of the entire cluster to cache commonly accessed data. Unlike a caching tier such as memcached, FoundationDB&#8217;s cache is completely synchronized to the database and provides all ACID guarantees.</p>
-</div>
-</div>
-<div class="section" id="concurrency">
+<p>When your database scales out, you don’t need a separate distributed caching layer: you already have one. FoundationDB uses the aggregate memory of the entire cluster to cache commonly accessed data. Unlike a caching tier such as memcached, FoundationDB’s cache is completely synchronized to the database and provides all ACID guarantees.</p>
+</section>
+</section>
+<section id="concurrency">
 <h2>Concurrency</h2>
-<div class="section" id="non-blocking">
+<section id="non-blocking">
 <h3>Non-blocking</h3>
 <p>FoundationDB uses multiversion concurrency control to provide transactionally isolated reads without locking data or blocking writes. Optimistic concurrency control ensures that deadlocks are impossible and that slow or failing clients cannot interfere with the operation of the database.</p>
-</div>
-<div class="section" id="concurrent-connections">
+</section>
+<section id="concurrent-connections">
 <h3>Concurrent Connections</h3>
 <p>FoundationDB is able to handle large numbers of concurrent client connections. Because it uses a threadless communications and concurrency model, FoundationDB does not have to create a thread per connection. This allows full performance even with hundreds of thousands of in-flight requests.</p>
-</div>
-<div class="section" id="interactive-transactions">
+</section>
+<section id="interactive-transactions">
 <h3>Interactive Transactions</h3>
 <p>FoundationDB transactions are true interactive sessions, unlike distributed databases that require stored procedures. This means that client code can make an iterative series of reads and writes over the network to execute complex transactions.</p>
-</div>
-</div>
-<div class="section" id="operations">
+</section>
+</section>
+<section id="operations">
 <h2>Operations</h2>
-<div class="section" id="elastic">
+<section id="elastic">
 <h3>Elastic</h3>
 <p>A FoundationDB database can start on a single machine and be expanded to a cluster as load and circumstances require. Adding a machine is as easy as running another FoundationDB process, even during database operation and without any extra administration. Data is continuously re-partitioned in the background; no manual data distribution or sharding is required.</p>
-</div>
-<div class="section" id="datacenter-failover">
+</section>
+<section id="datacenter-failover">
 <h3>Datacenter Failover</h3>
 <p>FoundationDB can be configured to run multiple geographically diverse datacenters through our Multi DC mode. Each piece of data is replicated into three data centers, and clients can read data from their local data center at low latencies. In the event of a data center failure, the two remaining data centers will continue accepting writes, allowing for minimal downtime.</p>
-</div>
-<div class="section" id="self-tuning">
+</section>
+<section id="self-tuning">
 <h3>Self Tuning</h3>
-<p>FoundationDB has been designed so that many functions (such as data distribution, fault tolerance, incorporation of new nodes, performance tuning, etc.) are done automatically and require minimal management. Management tools allow configuration of parameters like replication policy, cluster topology, and data directories. A status monitoring tool lets you monitor cluster health and utilization of the cluster&#8217;s physical resources.</p>
-</div>
-<div class="section" id="deploy-anywhere">
+<p>FoundationDB has been designed so that many functions (such as data distribution, fault tolerance, incorporation of new nodes, performance tuning, etc.) are done automatically and require minimal management. Management tools allow configuration of parameters like replication policy, cluster topology, and data directories. A status monitoring tool lets you monitor cluster health and utilization of the cluster’s physical resources.</p>
+</section>
+<section id="deploy-anywhere">
 <h3>Deploy Anywhere</h3>
 <p>Because it can scale linearly by adding new machines, FoundationDB is an ideal database for deployment in public or private cloud environments. For best performance in cloud environments with limited I/O, FoundationDB can be configured to use a durable in-memory storage engine instead of its default SSD-optimized storage engine.</p>
-</div>
-<div class="section" id="backup">
+</section>
+<section id="backup">
 <h3>Backup</h3>
-<p>An integrated backup system provides a true &#8220;moment-in-time&#8221; snapshot backup of the entire distributed database stored to a remote file system on a schedule. Although FoundationDB itself is fault tolerant, this capability is useful for recovering from disasters or unintentional modification of the database.</p>
-</div>
-</div>
-</div>
+<p>An integrated backup system provides a true “moment-in-time” snapshot backup of the entire distributed database stored to a remote file system on a schedule. Although FoundationDB itself is fault tolerant, this capability is useful for recovering from disasters or unintentional modification of the database.</p>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -316,7 +431,7 @@ Read more about <a class="reference internal" href="performance.html"><span clas
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Performance &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Performance &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Benchmarking" href="benchmarking.html" />
     <link rel="prev" title="Architecture" href="architecture.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -142,12 +257,12 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="performance">
+  <section id="performance">
 <h1>Performance</h1>
 <p>FoundationDB uses commodity hardware to provide high throughputs and low latencies to your application at a variety of scales.</p>
-<div class="section" id="scaling">
+<section id="scaling">
 <h2>Scaling</h2>
 <p>FoundationDB scales linearly with the number of cores in a cluster over a wide range of sizes.</p>
 <img alt="_images/scaling.png" src="_images/scaling.png" />
@@ -155,34 +270,30 @@
 <p>The scaling graph uses a 24-machine EC2 c3.8xlarge cluster in which each machine has a 16-core processor. We ran a FoundationDB server process on each core, yielding a 384-process cluster for the largest test, and scaled the cluster down for each smaller test.</p>
 <p>Scaling is the ability to efficiently deliver operations at different scales. For FoundationDB, the relevant operations are reads and writes, measured in operations per sec. Scale is measured in the number of processes, which will usually track the number of available cores. FoundationDB offers scalability from partial utilization of a single core on a single machine to full utilization of dozens of powerful multi-core machines in a cluster.</p>
 <p>See our <a class="reference internal" href="known-limitations.html#cluster-size"><span class="std std-ref">known limitations</span></a> for details about the limits of cluster scalability.</p>
-</div>
-<div class="section" id="latency">
+</section>
+<section id="latency">
 <h2>Latency</h2>
 <p>FoundationDB has low latencies over a broad range of workloads that only increase modestly as the cluster approaches saturation.</p>
 <img alt="_images/latency.png" src="_images/latency.png" />
 <p>When run at less than <strong>75% load</strong>, FoundationDB typically has the following latencies:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="40%" />
-<col width="60%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">&#160;</th>
-<th class="head">&#160;</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"></th>
+<th class="head"></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>Start transaction</td>
-<td>0.3 - 1ms</td>
+<tbody>
+<tr class="row-even"><td><p>Start transaction</p></td>
+<td><p>0.3 - 1ms</p></td>
 </tr>
-<tr class="row-odd"><td>Read</td>
-<td>0.1 - 1ms</td>
+<tr class="row-odd"><td><p>Read</p></td>
+<td><p>0.1 - 1ms</p></td>
 </tr>
-<tr class="row-even"><td>Set</td>
-<td>0 (deferred until commit)</td>
+<tr class="row-even"><td><p>Set</p></td>
+<td><p>0 (deferred until commit)</p></td>
 </tr>
-<tr class="row-odd"><td>Commit</td>
-<td>1.5 - 2.5ms</td>
+<tr class="row-odd"><td><p>Commit</p></td>
+<td><p>1.5 - 2.5ms</p></td>
 </tr>
 </tbody>
 </table>
@@ -190,36 +301,31 @@
 <p>Latency is the time required to complete a given operation. Latencies in FoundationDB are typically measured in milliseconds (ms). Like all systems, FoundationDB operates at low latencies while under low load and increasing latencies as the load approaches the saturation point. FoundationDB is engineered to keep latencies low even at moderate loads. As loads approach saturation, latencies increase as requests are queued up.</p>
 <p>For FoundationDB, the significant latencies are those experienced by a FoundationDB client as it prepares and submits a transaction. Writes incur no latency until the transaction is committed. There are three actions within a transaction that do incur latency:</p>
 <ul class="simple">
-<li><strong>Transaction start</strong>. This latency will be experienced as part of the first read in a transaction as the read version is obtained. It will typically be a few milliseconds under moderate load, but under high write loads FoundationDB tries to concentrate most transaction latency here.</li>
-<li><strong>Reads</strong>. Individual reads should take under 1 ms with moderate loads. If a transaction performs many reads by waiting for each to complete before starting the next, however, these small latencies can add up. You can thus reduce total latency (and potentially <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>) by doing as many of your reads as possible in parallel. FoundationDB supports non-blocking reads, so it&#8217;s easy to perform reads without waiting on them.</li>
-<li><strong>Commit</strong>. Transactions that perform writes must be committed, and the commit will not succeed until the transaction is durable with full replication. This latency should average under 3 ms with moderate loads. Only a small part of this latency impacts transaction <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>.</li>
+<li><p><strong>Transaction start</strong>. This latency will be experienced as part of the first read in a transaction as the read version is obtained. It will typically be a few milliseconds under moderate load, but under high write loads FoundationDB tries to concentrate most transaction latency here.</p></li>
+<li><p><strong>Reads</strong>. Individual reads should take under 1 ms with moderate loads. If a transaction performs many reads by waiting for each to complete before starting the next, however, these small latencies can add up. You can thus reduce total latency (and potentially <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>) by doing as many of your reads as possible in parallel. FoundationDB supports non-blocking reads, so it’s easy to perform reads without waiting on them.</p></li>
+<li><p><strong>Commit</strong>. Transactions that perform writes must be committed, and the commit will not succeed until the transaction is durable with full replication. This latency should average under 3 ms with moderate loads. Only a small part of this latency impacts transaction <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>.</p></li>
 </ul>
-</div>
-<div class="section" id="throughput-per-core">
+</section>
+<section id="throughput-per-core">
 <h2>Throughput (per core)</h2>
 <p>FoundationDB provides good throughput for the full range of read and write workloads, with two fully durable storage engine options.</p>
 <img alt="_images/throughput.png" src="_images/throughput.png" />
 <p>FoundationDB offers two <a class="reference internal" href="configuration.html#configuration-storage-engine"><span class="std std-ref">storage engines</span></a>, optimized for distinct use cases, both of which write to disk before reporting transactions committed. For each storage engine, the graph shows throughput of a single FoundationDB process running on a <strong>single core</strong> with saturating read/write workloads ranging from 100% reads to 100% writes, all with 16 byte keys and values between 8 and 100 bytes. Throughput for the unmixed workloads is about:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="27%" />
-<col width="30%" />
-<col width="42%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">workload</th>
-<th class="head">ssd engine</th>
-<th class="head">memory engine</th>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>workload</p></th>
+<th class="head"><p>ssd engine</p></th>
+<th class="head"><p>memory engine</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>Reads</td>
-<td>55,000/sec</td>
-<td>90,000/sec</td>
+<tbody>
+<tr class="row-even"><td><p>Reads</p></td>
+<td><p>55,000/sec</p></td>
+<td><p>90,000/sec</p></td>
 </tr>
-<tr class="row-odd"><td>Writes</td>
-<td>20,000/sec</td>
-<td>35,000/sec</td>
+<tr class="row-odd"><td><p>Writes</p></td>
+<td><p>20,000/sec</p></td>
+<td><p>35,000/sec</p></td>
 </tr>
 </tbody>
 </table>
@@ -228,36 +334,36 @@
 <p>The memory engine is optimized for datasets that entirely fit in memory, with secondary storage used for durable writes but not reads. The SSD engine is optimized for datasets that do not entirely fit in memory, with some percentage of reads being served from secondary storage.</p>
 <p>Because SATA SSDs are only about 50 times slower than memory, they can be combined with memory to achieve throughputs on the same order of magnitude as memory alone as long as cache-hit rates are reasonable. The SSD engine takes advantage of this property. In contrast, spinning disks are 5,000 times slower than memory and radically degrade throughput as soon as cache hits fall appreciably below 100%.</p>
 <p>FoundationDB will only reach maximum throughputs with a highly concurrent workload. In fact, for a given average latency, concurrency is the main driver of throughput.</p>
-</div>
-<div class="section" id="concurrency">
+</section>
+<section id="concurrency">
 <h2>Concurrency</h2>
 <p>FoundationDB is designed to achieve great performance under high concurrency from a large number of clients.</p>
 <img alt="_images/concurrency.png" src="_images/concurrency.png" />
 <p>Its asynchronous design allows it to handle very high concurrency, and for a typical workload with 90% reads and 10% writes, maximum throughput is reached at about 200 concurrent operations. This number of operations was achieved with <strong>20</strong> concurrent transactions per FoundationDB process each running 10 operations with 16 byte keys and values between 8 and 100 bytes.</p>
 <p>The concurrency graph uses a single FoundationDB server process on a single core (E3-1240).</p>
 <p>For a given system, average throughput and latency are related by a ratio known in queuing theory as Little’s Law. The practical application of this law to FoundationDB states:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">throughput</span> <span class="o">=</span> <span class="n">outstanding</span> <span class="n">requests</span> <span class="o">/</span> <span class="n">latency</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">throughput</span> <span class="o">=</span> <span class="n">outstanding</span> <span class="n">requests</span> <span class="o">/</span> <span class="n">latency</span>
 </pre></div>
 </div>
 <p>The implication of this relation is that, at a given latency, we can maximize throughput only by concurrently submitting enough outstanding requests. A FoundationDB cluster might have a commit latency of 2 ms and yet be capable of far more than 500 commits per second. In fact, tens of thousands of commits per second are easily achievable. To achieve this rate, there must be hundreds of requests happening concurrently. Not having enough pending requests is the single biggest reason for low performance.</p>
-</div>
-<div class="section" id="other-effects">
+</section>
+<section id="other-effects">
 <h2>Other Effects</h2>
 <p>A lot of things affect the simple first-order model of performance you see here. For example:</p>
 <ul class="simple">
-<li>For short periods, higher write throughputs can be absorbed, giving higher performance and keeping latencies low.</li>
-<li>Most workloads&#8217; reads can be cached, giving higher performance.</li>
-<li>Adjacently written keys can be written much faster.</li>
-<li>Large keys make the storage engine slower.</li>
-<li>Large values cost more to read and write than smaller ones.</li>
-<li>Not all CPUs are the same speed.</li>
-<li>To keep up with the performance modeled above, your disk subsystem will need to do a little over 1 IOPS per write, and about 1 IOPS per (uncached) read.</li>
-<li>Network performance tuning at the operating system level can be very important for both latency and throughput, especially in larger clusters.</li>
-<li>Running DR and/or backup requires applying each mutation multiple times and then reading those mutations from the database. Using either feature will reduce throughput.</li>
-<li>See our <a class="reference internal" href="known-limitations.html#known-limitations"><span class="std std-ref">known limitations</span></a> for other considerations which may affect performance.</li>
+<li><p>For short periods, higher write throughputs can be absorbed, giving higher performance and keeping latencies low.</p></li>
+<li><p>Most workloads’ reads can be cached, giving higher performance.</p></li>
+<li><p>Adjacently written keys can be written much faster.</p></li>
+<li><p>Large keys make the storage engine slower.</p></li>
+<li><p>Large values cost more to read and write than smaller ones.</p></li>
+<li><p>Not all CPUs are the same speed.</p></li>
+<li><p>To keep up with the performance modeled above, your disk subsystem will need to do a little over 1 IOPS per write, and about 1 IOPS per (uncached) read.</p></li>
+<li><p>Network performance tuning at the operating system level can be very important for both latency and throughput, especially in larger clusters.</p></li>
+<li><p>Running DR and/or backup requires applying each mutation multiple times and then reading those mutations from the database. Using either feature will reduce throughput.</p></li>
+<li><p>See our <a class="reference internal" href="known-limitations.html#known-limitations"><span class="std std-ref">known limitations</span></a> for other considerations which may affect performance.</p></li>
 </ul>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -279,7 +385,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

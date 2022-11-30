@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Transaction Manifesto &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Transaction Manifesto &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="CAP Theorem" href="cap-theorem.html" />
     <link rel="prev" title="Why FoundationDB" href="why-foundationdb.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -158,65 +273,65 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="transaction-manifesto">
+  <section id="transaction-manifesto">
 <h1>Transaction Manifesto</h1>
-<div class="section" id="what-is-a-transaction">
+<section id="what-is-a-transaction">
 <h2>What is a transaction?</h2>
-<p>A transaction is a set of database reads and writes that is handled as a unit with a few crucial properties. First, all reads in the transaction see the same snapshot of the database (e.g. do not see changes to the data resulting from other transactions executing concurrently). Second, the writes within a transaction either all succeed or all fail. (Failure might be caused, for example, by a connection loss.) Lastly, after a transaction succeeds (commits), the writes are permanently stored. These properties of transactions (called isolation, atomicity, and durability) are the fundamental &#8220;ACID&#8221; guarantees. We at FoundationDB think that support for ACID transactions is much more than a nice extra feature; transactions are critical for building robust systems in an efficient, simple way.</p>
-</div>
-<div class="section" id="everyone-needs-transactions">
+<p>A transaction is a set of database reads and writes that is handled as a unit with a few crucial properties. First, all reads in the transaction see the same snapshot of the database (e.g. do not see changes to the data resulting from other transactions executing concurrently). Second, the writes within a transaction either all succeed or all fail. (Failure might be caused, for example, by a connection loss.) Lastly, after a transaction succeeds (commits), the writes are permanently stored. These properties of transactions (called isolation, atomicity, and durability) are the fundamental “ACID” guarantees. We at FoundationDB think that support for ACID transactions is much more than a nice extra feature; transactions are critical for building robust systems in an efficient, simple way.</p>
+</section>
+<section id="everyone-needs-transactions">
 <h2>Everyone needs transactions</h2>
 <p>Every application that needs to support simultaneous clients (concurrency) should be built using transactions with ACID properties. Transactions are the simplest and strongest programming model available to handle concurrency and will play an increasingly prominent role as NoSQL technology matures.</p>
 <p>A common misconception is that transactions are useful only for e-commerce or banking, which deal with financial transactions. However, the power of transactions comes from their engineering impact on application-building, not from the details of any particular application. Because of the ACID properties, transactions can be composed to create new abstractions, support more efficient data structures, and enforce integrity constraints. As a result, building applications with transactions is easier, more reliable, and more extensible than any of the alternatives.</p>
 <p>It may seem that the design tradeoffs for your system compel you to give up the advantages of transactions to gain speed, scalability, and fault tolerance. Systems built this way are usually fragile, difficult to manage, and often nearly impossible to adapt to changing business needs. The costs of foregoing transactions are rarely worth the benefits, especially if an alternative can provide transactional integrity at scale.</p>
-</div>
-<div class="section" id="transactions-make-concurrency-simple">
+</section>
+<section id="transactions-make-concurrency-simple">
 <h2>Transactions make concurrency simple</h2>
-<p>Concurrency arises whenever multiple clients, users, or parts of an application read and write the same data at the same time. Transactions make managing concurrency simple for developers. The main property of transactions that achieves this simplicity is <em>isolation</em>, the &#8220;I&#8221; in ACID. When a system guarantees that transactions are fully isolated (known as &#8220;serializability&#8221;), developers can treat each transaction as if it were executed sequentially, even though it may actually be executed concurrently. The burden of reasoning about potential interactions between operations from separate transactions goes away.</p>
-</div>
-<div class="section" id="slightly-better-than-nothing-local-transactions">
+<p>Concurrency arises whenever multiple clients, users, or parts of an application read and write the same data at the same time. Transactions make managing concurrency simple for developers. The main property of transactions that achieves this simplicity is <em>isolation</em>, the “I” in ACID. When a system guarantees that transactions are fully isolated (known as “serializability”), developers can treat each transaction as if it were executed sequentially, even though it may actually be executed concurrently. The burden of reasoning about potential interactions between operations from separate transactions goes away.</p>
+</section>
+<section id="slightly-better-than-nothing-local-transactions">
 <h2>Slightly better than nothing: local transactions</h2>
 <p>Some systems offer ACID transactions for a limited set of predefined operations, typically restricted by the structure of the data model. For example, a document database may allow a single document to be updated in a transaction.</p>
 <p>However, the real power of transactions comes when they can be <em>defined by the application developer</em> over any set of data elements. An application developer working with a key-value store should be able to define transactions that read and write any number of key-value pairs. When developers can freely define transactions without arbitrary restrictions, they can use transactions as fundamental building blocks for an application.</p>
-</div>
-<div class="section" id="transactions-enable-abstraction">
+</section>
+<section id="transactions-enable-abstraction">
 <h2>Transactions enable abstraction</h2>
-<p>Application-defined transactions are <em>composable</em>. Isolation, in combination with <em>atomicity</em> (the &#8220;A&#8221; in ACID), ensures that the execution of one transaction can&#8217;t affect the visible behavior of another. This guarantee makes transactions composable with one another, allowing them to be assembled to build new <em>abstractions</em>. Abstractions can be encapsulated in <em>layers</em>. For example, a common abstraction is to maintain an index along with the primary data for to enable quickly finding data items matching some constraint. In any key-value store, this functionality can easily be implemented by storing a second copy of the data with the desired index field as the key. However, concurrent updates to the data potentially complicate this simple design. Without transactions it is difficult to ensure that, as the data changes, both the data and the index are updated consistently. With transactions, an indexing layer can update both the data and the index in a single transaction, guaranteeing their consistency and allowing a strong abstraction.</p>
+<p>Application-defined transactions are <em>composable</em>. Isolation, in combination with <em>atomicity</em> (the “A” in ACID), ensures that the execution of one transaction can’t affect the visible behavior of another. This guarantee makes transactions composable with one another, allowing them to be assembled to build new <em>abstractions</em>. Abstractions can be encapsulated in <em>layers</em>. For example, a common abstraction is to maintain an index along with the primary data for to enable quickly finding data items matching some constraint. In any key-value store, this functionality can easily be implemented by storing a second copy of the data with the desired index field as the key. However, concurrent updates to the data potentially complicate this simple design. Without transactions it is difficult to ensure that, as the data changes, both the data and the index are updated consistently. With transactions, an indexing layer can update both the data and the index in a single transaction, guaranteeing their consistency and allowing a strong abstraction.</p>
 <p>Transactions allow layers to build abstractions simply and efficiently, providing a highly extensible capability to support multiple data models. Data models optimized for hierarchical documents, column-oriented data, or relational data can all be implemented in layers on top of an ordered key-value store. In most of these cases, a single data object in the higher-level model will map onto multiple key-value pairs. Transactions make it straightforward to reliably implement these mappings by wrapping multiple key-value updates in atomic units.</p>
-</div>
-<div class="section" id="transactions-enable-efficient-data-representations">
+</section>
+<section id="transactions-enable-efficient-data-representations">
 <h2>Transactions enable efficient data representations</h2>
 <p>The benefits of transactions extend beyond a more flexible choice of high-level data model. They can also enable a more efficient data representation within a given model. For example, consider the design pattern of <em>embedding</em> data commonly used in document-oriented databases. (Someone from the relational database world might know this as denormalizing.) In the embedding pattern, you nest data within the hierarchical structure of a single document (often duplicating it) rather than storing a reference to another document that can be shared.</p>
-<p>Embedding is often motivated by a lack of support for global transactions. Since most document-oriented databases only allow atomic operations on a single document, the developer must &#8220;squeeze&#8221; the data into a single document to enable atomic updates. The resulting document with embedded data will be larger, more complex, and usually less efficient to access and update.</p>
+<p>Embedding is often motivated by a lack of support for global transactions. Since most document-oriented databases only allow atomic operations on a single document, the developer must “squeeze” the data into a single document to enable atomic updates. The resulting document with embedded data will be larger, more complex, and usually less efficient to access and update.</p>
 <p>With transactions, there is no need to employ embedding to achieve atomic updates. Data elements can be modeled to optimize access efficiency, using multiple documents when appropriate, and still be updated in a single transaction to guarantee consistency. Moreover, the data can be shared by multiple clients and concurrently updated. Again, transactions provide the concurrency control needed to safely manage shared state.</p>
-</div>
-<div class="section" id="transactions-enable-flexibility">
+</section>
+<section id="transactions-enable-flexibility">
 <h2>Transactions enable flexibility</h2>
-<p>Most applications supporting significant business functions experience changing requirements. (And, of course, they usually need to do more, not less!) You may be tempted to think of transactional integrity as a nice feature but one that that&#8217;s not essential for your application. To be sure, many applications can be built to avoid the need for global transactions by carefully designing the data schema for a specific, simple access pattern. However, when those applications evolve, having the flexibility to modify your data model and the power of global transactions can make the difference between an easy change and re-architecting.</p>
+<p>Most applications supporting significant business functions experience changing requirements. (And, of course, they usually need to do more, not less!) You may be tempted to think of transactional integrity as a nice feature but one that that’s not essential for your application. To be sure, many applications can be built to avoid the need for global transactions by carefully designing the data schema for a specific, simple access pattern. However, when those applications evolve, having the flexibility to modify your data model and the power of global transactions can make the difference between an easy change and re-architecting.</p>
 <p>Imagine you operate a web application in which users both generate posts and receive posts from other users. All posts are maintained in a back-end database. Management has asked you to build a dashboard for doing some basic analytics. Although your data store is read-write, the dashboard is initially intended to perform read-only queries. The data is just for analysis, so if results are sometimes a bit out-of-date, nobody will notice in the UI. Overall, you see no need for transactions. You put together some great data visualizations that allow your company to analyze and view posts in new ways.</p>
 <p>On the up side, the dashboard proves very popular. On the down side, you start hearing demands for new features: users want the dashboard to support editing and moderation of the posts found using the analytics. Also, the ad-serving division wants access to the dashboard data via an API to drive their billing system. You now have a situation where the simple read-only model of the dashboard has gone out the window, and your new API needs to be able to provide strong guarantees about the results it is delivering.</p>
 <p>This sort of evolution of requirements is a natural and frequently occurring pattern. Transactions make the difference between being able to easily add these features and throwing out large parts of your code and starting over.</p>
-</div>
-<div class="section" id="transactions-are-not-as-expensive-as-you-think">
+</section>
+<section id="transactions-are-not-as-expensive-as-you-think">
 <h2>Transactions are not as expensive as you think</h2>
 <p>You may be reluctant to employ transactions due to a perception that they impose serious technical tradeoffs, particularly for the kinds of high performance applications targeted by NoSQL databases. However, when you examine the tradeoffs more closely, the cost to the user is quite low. (The cost to the database engineer is quite high; distributed transactional systems are difficult to build!)</p>
-<div class="section" id="performance-and-scalability">
+<section id="performance-and-scalability">
 <h3>Performance and scalability?</h3>
 <p>We know of no practical limits to the scalability or performance of systems supporting transactions. When the movement toward NoSQL databases began, early systems, such as Google Bigtable, adopted minimal designs tightly focused on the scalability and performance. Features familiar from relational databases had been aggressively shed and the supposition was that the abandoned features were unnecessary or even harmful for scalability and performance goals.</p>
 <p>Those suppositions were wrong. It is becoming clear that supporting transactions is a matter of engineering effort, not a fundamental tradeoff in the design space. Algorithms for maintaining transactional integrity can be distributed and scale out like many other problems. Transactional integrity does come at a CPU cost, but in our experience <em>that cost is less than 10% of total system CPU</em>. This is a small price to pay for transactional integrity and can easily be made up elsewhere.</p>
-</div>
-<div class="section" id="write-latency">
+</section>
+<section id="write-latency">
 <h3>Write Latency?</h3>
-<p>Transactions guarantee the <em>durability</em> of writes (the &#8220;D&#8221; in ACID). This guarantee comes with some increase in write latency. Durability means that committed writes stay committed, even in the face of subsequent hardware failures. As such, durability is an important component of fault tolerance. NoSQL systems that don&#8217;t support durability are necessarily weaker in regard to fault tolerance. Because of the importance of true fault tolerance, the write latency required for durable transactions is usually worth the cost. For those applications that have a hard requirement to minimize write latency, durability can be turned off without sacrificing the &#8220;ACI&#8221; properties.</p>
-</div>
-</div>
-<div class="section" id="transactions-are-the-future-of-nosql">
+<p>Transactions guarantee the <em>durability</em> of writes (the “D” in ACID). This guarantee comes with some increase in write latency. Durability means that committed writes stay committed, even in the face of subsequent hardware failures. As such, durability is an important component of fault tolerance. NoSQL systems that don’t support durability are necessarily weaker in regard to fault tolerance. Because of the importance of true fault tolerance, the write latency required for durable transactions is usually worth the cost. For those applications that have a hard requirement to minimize write latency, durability can be turned off without sacrificing the “ACI” properties.</p>
+</section>
+</section>
+<section id="transactions-are-the-future-of-nosql">
 <h2>Transactions are the future of NoSQL</h2>
-<p>As NoSQL databases become more broadly used for a wide variety of purposes, more applications built on them employ non-trivial concurrency from multiple clients. Without adequate concurrency control, all the traditional problems of concurrency re-emerge and create a significant burden for application developers. ACID transactions simplify concurrency for developers by providing strictly serializable operations that can be composed to properly engineer application software. If you&#8217;re building an application that needs to be scalable and you don&#8217;t have transactions, you will eventually be burned. Fortunately, the scalability, fault-tolerance, and performance of NoSQL databases are still achievable with transactions. The choice to use transactions is ultimately not a matter of fundamental tradeoffs but of sound engineering. As the technology matures, transactions will form a foundational capability for future NoSQL databases.</p>
-</div>
-</div>
+<p>As NoSQL databases become more broadly used for a wide variety of purposes, more applications built on them employ non-trivial concurrency from multiple clients. Without adequate concurrency control, all the traditional problems of concurrency re-emerge and create a significant burden for application developers. ACID transactions simplify concurrency for developers by providing strictly serializable operations that can be composed to properly engineer application software. If you’re building an application that needs to be scalable and you don’t have transactions, you will eventually be burned. Fortunately, the scalability, fault-tolerance, and performance of NoSQL databases are still achievable with transactions. The choice to use transactions is ultimately not a matter of fundamental tradeoffs but of sound engineering. As the technology matures, transactions will form a foundational capability for future NoSQL databases.</p>
+</section>
+</section>
 
 
     </div>
@@ -238,7 +353,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

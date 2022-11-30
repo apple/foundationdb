@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>FDB Read and Write Path &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>FDB Read and Write Path &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="FDB HA Write Path: How a mutation travels in FDB HA" href="ha-write-path.html" />
     <link rel="prev" title="FoundationDB Architecture" href="kv-architecture.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -150,9 +265,9 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="fdb-read-and-write-path">
+  <section id="fdb-read-and-write-path">
 <h1>FDB Read and Write Path</h1>
 <div class="line-block">
 <div class="line">Author: Meng Xu</div>
@@ -167,7 +282,7 @@ The processing order of multiple transactions is important because it affects th
 <p>The content is based on FDB 6.2 and is true for FDB 6.3.  A new timestamp proxy role is introduced in post FDB 6.3,
 which affects the read path. We will discuss the timestamp proxy role in the future version of this document.</p>
 <img alt="_images/FDB_read_path.png" src="_images/FDB_read_path.png" />
-<div class="section" id="components">
+<section id="components">
 <h2>Components</h2>
 <p>FDB is built on top of several key components.
 The terms below are common database or distributed system terms, instead of FDB specific terms.</p>
@@ -176,8 +291,8 @@ An event at t1 happens before another event at t2, if t1 &lt; t2.
 The logic time is used to order events in FDB distributed systems and it is used by concurrency control to decide if two transactions have conflicts.
 The logical time is the timestamp for a transaction.</p>
 <ul class="simple">
-<li>A read-only transaction has only one timestamp which is assigned when the transaction is created;</li>
-<li>A read-write transaction has one timestamp at the transaction’s creation time and one timestamp at its commit time.</li>
+<li><p>A read-only transaction has only one timestamp which is assigned when the transaction is created;</p></li>
+<li><p>A read-write transaction has one timestamp at the transaction’s creation time and one timestamp at its commit time.</p></li>
 </ul>
 <p><strong>Concurrency Control.</strong> It decides if two transactions can be executed concurrently without violating Strict Serializable Isolation (SSI) property.
 It uses the Optimistic Concurrency Control (OCC) mechanism described in [SSI] to achieve that.</p>
@@ -185,12 +300,12 @@ It uses the Optimistic Concurrency Control (OCC) mechanism described in [SSI] to
 It exposes the transaction concept to applications.
 Client in FDB is a <em>fat</em> client that does multiple complex operations:
 (1) It calculates read and write conflict ranges for transactions;
-(2) it batches a transaction&#8217;s operations and send them all together at commit for better throughput;
+(2) it batches a transaction’s operations and send them all together at commit for better throughput;
 (3) it automatically retries failed transactions.</p>
 <p><strong>Proxies.</strong> It is a subsystem that acts like reverse proxies to serve clients’ requests. Its main purposes is:</p>
 <ul class="simple">
-<li>Serve for read request by (1) serving the logical time to client; and (2) providing which storage server has data for a key;</li>
-<li>Process write transactions on behalf of clients and return the results;</li>
+<li><p>Serve for read request by (1) serving the logical time to client; and (2) providing which storage server has data for a key;</p></li>
+<li><p>Process write transactions on behalf of clients and return the results;</p></li>
 </ul>
 <p>Each proxy has the system’s metadata, called transaction state store (txnStateStore). The metadata decides:
 (1) which key should go to which storage servers in the storage system;
@@ -215,143 +330,139 @@ which is the root cause why FDB’s transactions cannot be longer than 5 seconds
 The on-disk sqlite data has only the most-recent key-value.</p>
 <p><strong>Zookeeper like system.</strong> The system solves two main problems:</p>
 <ul class="simple">
-<li>Store the configuration of the transaction system, which includes information such as generations of queuing systems and their processes.
-The system used to be zookeeper. FDB later replaced it with its own implementation.</li>
-<li>Service discovery. Processes in the zookeeper-like system serve as well-known endpoints for clients to connect to the cluster.
-These well-known endpoint returns the list of proxies to clients.</li>
+<li><p>Store the configuration of the transaction system, which includes information such as generations of queuing systems and their processes.
+The system used to be zookeeper. FDB later replaced it with its own implementation.</p></li>
+<li><p>Service discovery. Processes in the zookeeper-like system serve as well-known endpoints for clients to connect to the cluster.
+These well-known endpoint returns the list of proxies to clients.</p></li>
 </ul>
-</div>
-<div class="section" id="read-path-of-a-transaction">
+</section>
+<section id="read-path-of-a-transaction">
 <h2>Read path of a transaction</h2>
 <p>Fig. 1 above shows a high-level view of the read path. An application uses FDB client library to read data.
 It creates a transaction and calls its read() function. The read() operation will lead to several steps.</p>
 <ul>
-<li><p class="first"><strong>Step 1 (Timestamp request)</strong>: The read operation needs a timestamp.
+<li><p><strong>Step 1 (Timestamp request)</strong>: The read operation needs a timestamp.
 The client initiates the timestamp request through an RPC to proxy. The request will trigger Step 2 and Step 3;</p>
 <ul class="simple">
-<li>To improve throughput and reduce load on the server side, each client dynamically batches the timestamp requests.
+<li><p>To improve throughput and reduce load on the server side, each client dynamically batches the timestamp requests.
 A client keeps adding requests to the current batch until
 <em>when</em> the number of requests in a batch exceeds a configurable threshold or
 <em>when</em> the batching times out at a dynamically computed threshold.
-Each batch sends only one timestamp request to proxy and all requests in the same batch share the same timestamp.</li>
+Each batch sends only one timestamp request to proxy and all requests in the same batch share the same timestamp.</p></li>
 </ul>
 </li>
-<li><p class="first"><strong>Step 2 (Get latest commit version)</strong>: When the timestamp request arrives at a proxy,
+<li><p><strong>Step 2 (Get latest commit version)</strong>: When the timestamp request arrives at a proxy,
 the proxy wants to get the largest commit version as the return value.
 So it contacts the rest of (n-1) proxies for their latest commit versions and
 uses the largest one as the return value for Step 1.</p>
 <blockquote>
 <div><ul class="simple">
-<li>O(n^2) communication cost: Because each proxy needs to contact the rest of (n-1) proxies to serve clients’ timestamp request,
-the communication cost is n*(n-1), where n is the number of proxies;</li>
-<li>Batching: To reduce communication cost, each proxy batches clients’ timestamp requests for a configurable time period (say 1ms) and
-return the same timestamp for requests in the same batch.</li>
+<li><p>O(n^2) communication cost: Because each proxy needs to contact the rest of (n-1) proxies to serve clients’ timestamp request,
+the communication cost is n*(n-1), where n is the number of proxies;</p></li>
+<li><p>Batching: To reduce communication cost, each proxy batches clients’ timestamp requests for a configurable time period (say 1ms) and
+return the same timestamp for requests in the same batch.</p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 3 (Confirm proxy’s liveness)</strong>: To prevent proxies that are no longer a part of the system (such as due to network partition) from serving requests,
+<li><p><strong>Step 3 (Confirm proxy’s liveness)</strong>: To prevent proxies that are no longer a part of the system (such as due to network partition) from serving requests,
 each proxy contacts the queuing system for each timestamp request to confirm it is still a valid proxy
 (i.e., not replaced by a newer generation proxy process).
 This is based on the FDB property that at most one active queuing system is available at any given time.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Why do we need this step? This is to achieve consensus (i.e., external consistency).
+<li><p>Why do we need this step? This is to achieve consensus (i.e., external consistency).
 Compared to serializable isolation, Strict Serializable Isolation (SSI) requires external consistency.
 It means the timestamp received by clients cannot decrease. If we do not have step and network partition happens,
 a set of old proxies that are disconnected from the rest of systems can still serve timestamp requests to clients.
-These timestamps can be smaller than the new generation of proxies, which breaks the external consistency in SSI.</li>
-<li>O(n * m) communication cost: To confirm a proxy’s liveness, the proxy has to contact all members in the queuing system to
+These timestamps can be smaller than the new generation of proxies, which breaks the external consistency in SSI.</p></li>
+<li><p>O(n * m) communication cost: To confirm a proxy’s liveness, the proxy has to contact all members in the queuing system to
 ensure the queuing system is still active. This causes <em>m</em> network communication, where <em>m</em> is the number of processes in the queuing system.
-A system with n proxies will have O(n * m) network communications at the step 3. In our deployment, n is typically equal to m;</li>
-<li>Do FDB production clusters have this overhead? No. Our production clusters disable the external consistency by
-configuring the knob ALWAYS_CAUSAL_READ_RISKY.</li>
+A system with n proxies will have O(n * m) network communications at the step 3. In our deployment, n is typically equal to m;</p></li>
+<li><p>Do FDB production clusters have this overhead? No. Our production clusters disable the external consistency by
+configuring the knob ALWAYS_CAUSAL_READ_RISKY.</p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 4 (Locality request)</strong>: The client gets which storage servers have its requested keys by sending another RPC to proxy.
+<li><p><strong>Step 4 (Locality request)</strong>: The client gets which storage servers have its requested keys by sending another RPC to proxy.
 This step returns a set of  <em>k</em> storage server interfaces, where k is the replication factor;</p>
 <blockquote>
 <div><ul class="simple">
-<li>Client cache mechanism: The key location will be cached in client.
+<li><p>Client cache mechanism: The key location will be cached in client.
 Future requests will use the cache to directly read from storage servers,
-which saves a trip to proxy. If location is stale, read will return error and client will retry and refresh the cache.</li>
+which saves a trip to proxy. If location is stale, read will return error and client will retry and refresh the cache.</p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><dl class="first docutils">
-<dt><strong>Step 5 (Get data request)</strong>: The client uses the location information from step 4 to directly query keys from corresponding storage servers.</dt>
-<dd><ul class="first last simple">
-<li>Direct read from client’s memory: If a key’s value exists in the client’s memory, the client reads it directly from its local memory.
+<li><dl class="simple">
+<dt><strong>Step 5 (Get data request)</strong>: The client uses the location information from step 4 to directly query keys from corresponding storage servers.</dt><dd><ul class="simple">
+<li><p>Direct read from client’s memory: If a key’s value exists in the client’s memory, the client reads it directly from its local memory.
 This happens when a client updates a key’s value and later reads it.
-This optimization reduces the amount of unnecessary requests to storage servers.</li>
-<li>Load balance: Each data exists on k storage servers, where k is the replication factor.
-To balance the load across the k replicas, client has a load balancing algorithm to balance the number of requests to each replica.</li>
-<li>Transaction succeed: If the storage server has the data at the read timestamp, the client will receive the data and return succeed.</li>
-<li>Transaction too old error: If the read request’s timestamp is older than 5 seconds,
+This optimization reduces the amount of unnecessary requests to storage servers.</p></li>
+<li><p>Load balance: Each data exists on k storage servers, where k is the replication factor.
+To balance the load across the k replicas, client has a load balancing algorithm to balance the number of requests to each replica.</p></li>
+<li><p>Transaction succeed: If the storage server has the data at the read timestamp, the client will receive the data and return succeed.</p></li>
+<li><p>Transaction too old error: If the read request’s timestamp is older than 5 seconds,
 storage server may have already flushed the data from its in-memory multi-version data structure to its on-disk single-version data structure.
 This means storage server does not have the data older than 5 seconds. So client will receive transaction too old error.
 The client will retry with a new timestamp.
-One scenario that can lead to the error is when it takes too long for a client to send the read request after it gets the timestamp.</li>
-<li>Future transaction error: Each storage server pulls data in increasing order of data’s timestamp from the queuing system.
+One scenario that can lead to the error is when it takes too long for a client to send the read request after it gets the timestamp.</p></li>
+<li><p>Future transaction error: Each storage server pulls data in increasing order of data’s timestamp from the queuing system.
 Let’s define a storage server’s timestamp as the largest timestamp of data the storage server has.
 If the read request’s timestamp is larger than the storage server’s timestamp,
 the storage server will reply future-transaction-error to the client.
-The client will retry. One scenario that can lead to the error is when the connection between the SS and the queuing system is slow.</li>
-<li>Wrong shard error: If keys in the request or result depend on data outside this storage server OR
+The client will retry. One scenario that can lead to the error is when the connection between the SS and the queuing system is slow.</p></li>
+<li><p>Wrong shard error: If keys in the request or result depend on data outside this storage server OR
 if a large selector offset prevents all data from being read in one range read.
-Client will invalidate its locality cache for the key and retry the read request at the failed key.</li>
+Client will invalidate its locality cache for the key and retry the read request at the failed key.</p></li>
 </ul>
 </dd>
 </dl>
 </li>
 </ul>
-<div class="section" id="implementation-of-fdb-read-path">
+<section id="implementation-of-fdb-read-path">
 <h3>Implementation of FDB read path</h3>
 <ul class="simple">
-<li><dl class="first docutils">
-<dt><strong>Step 1 (Timestamp request)</strong>:</dt>
-<dd><ul class="first last">
-<li>Each read request tries to get a timestamp if its transaction has not got one:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2104">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2104</a></li>
-<li>Client batches the get-timestamp requests:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3172">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3172</a></li>
-<li>Dynamic batching algorithm:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3101-L3104">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3101-L3104</a></li>
+<li><dl class="simple">
+<dt><strong>Step 1 (Timestamp request)</strong>:</dt><dd><ul>
+<li><p>Each read request tries to get a timestamp if its transaction has not got one:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2104">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2104</a></p></li>
+<li><p>Client batches the get-timestamp requests:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3172">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3172</a></p></li>
+<li><p>Dynamic batching algorithm:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3101-L3104">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L3101-L3104</a></p></li>
 </ul>
 </dd>
 </dl>
 </li>
-<li><strong>Step 2 (Get latest commit version)</strong>: Contacting (n-1) proxies for commit version:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1196">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1196</a></li>
-<li><dl class="first docutils">
-<dt><strong>Step 3 (Confirm proxy’s liveness)</strong>:</dt>
-<dd><ul class="first last">
-<li>We typically set our clusters’ knob ALWAYS_CAUSAL_READ_RISKY to 1 to skip this step</li>
-<li>Proxy confirm queuing system is alive:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1199">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1199</a></li>
-<li>How is confirmEpochLive(..) implemented for the above item:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/TagPartitionedLogSystem.actor.cpp#L1216-L1225">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/TagPartitionedLogSystem.actor.cpp#L1216-L1225</a></li>
+<li><p><strong>Step 2 (Get latest commit version)</strong>: Contacting (n-1) proxies for commit version:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1196">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1196</a></p></li>
+<li><dl class="simple">
+<dt><strong>Step 3 (Confirm proxy’s liveness)</strong>:</dt><dd><ul>
+<li><p>We typically set our clusters’ knob ALWAYS_CAUSAL_READ_RISKY to 1 to skip this step</p></li>
+<li><p>Proxy confirm queuing system is alive:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1199">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1199</a></p></li>
+<li><p>How is confirmEpochLive(..) implemented for the above item:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/TagPartitionedLogSystem.actor.cpp#L1216-L1225">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/TagPartitionedLogSystem.actor.cpp#L1216-L1225</a></p></li>
 </ul>
 </dd>
 </dl>
 </li>
-<li><strong>Step 4 (Locality request)</strong>:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1312-L1313">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1312-L1313</a></li>
-<li><dl class="first docutils">
-<dt><strong>Step 5 (Get data request)</strong>:</dt>
-<dd><ul class="first last">
-<li>Logics of handling get value request:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1306-L1396">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1306-L1396</a></li>
-<li>Load balance algorithm: The loadBalance() at
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1342-L1344">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1342-L1344</a></li>
+<li><p><strong>Step 4 (Locality request)</strong>:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1312-L1313">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1312-L1313</a></p></li>
+<li><dl class="simple">
+<dt><strong>Step 5 (Get data request)</strong>:</dt><dd><ul>
+<li><p>Logics of handling get value request:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1306-L1396">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1306-L1396</a></p></li>
+<li><p>Load balance algorithm: The loadBalance() at
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1342-L1344">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L1342-L1344</a></p></li>
 </ul>
 </dd>
 </dl>
 </li>
 </ul>
-</div>
-</div>
-<div class="section" id="write-path-of-a-transaction">
+</section>
+</section>
+<section id="write-path-of-a-transaction">
 <h2>Write path of a transaction</h2>
 <p>Suppose a client has a write-only transaction. Fig. 2 below shows the write path in a non-HA cluster.
 We will discuss how a transaction with both read and write works in the next section.</p>
@@ -359,52 +470,49 @@ We will discuss how a transaction with both read and write works in the next sec
 <p>To simplify the explanation, the steps below do not include transaction batching on proxy,
 which is a typical database technique to increase transaction throughput.</p>
 <ul>
-<li><p class="first"><strong>Step 1 (Client buffers write mutations):</strong> Client buffers all writes in a transaction until commit is called on the transaction.
+<li><p><strong>Step 1 (Client buffers write mutations):</strong> Client buffers all writes in a transaction until commit is called on the transaction.
 In the rest of document, a write is also named as a mutation.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Client is a fat client that preprocess transactions:
+<li><p>Client is a fat client that preprocess transactions:
 (a) For atomic operations, if client knows the key value, it will convert atomic operations to set operations;
 (b) For version stamp atomic operations, client adds extra bytes to key or value for the version stamp;
-(c) If a key has multiple operations, client coalesces them to one operation whenever possible.</li>
-<li>How client buffers mutations:
-<a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2345-L2361">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2345-L2361</a></li>
+(c) If a key has multiple operations, client coalesces them to one operation whenever possible.</p></li>
+<li><p>How client buffers mutations:
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2345-L2361">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2345-L2361</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 2 (Client commits the transaction):</strong> When a client calls commit(), it performs several operations:</p>
+<li><p><strong>Step 2 (Client commits the transaction):</strong> When a client calls commit(), it performs several operations:</p>
 <blockquote>
 <div><ul>
-<li><p class="first"><strong>Step 2-1</strong>: Add extra conflict ranges that are added by user but cannot be calculated from mutations.</p>
-</li>
-<li><dl class="first docutils">
-<dt><strong>Step 2-2</strong>: Get a timestamp as the transaction’s start time. The timestamp does not need causal consistency because the transaction has no read.</dt>
-<dd><ul class="first last simple">
-<li>This request goes to one of proxies. The proxy will contact all other (n-1) proxies to get the most recent commit version as it does in read path.
-The proxy does not need to contact log systems to confirm its activeness because it does not need causal consistency.</li>
+<li><p><strong>Step 2-1</strong>: Add extra conflict ranges that are added by user but cannot be calculated from mutations.</p></li>
+<li><dl class="simple">
+<dt><strong>Step 2-2</strong>: Get a timestamp as the transaction’s start time. The timestamp does not need causal consistency because the transaction has no read.</dt><dd><ul class="simple">
+<li><p>This request goes to one of proxies. The proxy will contact all other (n-1) proxies to get the most recent commit version as it does in read path.
+The proxy does not need to contact log systems to confirm its activeness because it does not need causal consistency.</p></li>
 </ul>
 </dd>
 </dl>
 </li>
-<li><p class="first"><strong>Step 2-3</strong>:  Sends the transaction’s information to a proxy. Load balancer in client decides which proxy will be used to handle a transaction.
+<li><p><strong>Step 2-3</strong>:  Sends the transaction’s information to a proxy. Load balancer in client decides which proxy will be used to handle a transaction.
 A transaction’s information includes:</p>
 <blockquote>
 <div><ul class="simple">
-<li>All of its mutations;</li>
-<li>Read and write conflict range;</li>
-<li>Transaction options that control a transaction’s behavior. For example, should the transaction write when the DB is locked?
-Shall the transaction uses the first proxy in the proxy list to commit?</li>
+<li><p>All of its mutations;</p></li>
+<li><p>Read and write conflict range;</p></li>
+<li><p>Transaction options that control a transaction’s behavior. For example, should the transaction write when the DB is locked?
+Shall the transaction uses the first proxy in the proxy list to commit?</p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><dl class="first docutils">
-<dt>Implementation:</dt>
-<dd><ul class="first last simple">
-<li>Transaction commit function: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2895-L2899">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2895-L2899</a></li>
-<li>Major work of commit in client side is done at here: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2784-L2868">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2784-L2868</a></li>
-<li>Step 2-1: Add extra conflict ranges: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2826-L2828">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2826-L2828</a></li>
-<li>Step 2-2: getReadVersion at commit which does not need external consistency because we do not have read in the transaction: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2822-L2823">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2822-L2823</a></li>
-<li>Step 2-3: Send transaction to a proxy via RPC: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2691-L2700">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2691-L2700</a></li>
+<li><dl class="simple">
+<dt>Implementation:</dt><dd><ul class="simple">
+<li><p>Transaction commit function: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2895-L2899">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2895-L2899</a></p></li>
+<li><p>Major work of commit in client side is done at here: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2784-L2868">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2784-L2868</a></p></li>
+<li><p>Step 2-1: Add extra conflict ranges: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2826-L2828">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2826-L2828</a></p></li>
+<li><p>Step 2-2: getReadVersion at commit which does not need external consistency because we do not have read in the transaction: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2822-L2823">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2822-L2823</a></p></li>
+<li><p>Step 2-3: Send transaction to a proxy via RPC: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2691-L2700">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbclient/NativeAPI.actor.cpp#L2691-L2700</a></p></li>
 </ul>
 </dd>
 </dl>
@@ -412,62 +520,59 @@ Shall the transaction uses the first proxy in the proxy list to commit?</li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first">When a proxy receives clients’ transactions, it commits the transaction on behalf of clients with Step 3 - 9.</p>
-</li>
-<li><p class="first"><strong>Step 3 (Proxy gets commit timestamp)</strong>: The proxy gets the timestamp of the transaction’s commit time from the time oracle through an RPC call.</p>
+<li><p>When a proxy receives clients’ transactions, it commits the transaction on behalf of clients with Step 3 - 9.</p></li>
+<li><p><strong>Step 3 (Proxy gets commit timestamp)</strong>: The proxy gets the timestamp of the transaction’s commit time from the time oracle through an RPC call.</p>
 <blockquote>
 <div><ul class="simple">
-<li>To improve transaction throughput and reduce network communication overhead,
+<li><p>To improve transaction throughput and reduce network communication overhead,
 each proxy dynamically batch transactions and process transactions in batches.
 A proxy keeps batching transactions until the batch time exceeds a configurable timeout value or
 until the number of transactions exceed a configurable value or
-until the total bytes of the batch exceeds a dynamically calculated desired size.</li>
-<li>The network overhead is 1 network communication per batch of commit transactions;</li>
-<li>How is the dynamically calculated batch size calculated: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1770-L1774">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1770-L1774</a></li>
-<li>How commit transactions are batched: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L416-L486">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L416-L486</a></li>
-<li>How each transaction batch is handled: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L523-L1174">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L523-L1174</a></li>
-<li>Where does proxy sends commit timestamp request to the timestamp generator:  <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L586-L587">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L586-L587</a></li>
+until the total bytes of the batch exceeds a dynamically calculated desired size.</p></li>
+<li><p>The network overhead is 1 network communication per batch of commit transactions;</p></li>
+<li><p>How is the dynamically calculated batch size calculated: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1770-L1774">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L1770-L1774</a></p></li>
+<li><p>How commit transactions are batched: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L416-L486">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L416-L486</a></p></li>
+<li><p>How each transaction batch is handled: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L523-L1174">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L523-L1174</a></p></li>
+<li><p>Where does proxy sends commit timestamp request to the timestamp generator:  <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L586-L587">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbserver/MasterProxyServer.actor.cpp#L586-L587</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 4 (Proxy builds transactions’ conflict ranges)</strong>: Because the concurrency control component may have multiple processes,
+<li><p><strong>Step 4 (Proxy builds transactions’ conflict ranges)</strong>: Because the concurrency control component may have multiple processes,
 each of which is responsible for resolving conflicts in a key range,
 the proxy needs to build one transaction-conflict-resolution request for each concurrency control process:
 For each transaction, the proxy splits its read and write conflict ranges based on concurrency control process’ responsible ranges.
 The proxy will create k conflict resolution requests for each transaction, where k is the number of processes in the concurrency control component.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Implementation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbserver/MasterProxyServer.actor.cpp#L607-L618">https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbserver/MasterProxyServer.actor.cpp#L607-L618</a></li>
+<li><p>Implementation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbserver/MasterProxyServer.actor.cpp#L607-L618">https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbserver/MasterProxyServer.actor.cpp#L607-L618</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 5 (Proxy sends conflict resolution requests to concurrency control)</strong>:
+<li><p><strong>Step 5 (Proxy sends conflict resolution requests to concurrency control)</strong>:
 Each concurrency control process is responsible for checking conflicts in a key range.
 Each process checks if the transaction has conflicts with other transactions in its  key-range.
 Each process returns the conflict checking result back to the proxy.</p>
 <blockquote>
 <div><ul class="simple">
-<li><dl class="first docutils">
-<dt>What is conflict range?</dt>
-<dd><ul class="first last">
-<li>A transaction’s write conflict range includes any key and key-ranges that are modified in the transactions.</li>
-<li>A transaction’s read conflict range includes any key and key-ranges that are read in the transaction.</li>
-<li>Client can also use transaction options to add explicit read-conflict-range or write-conflict-range.
-Example: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2634-L2635">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2634-L2635</a></li>
+<li><dl class="simple">
+<dt>What is conflict range?</dt><dd><ul>
+<li><p>A transaction’s write conflict range includes any key and key-ranges that are modified in the transactions.</p></li>
+<li><p>A transaction’s read conflict range includes any key and key-ranges that are read in the transaction.</p></li>
+<li><p>Client can also use transaction options to add explicit read-conflict-range or write-conflict-range.
+Example: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2634-L2635">https://github.com/apple/foundationdb/blob/4b0fba6ea89b51b82df7868ca24b81f6997db4e4/fdbclient/NativeAPI.actor.cpp#L2634-L2635</a></p></li>
 </ul>
 </dd>
 </dl>
 </li>
-<li><strong>Piggy-back metadata change</strong>. If the transaction changes database’s metadata, such as locking the database,
+<li><p><strong>Piggy-back metadata change</strong>. If the transaction changes database’s metadata, such as locking the database,
 the change is considered as a special mutation and also checked for conflicts by the concurrency control component.
 The primary difference between metadata mutation and normal mutations is that the metadata change must be propagated to all proxies
 so that all proxies have a consistent view of database’s metadata.
-This is achieved by piggy-backing metadata change in the reply from resolver to proxies.</li>
-<li><dl class="first docutils">
-<dt>Implementation</dt>
-<dd><ul class="first last">
-<li>Create conflict resolution requests for a batch of transactions: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L607-L618">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L607-L618</a></li>
-<li>Metadata mutations are sent from proxy to concurrency control processes: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L366-L369">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L366-L369</a></li>
+This is achieved by piggy-backing metadata change in the reply from resolver to proxies.</p></li>
+<li><dl class="simple">
+<dt>Implementation</dt><dd><ul>
+<li><p>Create conflict resolution requests for a batch of transactions: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L607-L618">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L607-L618</a></p></li>
+<li><p>Metadata mutations are sent from proxy to concurrency control processes: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L366-L369">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L366-L369</a></p></li>
 </ul>
 </dd>
 </dl>
@@ -475,18 +580,17 @@ This is achieved by piggy-backing metadata change in the reply from resolver to 
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 6 (Resolve conflicts among concurrent transactions)</strong>:
+<li><p><strong>Step 6 (Resolve conflicts among concurrent transactions)</strong>:
 Each concurrency control process checks conflicts among transactions based on the theory in [1].
 In a nutshell, it checks for read-write conflicts. Suppose two transactions operates on the same key.
 If a write transaction’s time overlaps between another read-write transaction’s start time and commit time,
 only one transaction can commit: the one that arrives first at all concurrency control processes will commit.</p>
 <blockquote>
 <div><ul class="simple">
-<li><dl class="first docutils">
-<dt>Implementation</dt>
-<dd><ul class="first last">
-<li>Proxy sends conflict checking request: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L626-L629">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L626-L629</a></li>
-<li>Concurrency control process handles the request: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/Resolver.actor.cpp#L320-L322">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/Resolver.actor.cpp#L320-L322</a></li>
+<li><dl class="simple">
+<dt>Implementation</dt><dd><ul>
+<li><p>Proxy sends conflict checking request: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L626-L629">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L626-L629</a></p></li>
+<li><p>Concurrency control process handles the request: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/Resolver.actor.cpp#L320-L322">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/Resolver.actor.cpp#L320-L322</a></p></li>
 </ul>
 </dd>
 </dl>
@@ -494,65 +598,65 @@ only one transaction can commit: the one that arrives first at all concurrency c
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 7 (Proxy’s post resolution processing)</strong>:
+<li><p><strong>Step 7 (Proxy’s post resolution processing)</strong>:
 Once the proxy receives conflict-resolution replies from all concurrency control processes, it performs three steps</p>
 <blockquote>
 <div><ul>
-<li><p class="first"><strong>Step 7-1 (Apply metadata effect caused by other proxies)</strong>: As mentioned above, when a proxy changes database’s metadata,
+<li><p><strong>Step 7-1 (Apply metadata effect caused by other proxies)</strong>: As mentioned above, when a proxy changes database’s metadata,
 the metadata mutations will be propagated via the concurrency control component to other proxies.
 So the proxy needs to first compute and apply these metadata mutations onto the proxy’s local states.
 Otherwise, the proxy will operate in a different view of database’s metadata.</p>
 <blockquote>
 <div><ul class="simple">
-<li>For example, if one proxy locks the database in a committed transaction at time t1, all other proxies should have seen the lock immediately after t1. Since another proxy may have transactions in flight already at t1, the proxy must first apply the “lock“ effect before it can process its in-flight transactions.</li>
-<li>How metadata effect is applied in implementation:  <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L678-L719">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L678-L719</a></li>
+<li><p>For example, if one proxy locks the database in a committed transaction at time t1, all other proxies should have seen the lock immediately after t1. Since another proxy may have transactions in flight already at t1, the proxy must first apply the “lock“ effect before it can process its in-flight transactions.</p></li>
+<li><p>How metadata effect is applied in implementation:  <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L678-L719">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L678-L719</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 7-2 (Determine which transactions are committed)</strong>: Proxy combines results from all concurrency control processes.
+<li><p><strong>Step 7-2 (Determine which transactions are committed)</strong>: Proxy combines results from all concurrency control processes.
 Only if all concurrency control processes say a transaction is committed, will the transaction be considered as committed by the proxy.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Implementation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L721-L757">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L721-L757</a></li>
+<li><p>Implementation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L721-L757">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L721-L757</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 7-3 (Apply metadata effect caused by this proxy)</strong>: For each committed transaction,
+<li><p><strong>Step 7-3 (Apply metadata effect caused by this proxy)</strong>: For each committed transaction,
 this proxy applies its metadata mutations to the proxy’s local state.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Note: These metadata mutations are also sent to concurrency control processes and propagated to other proxies at Step 5.
-This step is to apply metadata effect on its own proxy’s states.</li>
-<li>Implementation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L763-L777">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L763-L777</a></li>
+<li><p>Note: These metadata mutations are also sent to concurrency control processes and propagated to other proxies at Step 5.
+This step is to apply metadata effect on its own proxy’s states.</p></li>
+<li><p>Implementation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L763-L777">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L763-L777</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 7-4 (Assign mutations to storage servers and serialize them)</strong>:
+<li><p><strong>Step 7-4 (Assign mutations to storage servers and serialize them)</strong>:
 In order to let the rest of system (the queuing system and storage system) know which process a mutation should be routed to,
 the proxy needs to add tags to mutations.
 The proxy serializes mutations with the same tag into the same message and sends the serialized message to the queuing system.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Implementation of adding tags and serializing mutations into messages: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L800-L910">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L800-L910</a></li>
-<li>The lines that add tags to a mutation and serialize it: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L846-L847">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L846-L847</a></li>
+<li><p>Implementation of adding tags and serializing mutations into messages: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L800-L910">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L800-L910</a></p></li>
+<li><p>The lines that add tags to a mutation and serialize it: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L846-L847">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L846-L847</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 7-5 (Duplicate and serialize mutations to backup system keyspace)</strong>:
+<li><p><strong>Step 7-5 (Duplicate and serialize mutations to backup system keyspace)</strong>:
 When backup or disaster recovery (DR) is enabled, each proxy captures mutation streams into a dedicated system keyspace.
 Mutations in a transaction batch are serialized as a single mutation in a dedicated system keyspace.</p>
 <blockquote>
 <div><ul class="simple">
-<li>How mutations are duplicated for backup and DR: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L912-L986">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L912-L986</a></li>
-<li>Note: FDB will have a new backup system that avoids duplicating mutations to the system keyspace.
-Its design is similar to database’s Change Data Capture (CDC) design. The new backup system is not production-ready yet.</li>
+<li><p>How mutations are duplicated for backup and DR: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L912-L986">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L912-L986</a></p></li>
+<li><p>Note: FDB will have a new backup system that avoids duplicating mutations to the system keyspace.
+Its design is similar to database’s Change Data Capture (CDC) design. The new backup system is not production-ready yet.</p></li>
 </ul>
 </div></blockquote>
 </li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 8 (Make mutation messages durable in the queuing system)</strong>:
+<li><p><strong>Step 8 (Make mutation messages durable in the queuing system)</strong>:
 Proxy sends serialized mutation messages to the queuing system.
 The queuing system will append the mutation to an append-only file, fsync it, and send the respnose back.
 Each message has a tag, which decides which process in the queuing system the message should be sent to.
@@ -560,54 +664,54 @@ The queuing system returns to the proxy the minimum known committed version, whi
 The minimum known commit version is used when the system recovers from fault.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Sending messages to the queuing system is abstracted into a push() operation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1045">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1045</a></li>
-<li>The minimum known committed version is called minKnownCommittedVersion. It is updated for each commit: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1067">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1067</a></li>
+<li><p>Sending messages to the queuing system is abstracted into a push() operation: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1045">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1045</a></p></li>
+<li><p>The minimum known committed version is called minKnownCommittedVersion. It is updated for each commit: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1067">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1067</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 9 (Reply to client)</strong>: Proxy replies the transaction’s result to client.
+<li><p><strong>Step 9 (Reply to client)</strong>: Proxy replies the transaction’s result to client.
 If the transaction fails (say due to transaction conflicts), proxy sends the error message to the client.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Reply to clients based on different transaction’s results: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1117-L1138">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1117-L1138</a></li>
+<li><p>Reply to clients based on different transaction’s results: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1117-L1138">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/MasterProxyServer.actor.cpp#L1117-L1138</a></p></li>
 </ul>
 </div></blockquote>
 </li>
-<li><p class="first"><strong>Step 10 (Storage systems pull data from queuing system)</strong>:
+<li><p><strong>Step 10 (Storage systems pull data from queuing system)</strong>:
 Storage system asynchronously pulls data from queuing system and indexes data for read path.</p>
 <blockquote>
 <div><ul class="simple">
-<li>Each SS has a primary process (called primary tLog) in the queuing system to pull data from the SS’s data from the queuing system.
-Each SS only gets in-ordered streams of mutations that are owned by the SS.</li>
-<li>In failure scenario when a SS cannot reach the primary tLog, the SS will pull data from different tLogs that have part of the SS’s data.
-The SS will then merge the stream of data from different tLogs.</li>
-<li>Each SS does not make its pulled data durable to disk until the data becomes
+<li><p>Each SS has a primary process (called primary tLog) in the queuing system to pull data from the SS’s data from the queuing system.
+Each SS only gets in-ordered streams of mutations that are owned by the SS.</p></li>
+<li><p>In failure scenario when a SS cannot reach the primary tLog, the SS will pull data from different tLogs that have part of the SS’s data.
+The SS will then merge the stream of data from different tLogs.</p></li>
+<li><p>Each SS does not make its pulled data durable to disk until the data becomes
 at least 5 seconds older than the most recent data the SS has pulled.
-This allows each SS to roll back at least 5 seconds of mutations.</li>
-<li>Why do we need roll back feature for SS? This comes from an optimization used in FDB.
+This allows each SS to roll back at least 5 seconds of mutations.</p></li>
+<li><p>Why do we need roll back feature for SS? This comes from an optimization used in FDB.
 To make a mutation available in a SS as soon as possible,
 a SS may fetch a mutation from the queuing system that has not been fully replicated.
 The mutation’s transaction may be aborted in rare situations, such as
 when FDB has to recover from faults and decides to throw away the last few non-fully-durable transactions.
-SSes must throw away data in the aborted transactions.</li>
-<li>Why does SS not make data durable until 5 seconds later?
+SSes must throw away data in the aborted transactions.</p></li>
+<li><p>Why does SS not make data durable until 5 seconds later?
 This is because today’s SS does not support rolling back data that has already been made durable on disk.
 To support roll back, SS keeps data that might be rolled back in memory.
-When roll-back is needed, SS just throws away the in-memory data. This simplifies the SS implementation.</li>
-<li>Each storage process pulls data from the queuing system: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/storageserver.actor.cpp#L3593-L3599">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/storageserver.actor.cpp#L3593-L3599</a></li>
+When roll-back is needed, SS just throws away the in-memory data. This simplifies the SS implementation.</p></li>
+<li><p>Each storage process pulls data from the queuing system: <a class="reference external" href="https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/storageserver.actor.cpp#L3593-L3599">https://github.com/apple/foundationdb/blob/07e354c499158630d760283aa845440cbeaaa1ca/fdbserver/storageserver.actor.cpp#L3593-L3599</a></p></li>
 </ul>
 </div></blockquote>
 </li>
 </ul>
-</div>
-<div class="section" id="read-write-path-of-a-transaction">
+</section>
+<section id="read-write-path-of-a-transaction">
 <h2>Read write path of a transaction</h2>
 <p>This section uses an example transaction to describe how a transaction with both read and write operation works in FDB.</p>
 <p>Suppose application creates the following transaction, where <em>Future&lt;int&gt;</em> is an object that holds an asynchronous call and
 becomes ready when the async call returns, and <em>wait()</em> is a synchronous point when the code waits for futures to be ready.
 The following code reads key k1 and k2 from database,  increases k1’s value by 1 and write back k1’s new value into database.</p>
 <p><strong>Example Transaction</strong></p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Line1</span><span class="p">:</span> <span class="n">Transaction</span> <span class="n">tr</span><span class="p">;</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Line1</span><span class="p">:</span> <span class="n">Transaction</span> <span class="n">tr</span><span class="p">;</span>
 <span class="n">Line2</span><span class="p">:</span> <span class="n">Future</span><span class="o">&lt;</span><span class="nb">int</span><span class="o">&gt;</span> <span class="n">fv1</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k1</span><span class="p">);</span>
 <span class="n">Line3</span><span class="p">:</span> <span class="n">Future</span><span class="o">&lt;</span><span class="nb">int</span><span class="o">&gt;</span> <span class="n">fv2</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k2</span><span class="p">);</span>
 <span class="n">Line4</span><span class="p">:</span> <span class="n">v1</span> <span class="o">=</span> <span class="n">wait</span><span class="p">(</span><span class="n">fv1</span><span class="p">);</span>
@@ -618,79 +722,76 @@ The following code reads key k1 and k2 from database,  increases k1’s value by
 </div>
 <p>The transaction starts with the read path:</p>
 <ul class="simple">
-<li>When tr.get() is called, FDB client issues a timestamp request to proxies <em>if</em> the transaction has not set its start timestamp.
-The logic is the Step 1 in the read path;</li>
-<li><dl class="first docutils">
-<dt>Batching timestamp requests. When another tr.get() is called, it will try to get a timestamp as well. If we let every get request to follow the Step 1 in the read path, the performance overhead (especially network communication) will be a lot. In addition, this is not necessary because a transaction has only one start timestamp. To solve this problem, client chooses to batch timestamp requests from the same transaction and only issues one timestamp request when the transaction size reaches a preconfigured threshold or when the transaction duration reaches the batching timeout threshold.</dt>
-<dd><ul class="first last">
-<li>Timestamp requests are batched: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3185">https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3185</a></li>
-<li>Thresholds for client to send the timestamp request: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3095-L3098">https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3095-L3098</a></li>
+<li><p>When tr.get() is called, FDB client issues a timestamp request to proxies <em>if</em> the transaction has not set its start timestamp.
+The logic is the Step 1 in the read path;</p></li>
+<li><dl class="simple">
+<dt>Batching timestamp requests. When another tr.get() is called, it will try to get a timestamp as well. If we let every get request to follow the Step 1 in the read path, the performance overhead (especially network communication) will be a lot. In addition, this is not necessary because a transaction has only one start timestamp. To solve this problem, client chooses to batch timestamp requests from the same transaction and only issues one timestamp request when the transaction size reaches a preconfigured threshold or when the transaction duration reaches the batching timeout threshold.</dt><dd><ul>
+<li><p>Timestamp requests are batched: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3185">https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3185</a></p></li>
+<li><p>Thresholds for client to send the timestamp request: <a class="reference external" href="https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3095-L3098">https://github.com/apple/foundationdb/blob/4086e3a2750b776cc8bfb0f0e463fe00ac905595/fdbclient/NativeAPI.actor.cpp#L3095-L3098</a></p></li>
 </ul>
 </dd>
 </dl>
 </li>
-<li><dl class="first docutils">
-<dt>Each read request, i.e., tr.get operation in the example, will follow the read path to get data from storage servers, except that they will share the same timestamp;</dt>
-<dd><ul class="first last">
-<li>These read requests are sent to FDB cluster in parallel.
-The ordering of which read request will be ready first depends on requests’ network path and storage servers’ load.</li>
-<li>In the example, tr.get(k2) may return result earlier than tr.get(k1).</li>
+<li><dl class="simple">
+<dt>Each read request, i.e., tr.get operation in the example, will follow the read path to get data from storage servers, except that they will share the same timestamp;</dt><dd><ul>
+<li><p>These read requests are sent to FDB cluster in parallel.
+The ordering of which read request will be ready first depends on requests’ network path and storage servers’ load.</p></li>
+<li><p>In the example, tr.get(k2) may return result earlier than tr.get(k1).</p></li>
 </ul>
 </dd>
 </dl>
 </li>
-<li><dl class="first docutils">
-<dt>Client will likely block at the synchronization point at Line 4, until the value is returned from the cluster.</dt>
-<dd><ul class="first last">
-<li>To maximize clients’ performance, a client can issue multiple transactions concurrently.
+<li><dl class="simple">
+<dt>Client will likely block at the synchronization point at Line 4, until the value is returned from the cluster.</dt><dd><ul>
+<li><p>To maximize clients’ performance, a client can issue multiple transactions concurrently.
 When one transaction is blocked at the synchronization point,
-the client can switch to work on the other transactions concurrently.</li>
+the client can switch to work on the other transactions concurrently.</p></li>
 </ul>
 </dd>
 </dl>
 </li>
-<li>Client may or may not block at the synchronization point at Line 5.
-If tr.get(k2) returns earlier than tr.get(k1), the future fv2 is already ready when the client arrives at Line 5.</li>
-<li>At Line 6, client starts the write path. Because the transaction already has its start timestamp,
-client does not need to request for the transaction’s start time any more and can skip the Step 2-2 in the write path.</li>
-<li>At Line 7, client commits the transaction, which will trigger the operations from Step 2 in the write path.</li>
+<li><p>Client may or may not block at the synchronization point at Line 5.
+If tr.get(k2) returns earlier than tr.get(k1), the future fv2 is already ready when the client arrives at Line 5.</p></li>
+<li><p>At Line 6, client starts the write path. Because the transaction already has its start timestamp,
+client does not need to request for the transaction’s start time any more and can skip the Step 2-2 in the write path.</p></li>
+<li><p>At Line 7, client commits the transaction, which will trigger the operations from Step 2 in the write path.</p></li>
 </ul>
 <p>A transaction can get more complex than the example above.</p>
 <ul class="simple">
-<li>A transaction can have more writes operations between Line 6 and Line 7.
+<li><p>A transaction can have more writes operations between Line 6 and Line 7.
 Those writes will be buffered in client’s memory, which is the Step 1 in the write path.
-Only when the client calls commit(), will the rest of steps in the write path will be triggered;</li>
-<li>A transaction can have reads operations between Line 6 and Line 7 as well.</li>
-<li>A transaction may return commit_unknown_result, which indicate the transaction may or may not succeed.
+Only when the client calls commit(), will the rest of steps in the write path will be triggered;</p></li>
+<li><p>A transaction can have reads operations between Line 6 and Line 7 as well.</p></li>
+<li><p>A transaction may return commit_unknown_result, which indicate the transaction may or may not succeed.
 If application simply retries the transaction, the transaction may get executed twice.
 To solve this problem, the application can adds a transaction id to the transaction and
-check if the transaction id exists on the commit_unknown_result error.</li>
+check if the transaction id exists on the commit_unknown_result error.</p></li>
 </ul>
-</div>
-<div class="section" id="concurrency-and-ordering-of-multiple-write-transactions">
+</section>
+<section id="concurrency-and-ordering-of-multiple-write-transactions">
 <h2>Concurrency and ordering of multiple write transactions</h2>
 <p>FDB orders concurrent transactions in increasing order of the transactions’ commit timestamp.
 The ordering is enforced in the timestamp generator, the concurrency control component and the durable queuing system.</p>
 <ul class="simple">
-<li>When timestamp generator serves the commit timestamp request from a proxy,
+<li><p>When timestamp generator serves the commit timestamp request from a proxy,
 the reply includes not only the commit timestamp but also the latest commit timestamp the generator has sent out.
 For example, the timestamp generator just gave out the commit timestamp 50.
 When the next request arrives, the generator’s timestamp is 100 and the generator replies (50, 100).
-When the second request arrives and the generator’s timestamp is 200, the generator replies (100, 200).</li>
-<li>When a proxy sends conflict resolution requests to concurrency control processes or durable requests to the queuing system,
-each request includes both the current transaction’s commit timestamp and the previous transaction’s commit timestamp.</li>
-<li>Each concurrency control process and each process in the queuing system always process requests in the strict order of the request’s commit version.
-The semantics is do not process a request whose commit timestamp is V2 until the request at its previous commit timestamp V1 has been processed.</li>
+When the second request arrives and the generator’s timestamp is 200, the generator replies (100, 200).</p></li>
+<li><p>When a proxy sends conflict resolution requests to concurrency control processes or durable requests to the queuing system,
+each request includes both the current transaction’s commit timestamp and the previous transaction’s commit timestamp.</p></li>
+<li><p>Each concurrency control process and each process in the queuing system always process requests in the strict order of the request’s commit version.
+The semantics is do not process a request whose commit timestamp is V2 until the request at its previous commit timestamp V1 has been processed.</p></li>
 </ul>
 <p>We use the following example and draw its swimlane diagram to illustrate how two write transactions are ordered in FDB.
 The diagram with notes can be viewed at <a class="reference external" href="https://lucid.app/lucidchart/6336dbe3-cff4-4c46-995a-4ca3d9260696/view?page=0_0#?folder_id=home&amp;browser=icon">here</a>.</p>
 <img alt="_images/FDB_multiple_txn_swimlane_diagram.png" src="_images/FDB_multiple_txn_swimlane_diagram.png" />
-</div>
-<div class="section" id="reference">
+</section>
+<section id="reference">
 <h2>Reference</h2>
 <p>[SSI] Serializable Snapshot Isolation in PostgreSQL. <a class="reference external" href="https://arxiv.org/pdf/1208.4179.pdf">https://arxiv.org/pdf/1208.4179.pdf</a></p>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -712,7 +813,7 @@ The diagram with notes can be viewed at <a class="reference external" href="http
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Administration &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Administration &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Configuration" href="configuration.html" />
     <link rel="prev" title="Time-Series Data" href="time-series.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -107,7 +222,7 @@
 <li><a class="reference internal" href="#server-side-latency-band-tracking">Server-side latency band tracking</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
+<li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></a></li>
 <li><a class="reference internal" href="#managing-trace-files">Managing trace files</a></li>
 <li><a class="reference internal" href="#disaster-recovery">Disaster Recovery</a></li>
 <li><a class="reference internal" href="#managing-traffic">Managing traffic</a></li>
@@ -211,7 +326,7 @@
 <li><a class="reference internal" href="#server-side-latency-band-tracking">Server-side latency band tracking</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
+<li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></a></li>
 <li><a class="reference internal" href="#managing-trace-files">Managing trace files</a></li>
 <li><a class="reference internal" href="#disaster-recovery">Disaster Recovery</a></li>
 <li><a class="reference internal" href="#managing-traffic">Managing traffic</a></li>
@@ -252,179 +367,175 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="administration">
+  <section id="administration">
 <h1>Administration</h1>
 <div class="toctree-wrapper compound">
 </div>
 <p>This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">In FoundationDB, a &#8220;cluster&#8221; refers to one or more FoundationDB processes spread across one or more physical machines that together host a FoundationDB database.</p>
+<p class="admonition-title">Note</p>
+<p>In FoundationDB, a “cluster” refers to one or more FoundationDB processes spread across one or more physical machines that together host a FoundationDB database.</p>
 </div>
 <p>To administer an externally accessible cluster, you need to understand basic system tasks. You should begin with how to <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">start and stop the database</span></a>. Next, you should review management of a cluster, including <a class="reference internal" href="#adding-machines-to-a-cluster"><span class="std std-ref">adding</span></a> and <a class="reference internal" href="#removing-machines-from-a-cluster"><span class="std std-ref">removing</span></a> machines, and monitoring <a class="reference internal" href="#administration-monitoring-cluster-status"><span class="std std-ref">cluster status</span></a> and the basic <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">server processes</span></a>. You should be familiar with <a class="reference internal" href="#administration-managing-trace-files"><span class="std std-ref">managing trace files</span></a> and <a class="reference internal" href="#administration-other-administrative-concerns"><span class="std std-ref">other administrative concerns</span></a>. Finally, you should know how to <a class="reference internal" href="#administration-removing"><span class="std std-ref">uninstall</span></a> or <a class="reference internal" href="#upgrading-foundationdb"><span class="std std-ref">upgrade</span></a> the database.</p>
 <p>FoundationDB also provides a number of different <a class="reference internal" href="configuration.html"><span class="doc">configuration</span></a> options which you should know about when setting up a FoundationDB database.</p>
-<div class="section" id="starting-and-stopping">
+<section id="starting-and-stopping">
 <span id="administration-running-foundationdb"></span><h2>Starting and stopping</h2>
 <p>After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.</p>
-<div class="section" id="linux">
+<section id="linux">
 <h3>Linux</h3>
-<p>On Linux, FoundationDB is started and stopped using the <code class="docutils literal"><span class="pre">service</span></code> command as follows:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ sudo service foundationdb start
+<p>On Linux, FoundationDB is started and stopped using the <code class="docutils literal notranslate"><span class="pre">service</span></code> command as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ sudo service foundationdb start
 user@host$ sudo service foundationdb stop
 </pre></div>
 </div>
 <p>On Ubuntu, it can be prevented from starting at boot as follows (without stopping the service):</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ sudo update-rc.d foundationdb disable
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ sudo update-rc.d foundationdb disable
 </pre></div>
 </div>
 <p>On RHEL/CentOS, it can be prevented from starting at boot as follows (without stopping the service):</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ sudo chkconfig foundationdb off
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ sudo chkconfig foundationdb off
 </pre></div>
 </div>
-</div>
-<div class="section" id="macos">
+</section>
+<section id="macos">
 <h3>macOS</h3>
-<p>On macOS, FoundationDB is started and stopped using <code class="docutils literal"><span class="pre">launchctl</span></code> as follows:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>host:~ user$ sudo launchctl load /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
+<p>On macOS, FoundationDB is started and stopped using <code class="docutils literal notranslate"><span class="pre">launchctl</span></code> as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>host:~ user$ sudo launchctl load /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
 host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
 </pre></div>
 </div>
 <p>It can be stopped and prevented from starting at boot as follows:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>host:~ user$ sudo launchctl unload -w /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>host:~ user$ sudo launchctl unload -w /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
 </pre></div>
 </div>
-</div>
-</div>
-<div class="section" id="start-stop-and-restart-behavior">
+</section>
+</section>
+<section id="start-stop-and-restart-behavior">
 <h2>Start, stop and restart behavior</h2>
-<p>These commands above start and stop the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process, which in turn starts <code class="docutils literal"><span class="pre">fdbserver</span></code> and <code class="docutils literal"><span class="pre">backup-agent</span></code> processes.  See <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">fdbmonitor and fdbserver</span></a> for details.</p>
-<p>After any child process has terminated by any reason, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> tries to restart it. See <a class="reference internal" href="configuration.html#configuration-restarting"><span class="std std-ref">restarting parameters</span></a>.</p>
-<p>When <code class="docutils literal"><span class="pre">fdbmonitor</span></code> itself is killed unexpectedly (for example, by the <code class="docutils literal"><span class="pre">out-of-memory</span> <span class="pre">killer</span></code>), all the child processes are also terminated. Then the operating system is responsible for restarting it. See <a class="reference internal" href="configuration.html#configuration-restart-fdbmonitor"><span class="std std-ref">Configuring autorestart of fdbmonitor</span></a>.</p>
-</div>
-<div class="section" id="cluster-files">
+<p>These commands above start and stop the <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> process, which in turn starts <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> and <code class="docutils literal notranslate"><span class="pre">backup-agent</span></code> processes.  See <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">fdbmonitor and fdbserver</span></a> for details.</p>
+<p>After any child process has terminated by any reason, <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> tries to restart it. See <a class="reference internal" href="configuration.html#configuration-restarting"><span class="std std-ref">restarting parameters</span></a>.</p>
+<p>When <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> itself is killed unexpectedly (for example, by the <code class="docutils literal notranslate"><span class="pre">out-of-memory</span> <span class="pre">killer</span></code>), all the child processes are also terminated. Then the operating system is responsible for restarting it. See <a class="reference internal" href="configuration.html#configuration-restart-fdbmonitor"><span class="std std-ref">Configuring autorestart of fdbmonitor</span></a>.</p>
+</section>
+<section id="cluster-files">
 <span id="foundationdb-cluster-file"></span><h2>Cluster files</h2>
-<p>FoundationDB servers and clients use a cluster file (usually named <code class="docutils literal"><span class="pre">fdb.cluster</span></code>) to connect to a cluster. The contents of the cluster file are the same for all processes that connect to the cluster. An <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file is created automatically when you install a FoundationDB server and updated automatically when you <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">change coordination servers</span></a>. To connect to a cluster from a client machine, you will need access to a copy of the cluster file used by the servers in the cluster.  Typically, you will copy the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file from the <a class="reference internal" href="#default-cluster-file"><span class="std std-ref">default location</span></a> on a FoundationDB server to the default location on each client.</p>
+<p>FoundationDB servers and clients use a cluster file (usually named <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code>) to connect to a cluster. The contents of the cluster file are the same for all processes that connect to the cluster. An <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file is created automatically when you install a FoundationDB server and updated automatically when you <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">change coordination servers</span></a>. To connect to a cluster from a client machine, you will need access to a copy of the cluster file used by the servers in the cluster.  Typically, you will copy the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file from the <a class="reference internal" href="#default-cluster-file"><span class="std std-ref">default location</span></a> on a FoundationDB server to the default location on each client.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">This file should not normally be modified manually. To change coordination servers, see <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>.</p>
+<p class="admonition-title">Warning</p>
+<p>This file should not normally be modified manually. To change coordination servers, see <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>.</p>
 </div>
-<div class="section" id="default-cluster-file">
+<section id="default-cluster-file">
 <span id="id1"></span><h3>Default cluster file</h3>
-<p>When you initially install FoundationDB, a default <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file will be placed at a system-dependent location:</p>
+<p>When you initially install FoundationDB, a default <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file will be placed at a system-dependent location:</p>
 <ul class="simple">
-<li>Linux: <code class="docutils literal"><span class="pre">/etc/foundationdb/fdb.cluster</span></code></li>
-<li>macOS: <code class="docutils literal"><span class="pre">/usr/local/etc/foundationdb/fdb.cluster</span></code></li>
+<li><p>Linux: <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/fdb.cluster</span></code></p></li>
+<li><p>macOS: <code class="docutils literal notranslate"><span class="pre">/usr/local/etc/foundationdb/fdb.cluster</span></code></p></li>
 </ul>
-</div>
-<div class="section" id="specifying-the-cluster-file">
+</section>
+<section id="specifying-the-cluster-file">
 <span id="specifying-a-cluster-file"></span><h3>Specifying the cluster file</h3>
 <p>All FoundationDB components can be configured to use a specified cluster file:</p>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">fdbcli</span></code> tool allows a cluster file to be passed on the command line using the <code class="docutils literal"><span class="pre">-C</span></code> option.</li>
-<li>The <a class="reference internal" href="api-reference.html"><span class="doc">client APIs</span></a> allow a cluster file to be passed when connecting to a cluster, usually via <code class="docutils literal"><span class="pre">open()</span></code>.</li>
-<li>A FoundationDB server or <code class="docutils literal"><span class="pre">backup-agent</span></code> allow a cluster file to be specified in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>.</li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> tool allows a cluster file to be passed on the command line using the <code class="docutils literal notranslate"><span class="pre">-C</span></code> option.</p></li>
+<li><p>The <a class="reference internal" href="api-reference.html"><span class="doc">client APIs</span></a> allow a cluster file to be passed when connecting to a cluster, usually via <code class="docutils literal notranslate"><span class="pre">open()</span></code>.</p></li>
+<li><p>A FoundationDB server or <code class="docutils literal notranslate"><span class="pre">backup-agent</span></code> allow a cluster file to be specified in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>.</p></li>
 </ul>
-<p>In addition, FoundationDB allows you to use the environment variable <code class="docutils literal"><span class="pre">FDB_CLUSTER_FILE</span></code> to specify a cluster file. This approach is helpful if you operate or access more than one cluster.</p>
+<p>In addition, FoundationDB allows you to use the environment variable <code class="docutils literal notranslate"><span class="pre">FDB_CLUSTER_FILE</span></code> to specify a cluster file. This approach is helpful if you operate or access more than one cluster.</p>
 <p>All FoundationDB components will determine a cluster file in the following order:</p>
 <ol class="arabic simple">
-<li>An explicitly provided file, whether a command line argument using <code class="docutils literal"><span class="pre">-C</span></code> or an argument to an API function, if one is given;</li>
-<li>The value of the <code class="docutils literal"><span class="pre">FDB_CLUSTER_FILE</span></code> environment variable, if it has been set;</li>
-<li>An <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file in the current working directory, if one is present;</li>
-<li>The <a class="reference internal" href="#default-cluster-file"><span class="std std-ref">default file</span></a> at its system-dependent location.</li>
+<li><p>An explicitly provided file, whether a command line argument using <code class="docutils literal notranslate"><span class="pre">-C</span></code> or an argument to an API function, if one is given;</p></li>
+<li><p>The value of the <code class="docutils literal notranslate"><span class="pre">FDB_CLUSTER_FILE</span></code> environment variable, if it has been set;</p></li>
+<li><p>An <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file in the current working directory, if one is present;</p></li>
+<li><p>The <a class="reference internal" href="#default-cluster-file"><span class="std std-ref">default file</span></a> at its system-dependent location.</p></li>
 </ol>
 <p>This automatic determination of a cluster file makes it easy to write code using FoundationDB without knowing exactly where it will be installed or what database it will need to connect to.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">A cluster file must have the <a class="reference internal" href="#cluster-file-permissions"><span class="std std-ref">required permissions</span></a> in order to be used.</p>
+<p class="admonition-title">Warning</p>
+<p>A cluster file must have the <a class="reference internal" href="#cluster-file-permissions"><span class="std std-ref">required permissions</span></a> in order to be used.</p>
 </div>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">If <code class="docutils literal"><span class="pre">FDB_CLUSTER_FILE</span></code> is read and has been set to an invalid value (such as an empty value, a file that does not exist, or a file that is not a valid cluster file), an error will result. FoundationDB will not fall back to another file.</p>
+<p class="admonition-title">Warning</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">FDB_CLUSTER_FILE</span></code> is read and has been set to an invalid value (such as an empty value, a file that does not exist, or a file that is not a valid cluster file), an error will result. FoundationDB will not fall back to another file.</p>
 </div>
-</div>
-<div class="section" id="required-permissions">
+</section>
+<section id="required-permissions">
 <span id="cluster-file-permissions"></span><h3>Required Permissions</h3>
 <p>FoundationDB servers and clients require read <em>and</em> write access to the cluster file and its parent directory. This is because certain administrative changes to the cluster configuration (see <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>) can cause this file to be automatically modified by all servers and clients using the cluster. If a FoundationDB process cannot update the cluster file, it may eventually become unable to connect to the cluster.</p>
-</div>
-<div class="section" id="cluster-file-format">
+</section>
+<section id="cluster-file-format">
 <span id="id2"></span><h3>Cluster file format</h3>
 <p>The cluster file contains a connection string consisting of a cluster identifier and a comma-separated list of IP addresses (not hostnames) specifying the coordination servers. The format for the file is:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="nd">@IP</span><span class="p">:</span><span class="n">PORT</span><span class="p">,</span><span class="n">IP</span><span class="p">:</span><span class="n">PORT</span><span class="p">,</span><span class="o">...</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="nd">@IP</span><span class="p">:</span><span class="n">PORT</span><span class="p">,</span><span class="n">IP</span><span class="p">:</span><span class="n">PORT</span><span class="p">,</span><span class="o">...</span>
 </pre></div>
 </div>
 <ul class="simple">
-<li>The <code class="docutils literal"><span class="pre">description</span></code> is a logical description of the database using alphanumeric characters (a-z, A-Z, 0-9) and underscores.</li>
-<li>The <code class="docutils literal"><span class="pre">ID</span></code> is an arbitrary value containing alphanumeric characters (a-z, A-Z, 0-9). We recommend using a random eight-character identifier (such as the output of <code class="docutils literal"><span class="pre">mktemp</span> <span class="pre">-u</span> <span class="pre">XXXXXXXX</span></code>). Note that the <code class="docutils literal"><span class="pre">ID</span></code> will change when coordinators change.</li>
-<li>The list of <code class="docutils literal"><span class="pre">IP:PORT</span></code> pairs specify the set of coordination servers. A majority of these servers must be available for the database to be operational so they should be chosen carefully. The number of coordination servers should therefore be odd and must be more than one to support fault-tolerance. We recommend using five coordination servers when using <code class="docutils literal"><span class="pre">triple</span></code> mode to maintain the ability to tolerate two simultaneous machine failures.</li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">description</span></code> is a logical description of the database using alphanumeric characters (a-z, A-Z, 0-9) and underscores.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">ID</span></code> is an arbitrary value containing alphanumeric characters (a-z, A-Z, 0-9). We recommend using a random eight-character identifier (such as the output of <code class="docutils literal notranslate"><span class="pre">mktemp</span> <span class="pre">-u</span> <span class="pre">XXXXXXXX</span></code>). Note that the <code class="docutils literal notranslate"><span class="pre">ID</span></code> will change when coordinators change.</p></li>
+<li><p>The list of <code class="docutils literal notranslate"><span class="pre">IP:PORT</span></code> pairs specify the set of coordination servers. A majority of these servers must be available for the database to be operational so they should be chosen carefully. The number of coordination servers should therefore be odd and must be more than one to support fault-tolerance. We recommend using five coordination servers when using <code class="docutils literal notranslate"><span class="pre">triple</span></code> mode to maintain the ability to tolerate two simultaneous machine failures.</p></li>
 </ul>
-<p>Together the <code class="docutils literal"><span class="pre">description</span></code> and the <code class="docutils literal"><span class="pre">ID</span></code> should uniquely identify a FoundationDB cluster.</p>
-<p>A cluster file may contain comments, marked by the <code class="docutils literal"><span class="pre">#</span></code> character. All characters on a line after the first occurrence of a <code class="docutils literal"><span class="pre">#</span></code> will be ignored.</p>
-<p>Generally, a cluster file should not be modified manually. Incorrect modifications after a cluster is created could result in data loss. To change the set of coordination servers used by a cluster, see <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>. To change the cluster <code class="docutils literal"><span class="pre">description</span></code>, see <a class="reference internal" href="configuration.html#configuration-setting-cluster-description"><span class="std std-ref">Changing the cluster description</span></a>.</p>
+<p>Together the <code class="docutils literal notranslate"><span class="pre">description</span></code> and the <code class="docutils literal notranslate"><span class="pre">ID</span></code> should uniquely identify a FoundationDB cluster.</p>
+<p>A cluster file may contain comments, marked by the <code class="docutils literal notranslate"><span class="pre">#</span></code> character. All characters on a line after the first occurrence of a <code class="docutils literal notranslate"><span class="pre">#</span></code> will be ignored.</p>
+<p>Generally, a cluster file should not be modified manually. Incorrect modifications after a cluster is created could result in data loss. To change the set of coordination servers used by a cluster, see <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>. To change the cluster <code class="docutils literal notranslate"><span class="pre">description</span></code>, see <a class="reference internal" href="configuration.html#configuration-setting-cluster-description"><span class="std std-ref">Changing the cluster description</span></a>.</p>
 <p>It is very important that each cluster use a unique random ID. If multiple processes use the same database description and ID but different sets of coordination servers, data corruption could result.</p>
-</div>
-<div class="section" id="accessing-cluster-file-information-from-a-client">
+</section>
+<section id="accessing-cluster-file-information-from-a-client">
 <span id="cluster-file-client-access"></span><h3>Accessing cluster file information from a client</h3>
 <p>Any client connected to FoundationDB can access information about its cluster file directly from the database:</p>
 <ul class="simple">
-<li>To get the path to the cluster file, read the key <code class="docutils literal"><span class="pre">\xFF\xFF/cluster_file_path</span></code>.</li>
-<li>To get the desired contents of the cluster file, read the key <code class="docutils literal"><span class="pre">\xFF\xFF/connection_string</span></code>. Make sure the client can write to the cluster file and keep it up to date.</li>
+<li><p>To get the path to the cluster file, read the key <code class="docutils literal notranslate"><span class="pre">\xFF\xFF/cluster_file_path</span></code>.</p></li>
+<li><p>To get the desired contents of the cluster file, read the key <code class="docutils literal notranslate"><span class="pre">\xFF\xFF/connection_string</span></code>. Make sure the client can write to the cluster file and keep it up to date.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="ipv6-support">
+</section>
+</section>
+<section id="ipv6-support">
 <span id="id3"></span><h2>IPv6 Support</h2>
-<p>FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as <code class="docutils literal"><span class="pre">[IP]:PORT</span></code>, e.g. &#8220;[::1]:4800&#8221;, &#8220;[abcd::dead:beef]:4500&#8221;.</p>
+<p>FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as <code class="docutils literal notranslate"><span class="pre">[IP]:PORT</span></code>, e.g. “[::1]:4800”, “[abcd::dead:beef]:4500”.</p>
 <ol class="arabic">
-<li><p class="first">The cluster file can contain mix of IPv4 and IPv6 addresses. For example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="o">@</span><span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4500</span><span class="p">,[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">4500</span><span class="p">,</span><span class="o">...</span>
+<li><p>The cluster file can contain mix of IPv4 and IPv6 addresses. For example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="o">@</span><span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4500</span><span class="p">,[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">4500</span><span class="p">,</span><span class="o">...</span>
 </pre></div>
 </div>
 </li>
-<li><p class="first">Starting <code class="docutils literal"><span class="pre">fdbserver</span></code> with IPv6:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>$ /path/to/fdbserver -C fdb.cluster -p \[::1\]:4500
+<li><p>Starting <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> with IPv6:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ /path/to/fdbserver -C fdb.cluster -p \[::1\]:4500
 </pre></div>
 </div>
 </li>
 </ol>
-</div>
-<div class="section" id="adding-machines-to-a-cluster">
+</section>
+<section id="adding-machines-to-a-cluster">
 <span id="id4"></span><h2>Adding machines to a cluster</h2>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
+<p class="admonition-title">Warning</p>
+<p>The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
 </div>
 <p>You can add new machines to a cluster at any time:</p>
 <ol class="arabic">
-<li><p class="first"><a class="reference internal" href="getting-started-linux.html"><span class="doc">Install FoundationDB</span></a> on the new machine.</p>
-</li>
-<li><p class="first">The default installation runs only one FoundationDB server process per machine (which will use only one CPU core). Most users of multi-machine configurations will want to maximize performance by running one FoundationDB server process per core. This is accomplished by modifying the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a> (located at <code class="docutils literal"><span class="pre">/etc/foundationdb/foundationdb.conf</span></code>) to have <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections for each core. Note that 4GiB ECC RAM are required per FoundationDB server process (see <a class="reference internal" href="configuration.html#system-requirements"><span class="std std-ref">System requirements</span></a>).</p>
-</li>
-<li><p class="first">Copy an <a class="reference internal" href="#specifying-a-cluster-file"><span class="std std-ref">existing cluster file</span></a> from a server in your cluster to the new machine, overwriting the existing <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file.</p>
-</li>
-<li><p class="first">Restart FoundationDB on the new machine so that it uses the new cluster file:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host2$ sudo service foundationdb restart
+<li><p><a class="reference internal" href="getting-started-linux.html"><span class="doc">Install FoundationDB</span></a> on the new machine.</p></li>
+<li><p>The default installation runs only one FoundationDB server process per machine (which will use only one CPU core). Most users of multi-machine configurations will want to maximize performance by running one FoundationDB server process per core. This is accomplished by modifying the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a> (located at <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/foundationdb.conf</span></code>) to have <code class="docutils literal notranslate"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections for each core. Note that 4GiB ECC RAM are required per FoundationDB server process (see <a class="reference internal" href="configuration.html#system-requirements"><span class="std std-ref">System requirements</span></a>).</p></li>
+<li><p>Copy an <a class="reference internal" href="#specifying-a-cluster-file"><span class="std std-ref">existing cluster file</span></a> from a server in your cluster to the new machine, overwriting the existing <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file.</p></li>
+<li><p>Restart FoundationDB on the new machine so that it uses the new cluster file:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host2$ sudo service foundationdb restart
 </pre></div>
 </div>
 </li>
-<li><p class="first">If you have previously <a class="reference internal" href="#removing-machines-from-a-cluster"><span class="std std-ref">excluded</span></a> a machine from the cluster, you will need to take it off the exclusion list using the <code class="docutils literal"><span class="pre">include</span> <span class="pre">&lt;ip&gt;</span></code> or <code class="docutils literal"><span class="pre">include</span> <span class="pre">&lt;locality&gt;</span></code> command of fdbcli before it can be a full participant in the cluster.</p>
-</li>
+<li><p>If you have previously <a class="reference internal" href="#removing-machines-from-a-cluster"><span class="std std-ref">excluded</span></a> a machine from the cluster, you will need to take it off the exclusion list using the <code class="docutils literal notranslate"><span class="pre">include</span> <span class="pre">&lt;ip&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">include</span> <span class="pre">&lt;locality&gt;</span></code> command of fdbcli before it can be a full participant in the cluster.</p></li>
 </ol>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
+<p class="admonition-title">Note</p>
+<p>Addresses have the form <code class="docutils literal notranslate"><span class="pre">IP</span></code>:<code class="docutils literal notranslate"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
 </div>
-</div>
-<div class="section" id="removing-machines-from-a-cluster">
+</section>
+<section id="removing-machines-from-a-cluster">
 <span id="id5"></span><h2>Removing machines from a cluster</h2>
 <p>To temporarily or permanently remove one or more machines from a FoundationDB cluster without compromising fault tolerance or availability, perform the following steps:</p>
 <ol class="arabic simple">
-<li>Make sure that your current redundancy mode will still make sense after removing the machines you want to remove. For example, if you are currently using <code class="docutils literal"><span class="pre">triple</span></code> redundancy and are reducing the number of servers to fewer than five, you should probably switch to a lower redundancy mode first. See <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>.</li>
-<li>If any of the machines that you would like to remove is a coordinator, you should <a class="reference internal" href="configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">change coordination servers</span></a> to a set of servers that you will not be removing. Remember that even after changing coordinators, the old coordinators need to remain available until all servers and clients of the cluster have automatically updated their cluster files.</li>
-<li>Use the <code class="docutils literal"><span class="pre">exclude</span></code> command in <code class="docutils literal"><span class="pre">fdbcli</span></code> on the machines you plan to remove:</li>
+<li><p>Make sure that your current redundancy mode will still make sense after removing the machines you want to remove. For example, if you are currently using <code class="docutils literal notranslate"><span class="pre">triple</span></code> redundancy and are reducing the number of servers to fewer than five, you should probably switch to a lower redundancy mode first. See <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>.</p></li>
+<li><p>If any of the machines that you would like to remove is a coordinator, you should <a class="reference internal" href="configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">change coordination servers</span></a> to a set of servers that you will not be removing. Remember that even after changing coordinators, the old coordinators need to remain available until all servers and clients of the cluster have automatically updated their cluster files.</p></li>
+<li><p>Use the <code class="docutils literal notranslate"><span class="pre">exclude</span></code> command in <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> on the machines you plan to remove:</p></li>
 </ol>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ fdbcli
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host1$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
 The database is available.
@@ -435,45 +546,42 @@ Waiting for state to be removed from all excluded servers.  This may take a whil
 It is now safe to remove these machines or processes from the cluster.
 </pre></div>
 </div>
-<p><code class="docutils literal"><span class="pre">exclude</span></code> can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code> pair or by specifying a locality match).</p>
+<p><code class="docutils literal notranslate"><span class="pre">exclude</span></code> can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an <code class="docutils literal notranslate"><span class="pre">IP</span></code>:<code class="docutils literal notranslate"><span class="pre">PORT</span></code> pair or by specifying a locality match).</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
+<p class="admonition-title">Note</p>
+<p>Addresses have the form <code class="docutils literal notranslate"><span class="pre">IP</span></code>:<code class="docutils literal notranslate"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
 </div>
-<p>Excluding a server doesn&#8217;t shut it down immediately; data on the machine is first moved away. When the <code class="docutils literal"><span class="pre">exclude</span></code> command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.</p>
-<p>If you interrupt the exclude command with Ctrl-C after seeing the &#8220;waiting for state to be removed&#8221; message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the <code class="docutils literal"><span class="pre">exclude</span></code> command, use the <code class="docutils literal"><span class="pre">include</span></code> command.</p>
+<p>Excluding a server doesn’t shut it down immediately; data on the machine is first moved away. When the <code class="docutils literal notranslate"><span class="pre">exclude</span></code> command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.</p>
+<p>If you interrupt the exclude command with Ctrl-C after seeing the “waiting for state to be removed” message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the <code class="docutils literal notranslate"><span class="pre">exclude</span></code> command, use the <code class="docutils literal notranslate"><span class="pre">include</span></code> command.</p>
 <blockquote>
-<div><p>Excluding a server with the <code class="docutils literal"><span class="pre">failed</span></code> flag will shut it down immediately; it will assume that it has already become unrecoverable or unreachable, and will not attempt to move the data on the machine away. This may break the guarantee required to maintain the configured redundancy mode, which will be checked internally, and the command may be denied if the guarantee is violated. This safety check can be ignored by using the command <code class="docutils literal"><span class="pre">exclude</span> <span class="pre">FORCE</span> <span class="pre">failed</span></code>.</p>
-<p>In case you want to include a new machine with the same address as a server previously marked as failed, you can allow it to join by using the <code class="docutils literal"><span class="pre">include</span> <span class="pre">failed</span></code> command.</p>
+<div><p>Excluding a server with the <code class="docutils literal notranslate"><span class="pre">failed</span></code> flag will shut it down immediately; it will assume that it has already become unrecoverable or unreachable, and will not attempt to move the data on the machine away. This may break the guarantee required to maintain the configured redundancy mode, which will be checked internally, and the command may be denied if the guarantee is violated. This safety check can be ignored by using the command <code class="docutils literal notranslate"><span class="pre">exclude</span> <span class="pre">FORCE</span> <span class="pre">failed</span></code>.</p>
+<p>In case you want to include a new machine with the same address as a server previously marked as failed, you can allow it to join by using the <code class="docutils literal notranslate"><span class="pre">include</span> <span class="pre">failed</span></code> command.</p>
 </div></blockquote>
 <ol class="arabic" start="4">
-<li><p class="first">On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">instructions for your platform</span></a>. For example, on Ubuntu:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host3$ sudo service foundationdb stop
+<li><p>On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">instructions for your platform</span></a>. For example, on Ubuntu:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host3$ sudo service foundationdb stop
 user@host3$ sudo update-rc.d foundationdb disable
 </pre></div>
 </div>
 </li>
-<li><p class="first"><a class="reference internal" href="building-cluster.html#test-the-database"><span class="std std-ref">Test the database</span></a> to double check that everything went smoothly, paying particular attention to the replication health.</p>
-</li>
-<li><p class="first">You can optionally <a class="reference internal" href="#administration-removing"><span class="std std-ref">uninstall</span></a> the FoundationDB server package entirely and/or delete database files on removed servers.</p>
-</li>
-<li><p class="first">If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the <code class="docutils literal"><span class="pre">include</span></code> command of <code class="docutils literal"><span class="pre">fdbcli</span></code>. If attempting to re-include a failed server, this can be done using the <code class="docutils literal"><span class="pre">include</span> <span class="pre">failed</span></code> command of <code class="docutils literal"><span class="pre">fdbcli</span></code>. Typing <code class="docutils literal"><span class="pre">exclude</span></code> with no parameters will tell you the current list of excluded and failed machines.</p>
-</li>
+<li><p><a class="reference internal" href="building-cluster.html#test-the-database"><span class="std std-ref">Test the database</span></a> to double check that everything went smoothly, paying particular attention to the replication health.</p></li>
+<li><p>You can optionally <a class="reference internal" href="#administration-removing"><span class="std std-ref">uninstall</span></a> the FoundationDB server package entirely and/or delete database files on removed servers.</p></li>
+<li><p>If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the <code class="docutils literal notranslate"><span class="pre">include</span></code> command of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. If attempting to re-include a failed server, this can be done using the <code class="docutils literal notranslate"><span class="pre">include</span> <span class="pre">failed</span></code> command of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. Typing <code class="docutils literal notranslate"><span class="pre">exclude</span></code> with no parameters will tell you the current list of excluded and failed machines.</p></li>
 </ol>
 <p>As of api version 700, excluding servers can be done with the <a class="reference internal" href="special-keys.html#special-key-space-management-module"><span class="std std-ref">special key space management module</span></a> as well.</p>
-</div>
-<div class="section" id="moving-a-cluster">
+</section>
+<section id="moving-a-cluster">
 <h2>Moving a cluster</h2>
 <p>The procedures for adding and removing machines can be combined into a recipe for <a class="reference internal" href="moving-a-cluster.html"><span class="doc">moving an existing cluster to new machines</span></a>.</p>
-</div>
-<div class="section" id="converting-an-existing-cluster-to-use-tls">
+</section>
+<section id="converting-an-existing-cluster-to-use-tls">
 <h2>Converting an existing cluster to use TLS</h2>
 <p>A FoundationDB cluster has the option of supporting <a class="reference internal" href="tls.html"><span class="doc">Transport Layer Security (TLS)</span></a>. To enable TLS on an existing, non-TLS cluster, see <a class="reference internal" href="tls.html#converting-existing-cluster-after-6-1"><span class="std std-ref">Converting a running cluster</span></a>.</p>
-</div>
-<div class="section" id="monitoring-cluster-status">
+</section>
+<section id="monitoring-cluster-status">
 <span id="administration-monitoring-cluster-status"></span><h2>Monitoring cluster status</h2>
-<p>Use the <code class="docutils literal"><span class="pre">status</span></code> command of <code class="docutils literal"><span class="pre">fdbcli</span></code> to determine if the cluster is up and running:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbcli
+<p>Use the <code class="docutils literal notranslate"><span class="pre">status</span></code> command of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> to determine if the cluster is up and running:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
 The database is available.
@@ -522,119 +630,111 @@ Client time: 03/19/18 08:51:51
 </pre></div>
 </div>
 <p>The summary fields are interpreted as follows:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="12%" />
-<col width="88%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td>Redundancy mode</td>
-<td>The currently configured redundancy mode (see the section <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>)</td>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p>Redundancy mode</p></td>
+<td><p>The currently configured redundancy mode (see the section <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>)</p></td>
 </tr>
-<tr class="row-even"><td>Storage engine</td>
-<td>The currently configured storage engine (see the section <a class="reference internal" href="configuration.html#configuration-configuring-storage-subsystem"><span class="std std-ref">Configuring the storage subsystem</span></a>)</td>
+<tr class="row-even"><td><p>Storage engine</p></td>
+<td><p>The currently configured storage engine (see the section <a class="reference internal" href="configuration.html#configuration-configuring-storage-subsystem"><span class="std std-ref">Configuring the storage subsystem</span></a>)</p></td>
 </tr>
-<tr class="row-odd"><td>Coordinators</td>
-<td>The number of FoundationDB coordination servers</td>
+<tr class="row-odd"><td><p>Coordinators</p></td>
+<td><p>The number of FoundationDB coordination servers</p></td>
 </tr>
-<tr class="row-even"><td>Desired GRV Proxies</td>
-<td>Number of GRV proxies desired. (default 1)</td>
+<tr class="row-even"><td><p>Desired GRV Proxies</p></td>
+<td><p>Number of GRV proxies desired. (default 1)</p></td>
 </tr>
-<tr class="row-odd"><td>Desired Commit Proxies</td>
-<td>Number of commit proxies desired. If replication mode is 3 then default number of commit proxies is 3</td>
+<tr class="row-odd"><td><p>Desired Commit Proxies</p></td>
+<td><p>Number of commit proxies desired. If replication mode is 3 then default number of commit proxies is 3</p></td>
 </tr>
-<tr class="row-even"><td>Desired Logs</td>
-<td>Number of logs desired. If replication mode is 3 then default number of logs is 3</td>
+<tr class="row-even"><td><p>Desired Logs</p></td>
+<td><p>Number of logs desired. If replication mode is 3 then default number of logs is 3</p></td>
 </tr>
-<tr class="row-odd"><td>FoundationDB processes</td>
-<td>Number of FoundationDB processes participating in the cluster</td>
+<tr class="row-odd"><td><p>FoundationDB processes</p></td>
+<td><p>Number of FoundationDB processes participating in the cluster</p></td>
 </tr>
-<tr class="row-even"><td>Machines</td>
-<td>Number of physical machines running at least one FoundationDB process that is participating in the cluster</td>
+<tr class="row-even"><td><p>Machines</p></td>
+<td><p>Number of physical machines running at least one FoundationDB process that is participating in the cluster</p></td>
 </tr>
-<tr class="row-odd"><td>Memory availability</td>
-<td>RAM per process on machine with least available (see details below)</td>
+<tr class="row-odd"><td><p>Memory availability</p></td>
+<td><p>RAM per process on machine with least available (see details below)</p></td>
 </tr>
-<tr class="row-even"><td>Retransmissions rate</td>
-<td>Ratio of retransmitted packets to the total number of packets.</td>
+<tr class="row-even"><td><p>Retransmissions rate</p></td>
+<td><p>Ratio of retransmitted packets to the total number of packets.</p></td>
 </tr>
-<tr class="row-odd"><td>Fault tolerance</td>
-<td>Maximum number of machines that can fail without losing data or availability (number for losing data will be reported separately if lower)</td>
+<tr class="row-odd"><td><p>Fault tolerance</p></td>
+<td><p>Maximum number of machines that can fail without losing data or availability (number for losing data will be reported separately if lower)</p></td>
 </tr>
-<tr class="row-even"><td>Server time</td>
-<td>Timestamp from the server</td>
+<tr class="row-even"><td><p>Server time</p></td>
+<td><p>Timestamp from the server</p></td>
 </tr>
-<tr class="row-odd"><td>Replication health</td>
-<td>A qualitative estimate of the health of data replication</td>
+<tr class="row-odd"><td><p>Replication health</p></td>
+<td><p>A qualitative estimate of the health of data replication</p></td>
 </tr>
-<tr class="row-even"><td>Moving data</td>
-<td>Amount of data currently in movement between machines</td>
+<tr class="row-even"><td><p>Moving data</p></td>
+<td><p>Amount of data currently in movement between machines</p></td>
 </tr>
-<tr class="row-odd"><td>Sum of key-value sizes</td>
-<td>Estimated total size of keys and values stored (not including any overhead or replication)</td>
+<tr class="row-odd"><td><p>Sum of key-value sizes</p></td>
+<td><p>Estimated total size of keys and values stored (not including any overhead or replication)</p></td>
 </tr>
-<tr class="row-even"><td>Disk space used</td>
-<td>Overall disk space used by the cluster</td>
+<tr class="row-even"><td><p>Disk space used</p></td>
+<td><p>Overall disk space used by the cluster</p></td>
 </tr>
-<tr class="row-odd"><td>Storage server</td>
-<td>Free space for storage on the server with least available. For <code class="docutils literal"><span class="pre">ssd</span></code> storage engine, includes only disk; for <code class="docutils literal"><span class="pre">memory</span></code> storage engine, includes both RAM and disk.</td>
+<tr class="row-odd"><td><p>Storage server</p></td>
+<td><p>Free space for storage on the server with least available. For <code class="docutils literal notranslate"><span class="pre">ssd</span></code> storage engine, includes only disk; for <code class="docutils literal notranslate"><span class="pre">memory</span></code> storage engine, includes both RAM and disk.</p></td>
 </tr>
-<tr class="row-even"><td>Log server</td>
-<td>Free space for log server on the server with least available.</td>
+<tr class="row-even"><td><p>Log server</p></td>
+<td><p>Free space for log server on the server with least available.</p></td>
 </tr>
-<tr class="row-odd"><td>Read rate</td>
-<td>The current number of reads per second</td>
+<tr class="row-odd"><td><p>Read rate</p></td>
+<td><p>The current number of reads per second</p></td>
 </tr>
-<tr class="row-even"><td>Write rate</td>
-<td>The current number of writes per second</td>
+<tr class="row-even"><td><p>Write rate</p></td>
+<td><p>The current number of writes per second</p></td>
 </tr>
-<tr class="row-odd"><td>Transaction started</td>
-<td>The current number of transactions started per second</td>
+<tr class="row-odd"><td><p>Transaction started</p></td>
+<td><p>The current number of transactions started per second</p></td>
 </tr>
-<tr class="row-even"><td>Transaction committed</td>
-<td>The current number of transactions committed per second</td>
+<tr class="row-even"><td><p>Transaction committed</p></td>
+<td><p>The current number of transactions committed per second</p></td>
 </tr>
-<tr class="row-odd"><td>Conflict rate</td>
-<td>The current number of conflicts per second</td>
+<tr class="row-odd"><td><p>Conflict rate</p></td>
+<td><p>The current number of conflicts per second</p></td>
 </tr>
-<tr class="row-even"><td>Running backups</td>
-<td>Number of backups currently running. Different backups could be backing up to different prefixes and/or to different targets.</td>
+<tr class="row-even"><td><p>Running backups</p></td>
+<td><p>Number of backups currently running. Different backups could be backing up to different prefixes and/or to different targets.</p></td>
 </tr>
-<tr class="row-odd"><td>Running DRs</td>
-<td>Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.</td>
+<tr class="row-odd"><td><p>Running DRs</p></td>
+<td><p>Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.</p></td>
 </tr>
 </tbody>
 </table>
-<p>The &#8220;Memory availability&#8221; is a conservative estimate of the minimal RAM available to any <code class="docutils literal"><span class="pre">fdbserver</span></code> process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated <em>for each machine</em> by taking:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">availability</span> <span class="o">=</span> <span class="p">((</span><span class="n">total</span> <span class="o">-</span> <span class="n">committed</span><span class="p">)</span> <span class="o">+</span> <span class="nb">sum</span><span class="p">(</span><span class="n">processSize</span><span class="p">))</span> <span class="o">/</span> <span class="n">processes</span>
+<p>The “Memory availability” is a conservative estimate of the minimal RAM available to any <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated <em>for each machine</em> by taking:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">availability</span> <span class="o">=</span> <span class="p">((</span><span class="n">total</span> <span class="o">-</span> <span class="n">committed</span><span class="p">)</span> <span class="o">+</span> <span class="nb">sum</span><span class="p">(</span><span class="n">processSize</span><span class="p">))</span> <span class="o">/</span> <span class="n">processes</span>
 </pre></div>
 </div>
 <p>where:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="16%" />
-<col width="84%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td>total</td>
-<td>total RAM on the machine</td>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p>total</p></td>
+<td><p>total RAM on the machine</p></td>
 </tr>
-<tr class="row-even"><td>committed</td>
-<td>committed RAM on the machine</td>
+<tr class="row-even"><td><p>committed</p></td>
+<td><p>committed RAM on the machine</p></td>
 </tr>
-<tr class="row-odd"><td>processSize</td>
-<td>total physical memory used by a given <code class="docutils literal"><span class="pre">fdbserver</span></code> process</td>
+<tr class="row-odd"><td><p>processSize</p></td>
+<td><p>total physical memory used by a given <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> process</p></td>
 </tr>
-<tr class="row-even"><td>processes</td>
-<td>number of <code class="docutils literal"><span class="pre">fdbserver</span></code> processes on the machine</td>
+<tr class="row-even"><td><p>processes</p></td>
+<td><p>number of <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> processes on the machine</p></td>
 </tr>
 </tbody>
 </table>
 <p>The reported value is then the <em>minimum</em> of memory available per process <em>over all machines</em> in the cluster. If this value is below 4.0 GB, a warning message is added to the status report.</p>
-<div class="section" id="process-details">
+<section id="process-details">
 <h3>Process details</h3>
-<p>The <code class="docutils literal"><span class="pre">status</span></code> command can provide detailed statistics about the cluster and the database by giving it the <code class="docutils literal"><span class="pre">details</span></code> argument:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbcli
+<p>The <code class="docutils literal notranslate"><span class="pre">status</span></code> command can provide detailed statistics about the cluster and the database by giving it the <code class="docutils literal notranslate"><span class="pre">details</span></code> argument:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
 The database is available.
@@ -771,70 +871,62 @@ Client time: 03/19/18 08:59:37
 </pre></div>
 </div>
 <p>Several details about individual FoundationDB processes are displayed in a list format in parenthesis after the IP address and port:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="8%" />
-<col width="92%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td>cpu</td>
-<td>CPU utilization of the individual process</td>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p>cpu</p></td>
+<td><p>CPU utilization of the individual process</p></td>
 </tr>
-<tr class="row-even"><td>machine</td>
-<td>CPU utilization of the machine the process is running on (over all cores)</td>
+<tr class="row-even"><td><p>machine</p></td>
+<td><p>CPU utilization of the machine the process is running on (over all cores)</p></td>
 </tr>
-<tr class="row-odd"><td>Gbps</td>
-<td>Total input + output network traffic, in Gbps</td>
+<tr class="row-odd"><td><p>Gbps</p></td>
+<td><p>Total input + output network traffic, in Gbps</p></td>
 </tr>
-<tr class="row-even"><td>disk IO</td>
-<td>Percentage busy time of the disk subsystem on which the data resides</td>
+<tr class="row-even"><td><p>disk IO</p></td>
+<td><p>Percentage busy time of the disk subsystem on which the data resides</p></td>
 </tr>
-<tr class="row-odd"><td>REXMIT!</td>
-<td>Displayed only if there have been more than 10 TCP segments retransmitted in last 5s</td>
+<tr class="row-odd"><td><p>REXMIT!</p></td>
+<td><p>Displayed only if there have been more than 10 TCP segments retransmitted in last 5s</p></td>
 </tr>
-<tr class="row-even"><td>RAM</td>
-<td>Total physical memory used by process / memory available per process</td>
+<tr class="row-even"><td><p>RAM</p></td>
+<td><p>Total physical memory used by process / memory available per process</p></td>
 </tr>
 </tbody>
 </table>
-<p>In certain cases, FoundationDB&#8217;s overall performance can be negatively impacted by an individual slow or degraded computer or subsystem. If you suspect this is the case, this detailed list is helpful to find the culprit.</p>
-<p>If a process has had more than 10 TCP segments retransmitted in the last 5 seconds, the warning message <code class="docutils literal"><span class="pre">REXMIT!</span></code> is displayed between its disk and RAM values, leading to an output under <code class="docutils literal"><span class="pre">Process</span> <span class="pre">performance</span> <span class="pre">details</span></code> of the form:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; REXMIT! 2.5 GB / 4.1 GB RAM  )
+<p>In certain cases, FoundationDB’s overall performance can be negatively impacted by an individual slow or degraded computer or subsystem. If you suspect this is the case, this detailed list is helpful to find the culprit.</p>
+<p>If a process has had more than 10 TCP segments retransmitted in the last 5 seconds, the warning message <code class="docutils literal notranslate"><span class="pre">REXMIT!</span></code> is displayed between its disk and RAM values, leading to an output under <code class="docutils literal notranslate"><span class="pre">Process</span> <span class="pre">performance</span> <span class="pre">details</span></code> of the form:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; REXMIT! 2.5 GB / 4.1 GB RAM  )
 </pre></div>
 </div>
-</div>
-<div class="section" id="machine-readable-status">
+</section>
+<section id="machine-readable-status">
 <h3>Machine-readable status</h3>
-<p>The status command can provide a complete summary of statistics about the cluster and the database with the <code class="docutils literal"><span class="pre">json</span></code> argument. Full documentation for <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> output can be found <a class="reference internal" href="mr-status.html"><span class="doc">here</span></a>.
-From the output of <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code>, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="4%" />
-<col width="96%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td>Ratekeeper limit</td>
-<td><code class="docutils literal"><span class="pre">cluster.qos.transactions_per_second_limit</span></code> contains the number of read versions per second that the cluster can give out. A low ratekeeper limit indicates that the cluster performance is limited in some way. The reason for a low ratekeeper limit can be found at <code class="docutils literal"><span class="pre">cluster.qos.performance_limited_by</span></code>. <code class="docutils literal"><span class="pre">cluster.qos.released_transactions_per_second</span></code> describes the number of read versions given out per second, and can be used to tell how close the ratekeeper is to throttling.</td>
+<p>The status command can provide a complete summary of statistics about the cluster and the database with the <code class="docutils literal notranslate"><span class="pre">json</span></code> argument. Full documentation for <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code> output can be found <a class="reference internal" href="mr-status.html"><span class="doc">here</span></a>.
+From the output of <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code>, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.</p>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p>Ratekeeper limit</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cluster.qos.transactions_per_second_limit</span></code> contains the number of read versions per second that the cluster can give out. A low ratekeeper limit indicates that the cluster performance is limited in some way. The reason for a low ratekeeper limit can be found at <code class="docutils literal notranslate"><span class="pre">cluster.qos.performance_limited_by</span></code>. <code class="docutils literal notranslate"><span class="pre">cluster.qos.released_transactions_per_second</span></code> describes the number of read versions given out per second, and can be used to tell how close the ratekeeper is to throttling.</p></td>
 </tr>
-<tr class="row-even"><td>Storage queue size</td>
-<td><code class="docutils literal"><span class="pre">cluster.qos.worst_queue_bytes_storage_server</span></code> contains the maximum size in bytes of a storage queue. Each storage server has mutations that have not yet been made durable, stored in its storage queue. If this value gets too large, it indicates a storage server is falling behind. A large storage queue will cause the ratekeeper to increase throttling. However, depending on the configuration, the ratekeeper can ignore the worst storage queue from one fault domain. Thus, ratekeeper uses <code class="docutils literal"><span class="pre">cluster.qos.limiting_queue_bytes_storage_server</span></code> to determine the throttling level.</td>
+<tr class="row-even"><td><p>Storage queue size</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cluster.qos.worst_queue_bytes_storage_server</span></code> contains the maximum size in bytes of a storage queue. Each storage server has mutations that have not yet been made durable, stored in its storage queue. If this value gets too large, it indicates a storage server is falling behind. A large storage queue will cause the ratekeeper to increase throttling. However, depending on the configuration, the ratekeeper can ignore the worst storage queue from one fault domain. Thus, ratekeeper uses <code class="docutils literal notranslate"><span class="pre">cluster.qos.limiting_queue_bytes_storage_server</span></code> to determine the throttling level.</p></td>
 </tr>
-<tr class="row-odd"><td>Durable version lag</td>
-<td><code class="docutils literal"><span class="pre">cluster.qos.worst_durability_lag_storage_server</span></code> contains information about the worst storage server durability lag. The <code class="docutils literal"><span class="pre">versions</span></code> subfield contains the maximum number of versions in a storage queue. Ideally, this should be near 5 million. The <code class="docutils literal"><span class="pre">seconds</span></code> subfield contains the maximum number of seconds of non-durable data in a storage queue. Ideally, this should be near 5 seconds. If a storage server is overwhelmed, the durability lag could rise, causing performance issues.</td>
+<tr class="row-odd"><td><p>Durable version lag</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cluster.qos.worst_durability_lag_storage_server</span></code> contains information about the worst storage server durability lag. The <code class="docutils literal notranslate"><span class="pre">versions</span></code> subfield contains the maximum number of versions in a storage queue. Ideally, this should be near 5 million. The <code class="docutils literal notranslate"><span class="pre">seconds</span></code> subfield contains the maximum number of seconds of non-durable data in a storage queue. Ideally, this should be near 5 seconds. If a storage server is overwhelmed, the durability lag could rise, causing performance issues.</p></td>
 </tr>
-<tr class="row-even"><td>Transaction log queue</td>
-<td><code class="docutils literal"><span class="pre">cluster.qos.worst_queue_bytes_log_server</span></code> contains the maximum size in bytes of the mutations stored on a transaction log that have not yet been popped by storage servers. A large transaction log queue size can potentially cause the ratekeeper to increase throttling.</td>
+<tr class="row-even"><td><p>Transaction log queue</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cluster.qos.worst_queue_bytes_log_server</span></code> contains the maximum size in bytes of the mutations stored on a transaction log that have not yet been popped by storage servers. A large transaction log queue size can potentially cause the ratekeeper to increase throttling.</p></td>
 </tr>
 </tbody>
 </table>
-</div>
-<div class="section" id="server-side-latency-band-tracking">
+</section>
+<section id="server-side-latency-band-tracking">
 <h3>Server-side latency band tracking</h3>
-<p>As part of the status document, <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> provides some sampled latency metrics obtained by running probe transactions internally. While this can often be useful, it does not necessarily reflect the distribution of latencies for requests originated by clients.</p>
+<p>As part of the status document, <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code> provides some sampled latency metrics obtained by running probe transactions internally. While this can often be useful, it does not necessarily reflect the distribution of latencies for requests originated by clients.</p>
 <p>FoundationDB additionally provides optional functionality to measure the latencies of all incoming get read version (GRV), read, and commit requests and report some basic details about those requests. The latencies are measured from the time the server receives the request to the point when it replies, and will therefore not include time spent in transit between the client and server or delays in the client process itself.</p>
 <p>The latency band tracking works by configuring various latency thresholds and counting the number of requests that occur in each band (i.e. between two consecutive thresholds). For example, if you wanted to define a service-level objective (SLO) for your cluster where 99.9% of read requests were answered within N seconds, you could set a read latency threshold at N. You could then count the number of requests below and above the threshold and determine whether the required percentage of requests are answered sufficiently quickly.</p>
-<p>Configuration of server-side latency bands is performed by setting the <code class="docutils literal"><span class="pre">\xff\x02/latencyBandConfig</span></code> key to a string encoding the following JSON document:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">{</span>
+<p>Configuration of server-side latency bands is performed by setting the <code class="docutils literal notranslate"><span class="pre">\xff\x02/latencyBandConfig</span></code> key to a string encoding the following JSON document:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
   <span class="s2">&quot;get_read_version&quot;</span> <span class="p">:</span> <span class="p">{</span>
     <span class="s2">&quot;bands&quot;</span> <span class="p">:</span> <span class="p">[</span> <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">]</span>
   <span class="p">},</span>
@@ -852,18 +944,18 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 </div>
 <p>Every field in this configuration is optional, and any missing fields will be left unset (i.e. no bands will be tracked or limits will not apply). The configuration takes the following arguments:</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">bands</span></code> - a list of thresholds (in seconds) to be measured for the given request type (<code class="docutils literal"><span class="pre">get_read_version</span></code>, <code class="docutils literal"><span class="pre">read</span></code>, or <code class="docutils literal"><span class="pre">commit</span></code>)</li>
-<li><code class="docutils literal"><span class="pre">max_key_selector_offset</span></code> - an integer specifying the maximum key selector offset a read request can have and still be counted</li>
-<li><code class="docutils literal"><span class="pre">max_read_bytes</span></code> - an integer specifying the maximum size in bytes of a read response that will be counted</li>
-<li><code class="docutils literal"><span class="pre">max_commit_bytes</span></code> - an integer specifying the maximum size in bytes of a commit request that will be counted</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bands</span></code> - a list of thresholds (in seconds) to be measured for the given request type (<code class="docutils literal notranslate"><span class="pre">get_read_version</span></code>, <code class="docutils literal notranslate"><span class="pre">read</span></code>, or <code class="docutils literal notranslate"><span class="pre">commit</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">max_key_selector_offset</span></code> - an integer specifying the maximum key selector offset a read request can have and still be counted</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">max_read_bytes</span></code> - an integer specifying the maximum size in bytes of a read response that will be counted</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">max_commit_bytes</span></code> - an integer specifying the maximum size in bytes of a commit request that will be counted</p></li>
 </ul>
-<p>Setting this configuration key to a value that changes the configuration will result in the cluster controller server process logging a <code class="docutils literal"><span class="pre">LatencyBandConfigChanged</span></code> event. This event will indicate whether a configuration is present or not using its <code class="docutils literal"><span class="pre">Present</span></code> field. Specifying an invalid configuration will result in the latency band feature being unconfigured, and the server process running the cluster controller will log a <code class="docutils literal"><span class="pre">InvalidLatencyBandConfiguration</span></code> trace event.</p>
+<p>Setting this configuration key to a value that changes the configuration will result in the cluster controller server process logging a <code class="docutils literal notranslate"><span class="pre">LatencyBandConfigChanged</span></code> event. This event will indicate whether a configuration is present or not using its <code class="docutils literal notranslate"><span class="pre">Present</span></code> field. Specifying an invalid configuration will result in the latency band feature being unconfigured, and the server process running the cluster controller will log a <code class="docutils literal notranslate"><span class="pre">InvalidLatencyBandConfiguration</span></code> trace event.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">GRV requests are counted only at default and immediate priority. Batch priority GRV requests are ignored for the purposes of latency band tracking.</p>
+<p class="admonition-title">Note</p>
+<p>GRV requests are counted only at default and immediate priority. Batch priority GRV requests are ignored for the purposes of latency band tracking.</p>
 </div>
-<p>When configured, the <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> output will include additional fields to report the number of requests in each latency band located at <code class="docutils literal"><span class="pre">cluster.processes.&lt;ID&gt;.roles[N].*_latency_bands</span></code>:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="s2">&quot;grv_latency_bands&quot;</span> <span class="p">:</span> <span class="p">{</span>
+<p>When configured, the <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code> output will include additional fields to report the number of requests in each latency band located at <code class="docutils literal notranslate"><span class="pre">cluster.processes.&lt;ID&gt;.roles[N].*_latency_bands</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="s2">&quot;grv_latency_bands&quot;</span> <span class="p">:</span> <span class="p">{</span>
   <span class="mf">0.01</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
   <span class="mf">0.1</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
   <span class="n">inf</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
@@ -883,213 +975,209 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 <span class="p">}</span>
 </pre></div>
 </div>
-<p>The <code class="docutils literal"><span class="pre">grv_latency_bands</span></code> objects will only be logged for <code class="docutils literal"><span class="pre">grv_proxy</span></code> roles, <code class="docutils literal"><span class="pre">commit_latency_bands</span></code> objects will only be logged for <code class="docutils literal"><span class="pre">commit_proxy</span></code> roles, and <code class="docutils literal"><span class="pre">read_latency_bands</span></code> will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold.</p>
-<p>For example, <code class="docutils literal"><span class="pre">0.1:</span> <span class="pre">1</span></code> in <code class="docutils literal"><span class="pre">read_latency_bands</span></code> indicates that there has been 1 read request with a latency in the range <code class="docutils literal"><span class="pre">[0.01,</span> <span class="pre">0.1)</span></code>. For the smallest specified threshold, the lower bound is 0 (e.g. <code class="docutils literal"><span class="pre">[0,</span> <span class="pre">0.01)</span></code> in the example above). Requests that took longer than any defined latency band will be reported in the <code class="docutils literal"><span class="pre">inf</span></code> (infinity) band. Requests that were filtered by the configuration (e.g. using <code class="docutils literal"><span class="pre">max_read_bytes</span></code>) are reported in the <code class="docutils literal"><span class="pre">filtered</span></code> category.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">grv_latency_bands</span></code> objects will only be logged for <code class="docutils literal notranslate"><span class="pre">grv_proxy</span></code> roles, <code class="docutils literal notranslate"><span class="pre">commit_latency_bands</span></code> objects will only be logged for <code class="docutils literal notranslate"><span class="pre">commit_proxy</span></code> roles, and <code class="docutils literal notranslate"><span class="pre">read_latency_bands</span></code> will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold.</p>
+<p>For example, <code class="docutils literal notranslate"><span class="pre">0.1:</span> <span class="pre">1</span></code> in <code class="docutils literal notranslate"><span class="pre">read_latency_bands</span></code> indicates that there has been 1 read request with a latency in the range <code class="docutils literal notranslate"><span class="pre">[0.01,</span> <span class="pre">0.1)</span></code>. For the smallest specified threshold, the lower bound is 0 (e.g. <code class="docutils literal notranslate"><span class="pre">[0,</span> <span class="pre">0.01)</span></code> in the example above). Requests that took longer than any defined latency band will be reported in the <code class="docutils literal notranslate"><span class="pre">inf</span></code> (infinity) band. Requests that were filtered by the configuration (e.g. using <code class="docutils literal notranslate"><span class="pre">max_read_bytes</span></code>) are reported in the <code class="docutils literal notranslate"><span class="pre">filtered</span></code> category.</p>
 <p>Because each threshold reports latencies strictly in the range between the next lower threshold and itself, it may be necessary to sum up the counts for multiple bands to determine the total number of requests below a certain threshold.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">No history of request counts is recorded for processes that ran in the past. This includes the history prior to restart for a process that has been restarted, for which the counts get reset to 0. For this reason, it is recommended that you collect this information periodically if you need to be able to track requests from such processes.</p>
+<p class="admonition-title">Note</p>
+<p>No history of request counts is recorded for processes that ran in the past. This includes the history prior to restart for a process that has been restarted, for which the counts get reset to 0. For this reason, it is recommended that you collect this information periodically if you need to be able to track requests from such processes.</p>
 </div>
-</div>
-</div>
-<div class="section" id="fdbmonitor-and-fdbserver">
-<span id="administration-fdbmonitor"></span><h2><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></h2>
-<p>The core FoundationDB server process is <code class="docutils literal"><span class="pre">fdbserver</span></code>.  Each <code class="docutils literal"><span class="pre">fdbserver</span></code> process uses up to one full CPU core, so a production FoundationDB cluster will usually run N such processes on an N-core system.</p>
-<p>To make configuring, starting, stopping, and restarting <code class="docutils literal"><span class="pre">fdbserver</span></code> processes easy, FoundationDB also comes with a singleton daemon process, <code class="docutils literal"><span class="pre">fdbmonitor</span></code>, which is started automatically on boot.  <code class="docutils literal"><span class="pre">fdbmonitor</span></code> reads the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a> file and starts the configured set of <code class="docutils literal"><span class="pre">fdbserver</span></code> processes.  It is also responsible for starting <code class="docutils literal"><span class="pre">backup-agent</span></code>.</p>
+</section>
+</section>
+<section id="fdbmonitor-and-fdbserver">
+<span id="administration-fdbmonitor"></span><h2><code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></h2>
+<p>The core FoundationDB server process is <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code>.  Each <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> process uses up to one full CPU core, so a production FoundationDB cluster will usually run N such processes on an N-core system.</p>
+<p>To make configuring, starting, stopping, and restarting <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> processes easy, FoundationDB also comes with a singleton daemon process, <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code>, which is started automatically on boot.  <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> reads the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a> file and starts the configured set of <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> processes.  It is also responsible for starting <code class="docutils literal notranslate"><span class="pre">backup-agent</span></code>.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">Whenever the <code class="docutils literal"><span class="pre">foundationdb.conf</span></code> file changes, the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> daemon automatically detects the changes and starts, stops, or restarts child processes as necessary.  Note that changes to the configuration file contents must be made <em>atomically</em>.  It is recommended to save the modified file to a temporary filename and then move/rename it into place, replacing the original.  Some text editors do this automatically when saving.</p>
+<p class="admonition-title">Note</p>
+<p>Whenever the <code class="docutils literal notranslate"><span class="pre">foundationdb.conf</span></code> file changes, the <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> daemon automatically detects the changes and starts, stops, or restarts child processes as necessary.  Note that changes to the configuration file contents must be made <em>atomically</em>.  It is recommended to save the modified file to a temporary filename and then move/rename it into place, replacing the original.  Some text editors do this automatically when saving.</p>
 </div>
-<p>During normal operation, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> is transparent, and you interact with it only by modifying the configuration in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a> and perhaps occasionally by <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">starting and stopping</span></a> it manually. If some problem prevents an <code class="docutils literal"><span class="pre">fdbserver</span></code> or <code class="docutils literal"><span class="pre">backup-agent</span></code> process from starting or causes it to stop unexpectedly, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> will log errors to the system log.</p>
-<p>If <code class="docutils literal"><span class="pre">kill_on_configuration_change</span></code> parameter is unset or set to <code class="docutils literal"><span class="pre">true</span></code> in foundationdb.conf then fdbmonitor will restart monitored processes on changes automatically. If this parameter is set to <code class="docutils literal"><span class="pre">false</span></code> it will not restart any monitored processes on changes.</p>
-</div>
-<div class="section" id="managing-trace-files">
+<p>During normal operation, <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> is transparent, and you interact with it only by modifying the configuration in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a> and perhaps occasionally by <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">starting and stopping</span></a> it manually. If some problem prevents an <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> or <code class="docutils literal notranslate"><span class="pre">backup-agent</span></code> process from starting or causes it to stop unexpectedly, <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> will log errors to the system log.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">kill_on_configuration_change</span></code> parameter is unset or set to <code class="docutils literal notranslate"><span class="pre">true</span></code> in foundationdb.conf then fdbmonitor will restart monitored processes on changes automatically. If this parameter is set to <code class="docutils literal notranslate"><span class="pre">false</span></code> it will not restart any monitored processes on changes.</p>
+</section>
+<section id="managing-trace-files">
 <span id="administration-managing-trace-files"></span><h2>Managing trace files</h2>
 <p>By default, trace files are output to:</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">/var/log/foundationdb/</span></code> on Linux</li>
-<li><code class="docutils literal"><span class="pre">/usr/local/foundationdb/logs/</span></code> on macOS</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">/var/log/foundationdb/</span></code> on Linux</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">/usr/local/foundationdb/logs/</span></code> on macOS</p></li>
 </ul>
 <p>Trace files are rolled every 10MB. These files are valuable to the FoundationDB development team for diagnostic purposes, and should be retained in case you need support from FoundationDB. Old trace files are automatically deleted so that there are no more than 100 MB worth of trace files per process. Both the log size and the maximum total size of the log files are configurable on a per process basis in the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a>.</p>
-</div>
-<div class="section" id="disaster-recovery">
+</section>
+<section id="disaster-recovery">
 <span id="administration-disaster-recovery"></span><h2>Disaster Recovery</h2>
 <p>In the present version of FoundationDB, disaster recovery (DR) is implemented via asynchronous replication of a source cluster to a destination cluster residing in another datacenter. The asynchronous replication updates the destination cluster using transactions consistent with those that have been committed in the source cluster. In this way, the replication process guarantees that the destination cluster is always in a consistent state that matches a present or earlier state of the source cluster.</p>
 <p>Recovery takes place by reversing the asynchronous replication, so the data in the destination cluster is streamed back to a source cluster. For further information, see the <a class="reference internal" href="backups.html#backup-introduction"><span class="std std-ref">overview of backups</span></a> and the <a class="reference internal" href="backups.html#fdbdr-intro"><span class="std std-ref">fdbdr tool</span></a> that performs asynchronous replication.</p>
-</div>
-<div class="section" id="managing-traffic">
+</section>
+<section id="managing-traffic">
 <h2>Managing traffic</h2>
-<p>If clients of the database make use of the <a class="reference internal" href="transaction-tagging.html"><span class="doc">transaction tagging feature</span></a>, then the number of transactions allowed to start for different tags can be controlled using the <a class="reference internal" href="command-line-interface.html#cli-throttle"><span class="std std-ref">throttle command</span></a> in <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
-</div>
-<div class="section" id="other-administrative-concerns">
+<p>If clients of the database make use of the <a class="reference internal" href="transaction-tagging.html"><span class="doc">transaction tagging feature</span></a>, then the number of transactions allowed to start for different tags can be controlled using the <a class="reference internal" href="command-line-interface.html#cli-throttle"><span class="std std-ref">throttle command</span></a> in <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>.</p>
+</section>
+<section id="other-administrative-concerns">
 <span id="administration-other-administrative-concerns"></span><h2>Other administrative concerns</h2>
-<div class="section" id="storage-space-requirements">
+<section id="storage-space-requirements">
 <span id="id6"></span><h3>Storage space requirements</h3>
-<p>FoundationDB&#8217;s storage space requirements depend on which storage engine is used.</p>
-<p>Using the <code class="docutils literal"><span class="pre">ssd</span></code> storage engine, data is stored in B-trees that add some overhead.</p>
+<p>FoundationDB’s storage space requirements depend on which storage engine is used.</p>
+<p>Using the <code class="docutils literal notranslate"><span class="pre">ssd</span></code> storage engine, data is stored in B-trees that add some overhead.</p>
 <ul class="simple">
-<li>For key-value pairs larger than about 100 bytes, overhead should usually be less than 2x per replica. In a triple-replicated configuration, the raw capacity required might be 5x the size of the data. However, SSDs often require over-provisioning (e.g. keeping the drive less than 75% full) for best performance, so 7x would be a reasonable number. For example, 100GB of raw key-values would require 700GB of raw capacity.</li>
-<li>For very small key-value pairs, the overhead can be a large factor but not usually more than about 40 bytes per replica. Therefore, with triple replication and SSD over-provisioning, allowing 200 bytes of raw storage capacity for each very small key-value pair would be a reasonable guess. For example, 1 billion very small key-value pairs would require 200GB of raw storage.</li>
+<li><p>For key-value pairs larger than about 100 bytes, overhead should usually be less than 2x per replica. In a triple-replicated configuration, the raw capacity required might be 5x the size of the data. However, SSDs often require over-provisioning (e.g. keeping the drive less than 75% full) for best performance, so 7x would be a reasonable number. For example, 100GB of raw key-values would require 700GB of raw capacity.</p></li>
+<li><p>For very small key-value pairs, the overhead can be a large factor but not usually more than about 40 bytes per replica. Therefore, with triple replication and SSD over-provisioning, allowing 200 bytes of raw storage capacity for each very small key-value pair would be a reasonable guess. For example, 1 billion very small key-value pairs would require 200GB of raw storage.</p></li>
 </ul>
-<p>Using the <code class="docutils literal"><span class="pre">memory</span></code> storage engine, both memory and disk space need to be considered.</p>
+<p>Using the <code class="docutils literal notranslate"><span class="pre">memory</span></code> storage engine, both memory and disk space need to be considered.</p>
 <ul class="simple">
-<li>There is a fixed overhead of 72 bytes of memory for each key-value pair. Furthermore, memory is allocated in chunks whose sizes are powers of 2, leading to a variable padding overhead for each key-value pair. Finally, there is some overhead within memory chunks. For example, a 32 byte chunk has 6 bytes of overhead and therefore can only contain 26 bytes. As a result, a 27-byte key-value pair will be stored in a 64 byte chunk. The absolute amount of overhead within a chunk increases for larger chunks.</li>
-<li>Disk space usage is about 8x the original data size. The memory storage engine interleaves a snapshot on disk with a transaction log, with the resulting snapshot 2x the data size. A snapshot can&#8217;t be dropped from its log until the next snapshot is completely written, so 2 snapshots must be kept at 4x the data size. The two-file durable queue can&#8217;t overwrite data in one file until all the data in the other file has been dropped, resulting in 8x the data size. Finally, it should be noted that disk space is not reclaimed when key-value pairs are cleared.</li>
+<li><p>There is a fixed overhead of 72 bytes of memory for each key-value pair. Furthermore, memory is allocated in chunks whose sizes are powers of 2, leading to a variable padding overhead for each key-value pair. Finally, there is some overhead within memory chunks. For example, a 32 byte chunk has 6 bytes of overhead and therefore can only contain 26 bytes. As a result, a 27-byte key-value pair will be stored in a 64 byte chunk. The absolute amount of overhead within a chunk increases for larger chunks.</p></li>
+<li><p>Disk space usage is about 8x the original data size. The memory storage engine interleaves a snapshot on disk with a transaction log, with the resulting snapshot 2x the data size. A snapshot can’t be dropped from its log until the next snapshot is completely written, so 2 snapshots must be kept at 4x the data size. The two-file durable queue can’t overwrite data in one file until all the data in the other file has been dropped, resulting in 8x the data size. Finally, it should be noted that disk space is not reclaimed when key-value pairs are cleared.</p></li>
 </ul>
 <p>For either storage engine, there is possible additional overhead when running backup or DR. In usual operation, the overhead is negligible but if backup is unable to write or a secondary cluster is unavailable, mutation logs will build up until copying can resume, occupying space in your cluster.</p>
-</div>
-<div class="section" id="running-out-of-storage-space">
+</section>
+<section id="running-out-of-storage-space">
 <h3>Running out of storage space</h3>
-<p>FoundationDB is aware of the free storage space on each node. It attempts to distribute data equally on all the nodes so that no node runs out of space before the others. The database attempts to gracefully stop writes as storage space decreases to 100 MB, refusing to start new transactions with priorities other than <code class="docutils literal"><span class="pre">SYSTEM_IMMEDIATE</span></code>. This lower bound on free space leaves space to allow you to use <code class="docutils literal"><span class="pre">SYSTEM_IMMEDIATE</span></code> transactions to remove data.</p>
-<p>The measure of free space depends on the storage engine. For the memory storage engine, which is the default after installation, total space is limited to the lesser of the <code class="docutils literal"><span class="pre">storage_memory</span></code> configuration parameter (1 GB in the default configuration) or a fraction of the free disk space.</p>
+<p>FoundationDB is aware of the free storage space on each node. It attempts to distribute data equally on all the nodes so that no node runs out of space before the others. The database attempts to gracefully stop writes as storage space decreases to 100 MB, refusing to start new transactions with priorities other than <code class="docutils literal notranslate"><span class="pre">SYSTEM_IMMEDIATE</span></code>. This lower bound on free space leaves space to allow you to use <code class="docutils literal notranslate"><span class="pre">SYSTEM_IMMEDIATE</span></code> transactions to remove data.</p>
+<p>The measure of free space depends on the storage engine. For the memory storage engine, which is the default after installation, total space is limited to the lesser of the <code class="docutils literal notranslate"><span class="pre">storage_memory</span></code> configuration parameter (1 GB in the default configuration) or a fraction of the free disk space.</p>
 <p>If the disk is rapidly filled by other programs, trace files, etc., FoundationDB may be forced to stop with significant amounts of queued writes. The only way to restore the availability of the database at this point is to manually free storage space by deleting files.</p>
-</div>
-<div class="section" id="virtual-machines">
+</section>
+<section id="virtual-machines">
 <h3>Virtual machines</h3>
-<p>Processes running in different VMs on a single machine will appear to FoundationDB as being hardware isolated. FoundationDB takes pains to assure that data replication is protected from hardware-correlated failures. If FoundationDB is run in multiple VMs on a single machine this protection will be subverted. An administrator can inform FoundationDB of this hardware sharing, however, by specifying a machine ID using the <code class="docutils literal"><span class="pre">locality_machineid</span></code> parameter in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>. All processes on VMs that share hardware should specify the same <code class="docutils literal"><span class="pre">locality_machineid</span></code>.</p>
-</div>
-<div class="section" id="datacenters">
+<p>Processes running in different VMs on a single machine will appear to FoundationDB as being hardware isolated. FoundationDB takes pains to assure that data replication is protected from hardware-correlated failures. If FoundationDB is run in multiple VMs on a single machine this protection will be subverted. An administrator can inform FoundationDB of this hardware sharing, however, by specifying a machine ID using the <code class="docutils literal notranslate"><span class="pre">locality_machineid</span></code> parameter in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>. All processes on VMs that share hardware should specify the same <code class="docutils literal notranslate"><span class="pre">locality_machineid</span></code>.</p>
+</section>
+<section id="datacenters">
 <h3>Datacenters</h3>
-<p>FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">redundancy mode</span></a> to <code class="docutils literal"><span class="pre">three_datacenter</span></code> and that you set the <code class="docutils literal"><span class="pre">locality_dcid</span></code> parameter for all FoundationDB processes in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>.</p>
-<p>If you specify the <code class="docutils literal"><span class="pre">--datacenter-id</span></code> option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default &#8220;unset&#8221; datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.</p>
-</div>
-<div class="section" id="re-creating-a-database">
+<p>FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">redundancy mode</span></a> to <code class="docutils literal notranslate"><span class="pre">three_datacenter</span></code> and that you set the <code class="docutils literal notranslate"><span class="pre">locality_dcid</span></code> parameter for all FoundationDB processes in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>.</p>
+<p>If you specify the <code class="docutils literal notranslate"><span class="pre">--datacenter-id</span></code> option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default “unset” datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.</p>
+</section>
+<section id="re-creating-a-database">
 <h3>(Re)creating a database</h3>
-<p>Installing FoundationDB packages usually creates a new database on the cluster automatically. However, if a cluster does not have a database configured (because the package installation failed to create it, you deleted your data files, or you did not install from the packages, etc.), then you may need to create it manually using the <code class="docutils literal"><span class="pre">configure</span> <span class="pre">new</span></code> command in <code class="docutils literal"><span class="pre">fdbcli</span></code> with the desired redundancy mode and storage engine:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">configure</span> <span class="n">new</span> <span class="n">single</span> <span class="n">memory</span>
+<p>Installing FoundationDB packages usually creates a new database on the cluster automatically. However, if a cluster does not have a database configured (because the package installation failed to create it, you deleted your data files, or you did not install from the packages, etc.), then you may need to create it manually using the <code class="docutils literal notranslate"><span class="pre">configure</span> <span class="pre">new</span></code> command in <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> with the desired redundancy mode and storage engine:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">configure</span> <span class="n">new</span> <span class="n">single</span> <span class="n">memory</span>
 </pre></div>
 </div>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">In a cluster that hasn&#8217;t been configured, running <code class="docutils literal"><span class="pre">configure</span> <span class="pre">new</span></code> will cause the processes in the cluster to delete all data files in their data directories. If a process is reusing an existing data directory, be sure to backup any files that you want to keep. Do not use <code class="docutils literal"><span class="pre">configure</span> <span class="pre">new</span></code> to fix a previously working cluster that reports itself missing unless you are certain any necessary data files are safe.</p>
+<p class="admonition-title">Warning</p>
+<p>In a cluster that hasn’t been configured, running <code class="docutils literal notranslate"><span class="pre">configure</span> <span class="pre">new</span></code> will cause the processes in the cluster to delete all data files in their data directories. If a process is reusing an existing data directory, be sure to backup any files that you want to keep. Do not use <code class="docutils literal notranslate"><span class="pre">configure</span> <span class="pre">new</span></code> to fix a previously working cluster that reports itself missing unless you are certain any necessary data files are safe.</p>
 </div>
-</div>
-</div>
-<div class="section" id="uninstalling">
+</section>
+</section>
+<section id="uninstalling">
 <span id="administration-removing"></span><h2>Uninstalling</h2>
 <p>To uninstall FoundationDB from a cluster of one or more machines:</p>
 <ol class="arabic">
-<li><p class="first">Uninstall the packages on each machine in the cluster.</p>
+<li><p>Uninstall the packages on each machine in the cluster.</p>
 <ul>
-<li><p class="first">On Ubuntu use:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ sudo dpkg -P foundationdb-clients foundationdb-server
+<li><p>On Ubuntu use:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ sudo dpkg -P foundationdb-clients foundationdb-server
 </pre></div>
 </div>
 </li>
-<li><p class="first">On RHEL/CentOS use:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ sudo rpm -e foundationdb-clients foundationdb-server
+<li><p>On RHEL/CentOS use:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ sudo rpm -e foundationdb-clients foundationdb-server
 </pre></div>
 </div>
 </li>
-<li><p class="first">On macOS use:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>host:~ user$ sudo /usr/local/foundationdb/uninstall-FoundationDB.sh
+<li><p>On macOS use:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>host:~ user$ sudo /usr/local/foundationdb/uninstall-FoundationDB.sh
 </pre></div>
 </div>
 </li>
 </ul>
 </li>
-<li><p class="first">Delete all the data and configuration files stored by FoundationDB.</p>
+<li><p>Delete all the data and configuration files stored by FoundationDB.</p>
 <ul class="simple">
-<li>On Linux these will be in <code class="docutils literal"><span class="pre">/var/lib/foundationdb/</span></code>, <code class="docutils literal"><span class="pre">/var/log/foundationdb/</span></code>, and <code class="docutils literal"><span class="pre">/etc/foundationdb/</span></code> by default.</li>
-<li>On macOS these will be in <code class="docutils literal"><span class="pre">/usr/local/foundationdb/</span></code> and <code class="docutils literal"><span class="pre">/usr/local/etc/foundationdb/</span></code> by default.</li>
+<li><p>On Linux these will be in <code class="docutils literal notranslate"><span class="pre">/var/lib/foundationdb/</span></code>, <code class="docutils literal notranslate"><span class="pre">/var/log/foundationdb/</span></code>, and <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/</span></code> by default.</p></li>
+<li><p>On macOS these will be in <code class="docutils literal notranslate"><span class="pre">/usr/local/foundationdb/</span></code> and <code class="docutils literal notranslate"><span class="pre">/usr/local/etc/foundationdb/</span></code> by default.</p></li>
 </ul>
 </li>
 </ol>
-</div>
-<div class="section" id="upgrading">
+</section>
+<section id="upgrading">
 <span id="upgrading-foundationdb"></span><h2>Upgrading</h2>
 <p>When a FoundationDB package is installed on a machine that already has a previous version, the package will upgrade FoundationDB to the newer version. For recent versions, the upgrade will preserve all previous data and configuration settings. (See the <a class="reference internal" href="#version-specific-upgrading"><span class="std std-ref">notes on specific versions</span></a> for exceptions.)</p>
 <p>To upgrade a FoundationDB cluster, you must install the updated version of FoundationDB on each machine in the cluster. As the installations are taking place, the cluster will become unavailable until a sufficient number of machines have been upgraded. By following the steps below, you can perform a production upgrade with minimal downtime (seconds to minutes) and maintain all database guarantees. The instructions below assume that Linux packages are being used.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
+<p class="admonition-title">Warning</p>
+<p>The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
 </div>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">For information about upgrading client application code to newer API versions, see the <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
+<p class="admonition-title">Note</p>
+<p>For information about upgrading client application code to newer API versions, see the <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
 </div>
-<div class="section" id="install-updated-client-binaries">
+<section id="install-updated-client-binaries">
 <h3>Install updated client binaries</h3>
-<p>Apart from patch version upgrades, you should install the new client binary on all your clients and restart them to ensure they can reconnect after the upgrade. See <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a> for more information. Running <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> will show you which versions clients are connecting with so you can verify before upgrading that clients are correctly configured.</p>
-</div>
-<div class="section" id="stage-the-packages">
+<p>Apart from patch version upgrades, you should install the new client binary on all your clients and restart them to ensure they can reconnect after the upgrade. See <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a> for more information. Running <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code> will show you which versions clients are connecting with so you can verify before upgrading that clients are correctly configured.</p>
+</section>
+<section id="stage-the-packages">
 <h3>Stage the packages</h3>
 <p>Go to <a class="reference internal" href="downloads.html"><span class="doc">Downloads</span></a> and select Ubuntu or RHEL/CentOS, as appropriate for your system. Download both the client and server packages and copy them to each machine in your cluster.</p>
-</div>
-<div class="section" id="perform-the-upgrade">
+</section>
+<section id="perform-the-upgrade">
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
-<pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_7.1.25-1_amd64.deb \
-foundationdb-server_7.1.25-1_amd64.deb
-</pre>
+<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_7.2.0-1_amd64.deb \
+foundationdb-server_7.2.0-1_amd64.deb</pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
-<pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.1.25-1.el7.x86_64.rpm \
-foundationdb-server-7.1.25-1.el7.x86_64.rpm
-</pre>
-<p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> API. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
-</div>
-<div class="section" id="test-the-database">
+<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.2.0-1.el7.x86_64.rpm \
+foundationdb-server-7.2.0-1.el7.x86_64.rpm</pre>
+<p>The <code class="docutils literal notranslate"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> API. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
+</section>
+<section id="test-the-database">
 <h3>Test the database</h3>
-<p>Test the database to verify that it is operating normally by running <code class="docutils literal"><span class="pre">fdbcli</span></code> and <a class="reference internal" href="#administration-monitoring-cluster-status"><span class="std std-ref">reviewing the cluster status</span></a>.</p>
-</div>
-<div class="section" id="remove-old-client-library-versions">
+<p>Test the database to verify that it is operating normally by running <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> and <a class="reference internal" href="#administration-monitoring-cluster-status"><span class="std std-ref">reviewing the cluster status</span></a>.</p>
+</section>
+<section id="remove-old-client-library-versions">
 <h3>Remove old client library versions</h3>
 <p>You can now remove old client library versions from your clients. This is only to stop creating unnecessary connections.</p>
-</div>
-</div>
-<div class="section" id="version-specific-notes-on-upgrading">
+</section>
+</section>
+<section id="version-specific-notes-on-upgrading">
 <span id="version-specific-upgrading"></span><h2>Version-specific notes on upgrading</h2>
-<div class="section" id="upgrading-to-7-1-x">
+<section id="upgrading-to-7-1-x">
 <h3>Upgrading to 7.1.x</h3>
-<p>Upgrades to 7.1.0 or later will break any client using <code class="docutils literal"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code>, as it is removed in version 7.1.0.</p>
-</div>
-<div class="section" id="upgrading-from-6-2-x">
+<p>Upgrades to 7.1.0 or later will break any client using <code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code>, as it is removed in version 7.1.0.</p>
+</section>
+<section id="upgrading-from-6-2-x">
 <h3>Upgrading from 6.2.x</h3>
 <p>Upgrades from 6.2.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-6-1-x">
+</section>
+<section id="upgrading-from-6-1-x">
 <h3>Upgrading from 6.1.x</h3>
 <p>Upgrades from 6.1.x will keep all your old data and configuration settings. Data distribution will slowly reorganize how data is spread across storage servers.</p>
-</div>
-<div class="section" id="upgrading-from-6-0-x">
+</section>
+<section id="upgrading-from-6-0-x">
 <h3>Upgrading from 6.0.x</h3>
 <p>Upgrades from 6.0.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-5-2-x">
+</section>
+<section id="upgrading-from-5-2-x">
 <h3>Upgrading from 5.2.x</h3>
-<p>Upgrades from 5.2.x will keep all your old data and configuration settings. Some affinities that certain roles have for running on processes that haven&#8217;t set a process class have changed, which may result in these processes running in different locations after upgrading. To avoid this, set process classes as needed. The following changes were made:</p>
+<p>Upgrades from 5.2.x will keep all your old data and configuration settings. Some affinities that certain roles have for running on processes that haven’t set a process class have changed, which may result in these processes running in different locations after upgrading. To avoid this, set process classes as needed. The following changes were made:</p>
 <ul class="simple">
-<li>The proxies and master no longer prefer <code class="docutils literal"><span class="pre">resolution</span></code> or <code class="docutils literal"><span class="pre">transaction</span></code> class processes to processes with unset class.</li>
-<li>The resolver no longer prefers <code class="docutils literal"><span class="pre">transaction</span></code> class processes to processes with unset class.</li>
-<li>The cluster controller no longer prefers <code class="docutils literal"><span class="pre">master</span></code>, <code class="docutils literal"><span class="pre">resolution</span></code> or <code class="docutils literal"><span class="pre">proxy</span></code> class processes to processes with unset class.</li>
+<li><p>The proxies and master no longer prefer <code class="docutils literal notranslate"><span class="pre">resolution</span></code> or <code class="docutils literal notranslate"><span class="pre">transaction</span></code> class processes to processes with unset class.</p></li>
+<li><p>The resolver no longer prefers <code class="docutils literal notranslate"><span class="pre">transaction</span></code> class processes to processes with unset class.</p></li>
+<li><p>The cluster controller no longer prefers <code class="docutils literal notranslate"><span class="pre">master</span></code>, <code class="docutils literal notranslate"><span class="pre">resolution</span></code> or <code class="docutils literal notranslate"><span class="pre">proxy</span></code> class processes to processes with unset class.</p></li>
 </ul>
-<p>See <a class="reference internal" href="configuration.html#guidelines-process-class-config"><span class="std std-ref">Guidelines for setting process class</span></a> for recommendations on setting process classes. All of the above roles will prefer <code class="docutils literal"><span class="pre">stateless</span></code> class processes to ones that don&#8217;t set a class.</p>
-</div>
-<div class="section" id="upgrading-from-5-0-x-5-1-x">
+<p>See <a class="reference internal" href="configuration.html#guidelines-process-class-config"><span class="std std-ref">Guidelines for setting process class</span></a> for recommendations on setting process classes. All of the above roles will prefer <code class="docutils literal notranslate"><span class="pre">stateless</span></code> class processes to ones that don’t set a class.</p>
+</section>
+<section id="upgrading-from-5-0-x-5-1-x">
 <h3>Upgrading from 5.0.x - 5.1.x</h3>
 <p>Upgrades from versions between 5.0.x and 5.1.x will keep all your old data and configuration settings. Backups that are running will automatically be aborted and must be restarted.</p>
-</div>
-<div class="section" id="upgrading-from-older-versions">
+</section>
+<section id="upgrading-from-older-versions">
 <span id="id7"></span><h3>Upgrading from Older Versions</h3>
 <p>Upgrades from versions older than 5.0.0 are no longer supported.</p>
-</div>
-</div>
-<div class="section" id="version-specific-notes-on-downgrading">
+</section>
+</section>
+<section id="version-specific-notes-on-downgrading">
 <h2>Version-specific notes on downgrading</h2>
 <p>In general, downgrades between non-patch releases (i.e. 6.2.x - 6.1.x) are not supported.</p>
-<div class="section" id="downgrading-from-6-3-13-6-2-33">
+<section id="downgrading-from-6-3-13-6-2-33">
 <span id="downgrade-specific-version"></span><h3>Downgrading from 6.3.13 - 6.2.33</h3>
 <p>After upgrading from 6.2 to 6.3, the option of rolling back and downgrading to 6.2 is still possible, given that the following conditions are met:</p>
 <ul class="simple">
-<li>The 6.3 cluster cannot have <code class="docutils literal"><span class="pre">TLogVersion</span></code> greater than V4 (6.2).</li>
-<li>The 6.3 cluster cannot use storage engine types that are not <code class="docutils literal"><span class="pre">ssd-1</span></code>, <code class="docutils literal"><span class="pre">ssd-2</span></code>, or <code class="docutils literal"><span class="pre">memory</span></code>.</li>
-<li>The 6.3 cluster must not have any key servers serialized with tag encoding. This condition can only be guaranteed if the <code class="docutils literal"><span class="pre">TAG_ENCODE_KEY_SERVERS</span></code> knob has never been changed to <code class="docutils literal"><span class="pre">true</span></code> on this cluster.</li>
+<li><p>The 6.3 cluster cannot have <code class="docutils literal notranslate"><span class="pre">TLogVersion</span></code> greater than V4 (6.2).</p></li>
+<li><p>The 6.3 cluster cannot use storage engine types that are not <code class="docutils literal notranslate"><span class="pre">ssd-1</span></code>, <code class="docutils literal notranslate"><span class="pre">ssd-2</span></code>, or <code class="docutils literal notranslate"><span class="pre">memory</span></code>.</p></li>
+<li><p>The 6.3 cluster must not have any key servers serialized with tag encoding. This condition can only be guaranteed if the <code class="docutils literal notranslate"><span class="pre">TAG_ENCODE_KEY_SERVERS</span></code> knob has never been changed to <code class="docutils literal notranslate"><span class="pre">true</span></code> on this cluster.</p></li>
 </ul>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -1111,7 +1199,7 @@ foundationdb-server-7.1.25-1.el7.x86_64.rpm
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

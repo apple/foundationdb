@@ -1,45 +1,31 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Monitored Metrics &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Monitored Metrics &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Redwood Storage Engine" href="redwood.html" />
-    <link rel="prev" title="Transport Layer Security" href="tls.html" />
+    <link rel="prev" title="Authorization" href="authorization.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -190,7 +305,7 @@
               
                 
   <li>
-    <a href="tls.html" title="Previous Chapter: Transport Layer Security"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Transport Lay...</span>
+    <a href="authorization.html" title="Previous Chapter: Authorization"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Authorization</span>
     </a>
   </li>
   <li>
@@ -326,13 +441,13 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="monitored-metrics">
+  <section id="monitored-metrics">
 <h1><strong>Monitored Metrics</strong></h1>
-<div class="section" id="database-availability">
+<section id="database-availability">
 <h2><strong>Database Availability</strong></h2>
-<div class="section" id="database-availability-percentage">
+<section id="database-availability-percentage">
 <h3><em>Database Availability Percentage</em></h3>
 <p><strong>Explanation</strong> - For our purposes, we’ve defined the database to be
 unavailable if any operation (transaction start, read, or commit) cannot
@@ -348,8 +463,8 @@ measure the duration of that downtime. We exclude the last 5 seconds of
 this downtime, as operations performed during this period don’t satisfy
 the definition of unavailability above.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="database-available">
+</section>
+<section id="database-available">
 <h3><em>Database Available</em></h3>
 <p><strong>Explanation</strong> - Reports as a point in time measurement once per minute
 whether the database is available.</p>
@@ -358,8 +473,8 @@ described in ‘Database Availability Percentage’ detects an operation
 taking longer than 5 seconds and resets to 1 whenever an operation
 completes.</p>
 <p><strong>How we alert</strong> - We alert immediately whenever this value is 0.</p>
-</div>
-<div class="section" id="max-unavailability-seconds">
+</section>
+<section id="max-unavailability-seconds">
 <h3><em>Max Unavailability Seconds</em></h3>
 <p><strong>Explanation</strong> - Reports the largest period of unavailability
 overlapping a given minute. For example, a 3 minute unavailability that
@@ -371,11 +486,11 @@ unavailability period.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric, though it could
 possibly be combine with ‘Database Available’ to create an alert that
 fires when unavailability reaches a minimum duration.</p>
-</div>
-</div>
-<div class="section" id="fault-tolerance">
+</section>
+</section>
+<section id="fault-tolerance">
 <h2><strong>Fault Tolerance</strong></h2>
-<div class="section" id="data-loss-margin">
+<section id="data-loss-margin">
 <h3><em>Data Loss Margin</em></h3>
 <p><strong>Explanation</strong> - Reports the number of fault tolerance domains (e.g.
 separate Zone IDs) that can be safely lost without data loss. Fault
@@ -386,8 +501,8 @@ like the number of racks that could be lost.</p>
 <p>cluster.fault_tolerance.max_machine_failures_without_losing_data</p>
 <p><strong>How we alert</strong> - We do not alert on this metric because the
 Availability Loss Margin alert captures the same circumstances and more.</p>
-</div>
-<div class="section" id="availability-loss-margin">
+</section>
+<section id="availability-loss-margin">
 <h3><em>Availability Loss Margin</em></h3>
 <p><strong>Explanation</strong> - Reports the number of fault tolerance domains (e.g.
 separate Zone IDs) that can be safely lost without indefinite
@@ -398,15 +513,15 @@ availability loss.</p>
 on a relative measure with expected fault tolerance (e.g. 2 for triple,
 1 for double):</p>
 <ol class="arabic simple">
-<li>Fault tolerance is 2 less than expected (only relevant with at least
-triple redundancy)</li>
-<li>Fault tolerance is 1 less than expected for 3 hours (to allow for
-self-healing)</li>
-<li>Fault tolerance decreases more than 4 times in 1 hour (may indicate
-flapping)</li>
+<li><p>Fault tolerance is 2 less than expected (only relevant with at least
+triple redundancy)</p></li>
+<li><p>Fault tolerance is 1 less than expected for 3 hours (to allow for
+self-healing)</p></li>
+<li><p>Fault tolerance decreases more than 4 times in 1 hour (may indicate
+flapping)</p></li>
 </ol>
-</div>
-<div class="section" id="maintenance-mode">
+</section>
+<section id="maintenance-mode">
 <h3><em>Maintenance Mode</em></h3>
 <p><strong>Explanation</strong> - Whether or not maintenance mode has been activated,
 which treats a zone as failed but doesn’t invoke data movement for it.</p>
@@ -414,11 +529,11 @@ which treats a zone as failed but doesn’t invoke data movement for it.</p>
 present in status:</p>
 <p>cluster.maintenance_seconds_remaining</p>
 <p><strong>How we alert</strong> - We do not alert on this metric</p>
-</div>
-</div>
-<div class="section" id="process-and-machine-count">
+</section>
+</section>
+<section id="process-and-machine-count">
 <h2><strong>Process and Machine Count</strong></h2>
-<div class="section" id="process-count">
+<section id="process-count">
 <h3><em>Process Count</em></h3>
 <p><strong>Explanation</strong> - The number of processes in the cluster, not counting
 excluded processes.</p>
@@ -427,29 +542,29 @@ cluster.processes array where excluded is not true.</p>
 <p><strong>How we alert</strong> - We have 3 different alerts on this metric, some based
 on a relative measure with the expected count:</p>
 <ol class="arabic simple">
-<li>The process count decreases 5 times in 60 minutes (may indicate
-flapping)</li>
-<li>The process count is less that 70% of expected</li>
-<li>The process count does not match expected (low severity notification)</li>
+<li><p>The process count decreases 5 times in 60 minutes (may indicate
+flapping)</p></li>
+<li><p>The process count is less that 70% of expected</p></li>
+<li><p>The process count does not match expected (low severity notification)</p></li>
 </ol>
-</div>
-<div class="section" id="excluded-process-count">
+</section>
+<section id="excluded-process-count">
 <h3><em>Excluded Process Count</em></h3>
 <p><strong>Explanation</strong> - The number of processes in the cluster that are
 excluded.</p>
 <p><strong>How to compute</strong> - Count the number of entries in the
 cluster.processes array where excluded is true.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="expected-process-count">
+</section>
+<section id="expected-process-count">
 <h3><em>Expected Process Count</em></h3>
 <p><strong>Explanation</strong> - The expected number of non-excluded processes in the
 cluster.</p>
 <p><strong>How to compute</strong> - We determine this number from how we’ve configured
 the cluster.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="machine-count">
+</section>
+<section id="machine-count">
 <h3><em>Machine Count</em></h3>
 <p><strong>Explanation</strong> - The number of machines in the cluster, not counting
 excluded machines. This number may not be relevant depending on the
@@ -459,32 +574,32 @@ array where excluded is not true.</p>
 <p><strong>How we alert</strong> - We have 3 different alerts on this metric, some based
 on a relative measure with the expected count:</p>
 <ol class="arabic simple">
-<li>The machine count decreases 5 times in 60 minutes (may indicate
-flapping)</li>
-<li>The machine count is less that 70% of expected</li>
-<li>The machine count does not match expected (low severity notification)</li>
+<li><p>The machine count decreases 5 times in 60 minutes (may indicate
+flapping)</p></li>
+<li><p>The machine count is less that 70% of expected</p></li>
+<li><p>The machine count does not match expected (low severity notification)</p></li>
 </ol>
-</div>
-<div class="section" id="excluded-machine-count">
+</section>
+<section id="excluded-machine-count">
 <h3><em>Excluded Machine Count</em></h3>
 <p><strong>Explanation</strong> - The number of machines in the cluster that are
 excluded.</p>
 <p><strong>How to compute</strong> - Count the number of entries in the cluster.machines
 array where excluded is true.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="expected-machine-count">
+</section>
+<section id="expected-machine-count">
 <h3><em>Expected Machine Count</em></h3>
 <p><strong>Explanation</strong> - The expected number of non-excluded machines in the
 cluster.</p>
 <p><strong>How to compute</strong> - We determine this number from how we’ve configured
 the cluster.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-</div>
-<div class="section" id="latencies">
+</section>
+</section>
+<section id="latencies">
 <h2><strong>Latencies</strong></h2>
-<div class="section" id="grv-probe-latency">
+<section id="grv-probe-latency">
 <h3><em>GRV Probe Latency</em></h3>
 <p><strong>Explanation</strong> - The latency to get a read version as measured by the
 cluster controller’s status latency probe.</p>
@@ -495,8 +610,8 @@ depending on the magnitude of the latency. The specific magnitudes
 depend on the details of the cluster and the guarantees provided.
 Usually, we require elevated latencies over multiple minutes (e.g. 2 out
 of 3) to trigger an alert.</p>
-</div>
-<div class="section" id="read-probe-latency">
+</section>
+<section id="read-probe-latency">
 <h3><em>Read Probe Latency</em></h3>
 <p><strong>Explanation</strong> - The latency to read a key as measured by the cluster
 controller’s status latency probe. Notably, this will only test a read
@@ -510,8 +625,8 @@ depending on the magnitude of the latency. The specific magnitudes
 depend on the details of the cluster and the guarantees provided.
 Usually, we require elevated latencies over multiple minutes (e.g. 2 out
 of 3) to trigger an alert.</p>
-</div>
-<div class="section" id="commit-probe-latency">
+</section>
+<section id="commit-probe-latency">
 <h3><em>Commit Probe Latency</em></h3>
 <p><strong>Explanation</strong> - The latency to commit a transaction as measured by the
 cluster controller’s status latency probe.</p>
@@ -522,57 +637,57 @@ depending on the magnitude of the latency. The specific magnitudes
 depend on the details of the cluster and the guarantees provided.
 Usually, we require elevated latencies over multiple minutes (e.g. 2 out
 of 3) to trigger an alert.</p>
-</div>
-<div class="section" id="client-grv-latency">
+</section>
+<section id="client-grv-latency">
 <h3><em>Client GRV Latency</em></h3>
 <p><strong>Explanation</strong> - A sampled distribution of get read version latencies
 as measured on the clients.</p>
 <p><strong>How to compute</strong> - The use of this functionality is currently not well
 documented.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="client-read-latency">
+</section>
+<section id="client-read-latency">
 <h3><em>Client Read Latency</em></h3>
 <p><strong>Explanation</strong> - A sampled distribution of read latencies as measured
 on the clients.</p>
 <p><strong>How to compute</strong> - The use of this functionality is currently not well
 documented.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="client-commit-latency">
+</section>
+<section id="client-commit-latency">
 <h3><em>Client Commit Latency</em></h3>
 <p><strong>Explanation</strong> - A sampled distribution of commit latencies as measured
 on the clients.</p>
 <p><strong>How to compute</strong> - The use of this functionality is currently not well
 documented.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-</div>
-<div class="section" id="workload">
+</section>
+</section>
+<section id="workload">
 <h2><strong>Workload</strong></h2>
-<div class="section" id="transaction-starts-per-second">
+<section id="transaction-starts-per-second">
 <h3><em>Transaction Starts per Second</em></h3>
 <p><strong>Explanation</strong> - The number of read versions issued per second.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.transactions.started.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="conflicts-per-second">
+</section>
+<section id="conflicts-per-second">
 <h3><em>Conflicts per Second</em></h3>
 <p><strong>Explanation</strong> - The number of transaction conflicts per second.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.transactions.conflicted.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="commits-per-second">
+</section>
+<section id="commits-per-second">
 <h3><em>Commits per Second</em></h3>
 <p><strong>Explanation</strong> - The number of transactions successfully committed per
 second.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.transactions.committed.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="conflict-rate">
+</section>
+<section id="conflict-rate">
 <h3><em>Conflict Rate</em></h3>
 <p><strong>Explanation</strong> - The rate of conflicts relative to the total number of
 committed and conflicted transactions.</p>
@@ -580,48 +695,48 @@ committed and conflicted transactions.</p>
 metrics:</p>
 <p>conflicts_per_second / (conflicts_per_second + commits_per_second)</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="reads-per-second">
+</section>
+<section id="reads-per-second">
 <h3><em>Reads per Second</em></h3>
 <p><strong>Explanation</strong> - The total number of read operations issued per second
 to storage servers.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.operations.reads.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="keys-read-per-second">
+</section>
+<section id="keys-read-per-second">
 <h3><em>Keys Read per Second</em></h3>
 <p><strong>Explanation</strong> - The total number of keys read per second.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.keys.read.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="bytes-read-per-second">
+</section>
+<section id="bytes-read-per-second">
 <h3><em>Bytes Read per Second</em></h3>
 <p><strong>Explanation</strong> - The total number of bytes read per second.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.bytes.read.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="writes-per-second">
+</section>
+<section id="writes-per-second">
 <h3><em>Writes per Second</em></h3>
 <p><strong>Explanation</strong> - The total number of mutations committed per second.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.operations.writes.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="bytes-written-per-second">
+</section>
+<section id="bytes-written-per-second">
 <h3><em>Bytes Written Per Second</em></h3>
 <p><strong>Explanation</strong> - The total number of mutation bytes committed per
 second.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.workload.bytes.written.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-</div>
-<div class="section" id="recoveries">
+</section>
+</section>
+<section id="recoveries">
 <h2><strong>Recoveries</strong></h2>
-<div class="section" id="cluster-generation">
+<section id="cluster-generation">
 <h3><em>Cluster Generation</em></h3>
 <p><strong>Explanation</strong> - The cluster generation increases when there is a
 cluster recovery (i.e. the write subsystem gets restarted). For a
@@ -633,19 +748,19 @@ taking place.</p>
 <p>cluster.generation</p>
 <p><strong>How we alert</strong> - We alert if the generation increases in 5 separate
 minutes in a 60 minute window.</p>
-</div>
-</div>
-<div class="section" id="cluster-load">
+</section>
+</section>
+<section id="cluster-load">
 <h2><strong>Cluster Load</strong></h2>
-<div class="section" id="ratekeeper-limit">
+<section id="ratekeeper-limit">
 <h3><em>Ratekeeper Limit</em></h3>
 <p><strong>Explanation</strong> - The number of transactions that the cluster is
 allowing to start per second</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.qos.transactions_per_second_limit</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="ratekeeper-batch-priority-limit">
+</section>
+<section id="ratekeeper-batch-priority-limit">
 <h3><em>Ratekeeper Batch Priority Limit</em></h3>
 <p><strong>Explanation</strong> - The number of transactions that the cluster is
 allowing to start per second above which batch priority transactions
@@ -653,8 +768,8 @@ will not be allowed to start.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.qos.batch_transactions_per_second_limit</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="ratekeeper-released-transactions">
+</section>
+<section id="ratekeeper-released-transactions">
 <h3><em>Ratekeeper Released Transactions</em></h3>
 <p><strong>Explanation</strong> - The number of transactions that the cluster is
 releasing per second. If this number is near or above the ratekeeper
@@ -663,8 +778,8 @@ an increase in the get read version latencies.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.qos.released_transactions_per_second</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="max-storage-queue">
+</section>
+<section id="max-storage-queue">
 <h3><em>Max Storage Queue</em></h3>
 <p><strong>Explanation</strong> - The largest write queue on a storage server, which
 represents data being stored in memory that has not been persisted to
@@ -683,8 +798,8 @@ queue size of 500MB).</p>
 <p>cluster.qos.worst_queue_bytes_storage_server</p>
 <p><strong>How we alert</strong> - We alert when the largest queue exceeds 500MB for 30
 minutes in a 60 minute window.</p>
-</div>
-<div class="section" id="limiting-storage-queue">
+</section>
+<section id="limiting-storage-queue">
 <h3><em>Limiting Storage Queue</em></h3>
 <p><strong>Explanation</strong> - The largest write queue on a storage server that isn’t
 being ignored for ratekeeper purposes (see max storage queue for
@@ -694,8 +809,8 @@ transaction rate.</p>
 <p>cluster.qos.limiting_queue_bytes_storage_server</p>
 <p><strong>How we alert</strong> - We alert when the limiting queue exceeds 500MB for 10
 consecutive minutes.</p>
-</div>
-<div class="section" id="max-log-queue">
+</section>
+<section id="max-log-queue">
 <h3><em>Max Log Queue</em></h3>
 <p><strong>Explanation</strong> - The largest write queue on a transaction log, which
 represents data that is being stored in memory on the transaction log
@@ -714,8 +829,8 @@ the queue size reaches a smaller threshold (default target queue size of
 <p>cluster.qos.worst_queue_bytes_log_server</p>
 <p><strong>How we alert</strong> - We alert if the log queue is notably larger than the
 spilling threshold (&gt;1.6GB) for 3 consecutive minutes.</p>
-</div>
-<div class="section" id="storage-read-queue">
+</section>
+<section id="storage-read-queue">
 <h3><em>Storage Read Queue</em></h3>
 <p><strong>Explanation</strong> - The number of in flight read requests on a storage
 server. We track the average and maximum of the queue size over all
@@ -723,8 +838,8 @@ storage processes in the cluster.</p>
 <p><strong>How to compute</strong> - From status (storage role only):</p>
 <p>cluster.processes.&lt;process_id&gt;.roles[n].query_queue_max</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="storage-and-log-input-rates">
+</section>
+<section id="storage-and-log-input-rates">
 <h3><em>Storage and Log Input Rates</em></h3>
 <p><strong>Explanation</strong> - The number of bytes being input to each storage server
 or transaction log for writes as represented in memory. This includes
@@ -738,8 +853,8 @@ input rates over all storage processes in the cluster.</p>
 <p><strong>How we alert</strong> - We alert if the log input rate is larger than 80MB/s
 for 20 out of 60 minutes, which can be an indication that we are using a
 sizable fraction of our logs’ capacity.</p>
-</div>
-<div class="section" id="storage-server-operations-and-bytes-per-second">
+</section>
+<section id="storage-server-operations-and-bytes-per-second">
 <h3><em>Storage Server Operations and Bytes Per Second</em></h3>
 <p><strong>Explanation</strong> - We track the number of mutations, mutation bytes,
 reads, and read bytes per second on each storage server. We use this
@@ -758,8 +873,8 @@ team can sometimes indicate a hot shard.</p>
 busiest in the cluster), we ignore the top replication_factor storage
 processes.</p>
 <p><strong>How we alert</strong> - We do not alert on these metrics.</p>
-</div>
-<div class="section" id="transaction-log-to-storage-server-lag">
+</section>
+<section id="transaction-log-to-storage-server-lag">
 <h3><em>Transaction Log to Storage Server Lag</em></h3>
 <p><strong>Explanation</strong> - How far behind the latest mutations on the storage
 servers are from those on the transaction logs, measured in seconds. In
@@ -786,8 +901,8 @@ minutes. A more sophisticated alert may only alert if the lag is large
 and not decreasing.</p>
 <p>We also alert when the worst replica lag exceeds 15 seconds for 3
 consecutive minutes.</p>
-</div>
-<div class="section" id="storage-server-durability-lag">
+</section>
+<section id="storage-server-durability-lag">
 <h3><em>Storage Server Durability Lag</em></h3>
 <p><strong>Explanation</strong> - How far behind in seconds that the mutations on a
 storage server’s disk are from the latest mutations in that storage
@@ -798,11 +913,11 @@ cluster.</p>
 <p><strong>How to compute</strong> - From status (storage roles only):</p>
 <p>cluster.process.&lt;process_id&gt;.roles[n].durability_lag.seconds</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-</div>
-<div class="section" id="other-cluster-metrics">
+</section>
+</section>
+<section id="other-cluster-metrics">
 <h2><strong>Other Cluster Metrics</strong></h2>
-<div class="section" id="data-movement">
+<section id="data-movement">
 <h3><em>Data Movement</em></h3>
 <p><strong>Explanation</strong> - How much data is actively being moved or queued to be
 moved between shards in the cluster. There is often a small amount of
@@ -814,8 +929,8 @@ certain failures and maintenance operations can cause a lot of movement.</p>
 <div class="line">cluster.data.moving_data.in_queue_bytes</div>
 </div>
 <p><strong>How we alert</strong> - We do not alert on this metric</p>
-</div>
-<div class="section" id="coordinators">
+</section>
+<section id="coordinators">
 <h3><em>Coordinators</em></h3>
 <p><strong>Explanation</strong> - The number of coordinators in the cluster, both as
 configured and that are reachable from our monitoring agent.</p>
@@ -825,8 +940,8 @@ configured and that are reachable from our monitoring agent.</p>
 <p>cluster.coordinators.coordinators.reachable</p>
 <p><strong>How we alert</strong> - We alert if there are any unreachable coordinators
 for a duration of 3 hours or more.</p>
-</div>
-<div class="section" id="clients">
+</section>
+<section id="clients">
 <h3><em>Clients</em></h3>
 <p><strong>Explanation</strong> - A count of connected clients and incompatible clients.
 Currently, a large number of connected clients can be taxing for some
@@ -843,11 +958,11 @@ incompatible server processes:</p>
 <p><strong>How we alert</strong> - We alert if the number of connected clients exceeds
 1500 for 10 minutes. We also have a low priority alert if there are any
 incompatible connections for a period longer than 3 hours.</p>
-</div>
-</div>
-<div class="section" id="resource-usage">
+</section>
+</section>
+<section id="resource-usage">
 <h2><strong>Resource Usage</strong></h2>
-<div class="section" id="cpu-usage">
+<section id="cpu-usage">
 <h3><em>CPU Usage</em></h3>
 <p><strong>Explanation</strong> - Percentage of available CPU resources being used. We
 track the average and maximum values for each process (as a fraction of
@@ -862,8 +977,8 @@ For processes:</p>
 <p>To get the roles assigned to each process:</p>
 <p>cluster.processes.&lt;process_id&gt;.roles[n].role</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="disk-activity">
+</section>
+<section id="disk-activity">
 <h3><em>Disk Activity</em></h3>
 <p><strong>Explanation</strong> - Various metrics for how the disks are being used. We
 track averages and maximums for disk reads per second, disk writes per
@@ -876,8 +991,8 @@ For reads:</p>
 <p>For busyness (as a fraction of 1):</p>
 <p>cluster.processes.&lt;process_id&gt;.disk.busy</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="memory-usage">
+</section>
+<section id="memory-usage">
 <h3><em>Memory Usage</em></h3>
 <p><strong>Explanation</strong> - How much memory is being used by each process and on
 each machine. We track this in absolute numbers and as a percentage with
@@ -893,8 +1008,8 @@ memory:</p>
 <p>For machine memory used percentage, divide used memory by free memory:</p>
 <p>cluster.machines.&lt;machine_id&gt;.memory.free_bytes</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="network-activity">
+</section>
+<section id="network-activity">
 <h3><em>Network Activity</em></h3>
 <p><strong>Explanation</strong> - Input and output network rates for processes and
 machines in megabits per second (Mbps). We track averages and maximums
@@ -911,8 +1026,8 @@ For process traffic:</p>
 <div class="line">cluster.machines.&lt;machine_id&gt;.network.megabits_sent.hz</div>
 </div>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="network-connections">
+</section>
+<section id="network-connections">
 <h3><em>Network Connections</em></h3>
 <p><strong>Explanation</strong> - Statistics about open connection and connection
 activity. For each process, we track the number of connections, the
@@ -926,19 +1041,19 @@ closed per second, and the number of connection errors per second.</p>
 <div class="line">cluster.processes.&lt;process_id&gt;.network.connection_errors.hz</div>
 </div>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="network-retransmits">
+</section>
+<section id="network-retransmits">
 <h3><em>Network Retransmits</em></h3>
 <p><strong>Explanation</strong> - The number of TCP segments retransmitted per second
 per machine.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.machines.&lt;machine_id&gt;.network.tcp_segments_retransmitted.hz</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-</div>
-<div class="section" id="space-usage">
+</section>
+</section>
+<section id="space-usage">
 <h2><strong>Space Usage</strong></h2>
-<div class="section" id="dataset-size">
+<section id="dataset-size">
 <h3><em>Dataset Size</em></h3>
 <p><strong>Explanation</strong> - The logical size of the database (i.e. the estimated
 sum of key and value sizes) and the physical size of the database (bytes
@@ -951,8 +1066,8 @@ than the replication factor.</p>
 <div class="line">cluster.data.total_disk_used_bytes</div>
 </div>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="process-space-usage">
+</section>
+<section id="process-space-usage">
 <h3><em>Process Space Usage</em></h3>
 <p><strong>Explanation</strong> - Various metrics relating to the space usage on each
 process. We track the amount of space free on each process, reporting
@@ -982,8 +1097,8 @@ first is for kv-store data structures, present in storage and log roles:</p>
 <p><strong>How we alert</strong> - We alert when free space on any process falls below
 15%. We also alert with low severity when available space falls below
 35% and with higher severity when it falls below 25%.</p>
-</div>
-<div class="section" id="cluster-disk-space">
+</section>
+<section id="cluster-disk-space">
 <h3><em>Cluster Disk Space</em></h3>
 <p><strong>Explanation</strong> - An accounting of the amount of space on all disks in
 the cluster as well as how much of that space is free and available,
@@ -1007,11 +1122,11 @@ them back out with:</p>
 disk. For available bytes, you would add free bytes once per disk and
 (available-free) for each process.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-</div>
-<div class="section" id="backup-and-dr">
+</section>
+</section>
+<section id="backup-and-dr">
 <h2><strong>Backup and DR</strong></h2>
-<div class="section" id="num-backup-dr-agents-running">
+<section id="num-backup-dr-agents-running">
 <h3><em>Num Backup/DR Agents Running</em></h3>
 <p><strong>Explanation</strong> - A count of the number of backup and DR agents
 currently connected to the cluster. For DR agents, we track the number
@@ -1028,16 +1143,16 @@ source if needed.</p>
 at all from the expected value. We have high severity alerts if the
 number of running agents is less than half of what is expected or if the
 count decreases 5 times in one hour.</p>
-</div>
-<div class="section" id="num-backup-dr-agents-expected">
+</section>
+<section id="num-backup-dr-agents-expected">
 <h3><em>Num Backup/DR Agents Expected</em></h3>
 <p><strong>Explanation</strong> - The expected numbers of backup and DR agents in the
 cluster.</p>
 <p><strong>How to compute</strong> - We determine this number from how we’ve configured
 the cluster.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="backup-dr-running">
+</section>
+<section id="backup-dr-running">
 <h3><em>Backup/DR Running</em></h3>
 <p><strong>Explanation</strong> - Tracks whether backup or DR is running on a cluster.
 For our purposes, we only report DR is running on the primary cluster.</p>
@@ -1050,8 +1165,8 @@ For our purposes, we only report DR is running on the primary cluster.</p>
 minutes or DR is not running for 15 consecutive minutes. Because we only
 run backup on primary clusters in a DR pair, we don’t have either of
 these alerts on secondary clusters.</p>
-</div>
-<div class="section" id="backup-dr-rate">
+</section>
+<section id="backup-dr-rate">
 <h3><em>Backup/DR Rate</em></h3>
 <p><strong>Explanation</strong> - The rate at which backup and DR are processing data.
 We report rates for both ranges (i.e. copying data at rest) and new
@@ -1069,8 +1184,8 @@ and divide the number of bytes that each has increased by the time
 elapsed between the queries.</p>
 <p><strong>How we alert</strong> - See Backup/DR Lag section, where we have an alert
 that incorporates rate data.</p>
-</div>
-<div class="section" id="backup-dr-lag">
+</section>
+<section id="backup-dr-lag">
 <h3><em>Backup/DR Lag</em></h3>
 <p><strong>Explanation</strong> - How many seconds behind the most recent mutations a
 restorable backup or DR is. A backup or DR is restorable if it contains
@@ -1095,8 +1210,8 @@ least 5 minutes and the total backup/DR rate (combined range and
 mutation bytes) is less than 1000 bytes/s. For backup, this alert occurs
 after being in this state for 30 minutes, and for DR it is after 3
 minutes.</p>
-</div>
-<div class="section" id="backup-seconds-since-last-restorable">
+</section>
+<section id="backup-seconds-since-last-restorable">
 <h3><em>Backup Seconds Since Last Restorable</em></h3>
 <p><strong>Explanation</strong> - Measures how many seconds of data have not been backup
 up and could not be restored.</p>
@@ -1105,8 +1220,8 @@ except that we also track it in cases where the backup is not running or
 is not restorable:</p>
 <p>cluster.layers.backup.tags.default.last_restorable_seconds_behind</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="datacenter-lag-seconds">
+</section>
+<section id="datacenter-lag-seconds">
 <h3><em>Datacenter Lag Seconds</em></h3>
 <p><strong>Explanation</strong> - When running a multi-DC cluster with async
 replication, this tracks the lag in seconds between datacenters. It is
@@ -1119,19 +1234,19 @@ following metric and divide by 1,000,000:</p>
 <p>In 6.2 and later, use:</p>
 <p>cluster.datacenter_lag.seconds</p>
 <p><strong>How we alert</strong> - We have not yet defined alerts on this metric.</p>
-</div>
-<div class="section" id="estimated-backup-size">
+</section>
+<section id="estimated-backup-size">
 <h3><em>Estimated Backup Size</em></h3>
 <p><strong>Explanation</strong> - This is not being tracked correctly.</p>
-</div>
-<div class="section" id="process-uptime">
+</section>
+<section id="process-uptime">
 <h3><em>Process Uptime</em></h3>
 <p><strong>Explanation</strong> - How long each process has been running.</p>
 <p><strong>How to compute</strong> - From status:</p>
 <p>cluster.processes.&lt;process_id&gt;.uptime_seconds</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="cluster-health">
+</section>
+<section id="cluster-health">
 <h3><em>Cluster Health</em></h3>
 <p><strong>Explanation</strong> - This is a complicated metric reported by status that
 is used to indicate that something about the cluster is not in a desired
@@ -1143,8 +1258,8 @@ in fdbcli can help determine what’s wrong.</p>
 <p>cluster.database_status.healthy</p>
 <p>If the metric is missing, its value is presumed to be false.</p>
 <p><strong>How we alert</strong> - We do not alert on this metric.</p>
-</div>
-<div class="section" id="layer-status">
+</section>
+<section id="layer-status">
 <h3><em>Layer Status</em></h3>
 <p><strong>Explanation</strong> - Backup and DR report their statistics through a
 mechanism called “layer status”. If this layer status is missing or
@@ -1155,16 +1270,16 @@ can be used to track whether the layer status mechanism is working.</p>
 <p>If the metric is missing, its value is presumed to be false.</p>
 <p><strong>How we alert</strong> - We alert if the layer status is invalid for 10
 minutes.</p>
-</div>
-<div class="section" id="process-errors">
+</section>
+<section id="process-errors">
 <h3><em>Process Errors</em></h3>
 <p><strong>Explanation</strong> - We track all errors logged by any process running in
 the cluster (including the backup and DR agents).</p>
 <p><strong>How to compute</strong> - From process trace logs, look for events with
 Severity=“40”</p>
 <p><strong>How we alert</strong> - We receive a daily summary of all errors.</p>
-</div>
-<div class="section" id="process-notable-warnings">
+</section>
+<section id="process-notable-warnings">
 <h3><em>Process Notable Warnings</em></h3>
 <p><strong>Explanation</strong> - We track all notable warnings logged by any process
 running in the cluster (including the backup and DR agents). Note that
@@ -1173,9 +1288,9 @@ results.</p>
 <p><strong>How to compute</strong> - From process trace logs, look for events with
 Severity=“30”</p>
 <p><strong>How we alert</strong> - We receive a daily summary of all notable warnings.</p>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -1197,7 +1312,7 @@ Severity=“30”</p>
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -2,6 +2,8 @@
 Tenants
 #######
 
+.. _multi-tenancy:
+
 .. warning :: Tenants are currently experimental and are not recommended for use in production.
 
 FoundationDB provides a feature called tenants that allow you to configure one or more named transaction domains in your cluster. A transaction domain is a key-space in which a transaction is allowed to operate, and no tenant operations are allowed to use keys outside the tenant key-space. Tenants can be useful for managing separate, unrelated use-cases and preventing them from interfering with each other. They can also be helpful for defining safe boundaries when moving a subset of data between clusters.
@@ -31,7 +33,7 @@ FoundationDB clusters support the following tenant modes:
 Creating and deleting tenants
 =============================
 
-Tenants can be created and deleted using the ``\xff\xff/management/tenant_map/<tenant_name>`` :doc:`special key <special-keys>` range as well as by using APIs provided in some language bindings. 
+Tenants can be created and deleted using the ``\xff\xff/management/tenant/map/<tenant_name>`` :doc:`special key <special-keys>` range as well as by using APIs provided in some language bindings. 
 
 Tenants can be created with any byte-string name that does not begin with the ``\xff`` character. Once created, a tenant will be assigned an ID and a prefix where its data will reside.
 
@@ -49,7 +51,7 @@ All operations performed within a tenant transaction will occur within the tenan
 Raw access
 ----------
 
-When operating in the tenant mode ``required_experimental``, transactions are not ordinarily permitted to run without using a tenant. In order to access the system keys or perform maintenance operations that span multiple tenants, it is required to use the ``RAW_ACCESS`` transaction option to access the global key-space. It is an error to specify ``RAW_ACCESS`` on a transaction that is configured to use a tenant.
+When operating in the tenant mode ``required_experimental`` or using a metacluster, transactions are not ordinarily permitted to run without using a tenant. In order to access the system keys or perform maintenance operations that span multiple tenants, it is required to use the ``RAW_ACCESS`` transaction option to access the global key-space. It is an error to specify ``RAW_ACCESS`` on a transaction that is configured to use a tenant.
 
 .. note :: Setting the ``READ_SYSTEM_KEYS`` or ``ACCESS_SYSTEM_KEYS`` options implies ``RAW_ACCESS`` for your transaction.
 

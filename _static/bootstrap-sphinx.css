@@ -5,6 +5,25 @@
  * Sphinx stylesheet -- Bootstrap theme.
  */
 
+/*
+ * Imports to aggregate everything together.
+ */
+
+@import url("./basic.css");
+
+
+  
+
+
+
+    @import url("./bootstrap-3.4.1/css/bootstrap.min.css");
+    @import url("./bootstrap-3.4.1/css/bootstrap-theme.min.css");
+
+
+/*
+ * Styles
+ */
+
 .navbar-inverse .brand {
   color: #FFF;
 }
@@ -15,6 +34,17 @@
  */
 .navbar .container {
   padding-top: 0;
+}
+
+/*
+ * Reset the logo image dimensions. Sites like RTD can override with bad
+ * results on mobile (mega-huge logo...)
+ *
+ * https://github.com/ryan-roemer/sphinx-bootstrap-theme/issues/142
+ */
+.navbar-brand img {
+  width: auto;
+  height: 100%;
 }
 
 .page-top {
@@ -61,12 +91,17 @@ div.highlight {
   background: none;
 }
 
+a.headerlink {
+  margin-left: 0.25em;
+}
+
 a.footnote-reference {
   vertical-align: super;
   font-size: 75%;
 }
 
 table.footnote td.label {
+  color: inherit;
   font-size: 100%;
   display: block;
   line-height: normal;

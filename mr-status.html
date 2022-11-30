@@ -1,43 +1,29 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Machine-Readable Status &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Machine-Readable Status &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -50,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,7 +53,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul>
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -134,42 +249,40 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="machine-readable-status">
+  <section id="machine-readable-status">
 <span id="mr-status"></span><h1>Machine-Readable Status</h1>
 <p>FoundationDB provides status information in machine-readable JSON form (in addition to the human-readable form made available by <a class="reference internal" href="command-line-interface.html#cli-status"><span class="std std-ref">the command line interface</span></a>). This document explains how to access the machine-readable status, provides guidance for its use, and describes the JSON format used to encode it.</p>
-<div class="section" id="accessing-machine-readable-status">
+<section id="accessing-machine-readable-status">
 <span id="mr-status-key"></span><h2>Accessing machine-readable status</h2>
 <p>You can access machine-readable status in three ways ways:</p>
 <ul>
-<li><p class="first">Within <code class="docutils literal"><span class="pre">fdbcli</span></code>, issue the command <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code>. This command will output status information in JSON (rather than the human-readable format output by <code class="docutils literal"><span class="pre">status</span></code> and <code class="docutils literal"><span class="pre">status</span> <span class="pre">details</span></code>). See the <a class="reference internal" href="command-line-interface.html#cli-status"><span class="std std-ref">status</span></a> command for more information.</p>
-</li>
-<li><p class="first">From a command shell, use fdbcli by running <code class="docutils literal"><span class="pre">fdbcli</span> <span class="pre">--exec</span> <span class="pre">&quot;status</span> <span class="pre">json&quot;</span></code></p>
-</li>
-<li><p class="first">From any client, read the key <code class="docutils literal"><span class="pre">\xFF\xFF/status/json</span></code>. The value of this key is a JSON object serialized to a byte string with UTF-8 encoding. In Python, given an open database <code class="docutils literal"><span class="pre">db</span></code>, the JSON object can be read and deserialized with:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">json</span>
+<li><p>Within <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>, issue the command <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">json</span></code>. This command will output status information in JSON (rather than the human-readable format output by <code class="docutils literal notranslate"><span class="pre">status</span></code> and <code class="docutils literal notranslate"><span class="pre">status</span> <span class="pre">details</span></code>). See the <a class="reference internal" href="command-line-interface.html#cli-status"><span class="std std-ref">status</span></a> command for more information.</p></li>
+<li><p>From a command shell, use fdbcli by running <code class="docutils literal notranslate"><span class="pre">fdbcli</span> <span class="pre">--exec</span> <span class="pre">&quot;status</span> <span class="pre">json&quot;</span></code></p></li>
+<li><p>From any client, read the key <code class="docutils literal notranslate"><span class="pre">\xFF\xFF/status/json</span></code>. The value of this key is a JSON object serialized to a byte string with UTF-8 encoding. In Python, given an open database <code class="docutils literal notranslate"><span class="pre">db</span></code>, the JSON object can be read and deserialized with:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">json</span>
 <span class="n">status</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">db</span><span class="p">[</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/status/json&#39;</span><span class="p">])</span>
 </pre></div>
 </div>
 </li>
 </ul>
-</div>
-<div class="section" id="guidance-regarding-versioning">
+</section>
+<section id="guidance-regarding-versioning">
 <h2>Guidance regarding versioning</h2>
 <p>The JSON format of the machine-readable status is not considered part of our API and, in particular, is not governed by the <a class="reference internal" href="api-python.html#api-python-versioning"><span class="std std-ref">versioning mechanism</span></a> used to facilitate API upgrades. A client that makes use of the machine-readable status should be prepared to handle possible format changes across versions.</p>
 <p>Format changes will be governed as follows:</p>
 <ul class="simple">
-<li>We will not make arbitrary changes to the JSON format; we will make such changes only as required by changes in the underlying system characteristics relevant to status reporting.</li>
-<li>We may add fields as needed to report new categories of data.</li>
-<li>We may remove a field if a new version of FoundationDB renders the field obsolete.</li>
-<li>We will <em>not</em> change the semantics of an existing field. If the data relating to a field changes in a manner that is incompatible with previous usage, the field will be deleted and replaced by a newly named field.</li>
+<li><p>We will not make arbitrary changes to the JSON format; we will make such changes only as required by changes in the underlying system characteristics relevant to status reporting.</p></li>
+<li><p>We may add fields as needed to report new categories of data.</p></li>
+<li><p>We may remove a field if a new version of FoundationDB renders the field obsolete.</p></li>
+<li><p>We will <em>not</em> change the semantics of an existing field. If the data relating to a field changes in a manner that is incompatible with previous usage, the field will be deleted and replaced by a newly named field.</p></li>
 </ul>
-</div>
-<div class="section" id="json-format">
+</section>
+<section id="json-format">
 <h2>JSON format</h2>
-<p>The following format informally describes the JSON containing the status data. The possible values of <code class="docutils literal"><span class="pre">&lt;name_string&gt;</span></code> and <code class="docutils literal"><span class="pre">&lt;description_string&gt;</span></code> are described in <a class="reference internal" href="#mr-status-message"><span class="std std-ref">Message components</span></a>. The format is representative: <em>any field can be missing at any time</em>, depending on the database state. Clients should be prepared to flexibly handle format variations resulting from different database states.</p>
-<div class="highlight-javascript"><div class="highlight"><pre><span></span><span class="s2">&quot;cluster&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"></span>
+<p>The following format informally describes the JSON containing the status data. The possible values of <code class="docutils literal notranslate"><span class="pre">&lt;name_string&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">&lt;description_string&gt;</span></code> are described in <a class="reference internal" href="#mr-status-message"><span class="std std-ref">Message components</span></a>. The format is representative: <em>any field can be missing at any time</em>, depending on the database state. Clients should be prepared to flexibly handle format variations resulting from different database states.</p>
+<div class="highlight-javascript notranslate"><div class="highlight"><pre><span></span><span class="s2">&quot;cluster&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"></span>
 <span class="w">     </span><span class="s2">&quot;storage_wiggler&quot;</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">         </span><span class="s2">&quot;wiggle_server_ids&quot;</span><span class="o">:</span><span class="p">[</span><span class="s2">&quot;0ccb4e0feddb55&quot;</span><span class="p">],</span><span class="w"></span>
 <span class="w">         </span><span class="s2">&quot;wiggle_server_addresses&quot;</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;127.0.0.1&quot;</span><span class="p">],</span><span class="w"></span>
@@ -546,7 +659,9 @@
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">               </span><span class="s2">&quot;storage_server_durability_lag&quot;</span><span class="p">,</span><span class="w"></span>
-<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_lag&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_missing&quot;</span><span class="w"></span>
 <span class="w">            </span><span class="p">]</span><span class="w"></span>
 <span class="w">         </span><span class="p">},</span><span class="w"></span>
 <span class="w">         </span><span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span><span class="w"></span>
@@ -567,7 +682,9 @@
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">               </span><span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">               </span><span class="s2">&quot;storage_server_durability_lag&quot;</span><span class="p">,</span><span class="w"></span>
-<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;storage_server_list_fetch_failed&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_lag&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;blob_worker_missing&quot;</span><span class="w"></span>
 <span class="w">            </span><span class="p">]</span><span class="w"></span>
 <span class="w">         </span><span class="p">},</span><span class="w"></span>
 <span class="w">         </span><span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span><span class="w"></span>
@@ -691,7 +808,8 @@
 <span class="w">               </span><span class="s2">&quot;duplicate_mutation_fetch_timeout&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">               </span><span class="s2">&quot;primary_dc_missing&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">               </span><span class="s2">&quot;fetch_primary_dc_timeout&quot;</span><span class="p">,</span><span class="w"></span>
-<span class="w">               </span><span class="s2">&quot;fetch_storage_wiggler_stats_timeout&quot;</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;fetch_storage_wiggler_stats_timeout&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">               </span><span class="s2">&quot;fetch_consistency_scan_info_timeout&quot;</span><span class="w"></span>
 <span class="w">            </span><span class="p">]</span><span class="w"></span>
 <span class="w">         </span><span class="p">},</span><span class="w"></span>
 <span class="w">         </span><span class="s2">&quot;issues&quot;</span><span class="o">:</span><span class="p">[</span><span class="w"></span>
@@ -766,7 +884,7 @@
 <span class="w">            </span><span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span><span class="w"></span>
 <span class="w">            </span><span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="w"></span>
 <span class="w">         </span><span class="p">},</span><span class="w"></span>
-<span class="w">         </span><span class="s2">&quot;memory_errors&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// measures number of proxy_memory_limit_exceeded errors</span><span class="w"></span>
+<span class="w">         </span><span class="s2">&quot;memory_errors&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// measures number of (commit/grv)_proxy_memory_limit_exceeded errors</span><span class="w"></span>
 <span class="w">            </span><span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span><span class="w"></span>
 <span class="w">            </span><span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span><span class="w"></span>
 <span class="w">            </span><span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="w"></span>
@@ -905,6 +1023,7 @@
 <span class="w">          </span><span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;ssd-redwood-1-experimental&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">          </span><span class="s2">&quot;ssd-sharded-rocksdb&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;memory-1&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;memory-2&quot;</span><span class="p">,</span><span class="w"></span>
@@ -918,6 +1037,7 @@
 <span class="w">          </span><span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;ssd-redwood-1-experimental&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">          </span><span class="s2">&quot;ssd-sharded-rocksdb&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;memory&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;memory-1&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;memory-2&quot;</span><span class="p">,</span><span class="w"></span>
@@ -951,6 +1071,11 @@
 <span class="w">          </span><span class="s2">&quot;disabled&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;optional_experimental&quot;</span><span class="p">,</span><span class="w"></span>
 <span class="w">          </span><span class="s2">&quot;required_experimental&quot;</span><span class="w"></span>
+<span class="w">      </span><span class="p">]},</span><span class="w"></span>
+<span class="w">      </span><span class="s2">&quot;encryption_at_rest_mode&quot;</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">          </span><span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span><span class="w"></span>
+<span class="w">          </span><span class="s2">&quot;disabled&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">          </span><span class="s2">&quot;aes_256_ctr&quot;</span><span class="w"></span>
 <span class="w">      </span><span class="p">]}</span><span class="w"></span>
 <span class="w">   </span><span class="p">},</span><span class="w"></span>
 <span class="w">   </span><span class="s2">&quot;data&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"></span>
@@ -1044,6 +1169,9 @@
 <span class="w">            </span><span class="s2">&quot;logical_core_utilization&quot;</span><span class="o">:</span><span class="mf">0.4</span><span class="w"> </span><span class="c1">// computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading</span><span class="w"></span>
 <span class="w">         </span><span class="p">}</span><span class="w"></span>
 <span class="w">      </span><span class="p">}</span><span class="w"></span>
+<span class="w">   </span><span class="p">},</span><span class="w"></span>
+<span class="w">   </span><span class="s2">&quot;tenants&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="s2">&quot;num_tenants&quot;</span><span class="o">:</span><span class="mf">0</span><span class="w"></span>
 <span class="w">   </span><span class="p">}</span><span class="w"></span>
 <span class="p">},</span><span class="w"></span>
 <span class="s2">&quot;client&quot;</span><span class="o">:</span><span class="p">{</span><span class="w"></span>
@@ -1087,10 +1215,10 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<div class="section" id="message-components">
+<section id="message-components">
 <span id="mr-status-message"></span><h3>Message components</h3>
 <p>Several fields in the JSON object may contain messages in the format:</p>
-<div class="highlight-javascript"><div class="highlight"><pre><span></span><span class="s2">&quot;messages&quot;</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="w"></span>
+<div class="highlight-javascript notranslate"><div class="highlight"><pre><span></span><span class="s2">&quot;messages&quot;</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="w"></span>
 <span class="w">  </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="s2">&quot;name&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="nx">name_string</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
 <span class="w">    </span><span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="nx">description_string</span><span class="o">&gt;</span><span class="w"></span>
@@ -1098,262 +1226,254 @@
 <span class="p">]</span><span class="w"></span>
 </pre></div>
 </div>
-<p>Each message is an Object having at least a <code class="docutils literal"><span class="pre">&quot;name&quot;</span></code> field.  The <code class="docutils literal"><span class="pre">&quot;description&quot;</span></code> is present only in some messages.  Other fields may be present based on specific message instance details.  The possible name and description values of a message found at a given location in the JSON object are described in the tables below.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="6%" />
-<col width="6%" />
-<col width="88%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">JSON Path</th>
-<th class="head">Name</th>
-<th class="head">Description</th>
+<p>Each message is an Object having at least a <code class="docutils literal notranslate"><span class="pre">&quot;name&quot;</span></code> field.  The <code class="docutils literal notranslate"><span class="pre">&quot;description&quot;</span></code> is present only in some messages.  Other fields may be present based on specific message instance details.  The possible name and description values of a message found at a given location in the JSON object are described in the tables below.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>JSON Path</p></th>
+<th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>client.messages</td>
-<td>inconsistent_cluster_file</td>
-<td>Cluster file is not up to date. It contains the connection string ‘&lt;value&gt;’. The current connection string is ‘&lt;value&gt;’. This must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.</td>
+<tbody>
+<tr class="row-even"><td><p>client.messages</p></td>
+<td><p>inconsistent_cluster_file</p></td>
+<td><p>Cluster file is not up to date. It contains the connection string ‘&lt;value&gt;’. The current connection string is ‘&lt;value&gt;’. This must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.</p></td>
 </tr>
-<tr class="row-odd"><td>client.messages</td>
-<td>no_cluster_controller</td>
-<td>Unable to locate a cluster controller within 2 seconds. Check that there are server processes running.</td>
+<tr class="row-odd"><td><p>client.messages</p></td>
+<td><p>no_cluster_controller</p></td>
+<td><p>Unable to locate a cluster controller within 2 seconds. Check that there are server processes running.</p></td>
 </tr>
-<tr class="row-even"><td>client.messages</td>
-<td>quorum_not_reachable</td>
-<td>Unable to reach a quorum of coordinators.</td>
+<tr class="row-even"><td><p>client.messages</p></td>
+<td><p>quorum_not_reachable</p></td>
+<td><p>Unable to reach a quorum of coordinators.</p></td>
 </tr>
-<tr class="row-odd"><td>client.messages</td>
-<td>server_overloaded</td>
-<td>Server is under too much load and cannot respond.</td>
+<tr class="row-odd"><td><p>client.messages</p></td>
+<td><p>server_overloaded</p></td>
+<td><p>Server is under too much load and cannot respond.</p></td>
 </tr>
-<tr class="row-even"><td>client.messages</td>
-<td>status_incomplete_client</td>
-<td>Could not retrieve client status information.</td>
+<tr class="row-even"><td><p>client.messages</p></td>
+<td><p>status_incomplete_client</p></td>
+<td><p>Could not retrieve client status information.</p></td>
 </tr>
-<tr class="row-odd"><td>client.messages</td>
-<td>status_incomplete_cluster</td>
-<td>Could not retrieve cluster status information.</td>
+<tr class="row-odd"><td><p>client.messages</p></td>
+<td><p>status_incomplete_cluster</p></td>
+<td><p>Could not retrieve cluster status information.</p></td>
 </tr>
-<tr class="row-even"><td>client.messages</td>
-<td>status_incomplete_coordinators</td>
-<td>Could not fetch coordinator info.</td>
+<tr class="row-even"><td><p>client.messages</p></td>
+<td><p>status_incomplete_coordinators</p></td>
+<td><p>Could not fetch coordinator info.</p></td>
 </tr>
-<tr class="row-odd"><td>client.messages</td>
-<td>status_incomplete_error</td>
-<td>Cluster encountered an error fetching status.</td>
+<tr class="row-odd"><td><p>client.messages</p></td>
+<td><p>status_incomplete_error</p></td>
+<td><p>Cluster encountered an error fetching status.</p></td>
 </tr>
-<tr class="row-even"><td>client.messages</td>
-<td>status_incomplete_timeout</td>
-<td>Timed out fetching cluster status.</td>
+<tr class="row-even"><td><p>client.messages</p></td>
+<td><p>status_incomplete_timeout</p></td>
+<td><p>Timed out fetching cluster status.</p></td>
 </tr>
-<tr class="row-odd"><td>client.messages</td>
-<td>unreachable_cluster_controller</td>
-<td>No response received from the cluster controller.</td>
+<tr class="row-odd"><td><p>client.messages</p></td>
+<td><p>unreachable_cluster_controller</p></td>
+<td><p>No response received from the cluster controller.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>client_issues</td>
-<td>Some clients of this cluster have issues.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>client_issues</p></td>
+<td><p>Some clients of this cluster have issues.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.messages</td>
-<td>commit_timeout</td>
-<td>Unable to commit after __ seconds.</td>
+<tr class="row-odd"><td><p>cluster.messages</p></td>
+<td><p>commit_timeout</p></td>
+<td><p>Unable to commit after __ seconds.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>read_timeout</td>
-<td>Unable to read after __ seconds.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>read_timeout</p></td>
+<td><p>Unable to read after __ seconds.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.messages</td>
-<td>status_incomplete</td>
-<td>Unable to retrieve all status information.</td>
+<tr class="row-odd"><td><p>cluster.messages</p></td>
+<td><p>status_incomplete</p></td>
+<td><p>Unable to retrieve all status information.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>storage_servers_error</td>
-<td>Timed out trying to retrieve storage servers.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>storage_servers_error</p></td>
+<td><p>Timed out trying to retrieve storage servers.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.messages</td>
-<td>log_servers_error</td>
-<td>Timed out trying to retrieve log servers.</td>
+<tr class="row-odd"><td><p>cluster.messages</p></td>
+<td><p>log_servers_error</p></td>
+<td><p>Timed out trying to retrieve log servers.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>transaction_start_timeout</td>
-<td>Unable to start transaction after __ seconds.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>transaction_start_timeout</p></td>
+<td><p>Unable to start transaction after __ seconds.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.messages</td>
-<td>unreachable_master_worker</td>
-<td>Unable to locate the master worker.</td>
+<tr class="row-odd"><td><p>cluster.messages</p></td>
+<td><p>unreachable_master_worker</p></td>
+<td><p>Unable to locate the master worker.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>unreachable_dataDistributor_worker</td>
-<td>Unable to locate the data distributor worker.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>unreachable_dataDistributor_worker</p></td>
+<td><p>Unable to locate the data distributor worker.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.messages</td>
-<td>unreachable_ratekeeper_worker</td>
-<td>Unable to locate the ratekeeper worker.</td>
+<tr class="row-odd"><td><p>cluster.messages</p></td>
+<td><p>unreachable_ratekeeper_worker</p></td>
+<td><p>Unable to locate the ratekeeper worker.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>unreachable_processes</td>
-<td>The cluster has some unreachable processes.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>unreachable_processes</p></td>
+<td><p>The cluster has some unreachable processes.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.messages</td>
-<td>unreadable_configuration</td>
-<td>Unable to read database configuration.</td>
+<tr class="row-odd"><td><p>cluster.messages</p></td>
+<td><p>unreadable_configuration</p></td>
+<td><p>Unable to read database configuration.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>layer_status_incomplete</td>
-<td>Some or all of the layers subdocument could not be read.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>layer_status_incomplete</p></td>
+<td><p>Some or all of the layers subdocument could not be read.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.messages</td>
-<td>primary_dc_missing</td>
-<td>Unable to determine primary datacenter.</td>
+<tr class="row-odd"><td><p>cluster.messages</p></td>
+<td><p>primary_dc_missing</p></td>
+<td><p>Unable to determine primary datacenter.</p></td>
 </tr>
-<tr class="row-even"><td>cluster.messages</td>
-<td>fetch_primary_dc_timeout</td>
-<td>Fetching primary DC timed out.</td>
+<tr class="row-even"><td><p>cluster.messages</p></td>
+<td><p>fetch_primary_dc_timeout</p></td>
+<td><p>Fetching primary DC timed out.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.processes.&lt;process&gt;.messages</td>
-<td>file_open_error</td>
-<td>Unable to open ‘&lt;file&gt;’ (&lt;os_error&gt;).</td>
+<tr class="row-odd"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
+<td><p>file_open_error</p></td>
+<td><p>Unable to open ‘&lt;file&gt;’ (&lt;os_error&gt;).</p></td>
 </tr>
-<tr class="row-even"><td>cluster.processes.&lt;process&gt;.messages</td>
-<td>incorrect_cluster_file_contents</td>
-<td>Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.</td>
+<tr class="row-even"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
+<td><p>incorrect_cluster_file_contents</p></td>
+<td><p>Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.processes.&lt;process&gt;.messages</td>
-<td>io_error</td>
-<td>&lt;error&gt; occured in &lt;subsystem&gt;</td>
+<tr class="row-odd"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
+<td><p>io_error</p></td>
+<td><p>&lt;error&gt; occured in &lt;subsystem&gt;</p></td>
 </tr>
-<tr class="row-even"><td>cluster.processes.&lt;process&gt;.messages</td>
-<td>platform_error</td>
-<td>&lt;error&gt; occured in &lt;subsystem&gt;</td>
+<tr class="row-even"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
+<td><p>platform_error</p></td>
+<td><p>&lt;error&gt; occured in &lt;subsystem&gt;</p></td>
 </tr>
-<tr class="row-odd"><td>cluster.processes.&lt;process&gt;.messages</td>
-<td>process_error</td>
-<td>&lt;error&gt; occured in &lt;subsystem&gt;</td>
+<tr class="row-odd"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
+<td><p>process_error</p></td>
+<td><p>&lt;error&gt; occured in &lt;subsystem&gt;</p></td>
 </tr>
 </tbody>
 </table>
-<p>The JSON path <code class="docutils literal"><span class="pre">cluster.recovery_state</span></code>, when it exists, is an Object containing at least <code class="docutils literal"><span class="pre">&quot;name&quot;</span></code> and <code class="docutils literal"><span class="pre">&quot;description&quot;</span></code>.  The possible values for those fields are in the following table:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="15%" />
-<col width="85%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Name</th>
-<th class="head">Description</th>
+<p>The JSON path <code class="docutils literal notranslate"><span class="pre">cluster.recovery_state</span></code>, when it exists, is an Object containing at least <code class="docutils literal notranslate"><span class="pre">&quot;name&quot;</span></code> and <code class="docutils literal notranslate"><span class="pre">&quot;description&quot;</span></code>.  The possible values for those fields are in the following table:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>reading_coordinated_state</td>
-<td>Requesting information from coordination servers. Verify that a majority of coordination server processes are active.</td>
+<tbody>
+<tr class="row-even"><td><p>reading_coordinated_state</p></td>
+<td><p>Requesting information from coordination servers. Verify that a majority of coordination server processes are active.</p></td>
 </tr>
-<tr class="row-odd"><td>locking_coordinated_state</td>
-<td>Locking coordination state. Verify that a majority of coordination server processes are active.</td>
+<tr class="row-odd"><td><p>locking_coordinated_state</p></td>
+<td><p>Locking coordination state. Verify that a majority of coordination server processes are active.</p></td>
 </tr>
-<tr class="row-even"><td>reading_transaction_system_state</td>
-<td>Recovering transaction server state. Verify that the transaction server processes are active.</td>
+<tr class="row-even"><td><p>reading_transaction_system_state</p></td>
+<td><p>Recovering transaction server state. Verify that the transaction server processes are active.</p></td>
 </tr>
-<tr class="row-odd"><td>configuration_missing</td>
-<td>There appears to be a database, but its configuration does not appear to be initialized.</td>
+<tr class="row-odd"><td><p>configuration_missing</p></td>
+<td><p>There appears to be a database, but its configuration does not appear to be initialized.</p></td>
 </tr>
-<tr class="row-even"><td>configuration_never_created</td>
-<td>The coordinator(s) have no record of this database. Either the coordinator addresses are incorrect, the coordination state on those machines is missing, or no database has been created.</td>
+<tr class="row-even"><td><p>configuration_never_created</p></td>
+<td><p>The coordinator(s) have no record of this database. Either the coordinator addresses are incorrect, the coordination state on those machines is missing, or no database has been created.</p></td>
 </tr>
-<tr class="row-odd"><td>configuration_invalid</td>
-<td>The database configuration is invalid. Set a new, valid configuration to recover the database.</td>
+<tr class="row-odd"><td><p>configuration_invalid</p></td>
+<td><p>The database configuration is invalid. Set a new, valid configuration to recover the database.</p></td>
 </tr>
-<tr class="row-even"><td>recruiting_transaction_servers</td>
-<td>Recruiting new transaction servers.</td>
+<tr class="row-even"><td><p>recruiting_transaction_servers</p></td>
+<td><p>Recruiting new transaction servers.</p></td>
 </tr>
-<tr class="row-odd"><td>initializing_transaction_servers</td>
-<td>Initializing new transaction servers and recovering transaction logs.</td>
+<tr class="row-odd"><td><p>initializing_transaction_servers</p></td>
+<td><p>Initializing new transaction servers and recovering transaction logs.</p></td>
 </tr>
-<tr class="row-even"><td>recovery_transaction Performing</td>
-<td>recovery transaction.</td>
+<tr class="row-even"><td><p>recovery_transaction Performing</p></td>
+<td><p>recovery transaction.</p></td>
 </tr>
-<tr class="row-odd"><td>writing_coordinated_state</td>
-<td>Writing coordinated state. Verify that a majority of coordination server processes are active.</td>
+<tr class="row-odd"><td><p>writing_coordinated_state</p></td>
+<td><p>Writing coordinated state. Verify that a majority of coordination server processes are active.</p></td>
 </tr>
-<tr class="row-even"><td>fully_recovered</td>
-<td>Recovery complete.</td>
+<tr class="row-even"><td><p>fully_recovered</p></td>
+<td><p>Recovery complete.</p></td>
 </tr>
 </tbody>
 </table>
-<p>The JSON path <code class="docutils literal"><span class="pre">cluster.qos.performance_limited_by</span></code>, when it exists, is an Object containing at least <code class="docutils literal"><span class="pre">&quot;name&quot;</span></code> and <code class="docutils literal"><span class="pre">&quot;description&quot;</span></code>.  The possible values for those fields are in the following table:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="38%" />
-<col width="62%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Name</th>
-<th class="head">Description</th>
+<p>The JSON path <code class="docutils literal notranslate"><span class="pre">cluster.qos.performance_limited_by</span></code>, when it exists, is an Object containing at least <code class="docutils literal notranslate"><span class="pre">&quot;name&quot;</span></code> and <code class="docutils literal notranslate"><span class="pre">&quot;description&quot;</span></code>.  The possible values for those fields are in the following table:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>workload</td>
-<td>The database is not being saturated by the workload.</td>
+<tbody>
+<tr class="row-even"><td><p>workload</p></td>
+<td><p>The database is not being saturated by the workload.</p></td>
 </tr>
-<tr class="row-odd"><td>storage_server_write_queue_size</td>
-<td>Storage server performance (storage queue).</td>
+<tr class="row-odd"><td><p>storage_server_write_queue_size</p></td>
+<td><p>Storage server performance (storage queue).</p></td>
 </tr>
-<tr class="row-even"><td>storage_server_write_bandwidth_mvcc</td>
-<td>Storage server MVCC memory.</td>
+<tr class="row-even"><td><p>storage_server_write_bandwidth_mvcc</p></td>
+<td><p>Storage server MVCC memory.</p></td>
 </tr>
-<tr class="row-odd"><td>storage_server_readable_behind</td>
-<td>Storage server version falling behind.</td>
+<tr class="row-odd"><td><p>storage_server_readable_behind</p></td>
+<td><p>Storage server version falling behind.</p></td>
 </tr>
-<tr class="row-even"><td>log_server_mvcc_write_bandwidth</td>
-<td>Log server MVCC memory.</td>
+<tr class="row-even"><td><p>log_server_mvcc_write_bandwidth</p></td>
+<td><p>Log server MVCC memory.</p></td>
 </tr>
-<tr class="row-odd"><td>log_server_write_queue</td>
-<td>Storage server performance (log queue).</td>
+<tr class="row-odd"><td><p>log_server_write_queue</p></td>
+<td><p>Storage server performance (log queue).</p></td>
 </tr>
-<tr class="row-even"><td>min_free_space</td>
-<td>Running out of space (approaching 100MB limit).</td>
+<tr class="row-even"><td><p>min_free_space</p></td>
+<td><p>Running out of space (approaching 100MB limit).</p></td>
 </tr>
-<tr class="row-odd"><td>min_free_space_ratio</td>
-<td>Running out of space (approaching 5% limit).</td>
+<tr class="row-odd"><td><p>min_free_space_ratio</p></td>
+<td><p>Running out of space (approaching 5% limit).</p></td>
 </tr>
-<tr class="row-even"><td>log_server_min_free_space</td>
-<td>Log server running out of space (approaching 100MB limit).</td>
+<tr class="row-even"><td><p>log_server_min_free_space</p></td>
+<td><p>Log server running out of space (approaching 100MB limit).</p></td>
 </tr>
-<tr class="row-odd"><td>log_server_min_free_space_ratio</td>
-<td>Log server running out of space (approaching 5% limit).</td>
+<tr class="row-odd"><td><p>log_server_min_free_space_ratio</p></td>
+<td><p>Log server running out of space (approaching 5% limit).</p></td>
 </tr>
-<tr class="row-even"><td>storage_server_durability_lag</td>
-<td>Storage server durable version falling behind.</td>
+<tr class="row-even"><td><p>storage_server_durability_lag</p></td>
+<td><p>Storage server durable version falling behind.</p></td>
+</tr>
+<tr class="row-odd"><td><p>storage_server_list_fetch_failed</p></td>
+<td><p>Unable to fetch storage server list.</p></td>
+</tr>
+<tr class="row-even"><td><p>blob_worker_lag</p></td>
+<td><p>Blob worker granule version falling behind.</p></td>
+</tr>
+<tr class="row-odd"><td><p>blob_worker_missing</p></td>
+<td><p>No blob workers are reporting metrics.</p></td>
 </tr>
 </tbody>
 </table>
-<p>The JSON path <code class="docutils literal"><span class="pre">cluster.qos.throttled_tags</span></code>, when it exists, is an Object containing <code class="docutils literal"><span class="pre">&quot;auto&quot;</span></code> , <code class="docutils literal"><span class="pre">&quot;manual&quot;</span></code> and <code class="docutils literal"><span class="pre">&quot;recommended&quot;</span></code>.  The possible fields for those object are in the following table:</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="40%" />
-<col width="60%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Name</th>
-<th class="head">Description</th>
+<p>The JSON path <code class="docutils literal notranslate"><span class="pre">cluster.qos.throttled_tags</span></code>, when it exists, is an Object containing <code class="docutils literal notranslate"><span class="pre">&quot;auto&quot;</span></code> , <code class="docutils literal notranslate"><span class="pre">&quot;manual&quot;</span></code> and <code class="docutils literal notranslate"><span class="pre">&quot;recommended&quot;</span></code>.  The possible fields for those object are in the following table:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>count</td>
-<td>How many tags are throttled</td>
+<tbody>
+<tr class="row-even"><td><p>count</p></td>
+<td><p>How many tags are throttled</p></td>
 </tr>
-<tr class="row-odd"><td>busy_read</td>
-<td>How many tags are throttled because of busy read</td>
+<tr class="row-odd"><td><p>busy_read</p></td>
+<td><p>How many tags are throttled because of busy read</p></td>
 </tr>
-<tr class="row-even"><td>busy_write</td>
-<td>How many tags are throttled because of busy write</td>
+<tr class="row-even"><td><p>busy_write</p></td>
+<td><p>How many tags are throttled because of busy write</p></td>
 </tr>
 </tbody>
 </table>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -1375,7 +1495,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,27 +1,6 @@
-.. _release-notes:
-
 #############
 Release Notes
 #############
-
-7.1.25
-======
-* Same as 7.1.24 release with AVX enabled.
-
-7.1.24
-======
-* Released with AVX disabled.
-* Fixed a transaction log data corruption bug. `(PR #8525) <https://github.com/apple/foundationdb/pull/8525>`_, `(PR #8562) <https://github.com/apple/foundationdb/pull/8562>`_, and `(PR #8647) <https://github.com/apple/foundationdb/pull/8647>`_
-* Fixed a rare data race in transaction logs when PEEK_BATCHING_EMPTY_MSG is enabled. `(PR #8660) <https://github.com/apple/foundationdb/pull/8660>`_
-* Fixed a heap-use-after-free bug in cluster controller.  `(PR #8683) <https://github.com/apple/foundationdb/pull/8683>`_
-* Changed consistency check to report all corruptions. `(PR #8571) <https://github.com/apple/foundationdb/pull/8571>`_
-* Fixed a rare storage server crashing bug after recovery. `(PR #8468) <https://github.com/apple/foundationdb/pull/8468>`_
-* Added client knob UNLINKONLOAD_FDBCLIB to control deletion of external client libraries. `(PR #8434) <https://github.com/apple/foundationdb/pull/8434>`_
-* Updated the default peer latency degradation percentile to 0.5. `(PR #8370) <https://github.com/apple/foundationdb/pull/8370>`_
-* Made exclusion less pessimistic when warning about low space usage. `(PR #8347) <https://github.com/apple/foundationdb/pull/8347>`_ 
-* Added storage server readrange and update latency metrics. `(PR #8353) <https://github.com/apple/foundationdb/pull/8353>`_
-* Increased the default PEER_DEGRADATION_CONNECTION_FAILURE_COUNT value to 5s. `(PR #8336) <https://github.com/apple/foundationdb/pull/8336>`_
-* Increased RocksDB block cache size. `(PR #8274) <https://github.com/apple/foundationdb/pull/8274>`_
 
 7.1.23
 ======

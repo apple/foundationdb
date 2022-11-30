@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Flow &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Flow &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Simulation and Testing" href="testing.html" />
     <link rel="prev" title="Fault Tolerance" href="fault-tolerance.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -91,7 +206,7 @@
 <li><a class="reference internal" href="#state">State</a></li>
 <li><a class="reference internal" href="#promisestream-t-futurestream-t">PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</a></li>
 <li><a class="reference internal" href="#waitnext">waitNext()</a></li>
-<li><a class="reference internal" href="#choose-when">choose . . . when</a></li>
+<li><a class="reference internal" href="#choose-when">choose … when</a></li>
 <li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
 </ul>
 </li>
@@ -149,7 +264,7 @@
 <li><a class="reference internal" href="#state">State</a></li>
 <li><a class="reference internal" href="#promisestream-t-futurestream-t">PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</a></li>
 <li><a class="reference internal" href="#waitnext">waitNext()</a></li>
-<li><a class="reference internal" href="#choose-when">choose . . . when</a></li>
+<li><a class="reference internal" href="#choose-when">choose … when</a></li>
 <li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
 </ul>
 </li>
@@ -160,68 +275,68 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="flow">
+  <section id="flow">
 <h1>Flow</h1>
-<div class="section" id="engineering-challenges">
+<section id="engineering-challenges">
 <h2>Engineering challenges</h2>
-<p>FoundationDB began with ambitious goals for both <a class="reference internal" href="performance.html"><span class="doc">high performance</span></a> per node and <a class="reference internal" href="scalability.html"><span class="doc">scalability</span></a>. We knew that to achieve these goals we would face serious engineering challenges while developing the FoundationDB core. We&#8217;d need to implement efficient asynchronous communicating processes of the sort supported by <a class="reference external" href="http://en.wikipedia.org/wiki/Erlang_(programming_language)">Erlang</a> or the <a class="reference external" href="http://msdn.microsoft.com/en-us/library/vstudio/hh191443.aspx">Async library in .NET</a>, but we&#8217;d also need the raw speed and I/O efficiency of C++. Finally, we&#8217;d need to perform extensive simulation to engineer for reliability and fault tolerance on large clusters.</p>
-<p>To meet these challenges, we developed several new tools, the first of which is Flow, a new programming language that brings <a class="reference external" href="http://en.wikipedia.org/wiki/Actor_model">actor-based concurrency</a> to C++11. To add this capability, Flow introduces a number of new keywords and control-flow primitives for managing concurrency. Flow is implemented as a compiler which analyzes an asynchronous function (actor) and rewrites it as an object with many different sub-functions that use callbacks to avoid blocking (see <a class="reference external" href="https://github.com/Sage/streamlinejs">streamlinejs</a> for a similar concept using JavaScript). The Flow compiler&#8217;s output is normal C++11 code, which is then compiled to a binary using traditional tools. Flow also provides input to our simulation tool, which conducts deterministic simulations of the entire system, including its physical interfaces and failure modes. In short, Flow allows efficient concurrency within C++ in a maintainable and extensible manner, achieving all three major engineering goals:</p>
+<p>FoundationDB began with ambitious goals for both <a class="reference internal" href="performance.html"><span class="doc">high performance</span></a> per node and <a class="reference internal" href="scalability.html"><span class="doc">scalability</span></a>. We knew that to achieve these goals we would face serious engineering challenges while developing the FoundationDB core. We’d need to implement efficient asynchronous communicating processes of the sort supported by <a class="reference external" href="http://en.wikipedia.org/wiki/Erlang_(programming_language)">Erlang</a> or the <a class="reference external" href="http://msdn.microsoft.com/en-us/library/vstudio/hh191443.aspx">Async library in .NET</a>, but we’d also need the raw speed and I/O efficiency of C++. Finally, we’d need to perform extensive simulation to engineer for reliability and fault tolerance on large clusters.</p>
+<p>To meet these challenges, we developed several new tools, the first of which is Flow, a new programming language that brings <a class="reference external" href="http://en.wikipedia.org/wiki/Actor_model">actor-based concurrency</a> to C++11. To add this capability, Flow introduces a number of new keywords and control-flow primitives for managing concurrency. Flow is implemented as a compiler which analyzes an asynchronous function (actor) and rewrites it as an object with many different sub-functions that use callbacks to avoid blocking (see <a class="reference external" href="https://github.com/Sage/streamlinejs">streamlinejs</a> for a similar concept using JavaScript). The Flow compiler’s output is normal C++11 code, which is then compiled to a binary using traditional tools. Flow also provides input to our simulation tool, which conducts deterministic simulations of the entire system, including its physical interfaces and failure modes. In short, Flow allows efficient concurrency within C++ in a maintainable and extensible manner, achieving all three major engineering goals:</p>
 <ul class="simple">
-<li>high performance (by compiling to native code),</li>
-<li>actor-based concurrency (for high productivity development),</li>
-<li>simulation support (for testing).</li>
+<li><p>high performance (by compiling to native code),</p></li>
+<li><p>actor-based concurrency (for high productivity development),</p></li>
+<li><p>simulation support (for testing).</p></li>
 </ul>
-</div>
-<div class="section" id="a-first-look">
+</section>
+<section id="a-first-look">
 <h2>A first look</h2>
 <p>Actors in Flow receive asynchronous messages from each other using a data type called a <em>future</em>. When an actor requires a data value to continue computation, it waits for it without blocking other actors. The following simple actor performs asynchronous addition. It takes a future integer and a normal integer as an offset, waits on the future integer, and returns the sum of the value and the offset:</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">asyncAdd</span><span class="p">(</span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">asyncAdd</span><span class="p">(</span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wait</span><span class="p">(</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="p">);</span><span class="w"></span>
 <span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset</span><span class="p">;</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="flow-features">
+</section>
+<section id="flow-features">
 <h2>Flow features</h2>
-<p>Flow&#8217;s new keywords and control-flow primitives support the capability to pass messages asynchronously between components. Here&#8217;s a brief overview.</p>
-<div class="section" id="promise-t-and-future-t">
+<p>Flow’s new keywords and control-flow primitives support the capability to pass messages asynchronously between components. Here’s a brief overview.</p>
+<section id="promise-t-and-future-t">
 <h3>Promise&lt;T&gt; and Future&lt;T&gt;</h3>
-<p>The data types that connect asynchronous senders and receivers are <code class="docutils literal"><span class="pre">Promise&lt;T&gt;</span></code> and <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> for some C++ type <code class="docutils literal"><span class="pre">T</span></code>. When a sender holds a <code class="docutils literal"><span class="pre">Promise&lt;T&gt;</span></code>, it represents a promise to deliver a value of type <code class="docutils literal"><span class="pre">T</span></code> at some point in the future to the holder of the <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code>. Conversely, a receiver holding a <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> can asynchronously continue computation until the point at which it actually needs the <code class="docutils literal"><span class="pre">T.</span></code></p>
+<p>The data types that connect asynchronous senders and receivers are <code class="docutils literal notranslate"><span class="pre">Promise&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> for some C++ type <code class="docutils literal notranslate"><span class="pre">T</span></code>. When a sender holds a <code class="docutils literal notranslate"><span class="pre">Promise&lt;T&gt;</span></code>, it represents a promise to deliver a value of type <code class="docutils literal notranslate"><span class="pre">T</span></code> at some point in the future to the holder of the <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code>. Conversely, a receiver holding a <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> can asynchronously continue computation until the point at which it actually needs the <code class="docutils literal notranslate"><span class="pre">T.</span></code></p>
 <p>Promises and futures can be used within a single process, but their real strength in a distributed system is that they can traverse the network. For example, one computer could create a promise/future pair, then send the promise to another computer over the network. The promise and future will still be connected, and when the promise is fulfilled by the remote computer, the original holder of the future will see the value appear.</p>
-</div>
-<div class="section" id="wait">
+</section>
+<section id="wait">
 <h3>wait()</h3>
-<p>At the point when a receiver holding a <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> needs the <code class="docutils literal"><span class="pre">T</span></code> to continue computation, it invokes the <code class="docutils literal"><span class="pre">wait()</span></code> statement with the <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> as its parameter. The <code class="docutils literal"><span class="pre">wait()</span></code> statement allows the calling actor to pause execution until the value of the future is set, returning a value of type <code class="docutils literal"><span class="pre">T</span></code>. During the wait, other actors can continue execution, providing asynchronous concurrency within a single process.</p>
-</div>
-<div class="section" id="actor">
+<p>At the point when a receiver holding a <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> needs the <code class="docutils literal notranslate"><span class="pre">T</span></code> to continue computation, it invokes the <code class="docutils literal notranslate"><span class="pre">wait()</span></code> statement with the <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> as its parameter. The <code class="docutils literal notranslate"><span class="pre">wait()</span></code> statement allows the calling actor to pause execution until the value of the future is set, returning a value of type <code class="docutils literal notranslate"><span class="pre">T</span></code>. During the wait, other actors can continue execution, providing asynchronous concurrency within a single process.</p>
+</section>
+<section id="actor">
 <h3>ACTOR</h3>
-<p>Only functions labeled with the <code class="docutils literal"><span class="pre">ACTOR</span></code> tag can call <code class="docutils literal"><span class="pre">wait()</span></code>. Actors are the essential unit of asynchronous work and can be composed to create complex message-passing systems. By composing actors, futures can be chained together so that the result of one depends on the output of another.</p>
-<p>An actor is declared as returning a <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> where <code class="docutils literal"><span class="pre">T</span></code> may be <code class="docutils literal"><span class="pre">Void</span></code> if the actor&#8217;s return value is used only for signaling. Each actor is preprocessed into a C++11 class with internal callbacks and supporting functions.</p>
-</div>
-<div class="section" id="state">
+<p>Only functions labeled with the <code class="docutils literal notranslate"><span class="pre">ACTOR</span></code> tag can call <code class="docutils literal notranslate"><span class="pre">wait()</span></code>. Actors are the essential unit of asynchronous work and can be composed to create complex message-passing systems. By composing actors, futures can be chained together so that the result of one depends on the output of another.</p>
+<p>An actor is declared as returning a <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> where <code class="docutils literal notranslate"><span class="pre">T</span></code> may be <code class="docutils literal notranslate"><span class="pre">Void</span></code> if the actor’s return value is used only for signaling. Each actor is preprocessed into a C++11 class with internal callbacks and supporting functions.</p>
+</section>
+<section id="state">
 <h3>State</h3>
-<p>The <code class="docutils literal"><span class="pre">state</span></code> keyword is used to scope a variable so that it is visible across multiple <code class="docutils literal"><span class="pre">wait()</span></code> statements within an actor. The use of a <code class="docutils literal"><span class="pre">state</span></code> variable is illustrated in the example actor below.</p>
-</div>
-<div class="section" id="promisestream-t-futurestream-t">
+<p>The <code class="docutils literal notranslate"><span class="pre">state</span></code> keyword is used to scope a variable so that it is visible across multiple <code class="docutils literal notranslate"><span class="pre">wait()</span></code> statements within an actor. The use of a <code class="docutils literal notranslate"><span class="pre">state</span></code> variable is illustrated in the example actor below.</p>
+</section>
+<section id="promisestream-t-futurestream-t">
 <h3>PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</h3>
-<p>When a component wants to work with a <em>stream</em> of asynchronous messages rather than a single message, it can use <code class="docutils literal"><span class="pre">PromiseStream&lt;T&gt;</span></code> and <code class="docutils literal"><span class="pre">FutureStream&lt;T&gt;</span></code>. These constructs allow for two important features: multiplexing and reliable delivery of messages. They also play an important role in Flow design patterns. For example, many of the servers in FoundationDB expose their interfaces as a <code class="docutils literal"><span class="pre">struct</span></code> of promise streams—one for each request type.</p>
-</div>
-<div class="section" id="waitnext">
+<p>When a component wants to work with a <em>stream</em> of asynchronous messages rather than a single message, it can use <code class="docutils literal notranslate"><span class="pre">PromiseStream&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">FutureStream&lt;T&gt;</span></code>. These constructs allow for two important features: multiplexing and reliable delivery of messages. They also play an important role in Flow design patterns. For example, many of the servers in FoundationDB expose their interfaces as a <code class="docutils literal notranslate"><span class="pre">struct</span></code> of promise streams—one for each request type.</p>
+</section>
+<section id="waitnext">
 <h3>waitNext()</h3>
-<p><code class="docutils literal"><span class="pre">waitNext()</span></code> is the counterpart of <code class="docutils literal"><span class="pre">wait()</span></code> for streams. It pauses program execution and waits for the next value in a <code class="docutils literal"><span class="pre">FutureStream</span></code>. If there is a value ready in the stream, execution continues without delay.</p>
-</div>
-<div class="section" id="choose-when">
-<h3>choose . . . when</h3>
-<p>The <code class="docutils literal"><span class="pre">choose</span></code> and <code class="docutils literal"><span class="pre">when</span></code> constructs allow an actor to wait for multiple futures at once in a ordered and predictable way.</p>
-</div>
-<div class="section" id="example-a-server-interface">
+<p><code class="docutils literal notranslate"><span class="pre">waitNext()</span></code> is the counterpart of <code class="docutils literal notranslate"><span class="pre">wait()</span></code> for streams. It pauses program execution and waits for the next value in a <code class="docutils literal notranslate"><span class="pre">FutureStream</span></code>. If there is a value ready in the stream, execution continues without delay.</p>
+</section>
+<section id="choose-when">
+<h3>choose … when</h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">choose</span></code> and <code class="docutils literal notranslate"><span class="pre">when</span></code> constructs allow an actor to wait for multiple futures at once in a ordered and predictable way.</p>
+</section>
+<section id="example-a-server-interface">
 <h3>Example: A Server Interface</h3>
-<p>Below is a actor that runs on single server communicating over the network. Its functionality is to maintain a count in response to asynchronous messages from other actors. It supports an interface implemented with a loop containing a <code class="docutils literal"><span class="pre">choose</span></code> statement with a <code class="docutils literal"><span class="pre">when</span></code> for each request type. Each <code class="docutils literal"><span class="pre">when</span></code> uses <code class="docutils literal"><span class="pre">waitNext()</span></code> to asynchronously wait for the next request in the stream. The add and subtract interfaces modify the count itself, stored with a state variable. The get interface takes a <code class="docutils literal"><span class="pre">Promise&lt;int&gt;</span></code> instead of just an <code class="docutils literal"><span class="pre">int</span></code> to facilitate sending back the return message.</p>
+<p>Below is a actor that runs on single server communicating over the network. Its functionality is to maintain a count in response to asynchronous messages from other actors. It supports an interface implemented with a loop containing a <code class="docutils literal notranslate"><span class="pre">choose</span></code> statement with a <code class="docutils literal notranslate"><span class="pre">when</span></code> for each request type. Each <code class="docutils literal notranslate"><span class="pre">when</span></code> uses <code class="docutils literal notranslate"><span class="pre">waitNext()</span></code> to asynchronously wait for the next request in the stream. The add and subtract interfaces modify the count itself, stored with a state variable. The get interface takes a <code class="docutils literal notranslate"><span class="pre">Promise&lt;int&gt;</span></code> instead of just an <code class="docutils literal notranslate"><span class="pre">int</span></code> to facilitate sending back the return message.</p>
 <p>To write the equivalent code directly in C++, a developer would have to implement a complex set of callbacks with exception-handling, requiring far more engineering effort. Flow makes it much easier to implement this sort of asynchronous coordination, with no loss of performance:</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">serveCountingServerInterface</span><span class="p">(</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">serveCountingServerInterface</span><span class="p">(</span><span class="w"></span>
 <span class="w">           </span><span class="n">CountingServerInterface</span><span class="w"> </span><span class="n">csi</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
 <span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
@@ -240,16 +355,16 @@
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-</div>
-</div>
-<div class="section" id="caveats">
+</section>
+</section>
+<section id="caveats">
 <h2>Caveats</h2>
 <p>Even though Flow code looks a lot like C++, it is not. It has different rules and the files are preprocessed. It is always important to keep this in mind when programming flow.</p>
-<p>We still want to be able to use IDEs and modern editors (with language servers like cquery or clang-based completion engines like ycm). Because of this there is a header-file <code class="docutils literal"><span class="pre">actorcompiler.h</span></code> in flow which defines preprocessor definitions to make flow compile as normal C++ code. CMake even supports a special mode so that it doesn&#8217;t preprocess flow files. This mode can be used by passing <code class="docutils literal"><span class="pre">-DOPEN_FOR_IDE=ON</span></code> to cmake. Additionally we generate a special <code class="docutils literal"><span class="pre">compile_commands.json</span></code> into the source-directory which will support opening the project in IDEs and editors that look for a compilation database.</p>
+<p>We still want to be able to use IDEs and modern editors (with language servers like cquery or clang-based completion engines like ycm). Because of this there is a header-file <code class="docutils literal notranslate"><span class="pre">actorcompiler.h</span></code> in flow which defines preprocessor definitions to make flow compile as normal C++ code. CMake even supports a special mode so that it doesn’t preprocess flow files. This mode can be used by passing <code class="docutils literal notranslate"><span class="pre">-DOPEN_FOR_IDE=ON</span></code> to cmake. Additionally we generate a special <code class="docutils literal notranslate"><span class="pre">compile_commands.json</span></code> into the source-directory which will support opening the project in IDEs and editors that look for a compilation database.</p>
 <p>Some preprocessor definitions will not fix all issues though. When programming Flow the following things have to be taken care of by the programmer:</p>
 <ul>
-<li><p class="first">Local variables don&#8217;t survive a call to <code class="docutils literal"><span class="pre">wait</span></code>. So this would be legal Flow code, but NOT legal C++ code:</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<li><p>Local variables don’t survive a call to <code class="docutils literal notranslate"><span class="pre">wait</span></code>. So this would be legal Flow code, but NOT legal C++ code:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
 <span class="w">    </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span><span class="w"></span>
 <span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"></span>
@@ -258,7 +373,7 @@
 </pre></div>
 </div>
 <p>In order to make this not break IDE-support one can either rename the second occurrence of this variable or, if this is not desired as it might make the code unreadable, one can use scoping:</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="p">{</span><span class="w"></span>
 <span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
 <span class="w">        </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span><span class="w"></span>
@@ -271,17 +386,16 @@
 </pre></div>
 </div>
 </li>
-<li><p class="first">An <code class="docutils literal"><span class="pre">ACTOR</span></code> is compiled into a class internally. Which means that within an actor-function, <code class="docutils literal"><span class="pre">this</span></code> is a valid pointer to this class. But using them explicitly (or as described later implicitly) will break IDE support. One can use <code class="docutils literal"><span class="pre">THIS</span></code> and <code class="docutils literal"><span class="pre">THIS_ADDR</span></code> instead. But be careful as <code class="docutils literal"><span class="pre">THIS</span></code> will be of type <code class="docutils literal"><span class="pre">nullptr_t</span></code> in IDE-mode and of the actor-type in normal compilation mode.</p>
-</li>
-<li><p class="first">Lambdas and state variables are weird in a sense. After actor compilation, a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method <code class="docutils literal"><span class="pre">Foo::bar</span></code> is defined as <code class="docutils literal"><span class="pre">const</span></code>:</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<li><p>An <code class="docutils literal notranslate"><span class="pre">ACTOR</span></code> is compiled into a class internally. Which means that within an actor-function, <code class="docutils literal notranslate"><span class="pre">this</span></code> is a valid pointer to this class. But using them explicitly (or as described later implicitly) will break IDE support. One can use <code class="docutils literal notranslate"><span class="pre">THIS</span></code> and <code class="docutils literal notranslate"><span class="pre">THIS_ADDR</span></code> instead. But be careful as <code class="docutils literal notranslate"><span class="pre">THIS</span></code> will be of type <code class="docutils literal notranslate"><span class="pre">nullptr_t</span></code> in IDE-mode and of the actor-type in normal compilation mode.</p></li>
+<li><p>Lambdas and state variables are weird in a sense. After actor compilation, a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method <code class="docutils literal notranslate"><span class="pre">Foo::bar</span></code> is defined as <code class="docutils literal notranslate"><span class="pre">const</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span><span class="w"></span>
 <span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="o">=</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
 <p>If it is not, one has to pass the member explicitly as a reference:</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span><span class="w"></span>
 <span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">f</span><span class="p">;</span><span class="w"></span>
 <span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="n">x</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">x</span><span class="o">-&gt;</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span><span class="w"></span>
@@ -289,11 +403,10 @@
 </pre></div>
 </div>
 </li>
-<li><p class="first">state variables in Flow don&#8217;t follow the normal scoping rules. So in Flow a state variable can be defined in an inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.</p>
-</li>
+<li><p>state variables in Flow don’t follow the normal scoping rules. So in Flow a state variable can be defined in an inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.</p></li>
 </ul>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -315,7 +428,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Client Testing &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Client Testing &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Using FoundationDB Clients" href="api-general.html" />
     <link rel="prev" title="Data Modeling" href="data-modeling.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="client-design.html">Client Design</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -101,6 +216,16 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#running-a-workload-on-an-actual-cluster">Running a Workload on an actual Cluster</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-tester">API Tester</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#implementing-a-workload">Implementing a Workload</a></li>
+<li><a class="reference internal" href="#basic-workload-example">Basic Workload Example</a></li>
+<li><a class="reference internal" href="#implementing-control-structures">Implementing Control Structures</a></li>
+<li><a class="reference internal" href="#subclassing-apiworkload">Subclassing ApiWorkload</a></li>
+<li><a class="reference internal" href="#test-configuration">Test Configuration</a></li>
+<li><a class="reference internal" href="#executing-the-tests">Executing the Tests</a></li>
 </ul>
 </li>
 </ul>
@@ -166,78 +291,88 @@
 <li><a class="reference internal" href="#running-a-workload-on-an-actual-cluster">Running a Workload on an actual Cluster</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#api-tester">API Tester</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#implementing-a-workload">Implementing a Workload</a></li>
+<li><a class="reference internal" href="#basic-workload-example">Basic Workload Example</a></li>
+<li><a class="reference internal" href="#implementing-control-structures">Implementing Control Structures</a></li>
+<li><a class="reference internal" href="#subclassing-apiworkload">Subclassing ApiWorkload</a></li>
+<li><a class="reference internal" href="#test-configuration">Test Configuration</a></li>
+<li><a class="reference internal" href="#executing-the-tests">Executing the Tests</a></li>
+</ul>
+</li>
 </ul>
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="client-testing">
+  <section id="client-testing">
 <h1>Client Testing</h1>
-</div>
-<div class="section" id="testing-error-handling-with-buggify">
+</section>
+<section id="testing-error-handling-with-buggify">
 <h1>Testing Error Handling with Buggify</h1>
 <p>FoundationDB clients need to handle errors correctly. Wrong error handling can lead to many bugs - in the worst case it can
 lead to a corrupted database. Because of this it is important that an application or layer author tests properly their
 application during failure scenarios. But this is non-trivial. In a development environment cluster failures are very
 unlikely and it is therefore possible that certain types of exceptions are never tested in a controlled environment.</p>
-<p>The simplest way of testing for these kind of errors is a simple mechanism called <code class="docutils literal"><span class="pre">Buggify</span></code>. If this option is enabled
+<p>The simplest way of testing for these kind of errors is a simple mechanism called <code class="docutils literal notranslate"><span class="pre">Buggify</span></code>. If this option is enabled
 in the client, the client will randomly throw errors that an application might see in a production environment. Enable this
 option in testing will greatly improve the probability that error handling is tested properly.</p>
-<div class="section" id="options-to-control-buggify">
+<section id="options-to-control-buggify">
 <h2>Options to Control Buggify</h2>
 <p>There are four network options to control the buggify behavior. By default, buggify is disabled (as it will behave in a way
 that is not desirable in a production environment). The options to control buggify are:</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">buggify_enable</span></code>
-This option takes no argument and will enable buggify.</li>
-<li><code class="docutils literal"><span class="pre">buggify_disable</span></code>
-This can be used to disable buggify again.</li>
-<li><code class="docutils literal"><span class="pre">client_buggify_section_activated_probability</span></code> (default <code class="docutils literal"><span class="pre">25</span></code>)
-A number between 0 and 100.</li>
-<li><code class="docutils literal"><span class="pre">client_buggify_section_fired_probability</span></code> (default <code class="docutils literal"><span class="pre">25</span></code>)
-A number between 0 and 100.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">buggify_enable</span></code>
+This option takes no argument and will enable buggify.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">buggify_disable</span></code>
+This can be used to disable buggify again.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">client_buggify_section_activated_probability</span></code> (default <code class="docutils literal notranslate"><span class="pre">25</span></code>)
+A number between 0 and 100.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">client_buggify_section_fired_probability</span></code> (default <code class="docutils literal notranslate"><span class="pre">25</span></code>)
+A number between 0 and 100.</p></li>
 </ul>
 <p>The way buggify works is by enabling sections in the code first that get only executed with a certain probability. Generally
 these code sections will simply introduce a synthetic error.</p>
 <p>When a section is passed for the first time, the client library will decide randomly whether that code section will be enabled
-or not. It will be enabled with a probability of <code class="docutils literal"><span class="pre">client_buggify_section_activated_probability</span></code>.</p>
+or not. It will be enabled with a probability of <code class="docutils literal notranslate"><span class="pre">client_buggify_section_activated_probability</span></code>.</p>
 <p>Whenever the client executes a buggify-enabled code-block, it will randomly execute it. This is to make sure that a certain
-exception doesn&#8217;t always fire. The probably for executing such a section is <code class="docutils literal"><span class="pre">client_buggify_section_fired_probability</span></code>.</p>
-</div>
-</div>
-<div class="section" id="simulation-and-cluster-workloads">
+exception doesn’t always fire. The probably for executing such a section is <code class="docutils literal notranslate"><span class="pre">client_buggify_section_fired_probability</span></code>.</p>
+</section>
+</section>
+<section id="simulation-and-cluster-workloads">
 <h1>Simulation and Cluster Workloads</h1>
 <p>FoundationDB comes with its own testing framework. Tests are implemented as workloads. A workload is nothing more than a class
-that gets called by server processes running the <code class="docutils literal"><span class="pre">tester</span></code> role. Additionally, a <code class="docutils literal"><span class="pre">fdbserver</span></code> process can run a simulator that
+that gets called by server processes running the <code class="docutils literal notranslate"><span class="pre">tester</span></code> role. Additionally, a <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> process can run a simulator that
 simulates a full fdb cluster with several machines and different configurations in one process. This simulator can run the same
 workloads you can run on a real cluster. It will also inject random failures like network partitions and disk failures.</p>
 <p>This tutorial explains how one can implement a workload, how one can orchestrate a workload on a cluster with multiple clients, and
 how one can run a workload within a simulator. Running in a simulator is also useful as it does not require any setup: you can simply
 run one command that will provide you with a fully functional FoundationDB cluster.</p>
-<div class="section" id="general-overview">
+<section id="general-overview">
 <h2>General Overview</h2>
 <p>Workloads in FoundationDB are generally compiled into the binary. However, FoundationDB also provides the ability to load workloads
-dynamically. This is done through <code class="docutils literal"><span class="pre">dlopen</span></code> (on Unix like operating systems) or <code class="docutils literal"><span class="pre">LoadLibrary</span></code> (on Windows).</p>
-</div>
-<div class="section" id="parallelism-and-determinism">
+dynamically. This is done through <code class="docutils literal notranslate"><span class="pre">dlopen</span></code> (on Unix like operating systems) or <code class="docutils literal notranslate"><span class="pre">LoadLibrary</span></code> (on Windows).</p>
+</section>
+<section id="parallelism-and-determinism">
 <h2>Parallelism and Determinism</h2>
-<p>A workload can run either in a simulation or on a real cluster. In simulation, <code class="docutils literal"><span class="pre">fdbserver</span></code> will simulate a whole cluster and will
+<p>A workload can run either in a simulation or on a real cluster. In simulation, <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> will simulate a whole cluster and will
 use a deterministic random number generator to simulate random behavior and random failures. This random number generator is initialized
 with a random seed. In case of a test failure, the user can reuse the given seed and rerun the same test in order to further observe
 and debug the behavior.</p>
-<p>However, this will only work as long as the workload doesn&#8217;t introduce any non-deterministic behavior. One example of non-deterministic
+<p>However, this will only work as long as the workload doesn’t introduce any non-deterministic behavior. One example of non-deterministic
 behavior is the running multiple threads.</p>
 <p>The workload is created in the main network thread and it will run in the main network thread. Because of this, using any blocking
-function (for example <code class="docutils literal"><span class="pre">blockUntilReady</span></code> on a future object) will result in a deadlock. Using the callback API is therefore required
-if one wants to keep the simulator&#8217;s deterministic behavior.</p>
+function (for example <code class="docutils literal notranslate"><span class="pre">blockUntilReady</span></code> on a future object) will result in a deadlock. Using the callback API is therefore required
+if one wants to keep the simulator’s deterministic behavior.</p>
 <p>For existing applications and layers, however, not using the blocking API might not be an option. For these use-cases, a user can chose
 to start new threads and use the blocking API from within these threads. This will mean that test failures will be non-deterministic and
 might be hard to reproduce.</p>
-<p>To start a new thread, one has to &#8220;bind&#8221; operating system threads to their simulated processes. This can be done by setting the
-<code class="docutils literal"><span class="pre">ProcessId</span></code> in the child threads when they get created. In Java this is done by only starting new threads through the provided
-<code class="docutils literal"><span class="pre">Executor</span></code>. In the C++ API one can use the <code class="docutils literal"><span class="pre">FDBWorkloadContext</span></code> to do that. For example:</p>
-<div class="highlight-C++"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span><span class="w"> </span><span class="nc">Fun</span><span class="o">&gt;</span><span class="w"></span>
+<p>To start a new thread, one has to “bind” operating system threads to their simulated processes. This can be done by setting the
+<code class="docutils literal notranslate"><span class="pre">ProcessId</span></code> in the child threads when they get created. In Java this is done by only starting new threads through the provided
+<code class="docutils literal notranslate"><span class="pre">Executor</span></code>. In the C++ API one can use the <code class="docutils literal notranslate"><span class="pre">FDBWorkloadContext</span></code> to do that. For example:</p>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span><span class="w"> </span><span class="nc">Fun</span><span class="o">&gt;</span><span class="w"></span>
 <span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="n">startThread</span><span class="p">(</span><span class="n">FDBWorkloadContext</span><span class="o">*</span><span class="w"> </span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">Fun</span><span class="w"> </span><span class="n">fun</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">processId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">getProcessID</span><span class="p">();</span><span class="w"></span>
 <span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="p">([</span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">processID</span><span class="p">,</span><span class="w"> </span><span class="n">fun</span><span class="p">](</span><span class="w"></span>
@@ -247,84 +382,84 @@ might be hard to reproduce.</p>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="finding-the-shared-object">
+</section>
+<section id="finding-the-shared-object">
 <h2>Finding the Shared Object</h2>
-<p>When the test starts, <code class="docutils literal"><span class="pre">fdbserver</span></code> needs to find the shared object to load. The name of this shared object has to be provided.</p>
-<p>For Java, we provide an implementation in <code class="docutils literal"><span class="pre">libjava_workloads.so</span></code> which can be built out of the sources. The tester will look
-for the key <code class="docutils literal"><span class="pre">libraryName</span></code> in the test file which should be the name of the library without extension and without the <code class="docutils literal"><span class="pre">lib</span></code>
-prefix (so <code class="docutils literal"><span class="pre">java_workloads</span></code> if you want to write a Java workload).</p>
-<p>By default, the process will look for the library in the directory <code class="docutils literal"><span class="pre">../shared/foundationdb/</span></code> relative to the location of the
-<code class="docutils literal"><span class="pre">fdbserver</span></code> binary. If the library is somewhere else on the system, one can provide the absolute path to the library (only
-the folder, not the file name) in the test file with the <code class="docutils literal"><span class="pre">libraryPath</span></code> option.</p>
-</div>
-<div class="section" id="implementing-a-c-workload">
+<p>When the test starts, <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> needs to find the shared object to load. The name of this shared object has to be provided.</p>
+<p>For Java, we provide an implementation in <code class="docutils literal notranslate"><span class="pre">libjava_workloads.so</span></code> which can be built out of the sources. The tester will look
+for the key <code class="docutils literal notranslate"><span class="pre">libraryName</span></code> in the test file which should be the name of the library without extension and without the <code class="docutils literal notranslate"><span class="pre">lib</span></code>
+prefix (so <code class="docutils literal notranslate"><span class="pre">java_workloads</span></code> if you want to write a Java workload).</p>
+<p>By default, the process will look for the library in the directory <code class="docutils literal notranslate"><span class="pre">../shared/foundationdb/</span></code> relative to the location of the
+<code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> binary. If the library is somewhere else on the system, one can provide the absolute path to the library (only
+the folder, not the file name) in the test file with the <code class="docutils literal notranslate"><span class="pre">libraryPath</span></code> option.</p>
+</section>
+<section id="implementing-a-c-workload">
 <h2>Implementing a C++ Workload</h2>
 <p>In order to implement a workload, one has to build a shared library that links against the fdb client library. This library has to
-exppse a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type <code class="docutils literal"><span class="pre">FDBWorkloadFactory</span></code>.
-This mechanism allows the other to implement as many workloads within one library as she wants. To do this the pure virtual classes
-<code class="docutils literal"><span class="pre">FDBWorkloadFactory</span></code> and <code class="docutils literal"><span class="pre">FDBWorkload</span></code> have to be implemented.</p>
-<dl class="function">
-<dt id="_CPPv215workloadFactoryP9FDBLogger">
-<span id="workloadFactory__FDBLoggerP"></span>FDBWorkloadFactory *<code class="descclassname"></code><code class="descname">workloadFactory</code><span class="sig-paren">(</span>FDBLogger *<span class="sig-paren">)</span><br /></dt>
-<dd><p>This function has to be defined within the shared library and will be called by <code class="docutils literal"><span class="pre">fdbserver</span></code> for looking up a specific workload.
-<code class="docutils literal"><span class="pre">FDBLogger</span></code> will be passed and is guaranteed to survive for the lifetime of the process. This class can be used to write to the
-FoundationDB traces. Logging anything with severity <code class="docutils literal"><span class="pre">FDBSeverity::Error</span></code> will result in a hard test failure. This function needs
-to have c-linkage, so define it in a <code class="docutils literal"><span class="pre">extern</span> <span class="pre">&quot;C&quot;</span></code> block.</p>
+expose a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type <code class="docutils literal notranslate"><span class="pre">FDBWorkloadFactory</span></code>.
+This mechanism allows the author to implement as many workloads within one library as she wants. To do this the pure virtual classes
+<code class="docutils literal notranslate"><span class="pre">FDBWorkloadFactory</span></code> and <code class="docutils literal notranslate"><span class="pre">FDBWorkload</span></code> have to be implemented.</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv415workloadFactoryP9FDBLogger">
+<span id="_CPPv315workloadFactoryP9FDBLogger"></span><span id="_CPPv215workloadFactoryP9FDBLogger"></span><span id="workloadFactory__FDBLoggerP"></span><span class="n"><span class="pre">FDBWorkloadFactory</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">workloadFactory</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">FDBLogger</span></span><span class="p"><span class="pre">*</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>This function has to be defined within the shared library and will be called by <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> for looking up a specific workload.
+<code class="docutils literal notranslate"><span class="pre">FDBLogger</span></code> will be passed and is guaranteed to survive for the lifetime of the process. This class can be used to write to the
+FoundationDB traces. Logging anything with severity <code class="docutils literal notranslate"><span class="pre">FDBSeverity::Error</span></code> will result in a hard test failure. This function needs
+to have c-linkage, so define it in a <code class="docutils literal notranslate"><span class="pre">extern</span> <span class="pre">&quot;C&quot;</span></code> block.</p>
 </dd></dl>
 
-<dl class="function">
-<dt id="_CPPv2N11FDBWorkload6createERKNSt6stringE">
-<span id="FDBWorkload::create__ssCR"></span>std::shared_ptr&lt;FDBWorkload&gt; <code class="descclassname">FDBWorkload::</code><code class="descname">create</code><span class="sig-paren">(</span><em class="property">const</em> std::string &amp;<em>name</em><span class="sig-paren">)</span><br /></dt>
-<dd><p>This is the only method to be implemented in <code class="docutils literal"><span class="pre">FDBWorkloadFactory</span></code>. If the test file contains a key-value pair <code class="docutils literal"><span class="pre">workloadName</span></code>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N11FDBWorkload6createERKNSt6stringE">
+<span id="_CPPv3N11FDBWorkload6createERKNSt6stringE"></span><span id="_CPPv2N11FDBWorkload6createERKNSt6stringE"></span><span id="FDBWorkload::create__ssCR"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">shared_ptr</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">create</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">string</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">name</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>This is the only method to be implemented in <code class="docutils literal notranslate"><span class="pre">FDBWorkloadFactory</span></code>. If the test file contains a key-value pair <code class="docutils literal notranslate"><span class="pre">workloadName</span></code>
 the value will be passed to this method (empty string otherwise). This way, a library author can implement many workloads in one
 library and use the test file to chose which one to run (or run multiple workloads either concurrently or serially).</p>
 </dd></dl>
 
-<dl class="function">
-<dt id="_CPPv2NK11FDBWorkload11descriptionEv">
-<span id="FDBWorkload::descriptionC"></span>std::string <code class="descclassname">FDBWorkload::</code><code class="descname">description</code><span class="sig-paren">(</span><span class="sig-paren">)</span> <em class="property">const</em><br /></dt>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK11FDBWorkload11descriptionEv">
+<span id="_CPPv3NK11FDBWorkload11descriptionEv"></span><span id="_CPPv2NK11FDBWorkload11descriptionEv"></span><span id="FDBWorkload::descriptionC"></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">string</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">description</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><br /></dt>
 <dd><p>This method has to return the name of the workload. This can be a static name and is primarily used for tracing.</p>
 </dd></dl>
 
-<dl class="function">
-<dt id="_CPPv2N11FDBWorkload4initEP18FDBWorkloadContext">
-<span id="FDBWorkload::init__FDBWorkloadContextP"></span>bool <code class="descclassname">FDBWorkload::</code><code class="descname">init</code><span class="sig-paren">(</span>FDBWorkloadContext *<em>context</em><span class="sig-paren">)</span><br /></dt>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N11FDBWorkload4initEP18FDBWorkloadContext">
+<span id="_CPPv3N11FDBWorkload4initEP18FDBWorkloadContext"></span><span id="_CPPv2N11FDBWorkload4initEP18FDBWorkloadContext"></span><span id="FDBWorkload::init__FDBWorkloadContextP"></span><span class="kt"><span class="pre">bool</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">init</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">FDBWorkloadContext</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">context</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>Right after initialization</p>
 </dd></dl>
 
-<dl class="function">
-<dt id="_CPPv2N11FDBWorkload5setupEP11FDBDatabase14GenericPromiseIbE">
-<span id="FDBWorkload::setup__FDBDatabaseP.GenericPromise:b:"></span>void <code class="descclassname">FDBWorkload::</code><code class="descname">setup</code><span class="sig-paren">(</span>FDBDatabase *<em>db</em>, GenericPromise&lt;bool&gt; <em>done</em><span class="sig-paren">)</span><br /></dt>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N11FDBWorkload5setupEP11FDBDatabase14GenericPromiseIbE">
+<span id="_CPPv3N11FDBWorkload5setupEP11FDBDatabase14GenericPromiseIbE"></span><span id="_CPPv2N11FDBWorkload5setupEP11FDBDatabase14GenericPromiseIbE"></span><span id="FDBWorkload::setup__FDBDatabaseP.GenericPromise:b:"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">setup</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">FDBDatabase</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">db</span></span>, <span class="n"><span class="pre">GenericPromise</span></span><span class="p"><span class="pre">&lt;</span></span><span class="kt"><span class="pre">bool</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">done</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>This method will be called by the tester during the setup phase. It should be used to populate the database.</p>
 </dd></dl>
 
-<dl class="function">
-<dt id="_CPPv2N11FDBWorkload5startEP11FDBDatabase14GenericPromiseIbE">
-<span id="FDBWorkload::start__FDBDatabaseP.GenericPromise:b:"></span>void <code class="descclassname">FDBWorkload::</code><code class="descname">start</code><span class="sig-paren">(</span>FDBDatabase *<em>db</em>, GenericPromise&lt;bool&gt; <em>done</em><span class="sig-paren">)</span><br /></dt>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N11FDBWorkload5startEP11FDBDatabase14GenericPromiseIbE">
+<span id="_CPPv3N11FDBWorkload5startEP11FDBDatabase14GenericPromiseIbE"></span><span id="_CPPv2N11FDBWorkload5startEP11FDBDatabase14GenericPromiseIbE"></span><span id="FDBWorkload::start__FDBDatabaseP.GenericPromise:b:"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">start</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">FDBDatabase</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">db</span></span>, <span class="n"><span class="pre">GenericPromise</span></span><span class="p"><span class="pre">&lt;</span></span><span class="kt"><span class="pre">bool</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">done</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>This method should run the actual test.</p>
 </dd></dl>
 
-<dl class="function">
-<dt id="_CPPv2N11FDBWorkload5checkEP11FDBDatabase14GenericPromiseIbE">
-<span id="FDBWorkload::check__FDBDatabaseP.GenericPromise:b:"></span>void <code class="descclassname">FDBWorkload::</code><code class="descname">check</code><span class="sig-paren">(</span>FDBDatabase *<em>db</em>, GenericPromise&lt;bool&gt; <em>done</em><span class="sig-paren">)</span><br /></dt>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N11FDBWorkload5checkEP11FDBDatabase14GenericPromiseIbE">
+<span id="_CPPv3N11FDBWorkload5checkEP11FDBDatabase14GenericPromiseIbE"></span><span id="_CPPv2N11FDBWorkload5checkEP11FDBDatabase14GenericPromiseIbE"></span><span id="FDBWorkload::check__FDBDatabaseP.GenericPromise:b:"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">check</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">FDBDatabase</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">db</span></span>, <span class="n"><span class="pre">GenericPromise</span></span><span class="p"><span class="pre">&lt;</span></span><span class="kt"><span class="pre">bool</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">done</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>When the tester completes, this method will be called. A workload should run any consistency/correctness tests
 during this phase.</p>
 </dd></dl>
 
-<dl class="function">
-<dt id="_CPPv2NK11FDBWorkload10getMetricsERNSt6vectorI13FDBPerfMetricEE">
-<span id="FDBWorkload::getMetrics__std::vector:FDBPerfMetric:RC"></span>void <code class="descclassname">FDBWorkload::</code><code class="descname">getMetrics</code><span class="sig-paren">(</span>std::vector&lt;FDBPerfMetric&gt; &amp;<em>out</em><span class="sig-paren">)</span> <em class="property">const</em><br /></dt>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK11FDBWorkload10getMetricsERNSt6vectorI13FDBPerfMetricEE">
+<span id="_CPPv3NK11FDBWorkload10getMetricsERNSt6vectorI13FDBPerfMetricEE"></span><span id="_CPPv2NK11FDBWorkload10getMetricsERNSt6vectorI13FDBPerfMetricEE"></span><span id="FDBWorkload::getMetrics__std::vector:FDBPerfMetric:RC"></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-prename descclassname"><span class="n"><span class="pre">FDBWorkload</span></span><span class="p"><span class="pre">::</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">getMetrics</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">&lt;</span></span><span class="n"><span class="pre">FDBPerfMetric</span></span><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">out</span></span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><br /></dt>
 <dd><p>If a workload collects metrics (like latencies or throughput numbers), these should be reported back here.
 The multitester (or test orchestrator) will collect all metrics from all test clients and it will aggregate them.</p>
 </dd></dl>
 
-</div>
-<div class="section" id="implementing-a-java-workload">
+</section>
+<section id="implementing-a-java-workload">
 <h2>Implementing a Java Workload</h2>
-<p>In order to implement your own workload in Java you can simply create an implementation of the abstract class <code class="docutils literal"><span class="pre">AbstractWorkload</span></code>.
+<p>In order to implement your own workload in Java you can simply create an implementation of the abstract class <code class="docutils literal notranslate"><span class="pre">AbstractWorkload</span></code>.
 A minimal implementation will look like this:</p>
-<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nn">my.package</span><span class="p">;</span><span class="w"></span>
+<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nn">my.package</span><span class="p">;</span><span class="w"></span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.Promise</span><span class="p">;</span><span class="w"></span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.AbstractWorkload</span><span class="p">;</span><span class="w"></span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.WorkloadContext</span><span class="p">;</span><span class="w"></span>
@@ -356,62 +491,62 @@ A minimal implementation will look like this:</p>
 </div>
 <p>The lifecycle of a test will look like this:</p>
 <ol class="arabic simple">
-<li>All testers will create an instance of the <code class="docutils literal"><span class="pre">AbstractWorkload</span></code> implementation.</li>
-<li>All testers will (in parallel but not guaranteed exactly at the same time) call
-<code class="docutils literal"><span class="pre">setup</span></code> and they will wait for all of them to finish. This phase can be used to
-pre-populate data.</li>
-<li>All tester will then call start (again, in parallel) and wait for all of them to
-finish.</li>
-<li>All testers will then call <code class="docutils literal"><span class="pre">check</span></code> on all testers and use the returned boolean
-to determine whether the test succeeded.</li>
+<li><p>All testers will create an instance of the <code class="docutils literal notranslate"><span class="pre">AbstractWorkload</span></code> implementation.</p></li>
+<li><p>All testers will (in parallel but not guaranteed exactly at the same time) call
+<code class="docutils literal notranslate"><span class="pre">setup</span></code> and they will wait for all of them to finish. This phase can be used to
+pre-populate data.</p></li>
+<li><p>All tester will then call start (again, in parallel) and wait for all of them to
+finish.</p></li>
+<li><p>All testers will then call <code class="docutils literal notranslate"><span class="pre">check</span></code> on all testers and use the returned boolean
+to determine whether the test succeeded.</p></li>
 </ol>
-<p>All these methods take a <code class="docutils literal"><span class="pre">Database</span></code> object as an argument. This object can be used
+<p>All these methods take a <code class="docutils literal notranslate"><span class="pre">Database</span></code> object as an argument. This object can be used
 to create and execute transactions against the cluster.</p>
 <p>When implementing workloads, an author has to follow these rules:</p>
 <ul class="simple">
-<li>To write tracing to the trace-files one should use <code class="docutils literal"><span class="pre">AbstractWorkload.log</span></code>. This
+<li><p>To write tracing to the trace-files one should use <code class="docutils literal notranslate"><span class="pre">AbstractWorkload.log</span></code>. This
 Method takes three arguments: an integer for severity (5 means debug, 10 means log,
 20 means warning, 30 means warn always, and 40 is a severe error). If any tester
-logs something of severity 40, the test run is considered to have failed.</li>
-<li>In order to increase throughput on the cluster, an author might want to spawn several
-threads. However, threads <em>MUST</em> only be spawn through the <code class="docutils literal"><span class="pre">Executor</span></code> instance one
-can get from <code class="docutils literal"><span class="pre">AbstractWorkload.getExecutor()</span></code>. Otherwise, a simulation test will
+logs something of severity 40, the test run is considered to have failed.</p></li>
+<li><p>In order to increase throughput on the cluster, an author might want to spawn several
+threads. However, threads <em>MUST</em> only be spawn through the <code class="docutils literal notranslate"><span class="pre">Executor</span></code> instance one
+can get from <code class="docutils literal notranslate"><span class="pre">AbstractWorkload.getExecutor()</span></code>. Otherwise, a simulation test will
 probably segfault. The reason for this is that we need to keep track of which simulated
-machine a thread corresponds to internally.</li>
+machine a thread corresponds to internally.</p></li>
 </ul>
-<p>Within a workload you have access to the <code class="docutils literal"><span class="pre">WorkloadContext</span></code> which provides additional
+<p>Within a workload you have access to the <code class="docutils literal notranslate"><span class="pre">WorkloadContext</span></code> which provides additional
 information about the current execution environment. The context can be accessed through
-<code class="docutils literal"><span class="pre">this.context</span></code> and provides the following methods:</p>
+<code class="docutils literal notranslate"><span class="pre">this.context</span></code> and provides the following methods:</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">String</span> <span class="pre">getOption(String</span> <span class="pre">name,</span> <span class="pre">String</span> <span class="pre">defaultValue)</span></code>. A user can provide parameters to workloads
+<li><p><code class="docutils literal notranslate"><span class="pre">String</span> <span class="pre">getOption(String</span> <span class="pre">name,</span> <span class="pre">String</span> <span class="pre">defaultValue)</span></code>. A user can provide parameters to workloads
 through a configuration file (explained further down). These parameters are provided to
-all clients through the context and can be accessed with this method.</li>
-<li><code class="docutils literal"><span class="pre">int</span> <span class="pre">getClientId()</span></code> and <code class="docutils literal"><span class="pre">int</span> <span class="pre">getClientCount()</span></code>. An author can determine how many
+all clients through the context and can be accessed with this method.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">getClientId()</span></code> and <code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">getClientCount()</span></code>. An author can determine how many
 clients are running in the cluster and each of those will get a globally unique ID (a number
 between 0 and clientCount - 1). This is useful for example if you want to generate transactions
-that are guaranteed to not conflict with transactions from other clients.</li>
-<li><code class="docutils literal"><span class="pre">int</span> <span class="pre">getSharedRandomNumber()</span></code>. At startup a random number will be generated. This will allow for
-generating the same random numbers across several machines if this number is used as a seed.</li>
+that are guaranteed to not conflict with transactions from other clients.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">getSharedRandomNumber()</span></code>. At startup a random number will be generated. This will allow for
+generating the same random numbers across several machines if this number is used as a seed.</p></li>
 </ul>
-</div>
-<div class="section" id="running-a-workload-in-the-simulator">
+</section>
+<section id="running-a-workload-in-the-simulator">
 <h2>Running a Workload in the Simulator</h2>
-<p>We&#8217;ll first walk how one can run a workload in a simulator. FoundationDB comes already with a large number
-of workloads. But some of them can&#8217;t be run in simulation while other don&#8217;t work on a real cluster. Most
+<p>We’ll first walk how one can run a workload in a simulator. FoundationDB comes already with a large number
+of workloads. But some of them can’t be run in simulation while other don’t work on a real cluster. Most
 will work on both though. To look for examples how these can be ran, you can find configuration files in
-the <code class="docutils literal"><span class="pre">tests</span></code> directory in the FoundationDB source tree.</p>
+the <code class="docutils literal notranslate"><span class="pre">tests</span></code> directory in the FoundationDB source tree.</p>
 <p>We will now go through an example how you can write a relatively complex test and run it in the simulator.
 Writing and running tests in the simulator is a simple two-step process.</p>
 <ol class="arabic simple">
-<li>Write the test.</li>
-<li>Run <code class="docutils literal"><span class="pre">fdbserver</span></code> in simulation mode and provide it with the test file.</li>
+<li><p>Write the test.</p></li>
+<li><p>Run <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> in simulation mode and provide it with the test file.</p></li>
 </ol>
-<div class="section" id="write-the-test">
+<section id="write-the-test">
 <h3>Write the Test</h3>
 <p>A workload is not a test. A test is a simple test file that tells the test orchestrator which workloads it
 should run and in which order. Additionally one can provide parameters to workloads through this file.</p>
 <p>A test file might look like this:</p>
-<div class="highlight-none"><div class="highlight"><pre><span></span>testTitle=MyTest
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>testTitle=MyTest
   testName=External
   libraryName=java_workloads
   workloadName=my.package.MinimalWorkload
@@ -438,54 +573,54 @@ testTitle=AnotherTest
 </div>
 <p>This test will do the following:</p>
 <ol class="arabic simple">
-<li>First it will run <code class="docutils literal"><span class="pre">MinimalWorkload</span></code> without any parameter.</li>
-<li>After 5.0 seconds the simulator will reboot 3 random machines (this is what Attrition does
+<li><p>First it will run <code class="docutils literal notranslate"><span class="pre">MinimalWorkload</span></code> without any parameter.</p></li>
+<li><p>After 5.0 seconds the simulator will reboot 3 random machines (this is what Attrition does
 and this workload is provided by FoundationDB. This is one of the few workloads that only
-work in the simulator).</li>
-<li>When all workloads are finished, it will run <code class="docutils literal"><span class="pre">MinimalWorkload</span></code>
-again. This time it will have the option <code class="docutils literal"><span class="pre">someOption</span></code> set to
-<code class="docutils literal"><span class="pre">foo</span></code>. Additionally it will run <code class="docutils literal"><span class="pre">AnotherWorkload</span></code> in parallel.</li>
+work in the simulator).</p></li>
+<li><p>When all workloads are finished, it will run <code class="docutils literal notranslate"><span class="pre">MinimalWorkload</span></code>
+again. This time it will have the option <code class="docutils literal notranslate"><span class="pre">someOption</span></code> set to
+<code class="docutils literal notranslate"><span class="pre">foo</span></code>. Additionally it will run <code class="docutils literal notranslate"><span class="pre">AnotherWorkload</span></code> in parallel.</p></li>
 </ol>
-<div class="section" id="how-to-set-the-class-path-correctly">
+<section id="how-to-set-the-class-path-correctly">
 <h4>How to set the Class Path correctly</h4>
 <p>As you can see from above example, we can set the classpath through two different mechanisms. However, one has
-to be careful as they can&#8217;t be used interchangeably.</p>
+to be careful as they can’t be used interchangeably.</p>
 <ul class="simple">
-<li>You can set a class path through the JVM argument <code class="docutils literal"><span class="pre">-Djava.class.path=...</span></code>. This is how you have to pass the
+<li><p>You can set a class path through the JVM argument <code class="docutils literal notranslate"><span class="pre">-Djava.class.path=...</span></code>. This is how you have to pass the
 path to the FoundationDB client library (as the client library is needed during the initialization phase). However,
 only the first specified section will have any effect as the other Workloads will run in the same VM (and arguments,
-by nature, can only be passed once).</li>
-<li>The <code class="docutils literal"><span class="pre">classPath</span></code> option. This option will add all paths (directories or JAR-files) to the classPath of the JVM
+by nature, can only be passed once).</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">classPath</span></code> option. This option will add all paths (directories or JAR-files) to the classPath of the JVM
 while it is running. Not being able to add the path will result in a test failure. This is useful to add different
 dependencies to different workloads. A path can appear more than once across sections. However, they must not
-conflict with each other as we never remove something from the classpath.</li>
+conflict with each other as we never remove something from the classpath.</p></li>
 </ul>
-</div>
-</div>
-<div class="section" id="run-the-simulator">
+</section>
+</section>
+<section id="run-the-simulator">
 <h3>Run the simulator</h3>
-<p>This step is very simple. You can simply run <code class="docutils literal"><span class="pre">fdbserver</span></code> with role simulator
-and pass the test with <code class="docutils literal"><span class="pre">-f</span></code>:</p>
-<div class="highlight-sh"><div class="highlight"><pre><span></span>fdbserver -r simulation -f testfile.txt
+<p>This step is very simple. You can simply run <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> with role simulator
+and pass the test with <code class="docutils literal notranslate"><span class="pre">-f</span></code>:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>fdbserver -r simulation -f testfile.txt
 </pre></div>
 </div>
-</div>
-</div>
-<div class="section" id="running-a-workload-on-an-actual-cluster">
+</section>
+</section>
+<section id="running-a-workload-on-an-actual-cluster">
 <h2>Running a Workload on an actual Cluster</h2>
 <p>Running a workload on a cluster works basically the smae way. However, one must
 actually setup a cluster first. This cluster must run between one and many server
 processes with the class test. So above 2-step process becomes a bit more complex:</p>
 <ol class="arabic simple">
-<li>Write the test (same as above).</li>
-<li>Set up a cluster with as many test clients as you want.</li>
-<li>Run the orchestrator to actually execute the test.</li>
+<li><p>Write the test (same as above).</p></li>
+<li><p>Set up a cluster with as many test clients as you want.</p></li>
+<li><p>Run the orchestrator to actually execute the test.</p></li>
 </ol>
 <p>Step 1. is explained further up. For step 2., please refer to the general FoundationDB
 configuration. The main difference to a normal FoundationDB cluster is that some processes
-must have a test class assigned to them. This can be done in the <code class="docutils literal"><span class="pre">foundationdb.conf</span></code>. For
+must have a test class assigned to them. This can be done in the <code class="docutils literal notranslate"><span class="pre">foundationdb.conf</span></code>. For
 example this file would create a server with 8 processes of which 4 would act as test clients.</p>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[fdbmonitor]</span><span class="w"></span>
+<div class="highlight-ini notranslate"><div class="highlight"><pre><span></span><span class="k">[fdbmonitor]</span><span class="w"></span>
 <span class="na">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
 <span class="na">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
 
@@ -515,14 +650,352 @@ example this file would create a server with 8 processes of which 4 would act as
 <span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
 </pre></div>
 </div>
-<p>Running the actual test can be done with <code class="docutils literal"><span class="pre">fdbserver</span></code> as well. For this you can call the process
-with the <code class="docutils literal"><span class="pre">multitest</span></code> role:</p>
-<div class="highlight-sh"><div class="highlight"><pre><span></span>fdbserver -r multitest -f testfile.txt
+<p>Running the actual test can be done with <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> as well. For this you can call the process
+with the <code class="docutils literal notranslate"><span class="pre">multitest</span></code> role:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>fdbserver -r multitest -f testfile.txt
 </pre></div>
 </div>
 <p>This command will block until all tests are completed.</p>
+</section>
+</section>
+<section id="api-tester">
+<h1>API Tester</h1>
+<section id="introduction">
+<h2>Introduction</h2>
+<p>API tester is a framework for implementing end-to-end tests of FDB C API, i.e. testing the API on a real
+FDB cluster through all layers of the FDB client. Its executable is <code class="docutils literal notranslate"><span class="pre">fdb_c_api_tester</span></code>, and the source
+code is located in <code class="docutils literal notranslate"><span class="pre">bindings/c/test/apitester</span></code>. The structure of API Tests is similar to that of the
+Simulation Tests. The tests are implemented as workloads using FDB API, which are all built into the
+<code class="docutils literal notranslate"><span class="pre">fdb_c_api_tester</span></code>. A concrete test configuration is defined as a TOML file, which specifies the
+combination of workloads to be executed by the test together with their parameters. The test can be then
+executed by passing the TOML file as a parameter to <code class="docutils literal notranslate"><span class="pre">fdb_c_api_tester</span></code>.</p>
+<p>Since simulation tests rely on the actor model to execute the tests deterministically in single-threaded
+mode, they are not suitable for testing various multi-threaded aspects of the FDB client. End-to-end API
+tests complement the simulation tests by testing the FDB Client layers above the single-threaded Native
+Client.</p>
+<ul class="simple">
+<li><p>The specific testing goals of the end-to-end tests are:</p></li>
+<li><p>Check functional correctness of the Multi-Version Client (MVC) and Thread-Safe Client</p></li>
+<li><p>Detecting race conditions. They can be caused by accessing the state of the Native Client from wrong
+threads or introducing other shared state without proper synchronization</p></li>
+<li><p>Detecting memory management errors. Thread-safe reference counting must be used where necessary. MVC
+works with multiple client libraries. Memory allocated by one client library must be also deallocated
+by the same library.</p></li>
+<li><p>Maintaining interoperability with other client versions.  The client functionality is made available
+depending on the selected API version. The API changes are correctly adapted.</p></li>
+<li><p>Client API behaves correctly in case of cluster upgrades. Database and transaction state is correctly
+migrated to the upgraded connections. Pending operations are canceled and successfully retried on the
+upgraded connections.</p></li>
+</ul>
+</section>
+<section id="implementing-a-workload">
+<h2>Implementing a Workload</h2>
+<p>Each workload is declared as a direct or indirect subclass of <code class="docutils literal notranslate"><span class="pre">WorkloadBase</span></code> implementing a constructor
+with <code class="docutils literal notranslate"><span class="pre">WorkloadConfig</span></code> as a parameter and the method <code class="docutils literal notranslate"><span class="pre">start()</span></code>, which defines the entry point of the
+workload.</p>
+<p><code class="docutils literal notranslate"><span class="pre">WorkloadBase</span></code> provides a set of methods that serve as building blocks for implementation of a workload:</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv415execTransaction5start4cont11failOnError">
+<span id="_CPPv315execTransaction5start4cont11failOnError"></span><span id="_CPPv215execTransaction5start4cont11failOnError"></span><span id="execTransaction__start.cont.failOnError"></span><span class="sig-name descname"><span class="n"><span class="pre">execTransaction</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">start</span></span>, <span class="n"><span class="pre">cont</span></span>, <span class="n"><span class="pre">failOnError</span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="k"><span class="pre">true</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>creates and executes an FDB transaction. Here <code class="docutils literal notranslate"><span class="pre">start</span></code> is a function that takes a transaction context
+as parameter and implements the starting point of the transaction, and <code class="docutils literal notranslate"><span class="pre">cont</span></code> is a function implementing
+a continuation to be executed after finishing the transaction execution. Transactions are automatically
+retried on retryable errors. Transactions are retried by calling the <code class="docutils literal notranslate"><span class="pre">start</span></code> function again. In case
+of a fatal error, the entire workload is considered as failed unless <code class="docutils literal notranslate"><span class="pre">failOnError</span></code> is set to <code class="docutils literal notranslate"><span class="pre">false</span></code>.</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv48schedule4task">
+<span id="_CPPv38schedule4task"></span><span id="_CPPv28schedule4task"></span><span id="schedule__task"></span><span class="sig-name descname"><span class="n"><span class="pre">schedule</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">task</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>schedules a task for asynchronous execution. It is usually used in the continuations to schedule
+the next step of the workload.</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv44info3msg">
+<span id="_CPPv34info3msg"></span><span id="_CPPv24info3msg"></span><span id="info__msg"></span><span class="sig-name descname"><span class="n"><span class="pre">info</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">msg</span></span><span class="sig-paren">)</span><br /></dt>
+<dt class="sig sig-object cpp" id="_CPPv45error3msg">
+<span id="_CPPv35error3msg"></span><span id="_CPPv25error3msg"></span><span id="error__msg"></span><span class="sig-name descname"><span class="n"><span class="pre">error</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">msg</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>are used for logging a message with a tag identifying the workload. Issuing an error message marks
+the workload as failed.</p>
+</dd></dl>
+
+<p>The transaction context provides methods for implementation of the transaction logics:</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv42txv">
+<span id="_CPPv32txv"></span><span id="_CPPv22txv"></span><span id="tx"></span><span class="sig-name descname"><span class="n"><span class="pre">tx</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><br /></dt>
+<dd><p>the reference to the FDB transaction object</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv413continueAfter6future4cont12retryOnError">
+<span id="_CPPv313continueAfter6future4cont12retryOnError"></span><span id="_CPPv213continueAfter6future4cont12retryOnError"></span><span id="continueAfter__future.cont.retryOnError"></span><span class="sig-name descname"><span class="n"><span class="pre">continueAfter</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">future</span></span>, <span class="n"><span class="pre">cont</span></span>, <span class="n"><span class="pre">retryOnError</span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="k"><span class="pre">true</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>set a continuation to be executed when the future is ready. The <code class="docutils literal notranslate"><span class="pre">retryOnError</span></code> flag controls whether
+the transaction should be automatically retried in case the future results in a retriable error.</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv416continueAfterAll7futures4cont">
+<span id="_CPPv316continueAfterAll7futures4cont"></span><span id="_CPPv216continueAfterAll7futures4cont"></span><span id="continueAfterAll__futures.cont"></span><span class="sig-name descname"><span class="n"><span class="pre">continueAfterAll</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">futures</span></span>, <span class="n"><span class="pre">cont</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>takes a vector of futures and sets a continuation to be executed when all of the futures get ready.
+The transaction is retried if at least one of the futures results in an error. This method is useful
+for handling multiple concurrent reads.</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv46commitv">
+<span id="_CPPv36commitv"></span><span id="_CPPv26commitv"></span><span id="commit"></span><span class="sig-name descname"><span class="n"><span class="pre">commit</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><br /></dt>
+<dd><p>commit and finish the transaction. If the commit is successful, the execution proceeds to the
+continuation of <code class="docutils literal notranslate"><span class="pre">execTransaction()</span></code>. In case of a retriable error the transaction is
+automatically retried. A fatal error results in a failure of the workoad.</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv44donev">
+<span id="_CPPv34donev"></span><span id="_CPPv24donev"></span><span id="done"></span><span class="sig-name descname"><span class="n"><span class="pre">done</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><br /></dt>
+<dd><p>finish the transaction without committing. This method should be used to finish read transactions.
+The transaction gets destroyed and execution proceeds to the continuation of <code class="docutils literal notranslate"><span class="pre">execTransaction()</span></code>.
+Each transaction must be finished either by <code class="docutils literal notranslate"><span class="pre">commit()</span></code> or <code class="docutils literal notranslate"><span class="pre">done()</span></code>, because otherwise
+the framework considers that the transaction is still being executed, so it won’t destroy it and
+won’t call the continuation.</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv47onError3err">
+<span id="_CPPv37onError3err"></span><span id="_CPPv27onError3err"></span><span id="onError__err"></span><span class="sig-name descname"><span class="n"><span class="pre">onError</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">err</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Handle an error: restart the transaction in case of a retriable error, otherwise fail the workload.
+This method is typically used in the continuation of <code class="docutils literal notranslate"><span class="pre">continueAfter</span></code> called with
+<code class="docutils literal notranslate"><span class="pre">retryOnError=false</span></code> as a fallback to the default error handling.</p>
+</dd></dl>
+
+<p>A workload execution ends automatically when it is marked as failed or its last continuation does not
+schedule any new task or transaction.</p>
+<p>The workload class should be defined in the namespace FdbApiTester. The file name convention is
+<code class="docutils literal notranslate"><span class="pre">Tester{Name}Workload.cpp</span></code> so that we distinguish them from the source files of simulation workloads.</p>
+</section>
+<section id="basic-workload-example">
+<h2>Basic Workload Example</h2>
+<p>The code below implements a workload that consists of only two transactions. The first one sets a
+randomly generated key to a randomly generated value, and the second one reads the key and checks if
+the returned value matches the written one.</p>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;TesterWorkload.h&quot;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;TesterUtil.h&quot;</span><span class="cp"></span>
+
+<span class="k">namespace</span><span class="w"> </span><span class="nn">FdbApiTester</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SetAndGetWorkload</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">public</span><span class="o">:</span><span class="w"></span>
+<span class="w">	</span><span class="n">fdb</span><span class="o">::</span><span class="n">Key</span><span class="w"> </span><span class="n">keyPrefix</span><span class="p">;</span><span class="w"></span>
+<span class="w">	</span><span class="n">Random</span><span class="w"> </span><span class="n">random</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">	</span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">		</span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toBytesRef</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">&quot;{}/&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">workloadId</span><span class="p">));</span><span class="w"></span>
+<span class="w">	</span><span class="p">}</span><span class="w"></span>
+
+<span class="w">	</span><span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGet</span><span class="p">(</span><span class="n">NO_OP_TASK</span><span class="p">);</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">	</span><span class="kt">void</span><span class="w"> </span><span class="n">setAndGet</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">		</span><span class="n">fdb</span><span class="o">::</span><span class="n">Key</span><span class="w"> </span><span class="n">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">random</span><span class="p">.</span><span class="n">randomByteStringLowerCase</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span><span class="w"></span>
+<span class="w">		</span><span class="n">fdb</span><span class="o">::</span><span class="n">Value</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">random</span><span class="p">.</span><span class="n">randomByteStringLowerCase</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">1000</span><span class="p">);</span><span class="w"></span>
+<span class="w">		</span><span class="n">execTransaction</span><span class="p">(</span><span class="w"></span>
+<span class="w">		    </span><span class="p">[</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">](</span><span class="k">auto</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">			    </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">tx</span><span class="p">().</span><span class="n">set</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">);</span><span class="w"></span>
+<span class="w">			    </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">commit</span><span class="p">();</span><span class="w"></span>
+<span class="w">		    </span><span class="p">},</span><span class="w"></span>
+<span class="w">		    </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">cont</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">			    </span><span class="n">execTransaction</span><span class="p">(</span><span class="w"></span>
+<span class="w">			        </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">](</span><span class="k">auto</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">				        </span><span class="k">auto</span><span class="w"> </span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">tx</span><span class="p">().</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span><span class="w"></span>
+<span class="w">				        </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">continueAfter</span><span class="p">(</span><span class="n">future</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="n">future</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">					        </span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="n">fdb</span><span class="o">::</span><span class="n">Value</span><span class="o">&gt;</span><span class="w"> </span><span class="n">res</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">copyValueRef</span><span class="p">(</span><span class="n">future</span><span class="p">.</span><span class="n">get</span><span class="p">());</span><span class="w"></span>
+<span class="w">					        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">res</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">						        </span><span class="n">error</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="w"></span>
+<span class="w">						            </span><span class="s">&quot;expected: {} actual: {}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toCharsRef</span><span class="p">(</span><span class="n">value</span><span class="p">),</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toCharsRef</span><span class="p">(</span><span class="n">res</span><span class="p">.</span><span class="n">value</span><span class="p">())));</span><span class="w"></span>
+<span class="w">					        </span><span class="p">}</span><span class="w"></span>
+<span class="w">					        </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">done</span><span class="p">();</span><span class="w"></span>
+<span class="w">				        </span><span class="p">});</span><span class="w"></span>
+<span class="w">			        </span><span class="p">},</span><span class="w"></span>
+<span class="w">			        </span><span class="n">cont</span><span class="p">);</span><span class="w"></span>
+<span class="w">		    </span><span class="p">});</span><span class="w"></span>
+<span class="w">	</span><span class="p">}</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="n">WorkloadFactory</span><span class="o">&lt;</span><span class="n">SetAndGetWorkload</span><span class="o">&gt;</span><span class="w"> </span><span class="n">SetAndGetWorkloadFactory</span><span class="p">(</span><span class="s">&quot;SetAndGet&quot;</span><span class="p">);</span><span class="w"></span>
+
+<span class="p">}</span><span class="w"> </span><span class="c1">// namespace FdbApiTester</span>
+</pre></div>
 </div>
+<p>The workload is implemented in the method <code class="docutils literal notranslate"><span class="pre">setAndGet</span></code>. It generates a random key and a random value
+and executes a transaction that writes that key-value pair and commits. In the continuation of the
+first <code class="docutils literal notranslate"><span class="pre">execTransaction</span></code> call, we execute the second transaction that reads the same key. The read
+operation returns a future. So we call <code class="docutils literal notranslate"><span class="pre">continueAfter</span></code> to set a continuation for that future. In the
+continuation we check if the returned value matches the written one and finish the transaction by
+calling <code class="docutils literal notranslate"><span class="pre">ctx-&gt;done()</span></code>. After completing the second transaction we execute the continuation passed
+as parameter to the <code class="docutils literal notranslate"><span class="pre">setAndGet</span></code> method by the start method. In this case it is <code class="docutils literal notranslate"><span class="pre">NO_OP_TASK</span></code>, which
+does nothing and so finishes the workload.</p>
+<p>Finally, we declare an instance <code class="docutils literal notranslate"><span class="pre">WorkloadFactory</span></code> to register this workload with the name <code class="docutils literal notranslate"><span class="pre">SetAndGet</span></code>.</p>
+<p>Note that we use <code class="docutils literal notranslate"><span class="pre">workloadId</span></code> as a key prefix. This is necessary for isolating the key space of this
+workload, because the framework may be instructed to create multiple instances of the <code class="docutils literal notranslate"><span class="pre">SetAndGet</span></code>
+workload. If we do not isolate the key space, another workload can write a different value for the
+same key and so break the assumption of the test.</p>
+<p>The workload is implemented using the internal C++ API, implemented in <code class="docutils literal notranslate"><span class="pre">fdb_api.hpp</span></code>. It introduces
+a set of classes representing the FDB objects (transactions, futures, etc.). These classes provide C++-style
+methods wrapping FDB C API calls and automate memory management by means of reference counting.</p>
+</section>
+<section id="implementing-control-structures">
+<h2>Implementing Control Structures</h2>
+<p>Our basic workload executes just 2 transactions, but in practice we want to have workloads that generate
+multiple transactions. The following code demonstrates how we can modify our basic workload to generate
+multiple transactions in a loop.</p>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">SetAndGetWorkload</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">public</span><span class="o">:</span><span class="w"></span>
+<span class="w">   </span><span class="p">...</span><span class="w"></span>
+<span class="w">   </span><span class="kt">int</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span><span class="w"></span>
+<span class="w">   </span><span class="kt">int</span><span class="w"> </span><span class="n">iterationsLeft</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">   </span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toBytesRef</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">&quot;{}/&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">workloadId</span><span class="p">));</span><span class="w"></span>
+<span class="w">      </span><span class="n">numIterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">getIntOption</span><span class="p">(</span><span class="s">&quot;numIterations&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">1000</span><span class="p">);</span><span class="w"></span>
+<span class="w">   </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">   </span><span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="n">setAndGetLoop</span><span class="p">();</span><span class="w"></span>
+<span class="w">   </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">   </span><span class="kt">void</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">         </span><span class="k">return</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="p">}</span><span class="w"></span>
+<span class="w">      </span><span class="n">iterationsLeft</span><span class="o">--</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="n">setAndGet</span><span class="p">([</span><span class="k">this</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">();</span><span class="w"> </span><span class="p">});</span><span class="w"></span>
+<span class="w">   </span><span class="p">}</span><span class="w"></span>
+<span class="w">   </span><span class="p">...</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
 </div>
+<p>We introduce a workload parameter <code class="docutils literal notranslate"><span class="pre">numIterations</span></code> to specify the number of iterations. If not specified
+in the test configuration it defaults to 1000.</p>
+<p>The method <code class="docutils literal notranslate"><span class="pre">setAndGetLoop</span></code> implements the loop that decrements iterationsLeft counter until it reaches 0
+and each iteration calls setAndGet with a continuation that returns the execution to the loop. As you
+can see we don’t need any change in <code class="docutils literal notranslate"><span class="pre">setAndGet</span></code>, just call it with another continuation.</p>
+<p>The pattern of passing a continuation as a parameter also can be used to decompose the workload into a
+sequence of steps. For example,  we can introduce setup and cleanUp steps to our workload and modify the
+<code class="docutils literal notranslate"><span class="pre">setAndGetLoop</span></code> to make it composable with an arbitrary continuation:</p>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">setup</span><span class="p">([</span><span class="k">this</span><span class="p">](){</span><span class="w"></span>
+<span class="w">        </span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="n">setAndGetLoop</span><span class="p">([</span><span class="k">this</span><span class="p">](){</span><span class="w"></span>
+<span class="w">            </span><span class="n">cleanup</span><span class="p">(</span><span class="n">NO_OP_TASK</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="p">});</span><span class="w"></span>
+<span class="w">    </span><span class="p">});</span><span class="w"></span>
+<span class="w"> </span><span class="p">}</span><span class="w"></span>
+
+<span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">setAndGetLoop</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">schedule</span><span class="p">(</span><span class="n">cont</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="n">iterationsLeft</span><span class="o">--</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">setAndGet</span><span class="p">([</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">cont</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">(</span><span class="n">cont</span><span class="p">);</span><span class="w"> </span><span class="p">});</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="p">...</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Note that we call <code class="docutils literal notranslate"><span class="pre">schedule(cont)</span></code> in <code class="docutils literal notranslate"><span class="pre">setAndGetLoop</span></code> instead of calling the continuation directly.
+In this way we avoid keeping <code class="docutils literal notranslate"><span class="pre">setAndGetLoop</span></code> in the call stack, when executing the next step.</p>
+</section>
+<section id="subclassing-apiworkload">
+<h2>Subclassing ApiWorkload</h2>
+<p><code class="docutils literal notranslate"><span class="pre">ApiWorkload</span></code> is an abstract subclass of <code class="docutils literal notranslate"><span class="pre">WorkloadBase</span></code> that provides a framework for a typical
+implementation of API test workloads. It implements a workflow consisting of cleaning up the key space
+of the workload, populating it with newly generated data and then running a loop consisting of random
+database operations. The concrete subclasses of <code class="docutils literal notranslate"><span class="pre">ApiWorkload</span></code> are expected to override the method
+<code class="docutils literal notranslate"><span class="pre">randomOperation</span></code> with an implementation of concrete random operations.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">ApiWorkload</span></code> maintains a local key-value store that mirrors the part of the database state
+relevant to the workload. A successful database write operation should be followed by a continuation
+that performs equivalent changes in the local store, and the results of a database read operation should
+be validated against the values from the local store.</p>
+</section>
+<section id="test-configuration">
+<h2>Test Configuration</h2>
+<p>A concrete test configuration is specified by a TOML file. The file must contain one <code class="docutils literal notranslate"><span class="pre">[[test]]</span></code> section
+specifying the general settings for test execution followed by one or more <code class="docutils literal notranslate"><span class="pre">[[test.workload]]</span></code>
+configuration sessions, specifying the workloads to be executed and their parameters. The specified
+workloads are started all at once and executed concurrently.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">[[test]]</span></code> section can contain the following options:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">title</span></code>: descriptive title of the test</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">multiThreaded</span></code>: enable multi-threading (default: false)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">minFdbThreads</span></code> and <code class="docutils literal notranslate"><span class="pre">maxFdbThreads</span></code>: the number of FDB (network) threads to be randomly selected
+from the given range (default: 1-1). Used only if <code class="docutils literal notranslate"><span class="pre">multiThreaded=true</span></code>. It is also important to use
+multiple database instances to make use of the multithreading.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">minDatabases</span></code> and <code class="docutils literal notranslate"><span class="pre">maxDatabases</span></code>: the number of database instances to be randomly selected from
+the given range (default 1-1). The transactions of all workloads are randomly load-balanced over the
+pool of database instances.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">minClients</span></code> and <code class="docutils literal notranslate"><span class="pre">maxClients</span></code>: the number of clients, i.e. instances of each workload, to be
+randomly selected from the given range (default 1-8).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">minClientThreads</span></code> and <code class="docutils literal notranslate"><span class="pre">maxClientThreads</span></code>: the number of client threads, i.e. the threads used
+for execution of the workload, to be randomly selected from the given range (default 1-1).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">blockOnFutures</span></code>: use blocking waits on futures instead of scheduling future callbacks asynchronously
+(default: false)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">buggify</span></code>: Enable client-side failure injection (default: false)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">databasePerTransaction</span></code>: Create a separate database instance for each transaction (default: false).
+It is a special mode useful for testing bugs related to creation and destruction of database instances.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbCallbacksOnExternalThreads</span></code>: Enables the option <code class="docutils literal notranslate"><span class="pre">FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS</span></code>
+causting the callbacks of futures to be executed directly on the threads of the external FDB clients
+rather than on the thread of the local FDB client.</p></li>
+</ul>
+<p>The workload section <code class="docutils literal notranslate"><span class="pre">[[test.workload]]</span></code> must contain the attribute name matching the registered name
+of the workload to be executed. Other options are workload-specific.</p>
+<p>The subclasses of the <code class="docutils literal notranslate"><span class="pre">ApiWorkload</span></code> inherit the following configuration options:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">minKeyLength</span></code> and <code class="docutils literal notranslate"><span class="pre">maxKeyLength</span></code>: the size range of randomly generated keys (default: 1-64)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">minValueLength</span></code> and <code class="docutils literal notranslate"><span class="pre">maxValueLength</span></code>:  the size range of randomly generated values
+(default: 1-1000)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">maxKeysPerTransaction</span></code>: the maximum number of keys per transaction (default: 50)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">initialSize</span></code>: the number of key-value pairs in the initially populated database (default: 1000)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">readExistingKeysRatio</span></code>: the probability of choosing an existing key for read operations
+(default: 0.9)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">numRandomOperations</span></code>: the number of random operations to be executed per workload (default: 1000)</p></li>
+<li><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">runUntilStop</span></code>: run the workload indefinitely until the stop command is received (default: false).</dt><dd><p>This execution mode in upgrade tests and other scripted tests, where the workload needs to
+be generated continously until completion of the scripted test.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">numOperationsForProgressCheck</span></code>: the number of operations to be performed to confirm a progress</dt><dd><p>check (default: 10). This option is used in combination with <code class="docutils literal notranslate"><span class="pre">runUntilStop</span></code>. Progress checks are
+initiated by a test script to check if the client workload is successfully progressing after a
+cluster change.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="executing-the-tests">
+<h2>Executing the Tests</h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">fdb_c_api_tester</span></code> executable takes a single TOML file as a parameter and executes the test
+according to its specification. Before that we must create a FDB cluster and pass its cluster file as
+a parameter to <code class="docutils literal notranslate"><span class="pre">fdb_c_api_tester</span></code>. Note that multithreaded tests also need to be provided with an
+external client library.</p>
+<p>For example, we can create a temporary cluster and use it for execution of one of the existing API tests:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="si">${</span><span class="nv">srcDir</span><span class="si">}</span>/tests/TestRunner/tmp_cluster.py --build-dir <span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span> -- <span class="se">\</span>
+   <span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span>/bin/fdb_c_api_tester <span class="se">\</span>
+   --cluster-file @CLUSTER_FILE@ <span class="se">\</span>
+   --external-client-library<span class="o">=</span><span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span>/bindings/c/libfdb_c_external.so <span class="se">\</span>
+   --test-file <span class="si">${</span><span class="nv">srcDir</span><span class="si">}</span>/bindings/c/test/apitester/tests/CApiCorrectnessMultiThr.toml
+</pre></div>
+</div>
+<p>The test specifications added to the <code class="docutils literal notranslate"><span class="pre">bindings/c/test/apitester/tests/</span></code> directory are executed as a part
+of the regression test suite. They can be executed using the <code class="docutils literal notranslate"><span class="pre">ctest</span></code> target <code class="docutils literal notranslate"><span class="pre">fdb_c_api_tests</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ctest -R fdb_c_api_tests -VV
+</pre></div>
+</div>
+</section>
+</section>
 
 
     </div>
@@ -544,7 +1017,7 @@ with the <code class="docutils literal"><span class="pre">multitest</span></code
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

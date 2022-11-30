@@ -1,44 +1,31 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Release Notes &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="../_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    '../',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="../_static/jquery.js"></script>
-    <script type="text/javascript" src="../_static/underscore.js"></script>
-    <script type="text/javascript" src="../_static/doctools.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Release Notes &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="../_static/doctools.js"></script>
     <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Release Notes" href="release-notes-720.html" />
     <link rel="prev" title="Release Notes" href="release-notes-700.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="../_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -51,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -68,7 +55,136 @@
      href="../index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="../earlier-release-notes.html">Earlier Release Notes</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -81,32 +197,30 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.1.25</a></li>
-<li><a class="reference internal" href="#id3">7.1.24</a></li>
-<li><a class="reference internal" href="#id4">7.1.23</a></li>
-<li><a class="reference internal" href="#id5">7.1.22</a></li>
-<li><a class="reference internal" href="#id6">7.1.21</a></li>
-<li><a class="reference internal" href="#id7">7.1.20</a></li>
-<li><a class="reference internal" href="#id8">7.1.19</a></li>
-<li><a class="reference internal" href="#id9">7.1.18</a></li>
-<li><a class="reference internal" href="#id10">7.1.17</a></li>
-<li><a class="reference internal" href="#id11">7.1.16</a></li>
-<li><a class="reference internal" href="#id12">7.1.15</a></li>
-<li><a class="reference internal" href="#id13">7.1.14</a></li>
-<li><a class="reference internal" href="#id14">7.1.13</a></li>
-<li><a class="reference internal" href="#id15">7.1.12</a></li>
-<li><a class="reference internal" href="#id16">7.1.11</a></li>
-<li><a class="reference internal" href="#id17">7.1.10</a></li>
-<li><a class="reference internal" href="#id18">7.1.9</a></li>
-<li><a class="reference internal" href="#id19">7.1.8</a></li>
-<li><a class="reference internal" href="#id20">7.1.7</a></li>
-<li><a class="reference internal" href="#id21">7.1.6</a></li>
-<li><a class="reference internal" href="#id22">7.1.5</a></li>
-<li><a class="reference internal" href="#id23">7.1.4</a></li>
-<li><a class="reference internal" href="#id24">7.1.3</a></li>
-<li><a class="reference internal" href="#id25">7.1.2</a></li>
-<li><a class="reference internal" href="#id26">7.1.1</a></li>
-<li><a class="reference internal" href="#id27">7.1.0</a><ul>
+<li><a class="reference internal" href="#id1">7.1.23</a></li>
+<li><a class="reference internal" href="#id2">7.1.22</a></li>
+<li><a class="reference internal" href="#id3">7.1.21</a></li>
+<li><a class="reference internal" href="#id4">7.1.20</a></li>
+<li><a class="reference internal" href="#id5">7.1.19</a></li>
+<li><a class="reference internal" href="#id6">7.1.18</a></li>
+<li><a class="reference internal" href="#id7">7.1.17</a></li>
+<li><a class="reference internal" href="#id8">7.1.16</a></li>
+<li><a class="reference internal" href="#id9">7.1.15</a></li>
+<li><a class="reference internal" href="#id10">7.1.14</a></li>
+<li><a class="reference internal" href="#id11">7.1.13</a></li>
+<li><a class="reference internal" href="#id12">7.1.12</a></li>
+<li><a class="reference internal" href="#id13">7.1.11</a></li>
+<li><a class="reference internal" href="#id14">7.1.10</a></li>
+<li><a class="reference internal" href="#id15">7.1.9</a></li>
+<li><a class="reference internal" href="#id16">7.1.8</a></li>
+<li><a class="reference internal" href="#id17">7.1.7</a></li>
+<li><a class="reference internal" href="#id18">7.1.6</a></li>
+<li><a class="reference internal" href="#id19">7.1.5</a></li>
+<li><a class="reference internal" href="#id20">7.1.4</a></li>
+<li><a class="reference internal" href="#id21">7.1.3</a></li>
+<li><a class="reference internal" href="#id22">7.1.2</a></li>
+<li><a class="reference internal" href="#id23">7.1.1</a></li>
+<li><a class="reference internal" href="#id24">7.1.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -129,6 +243,10 @@
                 
   <li>
     <a href="release-notes-700.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+  <li>
+    <a href="release-notes-720.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
     </a>
   </li>
               
@@ -157,32 +275,30 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.1.25</a></li>
-<li><a class="reference internal" href="#id3">7.1.24</a></li>
-<li><a class="reference internal" href="#id4">7.1.23</a></li>
-<li><a class="reference internal" href="#id5">7.1.22</a></li>
-<li><a class="reference internal" href="#id6">7.1.21</a></li>
-<li><a class="reference internal" href="#id7">7.1.20</a></li>
-<li><a class="reference internal" href="#id8">7.1.19</a></li>
-<li><a class="reference internal" href="#id9">7.1.18</a></li>
-<li><a class="reference internal" href="#id10">7.1.17</a></li>
-<li><a class="reference internal" href="#id11">7.1.16</a></li>
-<li><a class="reference internal" href="#id12">7.1.15</a></li>
-<li><a class="reference internal" href="#id13">7.1.14</a></li>
-<li><a class="reference internal" href="#id14">7.1.13</a></li>
-<li><a class="reference internal" href="#id15">7.1.12</a></li>
-<li><a class="reference internal" href="#id16">7.1.11</a></li>
-<li><a class="reference internal" href="#id17">7.1.10</a></li>
-<li><a class="reference internal" href="#id18">7.1.9</a></li>
-<li><a class="reference internal" href="#id19">7.1.8</a></li>
-<li><a class="reference internal" href="#id20">7.1.7</a></li>
-<li><a class="reference internal" href="#id21">7.1.6</a></li>
-<li><a class="reference internal" href="#id22">7.1.5</a></li>
-<li><a class="reference internal" href="#id23">7.1.4</a></li>
-<li><a class="reference internal" href="#id24">7.1.3</a></li>
-<li><a class="reference internal" href="#id25">7.1.2</a></li>
-<li><a class="reference internal" href="#id26">7.1.1</a></li>
-<li><a class="reference internal" href="#id27">7.1.0</a><ul>
+<li><a class="reference internal" href="#id1">7.1.23</a></li>
+<li><a class="reference internal" href="#id2">7.1.22</a></li>
+<li><a class="reference internal" href="#id3">7.1.21</a></li>
+<li><a class="reference internal" href="#id4">7.1.20</a></li>
+<li><a class="reference internal" href="#id5">7.1.19</a></li>
+<li><a class="reference internal" href="#id6">7.1.18</a></li>
+<li><a class="reference internal" href="#id7">7.1.17</a></li>
+<li><a class="reference internal" href="#id8">7.1.16</a></li>
+<li><a class="reference internal" href="#id9">7.1.15</a></li>
+<li><a class="reference internal" href="#id10">7.1.14</a></li>
+<li><a class="reference internal" href="#id11">7.1.13</a></li>
+<li><a class="reference internal" href="#id12">7.1.12</a></li>
+<li><a class="reference internal" href="#id13">7.1.11</a></li>
+<li><a class="reference internal" href="#id14">7.1.10</a></li>
+<li><a class="reference internal" href="#id15">7.1.9</a></li>
+<li><a class="reference internal" href="#id16">7.1.8</a></li>
+<li><a class="reference internal" href="#id17">7.1.7</a></li>
+<li><a class="reference internal" href="#id18">7.1.6</a></li>
+<li><a class="reference internal" href="#id19">7.1.5</a></li>
+<li><a class="reference internal" href="#id20">7.1.4</a></li>
+<li><a class="reference internal" href="#id21">7.1.3</a></li>
+<li><a class="reference internal" href="#id22">7.1.2</a></li>
+<li><a class="reference internal" href="#id23">7.1.1</a></li>
+<li><a class="reference internal" href="#id24">7.1.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -199,322 +315,299 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="release-notes">
-<span id="id1"></span><h1>Release Notes</h1>
-<div class="section" id="id2">
-<h2>7.1.25</h2>
-<ul class="simple">
-<li>Same as 7.1.24 release with AVX enabled.</li>
-</ul>
-</div>
-<div class="section" id="id3">
-<h2>7.1.24</h2>
-<ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Fixed a transaction log data corruption bug. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8525">(PR #8525)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/8562">(PR #8562)</a>, and <a class="reference external" href="https://github.com/apple/foundationdb/pull/8647">(PR #8647)</a></li>
-<li>Fixed a rare data race in transaction logs when PEEK_BATCHING_EMPTY_MSG is enabled. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8660">(PR #8660)</a></li>
-<li>Fixed a heap-use-after-free bug in cluster controller.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/8683">(PR #8683)</a></li>
-<li>Changed consistency check to report all corruptions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8571">(PR #8571)</a></li>
-<li>Fixed a rare storage server crashing bug after recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8468">(PR #8468)</a></li>
-<li>Added client knob UNLINKONLOAD_FDBCLIB to control deletion of external client libraries. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8434">(PR #8434)</a></li>
-<li>Updated the default peer latency degradation percentile to 0.5. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8370">(PR #8370)</a></li>
-<li>Made exclusion less pessimistic when warning about low space usage. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8347">(PR #8347)</a></li>
-<li>Added storage server readrange and update latency metrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8353">(PR #8353)</a></li>
-<li>Increased the default PEER_DEGRADATION_CONNECTION_FAILURE_COUNT value to 5s. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8336">(PR #8336)</a></li>
-<li>Increased RocksDB block cache size. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8274">(PR #8274)</a></li>
-</ul>
-</div>
-<div class="section" id="id4">
+  <section id="release-notes">
+<h1>Release Notes</h1>
+<section id="id1">
 <h2>7.1.23</h2>
 <ul class="simple">
-<li>Same as 7.1.22 release with AVX enabled.</li>
+<li><p>Same as 7.1.22 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id5">
+</section>
+<section id="id2">
 <h2>7.1.22</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Added new latency samples for GetValue, GetRange, QueueWait, and VersionWait in storage servers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8215">(PR #8215)</a></li>
-<li>Fixed a rare partial data write for TLogs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8210">(PR #8210)</a></li>
-<li>Added HTTP proxy support for backup agents. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8193">(PR #8193)</a></li>
-<li>Fixed a memory bug of secondary queries in index prefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8195">(PR #8195)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/8190">(PR #8190)</a></li>
-<li>Introduced STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT knob to recreate SS at io_timeout errors. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8123">(PR #8123)</a></li>
-<li>Fixed two TLog stopped bugs and a CC leader replacement bug. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8081">(PR #8081)</a></li>
-<li>Added back RecoveryAvailable trace event for status&#8217;s seconds_since_last_recovered field. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8068">(PR #8068)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Added new latency samples for GetValue, GetRange, QueueWait, and VersionWait in storage servers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8215">(PR #8215)</a></p></li>
+<li><p>Fixed a rare partial data write for TLogs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8210">(PR #8210)</a></p></li>
+<li><p>Added HTTP proxy support for backup agents. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8193">(PR #8193)</a></p></li>
+<li><p>Fixed a memory bug of secondary queries in index prefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8195">(PR #8195)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/8190">(PR #8190)</a></p></li>
+<li><p>Introduced STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT knob to recreate SS at io_timeout errors. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8123">(PR #8123)</a></p></li>
+<li><p>Fixed two TLog stopped bugs and a CC leader replacement bug. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8081">(PR #8081)</a></p></li>
+<li><p>Added back RecoveryAvailable trace event for status’s seconds_since_last_recovered field. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8068">(PR #8068)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id6">
+</section>
+<section id="id3">
 <h2>7.1.21</h2>
 <ul class="simple">
-<li>Same as 7.1.20 release with AVX enabled.</li>
+<li><p>Same as 7.1.20 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id7">
+</section>
+<section id="id4">
 <h2>7.1.20</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Fixed missing localities for fdbserver that can cause cross DC calls among storage servers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7995">(PR #7995)</a></li>
-<li>Removed extremely spammy trace event in FetchKeys and fixed transaction_profiling_analyzer.py. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7934">(PR #7934)</a></li>
-<li>Fixed bugs when GRV proxy returns an error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7860">(PR #7860)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed missing localities for fdbserver that can cause cross DC calls among storage servers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7995">(PR #7995)</a></p></li>
+<li><p>Removed extremely spammy trace event in FetchKeys and fixed transaction_profiling_analyzer.py. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7934">(PR #7934)</a></p></li>
+<li><p>Fixed bugs when GRV proxy returns an error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7860">(PR #7860)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id8">
+</section>
+<section id="id5">
 <h2>7.1.19</h2>
 <ul class="simple">
-<li>Same as 7.1.18 release with AVX enabled.</li>
+<li><p>Same as 7.1.18 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id9">
+</section>
+<section id="id6">
 <h2>7.1.18</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Added knobs for the minimum and the maximum of the Ratekeeper&#8217;s default priority. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7820">(PR #7820)</a></li>
-<li>Fixed bugs in <code class="docutils literal"><span class="pre">getRange</span></code> of the special key space. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7778">(PR #7778)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/7720">(PR #7720)</a></li>
-<li>Added debug ID for secondary queries in index prefetching. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7755">(PR #7755)</a></li>
-<li>Changed hostname resolving to prefer IPv6 addresses. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7750">(PR #7750)</a></li>
-<li>Added more transaction debug events for prefetch queries. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7732">(PR #7732)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Added knobs for the minimum and the maximum of the Ratekeeper’s default priority. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7820">(PR #7820)</a></p></li>
+<li><p>Fixed bugs in <code class="docutils literal notranslate"><span class="pre">getRange</span></code> of the special key space. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7778">(PR #7778)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/7720">(PR #7720)</a></p></li>
+<li><p>Added debug ID for secondary queries in index prefetching. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7755">(PR #7755)</a></p></li>
+<li><p>Changed hostname resolving to prefer IPv6 addresses. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7750">(PR #7750)</a></p></li>
+<li><p>Added more transaction debug events for prefetch queries. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7732">(PR #7732)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id10">
+</section>
+<section id="id7">
 <h2>7.1.17</h2>
 <ul class="simple">
-<li>Same as 7.1.16 release with AVX enabled.</li>
+<li><p>Same as 7.1.16 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id11">
+</section>
+<section id="id8">
 <h2>7.1.16</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Fixed a crash bug when cluster controller shuts down. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7706">(PR #7706)</a></li>
-<li>Fixed a storage server failure when getReadVersion returns an error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7688">(PR #7688)</a></li>
-<li>Fixed unbounded status json generation. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7680">(PR #7680)</a></li>
-<li>Fixed ScopeEventFieldTypeMismatch error for TLogMetrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7640">(PR #7640)</a></li>
-<li>Added getMappedRange latency metrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7632">(PR #7632)</a></li>
-<li>Fixed a version vector performance bug due to not updating client side tag cache. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7616">(PR #7616)</a></li>
-<li>Fixed DiskReadSeconds and DiskWriteSeconds calculation in ProcessMetrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7609">(PR #7609)</a></li>
-<li>Added Rocksdb compression and data size stats. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7596">(PR #7596)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed a crash bug when cluster controller shuts down. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7706">(PR #7706)</a></p></li>
+<li><p>Fixed a storage server failure when getReadVersion returns an error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7688">(PR #7688)</a></p></li>
+<li><p>Fixed unbounded status json generation. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7680">(PR #7680)</a></p></li>
+<li><p>Fixed ScopeEventFieldTypeMismatch error for TLogMetrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7640">(PR #7640)</a></p></li>
+<li><p>Added getMappedRange latency metrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7632">(PR #7632)</a></p></li>
+<li><p>Fixed a version vector performance bug due to not updating client side tag cache. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7616">(PR #7616)</a></p></li>
+<li><p>Fixed DiskReadSeconds and DiskWriteSeconds calculation in ProcessMetrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7609">(PR #7609)</a></p></li>
+<li><p>Added Rocksdb compression and data size stats. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7596">(PR #7596)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id12">
+</section>
+<section id="id9">
 <h2>7.1.15</h2>
 <ul class="simple">
-<li>Same as 7.1.14 release with AVX enabled.</li>
+<li><p>Same as 7.1.14 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id13">
+</section>
+<section id="id10">
 <h2>7.1.14</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Fixed a high commit latency bug when there are data movement. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7548">(PR #7548)</a></li>
-<li>Fixed the primary locality on the sequencer by obtaining it from cluster controller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7535">(PR #7535)</a></li>
-<li>Added StorageEngine type to StorageMetrics trace events. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7546">(PR #7546)</a></li>
-<li>Improved hasIncompleteVersionstamp performance in Java binding to use iteration rather than stream processing. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7559">(PR #7559)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed a high commit latency bug when there are data movement. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7548">(PR #7548)</a></p></li>
+<li><p>Fixed the primary locality on the sequencer by obtaining it from cluster controller. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7535">(PR #7535)</a></p></li>
+<li><p>Added StorageEngine type to StorageMetrics trace events. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7546">(PR #7546)</a></p></li>
+<li><p>Improved hasIncompleteVersionstamp performance in Java binding to use iteration rather than stream processing. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7559">(PR #7559)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id14">
+</section>
+<section id="id11">
 <h2>7.1.13</h2>
 <ul class="simple">
-<li>Same as 7.1.12 release with AVX enabled.</li>
+<li><p>Same as 7.1.12 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id15">
+</section>
+<section id="id12">
 <h2>7.1.12</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Optimized out the version vector specific code on the client when version vector is disabled. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7528">(PR #7528)</a></li>
-<li>Added pipelining for secondary queries in index prefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7507">(PR #7507)</a></li>
-<li>Fixed a connection failure bug when using DNS names. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7478">(PR #7478)</a></li>
-<li>Fixed delays in version advancement that can be larger than knob MAX_COMMIT_BATCH_INTERVAL. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7518">(PR #7518)</a></li>
-<li>Removed explicit degraded peer recovery in gray failure detection since this may be false positive. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7466">(PR #7466)</a></li>
-<li>Fixed undefined behavior from accessing field of uninitialized object. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7430">(PR #7430)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Optimized out the version vector specific code on the client when version vector is disabled. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7528">(PR #7528)</a></p></li>
+<li><p>Added pipelining for secondary queries in index prefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7507">(PR #7507)</a></p></li>
+<li><p>Fixed a connection failure bug when using DNS names. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7478">(PR #7478)</a></p></li>
+<li><p>Fixed delays in version advancement that can be larger than knob MAX_COMMIT_BATCH_INTERVAL. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7518">(PR #7518)</a></p></li>
+<li><p>Removed explicit degraded peer recovery in gray failure detection since this may be false positive. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7466">(PR #7466)</a></p></li>
+<li><p>Fixed undefined behavior from accessing field of uninitialized object. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7430">(PR #7430)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id16">
+</section>
+<section id="id13">
 <h2>7.1.11</h2>
 <ul class="simple">
-<li>Same as 7.1.10 release with AVX enabled.</li>
+<li><p>Same as 7.1.10 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id17">
+</section>
+<section id="id14">
 <h2>7.1.10</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Fixed a sequencer crash when DC ID is a string. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7393">(PR #7393)</a></li>
-<li>Fixed a client performance regression by removing unnecessary transaction initialization. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7365">(PR #7365)</a></li>
-<li>Safely removed fdb_transaction_get_range_and_flat_map C API. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7379">(PR #7379)</a></li>
-<li>Fixed an unknown error bug when hostname resolving fails. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7380">(PR #7380)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed a sequencer crash when DC ID is a string. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7393">(PR #7393)</a></p></li>
+<li><p>Fixed a client performance regression by removing unnecessary transaction initialization. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7365">(PR #7365)</a></p></li>
+<li><p>Safely removed fdb_transaction_get_range_and_flat_map C API. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7379">(PR #7379)</a></p></li>
+<li><p>Fixed an unknown error bug when hostname resolving fails. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7380">(PR #7380)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id18">
+</section>
+<section id="id15">
 <h2>7.1.9</h2>
 <ul class="simple">
-<li>Same as 7.1.8 release with AVX enabled.</li>
+<li><p>Same as 7.1.8 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id19">
+</section>
+<section id="id16">
 <h2>7.1.8</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Fixed a performance regression in network run loop.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/7342">(PR #7342)</a></li>
-<li>Added RSS bytes for processes in status json output and corrected available_bytes calculation. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7348">(PR #7348)</a></li>
-<li>Added versionstamp support in tuples. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7313">(PR #7313)</a></li>
-<li>Fixed some spammy trace events. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7300">(PR #7300)</a></li>
-<li>Avoided a memory corruption bug by disabling streaming peeks. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7288">(PR #7288)</a></li>
-<li>Fixed a hang bug in fdbcli exclude command. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7268">(PR #7268)</a></li>
-<li>Fixed an issue that a remote TLog blocks peeks. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7255">(PR #7255)</a></li>
-<li>Fixed a connection issue using hostnames. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7264">(PR #7264)</a></li>
-<li>Added support of the reboot command in go bindings. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7270">(PR #7270)</a></li>
-<li>Fixed several issues in profiling special keys using GlobalConfig. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7120">(PR #7120)</a></li>
-<li>Fixed a stuck transaction system bug due to inconsistent recovery transaction version. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7261">(PR #7261)</a></li>
-<li>Fixed an unknown_error crash due to not resolving hostnames. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7254">(PR #7254)</a></li>
-<li>Fixed a heap-use-after-free bug. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7250">(PR #7250)</a></li>
-<li>Fixed a performance issue that remote TLogs are sending too many pops to log routers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7235">(PR #7235)</a></li>
-<li>Fixed an issue that SharedTLogs are not displaced and leaking disk space. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7246">(PR #7246)</a></li>
-<li>Fixed an issue that coordinatorsKey does not store DNS names. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7203">(PR #7203)</a></li>
-<li>Fixed a sequential execution issue for fdbcli kill, suspend, and expensive_data_check commands. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7211">(PR #7211)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed a performance regression in network run loop.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/7342">(PR #7342)</a></p></li>
+<li><p>Added RSS bytes for processes in status json output and corrected available_bytes calculation. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7348">(PR #7348)</a></p></li>
+<li><p>Added versionstamp support in tuples. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7313">(PR #7313)</a></p></li>
+<li><p>Fixed some spammy trace events. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7300">(PR #7300)</a></p></li>
+<li><p>Avoided a memory corruption bug by disabling streaming peeks. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7288">(PR #7288)</a></p></li>
+<li><p>Fixed a hang bug in fdbcli exclude command. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7268">(PR #7268)</a></p></li>
+<li><p>Fixed an issue that a remote TLog blocks peeks. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7255">(PR #7255)</a></p></li>
+<li><p>Fixed a connection issue using hostnames. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7264">(PR #7264)</a></p></li>
+<li><p>Added support of the reboot command in go bindings. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7270">(PR #7270)</a></p></li>
+<li><p>Fixed several issues in profiling special keys using GlobalConfig. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7120">(PR #7120)</a></p></li>
+<li><p>Fixed a stuck transaction system bug due to inconsistent recovery transaction version. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7261">(PR #7261)</a></p></li>
+<li><p>Fixed an unknown_error crash due to not resolving hostnames. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7254">(PR #7254)</a></p></li>
+<li><p>Fixed a heap-use-after-free bug. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7250">(PR #7250)</a></p></li>
+<li><p>Fixed a performance issue that remote TLogs are sending too many pops to log routers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7235">(PR #7235)</a></p></li>
+<li><p>Fixed an issue that SharedTLogs are not displaced and leaking disk space. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7246">(PR #7246)</a></p></li>
+<li><p>Fixed an issue that coordinatorsKey does not store DNS names. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7203">(PR #7203)</a></p></li>
+<li><p>Fixed a sequential execution issue for fdbcli kill, suspend, and expensive_data_check commands. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7211">(PR #7211)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id20">
+</section>
+<section id="id17">
 <h2>7.1.7</h2>
 <ul class="simple">
-<li>Same as 7.1.6 release with AVX enabled.</li>
+<li><p>Same as 7.1.6 release with AVX enabled.</p></li>
 </ul>
-</div>
-<div class="section" id="id21">
+</section>
+<section id="id18">
 <h2>7.1.6</h2>
 <ul class="simple">
-<li>Released with AVX disabled.</li>
-<li>Fixed a fdbserver crash when given invalid knob name. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7189">(PR #7189)</a></li>
-<li>Fixed a storage server bug that read data after its failure. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7217">(PR #7217)</a></li>
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed a fdbserver crash when given invalid knob name. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7189">(PR #7189)</a></p></li>
+<li><p>Fixed a storage server bug that read data after its failure. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7217">(PR #7217)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id22">
+</section>
+<section id="id19">
 <h2>7.1.5</h2>
 <ul class="simple">
-<li>Fixed a fdbcli kill bug that was not killing in parallel. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7150">(PR #7150)</a></li>
-<li>Fixed a bug that prevents a peer from sending messages on a previously incompatible connection. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7124">(PR #7124)</a></li>
-<li>Added rocksdb throttling counters to trace event. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7096">(PR #7096)</a></li>
-<li>Added a backtrace before throwing serialization_failed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7155">(PR #7155)</a></li>
+<li><p>Fixed a fdbcli kill bug that was not killing in parallel. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7150">(PR #7150)</a></p></li>
+<li><p>Fixed a bug that prevents a peer from sending messages on a previously incompatible connection. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7124">(PR #7124)</a></p></li>
+<li><p>Added rocksdb throttling counters to trace event. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7096">(PR #7096)</a></p></li>
+<li><p>Added a backtrace before throwing serialization_failed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7155">(PR #7155)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id23">
+</section>
+<section id="id20">
 <h2>7.1.4</h2>
 <ul class="simple">
-<li>Fixed a bug that prevents client from connecting to a cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7060">(PR #7060)</a></li>
-<li>Fixed a performance bug that overloads Resolver CPU. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7068">(PR #7068)</a></li>
-<li>Optimized storage server performance for &#8220;get range and flat map&#8221; feature. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7078">(PR #7078)</a></li>
-<li>Optimized both Proxy performance and Resolver (when version vector is enabled) performance. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7076">(PR #7076)</a></li>
-<li>Fixed a key size limit bug when using tenants. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6986">(PR #6986)</a></li>
-<li>Fixed operation_failed thrown incorrectly from transactions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6993">(PR #6993)</a></li>
-<li>Fixed a version vector bug when GRV cache is used. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7057">(PR #7057)</a></li>
-<li>Fixed orphaned storage server due to force recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7028">(PR #7028)</a></li>
-<li>Fixed a bug that a storage server reads stale cluster ID. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7026">(PR #7026)</a></li>
-<li>Fixed a storage server exclusion status bug that affects wiggling. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6984">(PR #6984)</a></li>
-<li>Fixed a bug that relocate shard tasks move data to a removed team. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7023">(PR #7023)</a></li>
-<li>Fixed recruitment thrashing when there are temporarily multiple cluster controllers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7001">(PR #7001)</a></li>
-<li>Fixed change feed deletion due to multiple sources race. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6987">(PR #6987)</a></li>
-<li>Fixed TLog crash if more TLogs are absent than the replication factor. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6991">(PR #6991)</a></li>
-<li>Added hostname DNS resolution logic for cluster connection string. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6998">(PR #6998)</a></li>
-<li>Fixed a limit bug in indexPrefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7005">(PR #7005)</a></li>
+<li><p>Fixed a bug that prevents client from connecting to a cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7060">(PR #7060)</a></p></li>
+<li><p>Fixed a performance bug that overloads Resolver CPU. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7068">(PR #7068)</a></p></li>
+<li><p>Optimized storage server performance for “get range and flat map” feature. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7078">(PR #7078)</a></p></li>
+<li><p>Optimized both Proxy performance and Resolver (when version vector is enabled) performance. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7076">(PR #7076)</a></p></li>
+<li><p>Fixed a key size limit bug when using tenants. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6986">(PR #6986)</a></p></li>
+<li><p>Fixed operation_failed thrown incorrectly from transactions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6993">(PR #6993)</a></p></li>
+<li><p>Fixed a version vector bug when GRV cache is used. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7057">(PR #7057)</a></p></li>
+<li><p>Fixed orphaned storage server due to force recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7028">(PR #7028)</a></p></li>
+<li><p>Fixed a bug that a storage server reads stale cluster ID. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7026">(PR #7026)</a></p></li>
+<li><p>Fixed a storage server exclusion status bug that affects wiggling. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6984">(PR #6984)</a></p></li>
+<li><p>Fixed a bug that relocate shard tasks move data to a removed team. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7023">(PR #7023)</a></p></li>
+<li><p>Fixed recruitment thrashing when there are temporarily multiple cluster controllers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7001">(PR #7001)</a></p></li>
+<li><p>Fixed change feed deletion due to multiple sources race. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6987">(PR #6987)</a></p></li>
+<li><p>Fixed TLog crash if more TLogs are absent than the replication factor. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6991">(PR #6991)</a></p></li>
+<li><p>Added hostname DNS resolution logic for cluster connection string. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6998">(PR #6998)</a></p></li>
+<li><p>Fixed a limit bug in indexPrefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7005">(PR #7005)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id24">
+</section>
+<section id="id21">
 <h2>7.1.3</h2>
 <ul class="simple">
-<li>Added logging measuring commit compute duration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6906">(PR #6906)</a></li>
-<li>RocksDb used aggregated property metrics for pending compaction bytes. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6867">(PR #6867)</a></li>
-<li>Fixed a perpetual wiggle bug that would not react to a pause. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6933">(PR #6933)</a></li>
-<li>Fixed a crash of data distributor. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6938">(PR #6938)</a></li>
-<li>Added new c libs to client package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6921">(PR #6921)</a></li>
-<li>Fixed a bug that prevents a cluster from fully recovered state after taking a snapshot. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6892">(PR #6892)</a></li>
+<li><p>Added logging measuring commit compute duration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6906">(PR #6906)</a></p></li>
+<li><p>RocksDb used aggregated property metrics for pending compaction bytes. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6867">(PR #6867)</a></p></li>
+<li><p>Fixed a perpetual wiggle bug that would not react to a pause. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6933">(PR #6933)</a></p></li>
+<li><p>Fixed a crash of data distributor. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6938">(PR #6938)</a></p></li>
+<li><p>Added new c libs to client package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6921">(PR #6921)</a></p></li>
+<li><p>Fixed a bug that prevents a cluster from fully recovered state after taking a snapshot. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6892">(PR #6892)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id25">
+</section>
+<section id="id22">
 <h2>7.1.2</h2>
 <ul class="simple">
-<li>Fixed failing upgrades due to non-persisted initial cluster version. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6864">(PR #6864)</a></li>
-<li>Fixed a client load balancing bug because ClientDBInfo may be unintentionally not set. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6878">(PR #6878)</a></li>
-<li>Fixed stuck LogRouter due to races of multiple PeekStream requests. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6870">(PR #6870)</a></li>
-<li>Fixed a client-side infinite loop due to provisional GRV Proxy ID not set in GetReadVersionReply. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6849">(PR #6849)</a></li>
+<li><p>Fixed failing upgrades due to non-persisted initial cluster version. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6864">(PR #6864)</a></p></li>
+<li><p>Fixed a client load balancing bug because ClientDBInfo may be unintentionally not set. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6878">(PR #6878)</a></p></li>
+<li><p>Fixed stuck LogRouter due to races of multiple PeekStream requests. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6870">(PR #6870)</a></p></li>
+<li><p>Fixed a client-side infinite loop due to provisional GRV Proxy ID not set in GetReadVersionReply. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6849">(PR #6849)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id26">
+</section>
+<section id="id23">
 <h2>7.1.1</h2>
 <ul class="simple">
-<li>Added new c libs to client package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6828">(PR #6828)</a></li>
+<li><p>Added new c libs to client package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6828">(PR #6828)</a></p></li>
 </ul>
-</div>
-<div class="section" id="id27">
+</section>
+<section id="id24">
 <h2>7.1.0</h2>
-<div class="section" id="features">
+<section id="features">
 <h3>Features</h3>
 <ul class="simple">
-<li>Added <code class="docutils literal"><span class="pre">USE_GRV_CACHE</span></code> transaction option to allow read versions to be locally cached on the client side for latency optimizations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5725">(PR #5725)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/6664">(PR #6664)</a></li>
-<li>Added &#8220;get range and flat map&#8221; feature with new APIs (see Bindings section). Storage servers are able to generate the keys in the queries based on another query. With this, upper layer can push some computations down to FDB, to improve latency and bandwidth when read. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5609">(PR #5609)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/6181">(PR #6181)</a>, etc..</li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">USE_GRV_CACHE</span></code> transaction option to allow read versions to be locally cached on the client side for latency optimizations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5725">(PR #5725)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/6664">(PR #6664)</a></p></li>
+<li><p>Added “get range and flat map” feature with new APIs (see Bindings section). Storage servers are able to generate the keys in the queries based on another query. With this, upper layer can push some computations down to FDB, to improve latency and bandwidth when read. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5609">(PR #5609)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/6181">(PR #6181)</a>, etc..</p></li>
 </ul>
-</div>
-<div class="section" id="performance">
+</section>
+<section id="performance">
 <h3>Performance</h3>
-</div>
-<div class="section" id="reliability">
+</section>
+<section id="reliability">
 <h3>Reliability</h3>
-</div>
-<div class="section" id="fixes">
+</section>
+<section id="fixes">
 <h3>Fixes</h3>
-</div>
-<div class="section" id="status">
+</section>
+<section id="status">
 <h3>Status</h3>
 <ul class="simple">
-<li>Added <code class="docutils literal"><span class="pre">cluster.storage_wiggler</span></code> field report storage wiggle stats <a class="reference external" href="https://github.com/apple/foundationdb/pull/6219">(PR #6219)</a></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">cluster.storage_wiggler</span></code> field report storage wiggle stats <a class="reference external" href="https://github.com/apple/foundationdb/pull/6219">(PR #6219)</a></p></li>
 </ul>
-</div>
-<div class="section" id="bindings">
+</section>
+<section id="bindings">
 <h3>Bindings</h3>
 <ul class="simple">
-<li>C: Added <code class="docutils literal"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> function to support running queries based on another query in one request. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5609">(PR #5609)</a></li>
-<li>Java: Added <code class="docutils literal"><span class="pre">Transaction.getRangeAndFlatMap</span></code> function to support running queries based on another query in one request. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5609">(PR #5609)</a></li>
+<li><p>C: Added <code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_and_flat_map</span></code> function to support running queries based on another query in one request. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5609">(PR #5609)</a></p></li>
+<li><p>Java: Added <code class="docutils literal notranslate"><span class="pre">Transaction.getRangeAndFlatMap</span></code> function to support running queries based on another query in one request. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5609">(PR #5609)</a></p></li>
 </ul>
-</div>
-<div class="section" id="other-changes">
+</section>
+<section id="other-changes">
 <h3>Other Changes</h3>
 <ul class="simple">
-<li>OpenTracing support is now deprecated in favor of OpenTelemetry tracing, which will be enabled in a future release. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6478/files">(PR #6478)</a></li>
-<li>Changed <code class="docutils literal"><span class="pre">memory</span></code> option to limit resident memory instead of virtual memory. Added a new <code class="docutils literal"><span class="pre">memory_vsize</span></code> option if limiting virtual memory is desired. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6719">(PR #6719)</a></li>
-<li>Change <code class="docutils literal"><span class="pre">perpetual</span> <span class="pre">storage</span> <span class="pre">wiggle</span></code> to wiggle the storage servers based on their created time. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6219">(PR #6219)</a></li>
+<li><p>OpenTracing support is now deprecated in favor of OpenTelemetry tracing, which will be enabled in a future release. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6478/files">(PR #6478)</a></p></li>
+<li><p>Changed <code class="docutils literal notranslate"><span class="pre">memory</span></code> option to limit resident memory instead of virtual memory. Added a new <code class="docutils literal notranslate"><span class="pre">memory_vsize</span></code> option if limiting virtual memory is desired. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6719">(PR #6719)</a></p></li>
+<li><p>Change <code class="docutils literal notranslate"><span class="pre">perpetual</span> <span class="pre">storage</span> <span class="pre">wiggle</span></code> to wiggle the storage servers based on their created time. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6219">(PR #6219)</a></p></li>
 </ul>
-</div>
-<div class="section" id="earlier-release-notes">
+</section>
+<section id="earlier-release-notes">
 <h3>Earlier release notes</h3>
 <ul class="simple">
-<li><a class="reference internal" href="release-notes-700.html"><span class="doc">7.0 (API Version 700)</span></a></li>
-<li><a class="reference internal" href="release-notes-630.html"><span class="doc">6.3 (API Version 630)</span></a></li>
-<li><a class="reference internal" href="release-notes-620.html"><span class="doc">6.2 (API Version 620)</span></a></li>
-<li><a class="reference internal" href="release-notes-610.html"><span class="doc">6.1 (API Version 610)</span></a></li>
-<li><a class="reference internal" href="release-notes-600.html"><span class="doc">6.0 (API Version 600)</span></a></li>
-<li><a class="reference internal" href="release-notes-520.html"><span class="doc">5.2 (API Version 520)</span></a></li>
-<li><a class="reference internal" href="release-notes-510.html"><span class="doc">5.1 (API Version 510)</span></a></li>
-<li><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></li>
-<li><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></li>
-<li><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></li>
-<li><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></li>
-<li><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></li>
-<li><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></li>
-<li><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></li>
-<li><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></li>
-<li><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></li>
-<li><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></li>
-<li><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></li>
-<li><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></li>
-<li><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></li>
-<li><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></li>
-<li><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></li>
-<li><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></li>
+<li><p><a class="reference internal" href="release-notes-700.html"><span class="doc">7.0 (API Version 700)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-630.html"><span class="doc">6.3 (API Version 630)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-620.html"><span class="doc">6.2 (API Version 620)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-610.html"><span class="doc">6.1 (API Version 610)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-600.html"><span class="doc">6.0 (API Version 600)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-520.html"><span class="doc">5.2 (API Version 520)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-510.html"><span class="doc">5.1 (API Version 510)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></p></li>
 </ul>
-</div>
-</div>
-</div>
+</section>
+</section>
+</section>
 
 
     </div>
@@ -536,7 +629,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

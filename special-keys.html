@@ -1,35 +1,18 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Special Keys &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Special Keys &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Global Configuration" href="global-configuration.html" />
     <link rel="prev" title="Error Codes" href="api-error-codes.html" />
@@ -37,9 +20,12 @@
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -52,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +55,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="api-reference.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -101,6 +216,8 @@
 <li><a class="reference internal" href="#tracing-module">Tracing module</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#deprecated-keys">Deprecated Keys</a></li>
+<li><a class="reference internal" href="#versioning">Versioning</a></li>
 </ul>
 </li>
 </ul>
@@ -164,46 +281,51 @@
 <li><a class="reference internal" href="#tracing-module">Tracing module</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#deprecated-keys">Deprecated Keys</a></li>
+<li><a class="reference internal" href="#versioning">Versioning</a></li>
 </ul>
 </li>
 </ul>
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="special-keys">
+  <section id="special-keys">
 <span id="id1"></span><h1>Special Keys</h1>
-<p>Keys starting with the bytes <code class="docutils literal"><span class="pre">\xff\xff</span></code> are called &#8220;special&#8221; keys, and they are materialized when read. <a class="reference internal" href="mr-status.html"><span class="doc">\xff\xff/status/json</span></a> is an example of a special key.
-As of api version 630, additional features have been exposed as special keys and are available to read as ranges instead of just individual keys. Additionally, the special keys are now organized into &#8220;modules&#8221;.</p>
-<div class="section" id="read-only-modules">
+<p>Keys starting with the bytes <code class="docutils literal notranslate"><span class="pre">\xff\xff</span></code> are called “special” keys, and they are materialized when read. <a class="reference internal" href="mr-status.html"><span class="doc">\xff\xff/status/json</span></a> is an example of a special key.
+As of api version 630, additional features have been exposed as special keys and are available to read as ranges instead of just individual keys. Additionally, the special keys are now organized into “modules”.</p>
+<section id="read-only-modules">
 <h2>Read-only modules</h2>
 <p>A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
-By default, users will see a <code class="docutils literal"><span class="pre">special_keys_no_module_found</span></code> error if they read from a range not contained in a module.
+By default, users will see a <code class="docutils literal notranslate"><span class="pre">special_keys_no_module_found</span></code> error if they read from a range not contained in a module.
 The error indicates the read would always return an empty set of keys if it proceeded. This could be caused by typo in the keys to read.
-Users will also (by default) see a <code class="docutils literal"><span class="pre">special_keys_cross_module_read</span></code> error if their read spans a module boundary.
+Users will also (by default) see a <code class="docutils literal notranslate"><span class="pre">special_keys_cross_module_read</span></code> error if their read spans a module boundary.
 The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
-Users may opt out of these restrictions by setting the <code class="docutils literal"><span class="pre">special_key_space_relaxed</span></code> transaction option.</p>
-<p>Each special key that existed before api version 630 is its own module. These are</p>
+Users may opt out of these restrictions by setting the <code class="docutils literal notranslate"><span class="pre">special_key_space_relaxed</span></code> transaction option.</p>
+<p>Each special key that existed before api version 630 is its own module. These are:</p>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/cluster_file_path</span></code> See <a class="reference internal" href="administration.html#cluster-file-client-access"><span class="std std-ref">cluster file client access</span></a></li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/status/json</span></code> See <a class="reference internal" href="mr-status.html"><span class="doc">Machine-readable status</span></a></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/cluster_file_path</span></code> - See <a class="reference internal" href="administration.html#cluster-file-client-access"><span class="std std-ref">cluster file client access</span></a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/status/json</span></code> - See <a class="reference internal" href="mr-status.html"><span class="doc">Machine-readable status</span></a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code> - key as the worker’s network address and value as the serialized ClientWorkerInterface, not transactional</p></li>
 </ol>
-<p>Prior to api version 630, it was also possible to read a range starting at
-<code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces</span></code>. This is mostly an implementation detail of fdbcli,
-but it&#8217;s available in api version 630 as a module with prefix <code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces/</span></code>.</p>
-<p>Api version 630 includes two new modules with prefixes
-<code class="docutils literal"><span class="pre">\xff\xff/transaction/</span></code> (information about the current transaction), and
-<code class="docutils literal"><span class="pre">\xff\xff/metrics/</span></code> (various metrics, not transactional).</p>
-<div class="section" id="transaction-module">
+<p>Prior to api version 630, it was also possible to read a range starting at <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code>. This is mostly an implementation detail of fdbcli,
+but it’s available in api version 630 as a module with prefix <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces/</span></code>.</p>
+<p>Api version 630 includes three new modules:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/</span></code> - information about the current transaction</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/</span></code> - various metrics, not transactional</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/clusterId</span></code> - returns an immutable unique ID for a cluster</p></li>
+</ol>
+<section id="transaction-module">
 <h3>Transaction module</h3>
 <p>Reads from the transaction module generally do not require an rpc and only inspect in-memory state for the current transaction.</p>
-<p>There are three sets of keys exposed by the transaction module, and each set uses the same encoding, so let&#8217;s first describe that encoding.</p>
-<p>Let&#8217;s say we have a set of keys represented as intervals of the form <code class="docutils literal"><span class="pre">begin1</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end1</span> <span class="pre">&amp;&amp;</span> <span class="pre">begin2</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end2</span> <span class="pre">&amp;&amp;</span> <span class="pre">...</span></code>.
-It could be the case that some of the intervals overlap, e.g. if <code class="docutils literal"><span class="pre">begin1</span> <span class="pre">&lt;=</span> <span class="pre">begin2</span> <span class="pre">&lt;</span> <span class="pre">end1</span></code>, or are adjacent, e.g. if <code class="docutils literal"><span class="pre">end1</span> <span class="pre">==</span> <span class="pre">begin2</span></code>.
+<p>There are three sets of keys exposed by the transaction module, and each set uses the same encoding, so let’s first describe that encoding.</p>
+<p>Let’s say we have a set of keys represented as intervals of the form <code class="docutils literal notranslate"><span class="pre">begin1</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end1</span> <span class="pre">&amp;&amp;</span> <span class="pre">begin2</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end2</span> <span class="pre">&amp;&amp;</span> <span class="pre">...</span></code>.
+It could be the case that some of the intervals overlap, e.g. if <code class="docutils literal notranslate"><span class="pre">begin1</span> <span class="pre">&lt;=</span> <span class="pre">begin2</span> <span class="pre">&lt;</span> <span class="pre">end1</span></code>, or are adjacent, e.g. if <code class="docutils literal notranslate"><span class="pre">end1</span> <span class="pre">==</span> <span class="pre">begin2</span></code>.
 If we merge all overlapping/adjacent intervals then sort, we end up with a canonical representation of this set of keys.</p>
 <p>We encode this canonical set as ordered key value pairs like this:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">begin1</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;1&quot;</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">begin1</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;1&quot;</span>
 <span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">end1</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;0&quot;</span>
 <span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">begin2</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;1&quot;</span>
 <span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">end2</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;0&quot;</span>
@@ -211,7 +333,7 @@ If we merge all overlapping/adjacent intervals then sort, we end up with a canon
 </pre></div>
 </div>
 <p>Python example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span><span class="p">()</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span><span class="p">()</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">tr</span><span class="o">.</span><span class="n">add_read_conflict_key</span><span class="p">(</span><span class="s1">&#39;foo&#39;</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">tr</span><span class="o">.</span><span class="n">add_read_conflict_range</span><span class="p">(</span><span class="s1">&#39;bar/&#39;</span><span class="p">,</span> <span class="s1">&#39;bar0&#39;</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/transaction/read_conflict_range/&#39;</span><span class="p">):</span>
@@ -227,28 +349,28 @@ If we merge all overlapping/adjacent intervals then sort, we end up with a canon
 is already available in memory, and so requesting small ranges is
 correspondingly cheaper than large ranges.</p>
 <p>For transactions with read-your-writes disabled, this canonical encoding is computed on
-every read, so you&#8217;re paying the full cost in CPU time whether or not you
+every read, so you’re paying the full cost in CPU time whether or not you
 request a small range.</p>
 <p>The namespaces for sets of keys are</p>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/read_conflict_range/</span></code> This is the set of keys that will be used for read conflict detection. If another transaction writes to any of these keys after this transaction&#8217;s read version, then this transaction won&#8217;t commit.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/write_conflict_range/</span></code> This is the set of keys that will be used for write conflict detection. Keys in this range may cause other transactions which read these keys to abort if this transaction commits.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/conflicting_keys/</span></code> If this transaction failed due to a conflict, it must be the case that some transaction attempted <a class="footnote-reference" href="#conflicting-keys" id="id2">[1]</a> to commit with a write conflict range that intersects this transaction&#8217;s read conflict range. This is the subset of your read conflict range that actually intersected a write conflict from another transaction.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/read_conflict_range/</span></code> This is the set of keys that will be used for read conflict detection. If another transaction writes to any of these keys after this transaction’s read version, then this transaction won’t commit.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/write_conflict_range/</span></code> This is the set of keys that will be used for write conflict detection. Keys in this range may cause other transactions which read these keys to abort if this transaction commits.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/conflicting_keys/</span></code> If this transaction failed due to a conflict, it must be the case that some transaction attempted <a class="footnote-reference brackets" href="#conflicting-keys" id="id2" role="doc-noteref"><span class="fn-bracket">[</span>1<span class="fn-bracket">]</span></a> to commit with a write conflict range that intersects this transaction’s read conflict range. This is the subset of your read conflict range that actually intersected a write conflict from another transaction.</p></li>
 </ol>
-<div class="section" id="caveats">
+<section id="caveats">
 <h4>Caveats</h4>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/read_conflict_range/</span></code> The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/write_conflict_range/</span></code> The conflict range range for a <code class="docutils literal"><span class="pre">set_versionstamped_key</span></code> atomic op is not known until commit time. You&#8217;ll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/conflicting_keys/</span></code> Since using this feature costs server (i.e., commit proxy and resolver) resources, it&#8217;s disabled by default. You must opt in by setting the <code class="docutils literal"><span class="pre">report_conflicting_keys</span></code> transaction option.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/read_conflict_range/</span></code> The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/write_conflict_range/</span></code> The conflict range range for a <code class="docutils literal notranslate"><span class="pre">set_versionstamped_key</span></code> atomic op is not known until commit time. You’ll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/transaction/conflicting_keys/</span></code> Since using this feature costs server (i.e., commit proxy and resolver) resources, it’s disabled by default. You must opt in by setting the <code class="docutils literal notranslate"><span class="pre">report_conflicting_keys</span></code> transaction option.</p></li>
 </ol>
-</div>
-</div>
-<div class="section" id="metrics-module">
+</section>
+</section>
+<section id="metrics-module">
 <h3>Metrics module</h3>
 <p>Reads in the metrics module are not transactional and may require rpcs to complete.</p>
-<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/data_distribution_stats/&lt;begin&gt;</span></code> represent stats about the shard that begins at <code class="docutils literal"><span class="pre">&lt;begin&gt;</span></code></p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">db</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/metrics/data_distribution_stats/&#39;</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+<p><code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/data_distribution_stats/&lt;begin&gt;</span></code> represent stats about the shard that begins at <code class="docutils literal notranslate"><span class="pre">&lt;begin&gt;</span></code></p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">db</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/metrics/data_distribution_stats/&#39;</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
 <span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 <span class="gp">...</span>
 <span class="go">(&#39;\xff\xff/metrics/data_distribution_stats/&#39;, &#39;{&quot;shard_bytes&quot;:3828000}&#39;)</span>
@@ -256,26 +378,21 @@ request a small range.</p>
 <span class="go">(&#39;\xff\xff/metrics/data_distribution_stats/mako00126&#39;, &#39;{&quot;shard_bytes&quot;:3201000}&#39;)</span>
 </pre></div>
 </div>
-<table border="1" class="docutils">
-<colgroup>
-<col width="30%" />
-<col width="10%" />
-<col width="60%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td><strong>Field</strong></td>
-<td><strong>Type</strong></td>
-<td><strong>Description</strong></td>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><strong>Field</strong></p></td>
+<td><p><strong>Type</strong></p></td>
+<td><p><strong>Description</strong></p></td>
 </tr>
-<tr class="row-even"><td>shard_bytes</td>
-<td>number</td>
-<td>An estimate of the sum of kv sizes for this shard.</td>
+<tr class="row-even"><td><p>shard_bytes</p></td>
+<td><p>number</p></td>
+<td><p>An estimate of the sum of kv sizes for this shard.</p></td>
 </tr>
 </tbody>
 </table>
-<p>Keys starting with <code class="docutils literal"><span class="pre">\xff\xff/metrics/health/</span></code> represent stats about the health of the cluster, suitable for application-level throttling.
-Some of this information is also available in <code class="docutils literal"><span class="pre">\xff\xff/status/json</span></code>, but these keys are significantly cheaper (in terms of server resources) to read.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">db</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/metrics/health/&#39;</span><span class="p">):</span>
+<p>Keys starting with <code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/health/</span></code> represent stats about the health of the cluster, suitable for application-level throttling.
+Some of this information is also available in <code class="docutils literal notranslate"><span class="pre">\xff\xff/status/json</span></code>, but these keys are significantly cheaper (in terms of server resources) to read.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">db</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/metrics/health/&#39;</span><span class="p">):</span>
 <span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 <span class="gp">...</span>
 <span class="go">(&#39;\xff\xff/metrics/health/aggregate&#39;, &#39;{&quot;batch_limited&quot;:false,&quot;limiting_storage_durability_lag&quot;:5000000,&quot;limiting_storage_queue&quot;:1000,&quot;tps_limit&quot;:483988.66315011407,&quot;worst_storage_durability_lag&quot;:5000001,&quot;worst_storage_queue&quot;:2036,&quot;worst_log_queue&quot;:300}&#39;)</span>
@@ -283,108 +400,93 @@ Some of this information is also available in <code class="docutils literal"><sp
 <span class="go">(&#39;\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a&#39;, &#39;{&quot;cpu_usage&quot;:2.398696781487125,&quot;disk_usage&quot;:0.059995917598039405,&quot;storage_durability_lag&quot;:5000001,&quot;storage_queue&quot;:2036}&#39;)</span>
 </pre></div>
 </div>
-<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/aggregate</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/health/aggregate</span></code></p>
 <p>Aggregate stats about cluster health. Reading this key alone is slightly cheaper than reading any of the per-process keys.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="21%" />
-<col width="5%" />
-<col width="74%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td><strong>Field</strong></td>
-<td><strong>Type</strong></td>
-<td><strong>Description</strong></td>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><strong>Field</strong></p></td>
+<td><p><strong>Type</strong></p></td>
+<td><p><strong>Description</strong></p></td>
 </tr>
-<tr class="row-even"><td>batch_limited</td>
-<td>boolean</td>
-<td>Whether or not the cluster is limiting batch priority transactions</td>
+<tr class="row-even"><td><p>batch_limited</p></td>
+<td><p>boolean</p></td>
+<td><p>Whether or not the cluster is limiting batch priority transactions</p></td>
 </tr>
-<tr class="row-odd"><td>limiting_storage_durability_lag</td>
-<td>number</td>
-<td>storage_durability_lag that ratekeeper is using to determine throttling (see the description for storage_durability_lag)</td>
+<tr class="row-odd"><td><p>limiting_storage_durability_lag</p></td>
+<td><p>number</p></td>
+<td><p>storage_durability_lag that ratekeeper is using to determine throttling (see the description for storage_durability_lag)</p></td>
 </tr>
-<tr class="row-even"><td>limiting_storage_queue</td>
-<td>number</td>
-<td>storage_queue that ratekeeper is using to determine throttling (see the description for storage_queue)</td>
+<tr class="row-even"><td><p>limiting_storage_queue</p></td>
+<td><p>number</p></td>
+<td><p>storage_queue that ratekeeper is using to determine throttling (see the description for storage_queue)</p></td>
 </tr>
-<tr class="row-odd"><td>tps_limit</td>
-<td>number</td>
-<td>The rate at which normal priority transactions are allowed to start</td>
+<tr class="row-odd"><td><p>tps_limit</p></td>
+<td><p>number</p></td>
+<td><p>The rate at which normal priority transactions are allowed to start</p></td>
 </tr>
-<tr class="row-even"><td>worst_storage_durability_lag</td>
-<td>number</td>
-<td>See the description for storage_durability_lag</td>
+<tr class="row-even"><td><p>worst_storage_durability_lag</p></td>
+<td><p>number</p></td>
+<td><p>See the description for storage_durability_lag</p></td>
 </tr>
-<tr class="row-odd"><td>worst_storage_queue</td>
-<td>number</td>
-<td>See the description for storage_queue</td>
+<tr class="row-odd"><td><p>worst_storage_queue</p></td>
+<td><p>number</p></td>
+<td><p>See the description for storage_queue</p></td>
 </tr>
-<tr class="row-even"><td>worst_log_queue</td>
-<td>number</td>
-<td>See the description for log_queue</td>
+<tr class="row-even"><td><p>worst_log_queue</p></td>
+<td><p>number</p></td>
+<td><p>See the description for log_queue</p></td>
 </tr>
 </tbody>
 </table>
-<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/log/&lt;id&gt;</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/health/log/&lt;id&gt;</span></code></p>
 <p>Stats about the health of a particular transaction log process</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="19%" />
-<col width="6%" />
-<col width="75%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td><strong>Field</strong></td>
-<td><strong>Type</strong></td>
-<td><strong>Description</strong></td>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><strong>Field</strong></p></td>
+<td><p><strong>Type</strong></p></td>
+<td><p><strong>Description</strong></p></td>
 </tr>
-<tr class="row-even"><td>log_queue</td>
-<td>number</td>
-<td>The number of bytes of mutations that need to be stored in memory on this transaction log process</td>
+<tr class="row-even"><td><p>log_queue</p></td>
+<td><p>number</p></td>
+<td><p>The number of bytes of mutations that need to be stored in memory on this transaction log process</p></td>
 </tr>
 </tbody>
 </table>
-<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/storage/&lt;id&gt;</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/health/storage/&lt;id&gt;</span></code></p>
 <p>Stats about the health of a particular storage process</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="12%" />
-<col width="4%" />
-<col width="85%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td><strong>Field</strong></td>
-<td><strong>Type</strong></td>
-<td><strong>Description</strong></td>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><strong>Field</strong></p></td>
+<td><p><strong>Type</strong></p></td>
+<td><p><strong>Description</strong></p></td>
 </tr>
-<tr class="row-even"><td>cpu_usage</td>
-<td>number</td>
-<td>The cpu percentage used by this storage process</td>
+<tr class="row-even"><td><p>cpu_usage</p></td>
+<td><p>number</p></td>
+<td><p>The cpu percentage used by this storage process</p></td>
 </tr>
-<tr class="row-odd"><td>disk_usage</td>
-<td>number</td>
-<td>The disk IO percentage used by this storage process</td>
+<tr class="row-odd"><td><p>disk_usage</p></td>
+<td><p>number</p></td>
+<td><p>The disk IO percentage used by this storage process</p></td>
 </tr>
-<tr class="row-even"><td>storage_durability_lag</td>
-<td>number</td>
-<td>The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000 <a class="footnote-reference" href="#max-read-transaction-life-versions" id="id3">[2]</a>.</td>
+<tr class="row-even"><td><p>storage_durability_lag</p></td>
+<td><p>number</p></td>
+<td><p>The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000 <a class="footnote-reference brackets" href="#max-read-transaction-life-versions" id="id3" role="doc-noteref"><span class="fn-bracket">[</span>2<span class="fn-bracket">]</span></a>.</p></td>
 </tr>
-<tr class="row-odd"><td>storage_queue</td>
-<td>number</td>
-<td>The number of bytes of mutations that need to be stored in memory on this storage process</td>
+<tr class="row-odd"><td><p>storage_queue</p></td>
+<td><p>number</p></td>
+<td><p>The number of bytes of mutations that need to be stored in memory on this storage process</p></td>
 </tr>
 </tbody>
 </table>
-<div class="section" id="id4">
+<section id="id4">
 <h4>Caveats</h4>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/</span></code> These keys may return data that&#8217;s several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys being absent.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/metrics/health/</span></code> These keys may return data that’s several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys being absent.</p></li>
 </ol>
-</div>
-</div>
-</div>
-<div class="section" id="read-write-modules">
+</section>
+</section>
+</section>
+<section id="read-write-modules">
 <h2>Read/write modules</h2>
 <p>As of api version 700, some modules in the special key space allow writes as
 well as reads. In these modules, a user can expect that mutations (i.e. sets,
@@ -395,127 +497,133 @@ special keys may require reading system keys (whose format is an implementation
 detail), and for those reads appropriate read conflict ranges are added on
 the underlying system keys.</p>
 <p>Writes to read/write modules in the special key space are disabled by
-default. Use the <code class="docutils literal"><span class="pre">special_key_space_enable_writes</span></code> transaction option to
-enable them <a class="footnote-reference" href="#special-key-space-enable-writes" id="id5">[3]</a>.</p>
-<div class="section" id="management-module">
+default. Use the <code class="docutils literal notranslate"><span class="pre">special_key_space_enable_writes</span></code> transaction option to
+enable them <a class="footnote-reference brackets" href="#special-key-space-enable-writes" id="id5" role="doc-noteref"><span class="fn-bracket">[</span>3<span class="fn-bracket">]</span></a>.</p>
+<section id="management-module">
 <span id="special-key-space-management-module"></span><h3>Management module</h3>
 <p>The management module is for temporary cluster configuration changes. For
 example, in order to safely remove a process from the cluster, one can add an
-exclusion to the <code class="docutils literal"><span class="pre">\xff\xff/management/excluded/</span></code> key prefix that matches
+exclusion to the <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/excluded/</span></code> key prefix that matches
 that process, and wait for necessary data to be moved away.</p>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/excluded/&lt;exclusion&gt;</span></code> Read/write. Indicates that the cluster should move data away from processes matching <code class="docutils literal"><span class="pre">&lt;exclusion&gt;</span></code>, so that they can be safely removed. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/failed/&lt;exclusion&gt;</span></code> Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/in_progress_exclusion/&lt;address&gt;</span></code> Read-only. Indicates that the process matching <code class="docutils literal"><span class="pre">&lt;address&gt;</span></code> matches an exclusion, but still has necessary data and can&#8217;t yet be safely removed.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/options/excluded/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal"><span class="pre">\xff\xff/management/excluded/&lt;exclusion&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/options/failed/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal"><span class="pre">\xff\xff/management/failed/&lt;exclusion&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/min_required_commit_version</span></code> Read/write. Changing this key will change the corresponding system key <code class="docutils literal"><span class="pre">\xff/minRequiredCommitVersion</span> <span class="pre">=</span> <span class="pre">[[Version]]</span></code>. The value of this special key is the literal text of the underlying <code class="docutils literal"><span class="pre">Version</span></code>, which is <code class="docutils literal"><span class="pre">int64_t</span></code>. If you set the key with a value failed to be parsed as <code class="docutils literal"><span class="pre">int64_t</span></code>, <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> will be thrown. In addition, the given <code class="docutils literal"><span class="pre">Version</span></code> should be larger than the current read version and smaller than the upper bound(<code class="docutils literal"><span class="pre">2**63-1-version_per_second*3600*24*365*1000</span></code>). Otherwise, <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> is thrown. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">advanceversion</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/profiling/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code> Read/write. Changing these two keys will change the corresponding system keys <code class="docutils literal"><span class="pre">\xff\x02/fdbClientInfo/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code>, respectively. The value of <code class="docutils literal"><span class="pre">\xff\xff/management/client_txn_sample_rate</span></code> is a literal text of <code class="docutils literal"><span class="pre">double</span></code>, and the value of <code class="docutils literal"><span class="pre">\xff\xff/management/client_txn_size_limit</span></code> is a literal text of <code class="docutils literal"><span class="pre">int64_t</span></code>. A special value <code class="docutils literal"><span class="pre">default</span></code> can be set to or read from these two keys, representing the client profiling is disabled. In addition, <code class="docutils literal"><span class="pre">clear</span></code> in this range is not allowed. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">profile</span> <span class="pre">client</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/maintenance/&lt;zone_id&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;seconds&gt;</span></code> Read/write. Set/clear a key in this range will change the corresponding system key <code class="docutils literal"><span class="pre">\xff\x02/healthyZone</span></code>. The value is a literal text of a non-negative <code class="docutils literal"><span class="pre">double</span></code> which represents the remaining time for the zone to be in maintenance. Commiting with an invalid value will throw <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code>. Only one zone is allowed to be in maintenance at the same time. Setting a new key in the range will override the old one and the transaction will throw <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> error if more than one zone is given. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">maintenance</span></code>.
-In addition, a special key <code class="docutils literal"><span class="pre">\xff\xff/management/maintenance/IgnoreSSFailures</span></code> in the range, if set, will disable datadistribution for storage server failures.
-It is doing the same thing as the fdbcli command <code class="docutils literal"><span class="pre">datadistribution</span> <span class="pre">disable</span> <span class="pre">ssfailure</span></code>.
-Maintenance mode will be unable to use until the key is cleared, which is the same as the fdbcli command <code class="docutils literal"><span class="pre">datadistribution</span> <span class="pre">enable</span> <span class="pre">ssfailure</span></code>.
-While the key is set, any commit that tries to set a key in the range will fail with the <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> error.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/data_distribution/&lt;mode|rebalance_ignored&gt;</span></code> Read/write. Changing these two keys will change the two corresponding system keys <code class="docutils literal"><span class="pre">\xff/dataDistributionMode</span></code> and <code class="docutils literal"><span class="pre">\xff\x02/rebalanceDDIgnored</span></code>. The value of <code class="docutils literal"><span class="pre">\xff\xff/management/data_distribution/mode</span></code> is a literal text of <code class="docutils literal"><span class="pre">0</span></code> (disable) or <code class="docutils literal"><span class="pre">1</span></code> (enable). Transactions committed with invalid values will throw <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> . The value of <code class="docutils literal"><span class="pre">\xff\xff/management/data_distribution/rebalance_ignored</span></code> is empty. If present, it means data distribution is disabled for rebalance. Any transaction committed with non-empty value for this key will throw <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code>. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">datadistribution</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/consistency_check_suspended</span></code> Read/write. Set or read this key will set or read the underlying system key <code class="docutils literal"><span class="pre">\xff\x02/ConsistencyCheck/Suspend</span></code>. The value of this special key is unused thus if present, will be empty. In particular, if the key exists, then consistency is suspended. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">consistencycheck</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/db_locked</span></code> Read/write. A single key that can be read and modified. Set the key with a 32 bytes hex string UID will lock the database and clear the key will unlock. Read the key will return the UID string as the value. If the database is already locked, then the commit will fail with the <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> error. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">lock</span></code> and <code class="docutils literal"><span class="pre">unlock</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/auto_coordinators</span></code> Read-only. A single key, if read, will return a set of processes which is able to satisfy the current redundency level and serve as new coordinators. The return value is formatted as a comma delimited string of network addresses of coordinators, i.e. <code class="docutils literal"><span class="pre">&lt;ip:port&gt;,&lt;ip:port&gt;,...,&lt;ip:port&gt;</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/excluded_locality/&lt;locality&gt;</span></code> Read/write. Indicates that the cluster should move data away from processes matching <code class="docutils literal"><span class="pre">&lt;locality&gt;</span></code>, so that they can be safely removed. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/failed_locality/&lt;locality&gt;</span></code> Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/options/excluded_locality/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal"><span class="pre">\xff\xff/management/excluded_locality/&lt;locality&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/options/failed_locality/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal"><span class="pre">\xff\xff/management/failed_locality/&lt;locality&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/management/tenant_map/&lt;tenant&gt;</span></code> Read/write. Setting a key in this range to any value will result in a tenant being created with name <code class="docutils literal"><span class="pre">&lt;tenant&gt;</span></code>. Clearing a key in this range will delete the tenant with name <code class="docutils literal"><span class="pre">&lt;tenant&gt;</span></code>. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/excluded/&lt;exclusion&gt;</span></code> Read/write. Indicates that the cluster should move data away from processes matching <code class="docutils literal notranslate"><span class="pre">&lt;exclusion&gt;</span></code>, so that they can be safely removed. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/failed/&lt;exclusion&gt;</span></code> Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/in_progress_exclusion/&lt;address&gt;</span></code> Read-only. Indicates that the process matching <code class="docutils literal notranslate"><span class="pre">&lt;address&gt;</span></code> matches an exclusion, but still has necessary data and can’t yet be safely removed.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/excluded/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/excluded/&lt;exclusion&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/failed/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/failed/&lt;exclusion&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/min_required_commit_version</span></code> Read/write. Changing this key will change the corresponding system key <code class="docutils literal notranslate"><span class="pre">\xff/minRequiredCommitVersion</span> <span class="pre">=</span> <span class="pre">[[Version]]</span></code>. The value of this special key is the literal text of the underlying <code class="docutils literal notranslate"><span class="pre">Version</span></code>, which is <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>. If you set the key with a value failed to be parsed as <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>, <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> will be thrown. In addition, the given <code class="docutils literal notranslate"><span class="pre">Version</span></code> should be larger than the current read version and smaller than the upper bound(<code class="docutils literal notranslate"><span class="pre">2**63-1-version_per_second*3600*24*365*1000</span></code>). Otherwise, <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> is thrown. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">advanceversion</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/maintenance/&lt;zone_id&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;seconds&gt;</span></code> Read/write. Set/clear a key in this range will change the corresponding system key <code class="docutils literal notranslate"><span class="pre">\xff\x02/healthyZone</span></code>. The value is a literal text of a non-negative <code class="docutils literal notranslate"><span class="pre">double</span></code> which represents the remaining time for the zone to be in maintenance. Commiting with an invalid value will throw <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code>. Only one zone is allowed to be in maintenance at the same time. Setting a new key in the range will override the old one and the transaction will throw <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> error if more than one zone is given. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">maintenance</span></code>.
+In addition, a special key <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/maintenance/IgnoreSSFailures</span></code> in the range, if set, will disable datadistribution for storage server failures.
+It is doing the same thing as the fdbcli command <code class="docutils literal notranslate"><span class="pre">datadistribution</span> <span class="pre">disable</span> <span class="pre">ssfailure</span></code>.
+Maintenance mode will be unable to use until the key is cleared, which is the same as the fdbcli command <code class="docutils literal notranslate"><span class="pre">datadistribution</span> <span class="pre">enable</span> <span class="pre">ssfailure</span></code>.
+While the key is set, any commit that tries to set a key in the range will fail with the <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> error.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/data_distribution/&lt;mode|rebalance_ignored&gt;</span></code> Read/write. Changing these two keys will change the two corresponding system keys <code class="docutils literal notranslate"><span class="pre">\xff/dataDistributionMode</span></code> and <code class="docutils literal notranslate"><span class="pre">\xff\x02/rebalanceDDIgnored</span></code>. The value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/data_distribution/mode</span></code> is a literal text of <code class="docutils literal notranslate"><span class="pre">0</span></code> (disable) or <code class="docutils literal notranslate"><span class="pre">1</span></code> (enable). Transactions committed with invalid values will throw <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> . The value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/data_distribution/rebalance_ignored</span></code> is empty. If present, it means data distribution is disabled for rebalance. Any transaction committed with non-empty value for this key will throw <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code>. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">datadistribution</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/consistency_check_suspended</span></code> Read/write. Set or read this key will set or read the underlying system key <code class="docutils literal notranslate"><span class="pre">\xff\x02/ConsistencyCheck/Suspend</span></code>. The value of this special key is unused thus if present, will be empty. In particular, if the key exists, then consistency is suspended. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">consistencycheck</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/db_locked</span></code> Read/write. A single key that can be read and modified. Set the key with a 32 bytes hex string UID will lock the database and clear the key will unlock. Read the key will return the UID string as the value. If the database is already locked, then the commit will fail with the <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> error. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">lock</span></code> and <code class="docutils literal notranslate"><span class="pre">unlock</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/auto_coordinators</span></code> Read-only. A single key, if read, will return a set of processes which is able to satisfy the current redundency level and serve as new coordinators. The return value is formatted as a comma delimited string of network addresses of coordinators, i.e. <code class="docutils literal notranslate"><span class="pre">&lt;ip:port&gt;,&lt;ip:port&gt;,...,&lt;ip:port&gt;</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/excluded_locality/&lt;locality&gt;</span></code> Read/write. Indicates that the cluster should move data away from processes matching <code class="docutils literal notranslate"><span class="pre">&lt;locality&gt;</span></code>, so that they can be safely removed. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/failed_locality/&lt;locality&gt;</span></code> Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removing machines from a cluster</span></a> for documentation for the corresponding fdbcli command.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/excluded_locality/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/excluded_locality/&lt;locality&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/failed_locality/force</span></code> Read/write. Setting this key disables safety checks for writes to <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/failed_locality/&lt;locality&gt;</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/tenant/map/&lt;tenant&gt;</span></code> Read/write. Setting a key in this range to any value will result in a tenant being created with name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code>. Clearing a key in this range will delete the tenant with name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code>. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/tenant/rename/&lt;tenant&gt;</span></code> Read/write. Setting a key in this range to an unused tenant name will result in the tenant with the name <code class="docutils literal notranslate"><span class="pre">&lt;tenant&gt;</span></code> to be renamed to the value provided. If the rename operation is a transaction retried in a loop, it is possible for the rename to be applied twice, in which case <code class="docutils literal notranslate"><span class="pre">tenant_not_found</span></code> or <code class="docutils literal notranslate"><span class="pre">tenant_already_exists</span></code> errors may be returned. This can be avoided by checking for the tenant’s existence first.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/options/worker_interfaces/verify</span></code> Read/write. Setting this key will add a verification phase in reading <code class="docutils literal notranslate"><span class="pre">\xff\xff/worker_interfaces</span></code>. Setting this key only has an effect in the current transaction and is not persisted on commit. Try to establish connections with every worker from the list returned by Cluster Controller and only return those workers that the client can connect to. This option is now only used in fdbcli commands <code class="docutils literal notranslate"><span class="pre">kill</span></code>, <code class="docutils literal notranslate"><span class="pre">suspend</span></code> and <code class="docutils literal notranslate"><span class="pre">expensive_data_check</span></code> to populate the worker list.</p></li>
 </ol>
-<p>An exclusion is syntactically either an ip address (e.g. <code class="docutils literal"><span class="pre">127.0.0.1</span></code>), or
-an ip address and port (e.g. <code class="docutils literal"><span class="pre">127.0.0.1:4500</span></code>) or any locality (e.g <code class="docutils literal"><span class="pre">locality_dcid:primary-satellite</span></code> or
-<code class="docutils literal"><span class="pre">locality_zoneid:primary-satellite-log-2</span></code> or <code class="docutils literal"><span class="pre">locality_machineid:primary-stateless-1</span></code> or <code class="docutils literal"><span class="pre">locality_processid:223be2da244ca0182375364e4d122c30</span></code>).
+<p>An exclusion is syntactically either an ip address (e.g. <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code>), or
+an ip address and port (e.g. <code class="docutils literal notranslate"><span class="pre">127.0.0.1:4500</span></code>) or any locality (e.g <code class="docutils literal notranslate"><span class="pre">locality_dcid:primary-satellite</span></code> or
+<code class="docutils literal notranslate"><span class="pre">locality_zoneid:primary-satellite-log-2</span></code> or <code class="docutils literal notranslate"><span class="pre">locality_machineid:primary-stateless-1</span></code> or <code class="docutils literal notranslate"><span class="pre">locality_processid:223be2da244ca0182375364e4d122c30</span></code>).
 If no port is specified, then all processes on that host match the exclusion.
 For locality, all processes that match the given locality are excluded.</p>
-</div>
-<div class="section" id="configuration-module">
+</section>
+<section id="configuration-module">
 <h3>Configuration module</h3>
 <p>The configuration module is for changing the cluster configuration.
 For example, you can change a process type or update coordinators by manipulating related special keys through transactions.</p>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/configuration/process/class_type/&lt;address&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;class_type&gt;</span></code> Read/write. Reading keys in the range will retrieve processes&#8217; class types. Setting keys in the range will update processes&#8217; class types. The process matching <code class="docutils literal"><span class="pre">&lt;address&gt;</span></code> will be assigned to the given class type if the commit is successful. The valid class types are <code class="docutils literal"><span class="pre">storage</span></code>, <code class="docutils literal"><span class="pre">transaction</span></code>, <code class="docutils literal"><span class="pre">resolution</span></code>, etc. A full list of class type can be found via <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">help</span> <span class="pre">setclass</span></code>. Clearing keys is forbidden in the range. Instead, you can set the type as <code class="docutils literal"><span class="pre">default</span></code>, which will clear the assigned class type if existing. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">setclass</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/configuration/process/class_source/&lt;address&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;class_source&gt;</span></code> Read-only. Reading keys in the range will retrieve processes&#8217; class source. The class source is one of <code class="docutils literal"><span class="pre">command_line</span></code>, <code class="docutils literal"><span class="pre">configure_auto</span></code>, <code class="docutils literal"><span class="pre">set_class</span></code> and <code class="docutils literal"><span class="pre">invalid</span></code>, indicating the source that the process&#8217;s class type comes from.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/configuration/coordinators/processes</span> <span class="pre">:=</span> <span class="pre">&lt;ip:port&gt;,&lt;ip:port&gt;,...,&lt;ip:port&gt;</span></code> Read/write. A single key, if read, will return a comma delimited string of coordinators&#8217; network addresses. Thus to provide a new set of cooridinators, set the key with a correct formatted string of new coordinators&#8217; network addresses. As there&#8217;s always the need to have coordinators, clear on the key is forbidden and a transaction will fail with the <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> error if the clear is committed. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">coordinators</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/configuration/coordinators/cluster_description</span> <span class="pre">:=</span> <span class="pre">&lt;new_description&gt;</span></code> Read/write. A single key, if read, will return the cluster description. Thus modifying the key will update the cluster decription. The new description needs to match <code class="docutils literal"><span class="pre">[A-Za-z0-9_]+</span></code>, otherwise, the <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> error will be thrown. In addition, clear on the key is meaningless thus forbidden. For more details, see help text of <code class="docutils literal"><span class="pre">fdbcli</span></code> command <code class="docutils literal"><span class="pre">coordinators</span></code>.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/configuration/process/class_type/&lt;address&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;class_type&gt;</span></code> Read/write. Reading keys in the range will retrieve processes’ class types. Setting keys in the range will update processes’ class types. The process matching <code class="docutils literal notranslate"><span class="pre">&lt;address&gt;</span></code> will be assigned to the given class type if the commit is successful. The valid class types are <code class="docutils literal notranslate"><span class="pre">storage</span></code>, <code class="docutils literal notranslate"><span class="pre">transaction</span></code>, <code class="docutils literal notranslate"><span class="pre">resolution</span></code>, etc. A full list of class type can be found via <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">help</span> <span class="pre">setclass</span></code>. Clearing keys is forbidden in the range. Instead, you can set the type as <code class="docutils literal notranslate"><span class="pre">default</span></code>, which will clear the assigned class type if existing. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">setclass</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/configuration/process/class_source/&lt;address&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;class_source&gt;</span></code> Read-only. Reading keys in the range will retrieve processes’ class source. The class source is one of <code class="docutils literal notranslate"><span class="pre">command_line</span></code>, <code class="docutils literal notranslate"><span class="pre">configure_auto</span></code>, <code class="docutils literal notranslate"><span class="pre">set_class</span></code> and <code class="docutils literal notranslate"><span class="pre">invalid</span></code>, indicating the source that the process’s class type comes from.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/configuration/coordinators/processes</span> <span class="pre">:=</span> <span class="pre">&lt;ip:port&gt;,&lt;ip:port&gt;,...,&lt;ip:port&gt;</span></code> Read/write. A single key, if read, will return a comma delimited string of coordinators’ network addresses. Thus to provide a new set of cooridinators, set the key with a correct formatted string of new coordinators’ network addresses. As there’s always the need to have coordinators, clear on the key is forbidden and a transaction will fail with the <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> error if the clear is committed. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">coordinators</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/configuration/coordinators/cluster_description</span> <span class="pre">:=</span> <span class="pre">&lt;new_description&gt;</span></code> Read/write. A single key, if read, will return the cluster description. Thus modifying the key will update the cluster decription. The new description needs to match <code class="docutils literal notranslate"><span class="pre">[A-Za-z0-9_]+</span></code>, otherwise, the <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> error will be thrown. In addition, clear on the key is meaningless thus forbidden. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">coordinators</span></code>.</p></li>
 </ol>
-<p>The <code class="docutils literal"><span class="pre">&lt;address&gt;</span></code> here is the network address of the corresponding process. Thus the general form is <code class="docutils literal"><span class="pre">ip:port</span></code>.</p>
-</div>
-<div class="section" id="error-message-module">
+<p>The <code class="docutils literal notranslate"><span class="pre">&lt;address&gt;</span></code> here is the network address of the corresponding process. Thus the general form is <code class="docutils literal notranslate"><span class="pre">ip:port</span></code>.</p>
+</section>
+<section id="error-message-module">
 <h3>Error message module</h3>
 <p>Each module written to validates the transaction before committing, and this
-validation failing is indicated by a <code class="docutils literal"><span class="pre">special_keys_api_failure</span></code> error.
-More detailed information about why this validation failed can be accessed through the <code class="docutils literal"><span class="pre">\xff\xff/error_message</span></code> key, whose value is a json document with the following schema.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="30%" />
-<col width="9%" />
-<col width="61%" />
-</colgroup>
-<tbody valign="top">
-<tr class="row-odd"><td><strong>Field</strong></td>
-<td><strong>Type</strong></td>
-<td><strong>Description</strong></td>
+validation failing is indicated by a <code class="docutils literal notranslate"><span class="pre">special_keys_api_failure</span></code> error.
+More detailed information about why this validation failed can be accessed through the <code class="docutils literal notranslate"><span class="pre">\xff\xff/error_message</span></code> key, whose value is a json document with the following schema.</p>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><strong>Field</strong></p></td>
+<td><p><strong>Type</strong></p></td>
+<td><p><strong>Description</strong></p></td>
 </tr>
-<tr class="row-even"><td>retriable</td>
-<td>boolean</td>
-<td>Whether or not this operation might succeed if retried</td>
+<tr class="row-even"><td><p>retriable</p></td>
+<td><p>boolean</p></td>
+<td><p>Whether or not this operation might succeed if retried</p></td>
 </tr>
-<tr class="row-odd"><td>command</td>
-<td>string</td>
-<td>The fdbcli command corresponding to this operation</td>
+<tr class="row-odd"><td><p>command</p></td>
+<td><p>string</p></td>
+<td><p>The fdbcli command corresponding to this operation</p></td>
 </tr>
-<tr class="row-even"><td>message</td>
-<td>string</td>
-<td>Help text explaining the reason this operation failed</td>
+<tr class="row-even"><td><p>message</p></td>
+<td><p>string</p></td>
+<td><p>Help text explaining the reason this operation failed</p></td>
 </tr>
 </tbody>
 </table>
-</div>
-<div class="section" id="global-configuration-module">
+</section>
+<section id="global-configuration-module">
 <h3>Global configuration module</h3>
 <p>The global configuration module provides an interface to read and write values
 to <a class="reference internal" href="global-configuration.html"><span class="doc">Global Configuration</span></a>. In general, clients should not read and write
 the global configuration special key space keys directly, but should instead
 use the global configuration functions.</p>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/global_config/&lt;key&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;value&gt;</span></code> Read/write. Reading keys in the range will return a tuple decoded string representation of the value for the given key. Writing a value will update all processes in the cluster with the new key-value pair. Values must be written using the <a class="reference internal" href="api-python.html#api-python-tuple-layer"><span class="std std-ref">Tuple layer</span></a>.</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/global_config/&lt;key&gt;</span> <span class="pre">:=</span> <span class="pre">&lt;value&gt;</span></code> Read/write. Reading keys in the range will return a tuple decoded string representation of the value for the given key. Writing a value will update all processes in the cluster with the new key-value pair. Values must be written using the <a class="reference internal" href="api-python.html#api-python-tuple-layer"><span class="std std-ref">Tuple layer</span></a>.</p></li>
 </ol>
-</div>
-<div class="section" id="tracing-module">
+</section>
+<section id="tracing-module">
 <span id="special-key-space-tracing-module"></span><h3>Tracing module</h3>
-<p>The tracing module provides read and write access to a transactions&#8217; tracing
+<p>The tracing module provides read and write access to a transactions’ tracing
 data. Every transaction contains a unique identifier which follows the
 transaction through the system. By providing access to set this identifier,
 clients can connect FoundationDB transactions to outside events.</p>
 <ol class="arabic simple">
-<li><code class="docutils literal"><span class="pre">\xff\xff/tracing/transaction_id</span> <span class="pre">:=</span> <span class="pre">&lt;transaction_id&gt;</span></code> Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.</li>
-<li><code class="docutils literal"><span class="pre">\xff\xff/tracing/token</span> <span class="pre">:=</span> <span class="pre">&lt;tracing_enabled&gt;</span></code> Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/tracing/transaction_id</span> <span class="pre">:=</span> <span class="pre">&lt;transaction_id&gt;</span></code> Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/tracing/token</span> <span class="pre">:=</span> <span class="pre">&lt;tracing_enabled&gt;</span></code> Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).</p></li>
 </ol>
-<table class="docutils footnote" frame="void" id="conflicting-keys" rules="none">
-<colgroup><col class="label" /><col /></colgroup>
-<tbody valign="top">
-<tr><td class="label"><a class="fn-backref" href="#id2">[1]</a></td><td>In practice, the transaction probably committed successfully. However, if you&#8217;re running multiple resolvers then it&#8217;s possible for a transaction to cause another to abort even if it doesn&#8217;t commit successfully.</td></tr>
-</tbody>
-</table>
-<table class="docutils footnote" frame="void" id="max-read-transaction-life-versions" rules="none">
-<colgroup><col class="label" /><col /></colgroup>
-<tbody valign="top">
-<tr><td class="label"><a class="fn-backref" href="#id3">[2]</a></td><td>The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS</td></tr>
-</tbody>
-</table>
-<table class="docutils footnote" frame="void" id="special-key-space-enable-writes" rules="none">
-<colgroup><col class="label" /><col /></colgroup>
-<tbody valign="top">
-<tr><td class="label"><a class="fn-backref" href="#id5">[3]</a></td><td>Enabling this option enables other transaction options, such as <code class="docutils literal"><span class="pre">ACCESS_SYSTEM_KEYS</span></code>. This may change in the future.</td></tr>
-</tbody>
-</table>
-</div>
-</div>
-</div>
+</section>
+</section>
+<section id="deprecated-keys">
+<span id="special-key-space-deprecation"></span><h2>Deprecated Keys</h2>
+<p>Listed below are the special keys that have been deprecated. Special key(s) will no longer be accessible when the client specifies an API version equal to or larger than the version where they were deprecated. Clients specifying older API versions will be able to continue using the deprecated key(s).</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">\xff\xff/management/profiling/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code> Deprecated as of API version 720. The corresponding functionalities are now covered by the global configuration module. For details, see <a class="reference internal" href="global-configuration.html"><span class="doc">Global Configuration</span></a>. Read/write. Changing these two keys will change the corresponding system keys <code class="docutils literal notranslate"><span class="pre">\xff\x02/fdbClientInfo/&lt;client_txn_sample_rate|client_txn_size_limit&gt;</span></code>, respectively. The value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/client_txn_sample_rate</span></code> is a literal text of <code class="docutils literal notranslate"><span class="pre">double</span></code>, and the value of <code class="docutils literal notranslate"><span class="pre">\xff\xff/management/client_txn_size_limit</span></code> is a literal text of <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>. A special value <code class="docutils literal notranslate"><span class="pre">default</span></code> can be set to or read from these two keys, representing the client profiling is disabled. In addition, <code class="docutils literal notranslate"><span class="pre">clear</span></code> in this range is not allowed. For more details, see help text of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command <code class="docutils literal notranslate"><span class="pre">profile</span> <span class="pre">client</span></code>.</p></li>
+</ol>
+</section>
+<section id="versioning">
+<h2>Versioning</h2>
+<p>For how FDB clients deal with versioning, see <a class="reference internal" href="api-general.html#api-versions"><span class="std std-ref">API versions</span></a>. The special key space deals with versioning by using the <code class="docutils literal notranslate"><span class="pre">API_VERSION</span></code> passed to initialize the client. Any module added at a version larger than the API version set by the client will be inaccessible. For example, if a module is added in version 7.0 and the client sets its API version to 630, then the module will not available. When removing or updating existing modules, module developers need to continue to provide the old behavior for clients that specify old API versions.</p>
+<p>To remove the functionality of a certain special key(s), specify the API version where the function is being deprecated in the <code class="docutils literal notranslate"><span class="pre">registerSpecialKeysImpl</span></code> function. When a client specifies an API version greater than or equal to the deprecation version, the functionality will not be available. Move and update its documentation to <a class="reference internal" href="#special-key-space-deprecation"><span class="std std-ref">Deprecated Keys</span></a>.</p>
+<p>To update the implementation of any special keys, add the new implementation and use <code class="docutils literal notranslate"><span class="pre">API_VERSION</span></code> to switch between different implementations.</p>
+<p>Add notes in <code class="docutils literal notranslate"><span class="pre">api-version-upgrade-guide.rst</span></code> if you either remove or update a special key(s) implementation.</p>
+<aside class="footnote-list brackets">
+<aside class="footnote brackets" id="conflicting-keys" role="note">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id2">1</a><span class="fn-bracket">]</span></span>
+<p>In practice, the transaction probably committed successfully. However, if you’re running multiple resolvers then it’s possible for a transaction to cause another to abort even if it doesn’t commit successfully.</p>
+</aside>
+<aside class="footnote brackets" id="max-read-transaction-life-versions" role="note">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id3">2</a><span class="fn-bracket">]</span></span>
+<p>The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS</p>
+</aside>
+<aside class="footnote brackets" id="special-key-space-enable-writes" role="note">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id5">3</a><span class="fn-bracket">]</span></span>
+<p>Enabling this option enables other transaction options, such as <code class="docutils literal notranslate"><span class="pre">ACCESS_SYSTEM_KEYS</span></code>. This may change in the future.</p>
+</aside>
+</aside>
+</section>
+</section>
 
 
     </div>
@@ -537,7 +645,7 @@ clients can connect FoundationDB transactions to outside events.</p>
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

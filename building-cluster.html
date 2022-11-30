@@ -1,43 +1,29 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Building a Cluster &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Building a Cluster &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -50,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,7 +53,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul>
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -138,63 +253,63 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="building-a-cluster">
+  <section id="building-a-cluster">
 <span id="building-cluster"></span><h1>Building a Cluster</h1>
 <p>This guide walks through the steps to build an externally accessible FoundationDB cluster of one or more machines. Before setting up a cluster for performance testing or production use, you should also read the reference material in <a class="reference internal" href="configuration.html"><span class="doc">Configuration</span></a> and <a class="reference internal" href="administration.html"><span class="doc">Administration</span></a>.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
+<p class="admonition-title">Warning</p>
+<p>The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
 </div>
 <p>To build an externally accessible FoundationDB cluster, perform the following steps:</p>
-<div class="contents local topic" id="contents">
+<nav class="contents local" id="contents">
 <ul class="simple">
-<li><a class="reference internal" href="#install-foundationdb" id="id3">Install FoundationDB</a></li>
-<li><a class="reference internal" href="#optimize-for-your-hardware" id="id4">Optimize for your hardware</a></li>
-<li><a class="reference internal" href="#make-foundationdb-externally-accessible" id="id5">Make FoundationDB externally accessible</a></li>
-<li><a class="reference internal" href="#test-the-database" id="id6">Test the database</a></li>
-<li><a class="reference internal" href="#add-machines-to-the-cluster" id="id7">Add machines to the cluster</a></li>
-<li><a class="reference internal" href="#change-redundancy-mode-and-storage-engine" id="id8">Change redundancy mode and storage engine</a></li>
-<li><a class="reference internal" href="#change-coordination-servers" id="id9">Change coordination servers</a></li>
-<li><a class="reference internal" href="#next-steps" id="id10">Next steps</a></li>
+<li><p><a class="reference internal" href="#install-foundationdb" id="id3">Install FoundationDB</a></p></li>
+<li><p><a class="reference internal" href="#optimize-for-your-hardware" id="id4">Optimize for your hardware</a></p></li>
+<li><p><a class="reference internal" href="#make-foundationdb-externally-accessible" id="id5">Make FoundationDB externally accessible</a></p></li>
+<li><p><a class="reference internal" href="#test-the-database" id="id6">Test the database</a></p></li>
+<li><p><a class="reference internal" href="#add-machines-to-the-cluster" id="id7">Add machines to the cluster</a></p></li>
+<li><p><a class="reference internal" href="#change-redundancy-mode-and-storage-engine" id="id8">Change redundancy mode and storage engine</a></p></li>
+<li><p><a class="reference internal" href="#change-coordination-servers" id="id9">Change coordination servers</a></p></li>
+<li><p><a class="reference internal" href="#next-steps" id="id10">Next steps</a></p></li>
 </ul>
-</div>
-<div class="section" id="install-foundationdb">
+</nav>
+<section id="install-foundationdb">
 <h2>Install FoundationDB</h2>
 <p>Follow the steps in <a class="reference internal" href="getting-started-linux.html"><span class="doc">Getting Started on Linux</span></a> to install FoundationDB locally on each of the Linux machines that you wish to use in your cluster.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">When building a cluster, do <strong>not</strong> simply copy the FoundationDB installation, and in particular the <strong>data</strong> files, from one machine to another, whether by direct copying or by cloning a VM.</p>
+<p class="admonition-title">Warning</p>
+<p>When building a cluster, do <strong>not</strong> simply copy the FoundationDB installation, and in particular the <strong>data</strong> files, from one machine to another, whether by direct copying or by cloning a VM.</p>
 </div>
-</div>
-<div class="section" id="optimize-for-your-hardware">
+</section>
+<section id="optimize-for-your-hardware">
 <h2>Optimize for your hardware</h2>
-<p>The default installation runs only one FoundationDB server process per machine (which will use only one CPU core). Most users of multi-machine configurations will want to maximize performance by running one FoundationDB server process per core. This is accomplished by modifying the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a> (located at <code class="docutils literal"><span class="pre">/etc/foundationdb/foundationdb.conf</span></code>) to have <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections for each core. Note that 4GiB ECC RAM are required per FoundationDB server process (see <a class="reference internal" href="configuration.html#system-requirements"><span class="std std-ref">System requirements</span></a>).</p>
+<p>The default installation runs only one FoundationDB server process per machine (which will use only one CPU core). Most users of multi-machine configurations will want to maximize performance by running one FoundationDB server process per core. This is accomplished by modifying the <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">configuration file</span></a> (located at <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/foundationdb.conf</span></code>) to have <code class="docutils literal notranslate"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections for each core. Note that 4GiB ECC RAM are required per FoundationDB server process (see <a class="reference internal" href="configuration.html#system-requirements"><span class="std std-ref">System requirements</span></a>).</p>
 <p>We recommend changing the configuration file once and copying to other machines in the cluster.</p>
-</div>
-<div class="section" id="make-foundationdb-externally-accessible">
+</section>
+<section id="make-foundationdb-externally-accessible">
 <h2>Make FoundationDB externally accessible</h2>
-<p>By default, FoundationDB installs on a single server in a locally accessible mode suitable for development &#8212; only clients on the same machine will be able to access the database. To allow external access, you will have to make your <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> public.</p>
-<p>Choose a machine to be the starting machine for your cluster. The database on this machine will be the one that we grow to span the cluster. Use the <code class="docutils literal"><span class="pre">/usr/lib/foundationdb/make_public.py</span></code> script on that server to update your cluster file to use a public interface. For example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make_public.py
+<p>By default, FoundationDB installs on a single server in a locally accessible mode suitable for development — only clients on the same machine will be able to access the database. To allow external access, you will have to make your <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> public.</p>
+<p>Choose a machine to be the starting machine for your cluster. The database on this machine will be the one that we grow to span the cluster. Use the <code class="docutils literal notranslate"><span class="pre">/usr/lib/foundationdb/make_public.py</span></code> script on that server to update your cluster file to use a public interface. For example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make_public.py
 /etc/foundationdb/fdb.cluster is now using address 10.0.1.1
 </pre></div>
 </div>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">A FoundationDB cluster has the option of supporting <a class="reference internal" href="tls.html"><span class="doc">Transport Layer Security (TLS)</span></a> for all connections (between server processes and between clients and servers). To enable TLS on a new cluster, see <a class="reference internal" href="tls.html#enable-tls"><span class="std std-ref">Enabling TLS</span></a>.</p>
+<p class="admonition-title">Note</p>
+<p>A FoundationDB cluster has the option of supporting <a class="reference internal" href="tls.html"><span class="doc">Transport Layer Security (TLS)</span></a> for all connections (between server processes and between clients and servers). To enable TLS on a new cluster, see <a class="reference internal" href="tls.html#enable-tls"><span class="std std-ref">Enabling TLS</span></a>.</p>
 </div>
-<p>By default, the script will pick a local network interface that can access the internet. To specify the address manually, use the <code class="docutils literal"><span class="pre">-a</span></code> flag and choose an address that is accessible by all machines in the cluster as well as by all intended clients.:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make_public.py -a 10.0.1.1
+<p>By default, the script will pick a local network interface that can access the internet. To specify the address manually, use the <code class="docutils literal notranslate"><span class="pre">-a</span></code> flag and choose an address that is accessible by all machines in the cluster as well as by all intended clients.:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host1$ sudo /usr/lib/foundationdb/make_public.py -a 10.0.1.1
 /etc/foundationdb/fdb.cluster is now using address 10.0.1.1
 </pre></div>
 </div>
-</div>
-<div class="section" id="test-the-database">
+</section>
+<section id="test-the-database">
 <span id="id1"></span><h2>Test the database</h2>
-<p>At this point and after each subsequent step, it is a good idea to test the database to make sure it is operating normally. Run <code class="docutils literal"><span class="pre">fdbcli</span></code> on the starting machine:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ fdbcli
+<p>At this point and after each subsequent step, it is a good idea to test the database to make sure it is operating normally. Run <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> on the starting machine:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host1$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
 The database is available.
@@ -239,28 +354,27 @@ Client time: Thu Mar 15 14:41:34 2018
 </pre></div>
 </div>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last">If the database is not operational the status command will provide diagnostic information to help you resolve the issue. For more help, please post a question (and the results of the status command) on the <a class="reference external" href="https://forums.foundationdb.org">community forums</a>.</p>
+<p class="admonition-title">Note</p>
+<p>If the database is not operational the status command will provide diagnostic information to help you resolve the issue. For more help, please post a question (and the results of the status command) on the <a class="reference external" href="https://forums.foundationdb.org">community forums</a>.</p>
 </div>
-</div>
-<div class="section" id="add-machines-to-the-cluster">
+</section>
+<section id="add-machines-to-the-cluster">
 <h2>Add machines to the cluster</h2>
 <p>To add the rest of your machines to the cluster, perform the following steps on each one:</p>
 <ul>
-<li><p class="first">Copy the cluster file from a server already in the cluster (located at <code class="docutils literal"><span class="pre">/etc/foundationdb/fdb.cluster</span></code>) to the new machine, overwriting the existing <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file.</p>
-</li>
-<li><p class="first">Restart FoundationDB on the new machine so that it uses the new cluster file:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host2$ sudo service foundationdb restart
+<li><p>Copy the cluster file from a server already in the cluster (located at <code class="docutils literal notranslate"><span class="pre">/etc/foundationdb/fdb.cluster</span></code>) to the new machine, overwriting the existing <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file.</p></li>
+<li><p>Restart FoundationDB on the new machine so that it uses the new cluster file:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host2$ sudo service foundationdb restart
 </pre></div>
 </div>
 </li>
 </ul>
-</div>
-<div class="section" id="change-redundancy-mode-and-storage-engine">
+</section>
+<section id="change-redundancy-mode-and-storage-engine">
 <span id="id2"></span><h2>Change redundancy mode and storage engine</h2>
-<p>By default, the database will be in <code class="docutils literal"><span class="pre">single</span></code> redundancy mode and use the <code class="docutils literal"><span class="pre">memory</span></code> storage engine. You should change the redundancy mode (see <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>) and storage engine (see <a class="reference internal" href="configuration.html#configuration-storage-engine"><span class="std std-ref">Storage engines</span></a>) to appropriate values for your cluster.</p>
-<p>For example, to use a triple-replicated database with the SSD storage engine, use the <code class="docutils literal"><span class="pre">configure</span></code> command in the <code class="docutils literal"><span class="pre">fdbcli</span></code>:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ fdbcli
+<p>By default, the database will be in <code class="docutils literal notranslate"><span class="pre">single</span></code> redundancy mode and use the <code class="docutils literal notranslate"><span class="pre">memory</span></code> storage engine. You should change the redundancy mode (see <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>) and storage engine (see <a class="reference internal" href="configuration.html#configuration-storage-engine"><span class="std std-ref">Storage engines</span></a>) to appropriate values for your cluster.</p>
+<p>For example, to use a triple-replicated database with the SSD storage engine, use the <code class="docutils literal notranslate"><span class="pre">configure</span></code> command in the <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host1$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
 The database is available.
@@ -271,11 +385,11 @@ Configuration changed
 </pre></div>
 </div>
 <p>If the configure command hangs or returns an error message, see <a class="reference internal" href="#test-the-database"><span class="std std-ref">Test the database</span></a>.</p>
-</div>
-<div class="section" id="change-coordination-servers">
+</section>
+<section id="change-coordination-servers">
 <h2>Change coordination servers</h2>
-<p>At this point, your cluster will be using the starting machine as the only coordination server, leaving that as a single point of failure. You should therefore select a fault-tolerant set of coordinators according to the criteria in <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>. To switch the cluster to your chosen coordinators, run the <code class="docutils literal"><span class="pre">fdbcli</span></code> command on one of the servers and use the <code class="docutils literal"><span class="pre">coordinators</span></code> command to <a class="reference internal" href="configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">set the coordinators</span></a>.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbcli
+<p>At this point, your cluster will be using the starting machine as the only coordination server, leaving that as a single point of failure. You should therefore select a fault-tolerant set of coordinators according to the criteria in <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>. To switch the cluster to your chosen coordinators, run the <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> command on one of the servers and use the <code class="docutils literal notranslate"><span class="pre">coordinators</span></code> command to <a class="reference internal" href="configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">set the coordinators</span></a>.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
 The database is available.
@@ -285,18 +399,18 @@ fdb&gt; coordinators 10.0.4.1:4500 10.0.4.2:4500 10.0.4.3:4500
 Coordinators changed
 </pre></div>
 </div>
-<p>There is also a convenience option, <code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code>, that will automatically select a set of coordinators based on your redundancy mode.</p>
+<p>There is also a convenience option, <code class="docutils literal notranslate"><span class="pre">coordinators</span> <span class="pre">auto</span></code>, that will automatically select a set of coordinators based on your redundancy mode.</p>
 <div class="admonition note">
-<p class="first admonition-title">Note</p>
-<p class="last"><code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code> selects processes based on IP address. If your cluster has processes on the same machine with different IP addresses, <code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code> may select a set of coordinators that are not fault tolerant. To ensure maximal fault tolerance, we recommend selecting coordinators according to the criteria in <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a> and setting them manually.</p>
+<p class="admonition-title">Note</p>
+<p><code class="docutils literal notranslate"><span class="pre">coordinators</span> <span class="pre">auto</span></code> selects processes based on IP address. If your cluster has processes on the same machine with different IP addresses, <code class="docutils literal notranslate"><span class="pre">coordinators</span> <span class="pre">auto</span></code> may select a set of coordinators that are not fault tolerant. To ensure maximal fault tolerance, we recommend selecting coordinators according to the criteria in <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a> and setting them manually.</p>
 </div>
-<p>You can also change the cluster <code class="docutils literal"><span class="pre">description</span></code>, as described in <a class="reference internal" href="configuration.html#configuration-setting-cluster-description"><span class="std std-ref">Changing the cluster description</span></a>.</p>
-</div>
-<div class="section" id="next-steps">
+<p>You can also change the cluster <code class="docutils literal notranslate"><span class="pre">description</span></code>, as described in <a class="reference internal" href="configuration.html#configuration-setting-cluster-description"><span class="std std-ref">Changing the cluster description</span></a>.</p>
+</section>
+<section id="next-steps">
 <h2>Next steps</h2>
 <p>To add or remove machines from the cluster or perform other administrative tasks, see <a class="reference internal" href="administration.html"><span class="doc">Administration</span></a>.</p>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -318,7 +432,7 @@ Coordinators changed
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

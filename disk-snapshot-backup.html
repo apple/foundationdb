@@ -1,43 +1,29 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Disk snapshot backup and Restore &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Disk snapshot backup and Restore &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -50,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,7 +53,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul>
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -144,249 +259,234 @@
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="disk-snapshot-backup-and-restore">
+  <section id="disk-snapshot-backup-and-restore">
 <span id="disk-snapshot-backups"></span><h1>Disk snapshot backup and Restore</h1>
 <p>This document covers disk snapshot based backup and restoration of a FoundationDB database. This tool leverages disk level snapshots and gets a point-in-time consistent copy of the database. The disk snapshot backup can be used for test and development purposes, for compliance reasons or to provide an additional level of protection in case of hardware or software failures.</p>
-<div class="section" id="introduction">
+<section id="introduction">
 <span id="disk-snapshot-backup-introduction"></span><h2>Introduction</h2>
-<p>FoundationDB&#8217;s disk snapshot backup tool makes a consistent, point-in-time backup of FoundationDB database without downtime by taking crash consistent snapshot of all the disk stores that have persistent data.</p>
+<p>FoundationDB’s disk snapshot backup tool makes a consistent, point-in-time backup of FoundationDB database without downtime by taking crash consistent snapshot of all the disk stores that have persistent data.</p>
 <p>The prerequisite of this feature is to have crash consistent snapshot support on the filesystem (or the disks) on which FoundationDB is running.</p>
 <p>The disk snapshot backup tool orchestrates the snapshotting of all the disk images and ensures that they are restorable to a consistent point in time.</p>
 <p>Restore is achieved by copying or attaching the disk snapshot images to FoundationDB compute instances. Restore behaves as if the cluster were powered down and restarted.</p>
-</div>
-<div class="section" id="backup-vs-disk-snapshot-backup">
+</section>
+<section id="backup-vs-disk-snapshot-backup">
 <h2>Backup vs Disk snapshot backup</h2>
 <p>Backup feature already exists in FoundationDB and is detailed here <a class="reference internal" href="backups.html#backups"><span class="std std-ref">Backup, Restore, and Replication for Disaster Recovery</span></a>, any use of fdbbackup will refer to this feature.</p>
 <p>Both fdbbackup and Disk snapshot backup tools provide a point-in-time consistent backup of FoundationDB database, but they operate at different levels and there are differences in terms of performance, features and external dependency.</p>
 <p>fdbbackup operates at the key-value level. Backup involves copying of all the key-value pairs from the source cluster and restore involves applying all the key-value pairs to the destination database. Performance depends on the amount of data and the throughput with which the data can be read and written. This approach has no external dependency, there is no requirement for any snapshotting feature from the disk system. Additionally, it has an option for continuous backup with the flexibility to pick a restore point.</p>
 <p>Disk snapshot backup and restore are generally high performance because it operates at disk level and data is not read or written through the FoundationDB stack. In environments where disk snapshot and restore are highly performant this approach can be very fast. Frequent backups can be done as a substitute to continuous backup if the backups are performant.</p>
-</div>
-<div class="section" id="limitations">
+</section>
+<section id="limitations">
 <h2>Limitations</h2>
 <ul class="simple">
-<li>No support for continuous backup</li>
-<li>Feature is not supported on Windows operating system</li>
-<li>Data encryption is dependent on the disk system</li>
-<li>Backup and restore involves tooling which are deployment and environment specific to be developed by operators</li>
-<li><code class="docutils literal"><span class="pre">snapshot</span></code> command is a hidden fdbcli command in the current release and will be unhidden in a future patch release.</li>
+<li><p>No support for continuous backup</p></li>
+<li><p>Feature is not supported on Windows operating system</p></li>
+<li><p>Data encryption is dependent on the disk system</p></li>
+<li><p>Backup and restore involves tooling which are deployment and environment specific to be developed by operators</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command is a hidden fdbcli command in the current release and will be unhidden in a future patch release.</p></li>
 </ul>
-</div>
-<div class="section" id="disk-snapshot-backup-steps">
+</section>
+<section id="disk-snapshot-backup-steps">
 <h2>Disk snapshot backup steps</h2>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">snapshot</span></code></dt>
-<dd>This command line tool is used to create the snapshot. It takes a full path to a <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> and reports the status. Optionally, it can take additional arguments to be passed down to the <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code>. It returns a unique identifier which can be used to identify all the disk snapshots of a backup. Even in case of failures the unique identifier is returned to identify and clear any partially create disk snapshots.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">snapshot</span></code></dt><dd><p>This command line tool is used to create the snapshot. It takes a full path to a <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> and reports the status. Optionally, it can take additional arguments to be passed down to the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code>. It returns a unique identifier which can be used to identify all the disk snapshots of a backup. Even in case of failures the unique identifier is returned to identify and clear any partially create disk snapshots.</p>
+</dd>
 </dl>
-<p>In response to the snapshot request from the user, FoundationDB will run the user specified <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on all processes which have persistent data, binary should call filesystem/disk system specific snapshot create API.</p>
-<p>Before using the <code class="docutils literal"><span class="pre">snapshot</span></code> command the following setup needs to be done</p>
+<p>In response to the snapshot request from the user, FoundationDB will run the user specified <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on all processes which have persistent data, binary should call filesystem/disk system specific snapshot create API.</p>
+<p>Before using the <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command the following setup needs to be done</p>
 <ul>
-<li><p class="first">Write a program that will snapshot the local disk store when invoked by the <code class="docutils literal"><span class="pre">fdbserver</span></code> with the following arguments:</p>
+<li><p>Write a program that will snapshot the local disk store when invoked by the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> with the following arguments:</p>
 <ul class="simple">
-<li>UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup</li>
-<li>Version - version string of the FoundationDB binary</li>
-<li>Path - path of the FoundationDB <code class="docutils literal"><span class="pre">datadir</span></code> to be snapshotted, <code class="docutils literal"><span class="pre">datadir</span></code> specified in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a></li>
-<li>Role - <code class="docutils literal"><span class="pre">tlog</span></code>/<code class="docutils literal"><span class="pre">storage</span></code>/<code class="docutils literal"><span class="pre">coordinator</span></code>, identifies the role of the node on which the snapshot is being invoked</li>
+<li><p>UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup</p></li>
+<li><p>Version - version string of the FoundationDB binary</p></li>
+<li><p>Path - path of the FoundationDB <code class="docutils literal notranslate"><span class="pre">datadir</span></code> to be snapshotted, <code class="docutils literal notranslate"><span class="pre">datadir</span></code> specified in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a></p></li>
+<li><p>Role - <code class="docutils literal notranslate"><span class="pre">tlog</span></code>/<code class="docutils literal notranslate"><span class="pre">storage</span></code>/<code class="docutils literal notranslate"><span class="pre">coordinator</span></code>, identifies the role of the node on which the snapshot is being invoked</p></li>
 </ul>
 </li>
-<li><p class="first">Install <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on the FoundationDB instance in a secure path that can be invoked by the <code class="docutils literal"><span class="pre">fdbserver</span></code></p>
-</li>
-<li><p class="first">Set a new config parameter <code class="docutils literal"><span class="pre">whitelist_binpath</span></code> in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>, whose value is the <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> absolute path. Running any <code class="docutils literal"><span class="pre">snapshot</span></code> command will validate that it is in the <code class="docutils literal"><span class="pre">whitelist_binpath</span></code>. This is a security mechanism to stop running a random/insecure command on the cluster by a client using the <code class="docutils literal"><span class="pre">snapshot</span></code> command. Example configuration entry will look like:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">whitelist_binpath</span> <span class="o">=</span> <span class="s2">&quot;/bin/snap_create.sh&quot;</span>
+<li><p>Install <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on the FoundationDB instance in a secure path that can be invoked by the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></p></li>
+<li><p>Set a new config parameter <code class="docutils literal notranslate"><span class="pre">whitelist_binpath</span></code> in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>, whose value is the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> absolute path. Running any <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command will validate that it is in the <code class="docutils literal notranslate"><span class="pre">whitelist_binpath</span></code>. This is a security mechanism to stop running a random/insecure command on the cluster by a client using the <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command. Example configuration entry will look like:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">whitelist_binpath</span> <span class="o">=</span> <span class="s2">&quot;/bin/snap_create.sh&quot;</span>
 </pre></div>
 </div>
 </li>
-<li><p class="first"><code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> should capture any additional data needed to restore the cluster. Additional data can be stored as tags in cloud environments or it can be stored in an additional file/directory in the <code class="docutils literal"><span class="pre">datadir</span></code> and then snapshotted. The section <a class="reference internal" href="#disk-snapshot-backup-specification"><span class="std std-ref">Disk snapshot backup specification</span></a> describes the recommended specification of the list of things that can be gathered by the binary.</p>
-</li>
-<li><p class="first">Program should return a non-zero status for any failures and zero for success</p>
-</li>
-<li><p class="first">If the <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> process takes longer than 5 minutes to return a status then it will be killed and <code class="docutils literal"><span class="pre">snapshot</span></code> command will fail. Timeout of 5 minutes is configurable and can be set with <code class="docutils literal"><span class="pre">SNAP_CREATE_MAX_TIMEOUT</span></code> config parameter in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>. Since the default value is large enough, there should not be a need to modify this configuration.</p>
-</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> should capture any additional data needed to restore the cluster. Additional data can be stored as tags in cloud environments or it can be stored in an additional file/directory in the <code class="docutils literal notranslate"><span class="pre">datadir</span></code> and then snapshotted. The section <a class="reference internal" href="#disk-snapshot-backup-specification"><span class="std std-ref">Disk snapshot backup specification</span></a> describes the recommended specification of the list of things that can be gathered by the binary.</p></li>
+<li><p>Program should return a non-zero status for any failures and zero for success</p></li>
+<li><p>If the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> process takes longer than 5 minutes to return a status then it will be killed and <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command will fail. Timeout of 5 minutes is configurable and can be set with <code class="docutils literal notranslate"><span class="pre">SNAP_CREATE_MAX_TIMEOUT</span></code> config parameter in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>. Since the default value is large enough, there should not be a need to modify this configuration.</p></li>
 </ul>
-<p><code class="docutils literal"><span class="pre">snapshot</span></code> is a synchronous command and when it returns successfully backup is considered complete and restorable. The time it takes to finish a backup is a function of the time it takes to snapshot the disk store. For example, if disk snapshot takes 1 second, time to finish backup should be less than &lt; 10 seconds, this is general guidance and in some cases it may take longer. If the command is aborted by the user then the disk snapshots should not be used for restore, because the state of backup is undefined. If the command fails or aborts, operator can retry by issuing another <code class="docutils literal"><span class="pre">snapshot</span></code> command.</p>
-<p>Example <code class="docutils literal"><span class="pre">snapshot</span></code> command usage:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">snapshot</span> <span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">snap_create</span><span class="o">.</span><span class="n">sh</span> <span class="o">--</span><span class="n">param1</span> <span class="n">param1</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">param2</span> <span class="n">param2</span><span class="o">-</span><span class="n">value</span>
+<p><code class="docutils literal notranslate"><span class="pre">snapshot</span></code> is a synchronous command and when it returns successfully backup is considered complete and restorable. The time it takes to finish a backup is a function of the time it takes to snapshot the disk store. For example, if disk snapshot takes 1 second, time to finish backup should be less than &lt; 10 seconds, this is general guidance and in some cases it may take longer. If the command is aborted by the user then the disk snapshots should not be used for restore, because the state of backup is undefined. If the command fails or aborts, operator can retry by issuing another <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command.</p>
+<p>Example <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">snapshot</span> <span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">snap_create</span><span class="o">.</span><span class="n">sh</span> <span class="o">--</span><span class="n">param1</span> <span class="n">param1</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">param2</span> <span class="n">param2</span><span class="o">-</span><span class="n">value</span>
 <span class="n">Snapshot</span> <span class="n">command</span> <span class="n">succeeded</span> <span class="k">with</span> <span class="n">UID</span> <span class="n">c50263df28be44ebb596f5c2a849adbb</span>
 </pre></div>
 </div>
-<p>will invoke the <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on <code class="docutils literal"><span class="pre">tlog</span></code> role with the following arguments:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">param1</span> <span class="n">param1</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">param2</span> <span class="n">param2</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">circus</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="mi">4502</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">tlog</span> <span class="o">--</span><span class="n">uid</span> <span class="n">c50263df28be44ebb596f5c2a849adbb</span>
+<p>will invoke the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on <code class="docutils literal notranslate"><span class="pre">tlog</span></code> role with the following arguments:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">param1</span> <span class="n">param1</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">param2</span> <span class="n">param2</span><span class="o">-</span><span class="n">value</span> <span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">circus</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="mi">4502</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">tlog</span> <span class="o">--</span><span class="n">uid</span> <span class="n">c50263df28be44ebb596f5c2a849adbb</span>
 </pre></div>
 </div>
-<div class="section" id="disk-snapshot-backup-specification">
+<section id="disk-snapshot-backup-specification">
 <span id="id1"></span><h3>Disk snapshot backup specification</h3>
-<p>Details the list of artifacts the <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> should gather to aid the restore.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="22%" />
-<col width="39%" />
-<col width="39%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Field Name</th>
-<th class="head">Description</th>
-<th class="head">Source of information</th>
+<p>Details the list of artifacts the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> should gather to aid the restore.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Field Name</p></th>
+<th class="head"><p>Description</p></th>
+<th class="head"><p>Source of information</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">UID</span></code></td>
-<td>unique identifier passed with all the
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">UID</span></code></p></td>
+<td><p>unique identifier passed with all the
 snapshot create binary invocations associated with
-a backup. Disk snapshots could be tagged with this UID.</td>
-<td><code class="docutils literal"><span class="pre">snapshot</span></code> CLI command output contains the UID</td>
+a backup. Disk snapshots could be tagged with this UID.</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">snapshot</span></code> CLI command output contains the UID</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">FoundationDB</span> <span class="pre">Server</span> <span class="pre">Version</span></code></td>
-<td>software version of the <code class="docutils literal"><span class="pre">fdbserver</span></code></td>
-<td>command line argument to snap create binary</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">FoundationDB</span> <span class="pre">Server</span> <span class="pre">Version</span></code></p></td>
+<td><p>software version of the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></p></td>
+<td><p>command line argument to snap create binary</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">CreationTime</span></code></td>
-<td>current system date and time</td>
-<td>time obtained by calling the system time</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CreationTime</span></code></p></td>
+<td><p>current system date and time</p></td>
+<td><p>time obtained by calling the system time</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">FoundationDB</span> <span class="pre">Cluster</span> <span class="pre">File</span></code></td>
-<td>cluster file which has cluster-name, magic and
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">FoundationDB</span> <span class="pre">Cluster</span> <span class="pre">File</span></code></p></td>
+<td><p>cluster file which has cluster-name, magic and
 the list of coordinators, cluster file is detailed
-here <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">Cluster files</span></a></td>
-<td>read from the location of the cluster file location
+here <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">Cluster files</span></a></p></td>
+<td><p>read from the location of the cluster file location
 mentioned in the command line arguments. Command
-line arguments of <code class="docutils literal"><span class="pre">fdbserver</span></code> can be accessed from
-/proc/$PPID/cmdline</td>
+line arguments of <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> can be accessed from
+/proc/$PPID/cmdline</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">Config</span> <span class="pre">Knobs</span></code></td>
-<td>command line arguments passed to <code class="docutils literal"><span class="pre">fdbserver</span></code></td>
-<td>available from command line arguments of <code class="docutils literal"><span class="pre">fdbserver</span></code>
-or from foundationdb.conf</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">Config</span> <span class="pre">Knobs</span></code></p></td>
+<td><p>command line arguments passed to <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></p></td>
+<td><p>available from command line arguments of <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code>
+or from foundationdb.conf</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">IP</span> <span class="pre">Address</span> <span class="pre">+</span> <span class="pre">Port</span></code></td>
-<td>host address and port information of the <code class="docutils literal"><span class="pre">fdbserver</span></code>
-that is invoking the snapshot</td>
-<td>available from command line arguments of <code class="docutils literal"><span class="pre">fdbserver</span></code></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">IP</span> <span class="pre">Address</span> <span class="pre">+</span> <span class="pre">Port</span></code></p></td>
+<td><p>host address and port information of the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code>
+that is invoking the snapshot</p></td>
+<td><p>available from command line arguments of <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">LocalityData</span></code></td>
-<td>machine id, zone id or any other locality information</td>
-<td>available from command line arguments of <code class="docutils literal"><span class="pre">fdbserver</span></code></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">LocalityData</span></code></p></td>
+<td><p>machine id, zone id or any other locality information</p></td>
+<td><p>available from command line arguments of <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">Name</span> <span class="pre">for</span> <span class="pre">the</span> <span class="pre">snapshot</span> <span class="pre">file</span></code></td>
-<td>recommended name for the disk snapshot</td>
-<td>cluster-name:ip-addr:port:UID</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">Name</span> <span class="pre">for</span> <span class="pre">the</span> <span class="pre">snapshot</span> <span class="pre">file</span></code></p></td>
+<td><p>recommended name for the disk snapshot</p></td>
+<td><p>cluster-name:ip-addr:port:UID</p></td>
 </tr>
 </tbody>
 </table>
-<p><code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or CommitProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.</p>
-</div>
-<div class="section" id="management-of-disk-snapshots">
+<p><code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or CommitProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.</p>
+</section>
+<section id="management-of-disk-snapshots">
 <h3>Management of disk snapshots</h3>
 <p>Unused disk snapshots or disk snapshots that are part of failed backups have to deleted by the operator externally.</p>
-</div>
-<div class="section" id="error-codes">
+</section>
+<section id="error-codes">
 <h3>Error codes</h3>
-<p>Error codes returned by <code class="docutils literal"><span class="pre">snapshot</span></code> command</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="28%" />
-<col width="9%" />
-<col width="21%" />
-<col width="43%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Name</th>
-<th class="head">Code</th>
-<th class="head">Description</th>
-<th class="head">Comments</th>
+<p>Error codes returned by <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Code</p></th>
+<th class="head"><p>Description</p></th>
+<th class="head"><p>Comments</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td>snap_path_not_whitelisted</td>
-<td>2505</td>
-<td>Snapshot create binary path
-not whitelisted</td>
-<td>Whitelist the <code class="docutils literal"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> path and retry the
-operation.</td>
+<tbody>
+<tr class="row-even"><td><p>snap_path_not_whitelisted</p></td>
+<td><p>2505</p></td>
+<td><p>Snapshot create binary path
+not whitelisted</p></td>
+<td><p>Whitelist the <code class="docutils literal notranslate"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> path and retry the
+operation.</p></td>
 </tr>
-<tr class="row-odd"><td>snap_not_fully_recovered_unsupported</td>
-<td>2506</td>
-<td>Unsupported when the cluster
-is not fully recovered</td>
-<td>Wait for the cluster to finish recovery and then retry the
-operation</td>
+<tr class="row-odd"><td><p>snap_not_fully_recovered_unsupported</p></td>
+<td><p>2506</p></td>
+<td><p>Unsupported when the cluster
+is not fully recovered</p></td>
+<td><p>Wait for the cluster to finish recovery and then retry the
+operation</p></td>
 </tr>
-<tr class="row-even"><td>snap_log_anti_quorum_unsupported</td>
-<td>2507</td>
-<td>Unsupported when log anti
-quorum is configured</td>
-<td>Feature is not supported when log anti quorum is configured</td>
+<tr class="row-even"><td><p>snap_log_anti_quorum_unsupported</p></td>
+<td><p>2507</p></td>
+<td><p>Unsupported when log anti
+quorum is configured</p></td>
+<td><p>Feature is not supported when log anti quorum is configured</p></td>
 </tr>
-<tr class="row-odd"><td>snap_with_recovery_unsupported</td>
-<td>2508</td>
-<td>Cluster recovery during
+<tr class="row-odd"><td><p>snap_with_recovery_unsupported</p></td>
+<td><p>2508</p></td>
+<td><p>Cluster recovery during
 snapshot operation not
-supported</td>
-<td>Recovery happened while snapshot operation was in progress,
-retry the operation.</td>
+supported</p></td>
+<td><p>Recovery happened while snapshot operation was in progress,
+retry the operation.</p></td>
 </tr>
-<tr class="row-even"><td>snap_storage_failed</td>
-<td>2501</td>
-<td>Failed to snapshot storage
-nodes</td>
-<td>Verify that the <code class="docutils literal"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> is installed and
-can be executed by the user running <code class="docutils literal"><span class="pre">fdbserver</span></code></td>
+<tr class="row-even"><td><p>snap_storage_failed</p></td>
+<td><p>2501</p></td>
+<td><p>Failed to snapshot storage
+nodes</p></td>
+<td><p>Verify that the <code class="docutils literal notranslate"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> is installed and
+can be executed by the user running <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></p></td>
 </tr>
-<tr class="row-odd"><td>snap_tlog_failed</td>
-<td>2502</td>
-<td>Failed to snapshot TLog
-nodes</td>
-<td>,,</td>
+<tr class="row-odd"><td><p>snap_tlog_failed</p></td>
+<td><p>2502</p></td>
+<td><p>Failed to snapshot TLog
+nodes</p></td>
+<td><p>,,</p></td>
 </tr>
-<tr class="row-even"><td>snap_coord_failed</td>
-<td>2503</td>
-<td>Failed to snapshot
-coordinator nodes</td>
-<td>,,</td>
+<tr class="row-even"><td><p>snap_coord_failed</p></td>
+<td><p>2503</p></td>
+<td><p>Failed to snapshot
+coordinator nodes</p></td>
+<td><p>,,</p></td>
 </tr>
-<tr class="row-odd"><td>unknown_error</td>
-<td>4000</td>
-<td>An unknown error occurred</td>
-<td>,,</td>
+<tr class="row-odd"><td><p>unknown_error</p></td>
+<td><p>4000</p></td>
+<td><p>An unknown error occurred</p></td>
+<td><p>,,</p></td>
 </tr>
-<tr class="row-even"><td>snap_disable_tlog_pop_failed</td>
-<td>2500</td>
-<td>Disk Snapshot error</td>
-<td>No operator action is needed, retry the operation</td>
+<tr class="row-even"><td><p>snap_disable_tlog_pop_failed</p></td>
+<td><p>2500</p></td>
+<td><p>Disk Snapshot error</p></td>
+<td><p>No operator action is needed, retry the operation</p></td>
 </tr>
-<tr class="row-odd"><td>snap_enable_tlog_pop_failed</td>
-<td>2504</td>
-<td>Disk Snapshot error</td>
-<td>,,</td>
+<tr class="row-odd"><td><p>snap_enable_tlog_pop_failed</p></td>
+<td><p>2504</p></td>
+<td><p>Disk Snapshot error</p></td>
+<td><p>,,</p></td>
 </tr>
 </tbody>
 </table>
-</div>
-</div>
-<div class="section" id="disk-snapshot-restore-steps">
+</section>
+</section>
+<section id="disk-snapshot-restore-steps">
 <h2>Disk snapshot restore steps</h2>
 <p>Restore is the process of building up the cluster from the snapshotted disk images. There is no option to specify a restore version because there is no support for continuous backup. Here is the list of steps for the restore process:</p>
 <ul class="simple">
-<li>Identify the snapshot disk images associated with the backup to be restored with the help of UID or creation time</li>
-<li>Group disk images of a backup by IP address and/or locality information</li>
-<li>Bring up a new cluster similar to the source cluster with FoundationDB services stopped and either attach the snapshot disk images or copy the snapshot disk images to the cluster in the following manner:<ul>
-<li>Map the old IP address to new IP address in a one to one fashion and use that mapping to guide the restoration of disk images</li>
+<li><p>Identify the snapshot disk images associated with the backup to be restored with the help of UID or creation time</p></li>
+<li><p>Group disk images of a backup by IP address and/or locality information</p></li>
+<li><p>Bring up a new cluster similar to the source cluster with FoundationDB services stopped and either attach the snapshot disk images or copy the snapshot disk images to the cluster in the following manner:</p>
+<ul>
+<li><p>Map the old IP address to new IP address in a one to one fashion and use that mapping to guide the restoration of disk images</p></li>
 </ul>
 </li>
-<li>Compute the new fdb.cluster file based on where the new <code class="docutils literal"><span class="pre">coordinators</span></code> disk stores are placed and push it to the all the instances in the new cluster</li>
-<li>Start the FoundationDB service on all the instances</li>
-<li>NOTE: Process can have multiple roles with persistent data which share the same <code class="docutils literal"><span class="pre">datadir</span></code>. <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> will create multiple snapshots, one per role. In such case, snapshot disk images needs to go through additional processing before restore, if a snapshot image of a role has files that belongs to other roles then they need to be deleted.</li>
+<li><p>Compute the new fdb.cluster file based on where the new <code class="docutils literal notranslate"><span class="pre">coordinators</span></code> disk stores are placed and push it to the all the instances in the new cluster</p></li>
+<li><p>Start the FoundationDB service on all the instances</p></li>
+<li><p>NOTE: Process can have multiple roles with persistent data which share the same <code class="docutils literal notranslate"><span class="pre">datadir</span></code>. <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> will create multiple snapshots, one per role. In such case, snapshot disk images needs to go through additional processing before restore, if a snapshot image of a role has files that belongs to other roles then they need to be deleted.</p></li>
 </ul>
 <p>Cluster will start and get to healthy state indicating the completion of restore. Applications can optionally do any additional validations and use the cluster.</p>
-</div>
-<div class="section" id="example-backup-and-restore-steps">
+</section>
+<section id="example-backup-and-restore-steps">
 <h2>Example backup and restore steps</h2>
-<p>Here are the backup and restore steps on an over simplified setup with a single node cluster and <code class="docutils literal"><span class="pre">cp</span></code> command to create snapshots and restore. This is purely for illustration, real world backup and restore scripts needs to follow all the steps detailed above.</p>
+<p>Here are the backup and restore steps on an over simplified setup with a single node cluster and <code class="docutils literal notranslate"><span class="pre">cp</span></code> command to create snapshots and restore. This is purely for illustration, real world backup and restore scripts needs to follow all the steps detailed above.</p>
 <ul>
-<li><p class="first">Create a single node cluster by following the steps here <a class="reference internal" href="building-cluster.html#building-cluster"><span class="std std-ref">Building a Cluster</span></a></p>
-</li>
-<li><p class="first">Check the status of the cluster and write a few sample keys:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>fdb&gt; status
+<li><p>Create a single node cluster by following the steps here <a class="reference internal" href="building-cluster.html#building-cluster"><span class="std std-ref">Building a Cluster</span></a></p></li>
+<li><p>Check the status of the cluster and write a few sample keys:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; status
 
 Using cluster file `/mnt/source/fdb.cluster&#39;.
 
@@ -434,8 +534,8 @@ Committed (80235963)
 </pre></div>
 </div>
 </li>
-<li><p class="first">Write a <code class="docutils literal"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> which copies the <code class="docutils literal"><span class="pre">datadir</span></code> to a user passed destination directory location:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>#!/bin/sh
+<li><p>Write a <code class="docutils literal notranslate"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> which copies the <code class="docutils literal notranslate"><span class="pre">datadir</span></code> to a user passed destination directory location:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>#!/bin/sh
 
 while (( &quot;$#&quot; )); do
     case &quot;$1&quot; in
@@ -468,47 +568,43 @@ exit 0
 </pre></div>
 </div>
 </li>
-<li><p class="first">Install the <code class="docutils literal"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> as <code class="docutils literal"><span class="pre">/bin/snap_create.sh</span></code>, add the entry for <code class="docutils literal"><span class="pre">whitelist_binpath</span></code> in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>, stop and start the foundationdb service for the configuration change to take effect</p>
-</li>
-<li><p class="first">Issue <code class="docutils literal"><span class="pre">snapshot</span></code> command as follows:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">snapshot</span> <span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">snap_create</span><span class="o">.</span><span class="n">sh</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
+<li><p>Install the <code class="docutils literal notranslate"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> as <code class="docutils literal notranslate"><span class="pre">/bin/snap_create.sh</span></code>, add the entry for <code class="docutils literal notranslate"><span class="pre">whitelist_binpath</span></code> in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>, stop and start the foundationdb service for the configuration change to take effect</p></li>
+<li><p>Issue <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">snapshot</span> <span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">snap_create</span><span class="o">.</span><span class="n">sh</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
 <span class="n">Snapshot</span> <span class="n">command</span> <span class="n">succeeded</span> <span class="k">with</span> <span class="n">UID</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span>
 </pre></div>
 </div>
 </li>
-<li><p class="first"><code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> gets invoked once for each role namely <code class="docutils literal"><span class="pre">tlog</span></code>, <code class="docutils literal"><span class="pre">storage</span></code> and <code class="docutils literal"><span class="pre">coordinator</span></code> in this process with the following arguments:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">storage</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
+<li><p><code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> gets invoked once for each role namely <code class="docutils literal notranslate"><span class="pre">tlog</span></code>, <code class="docutils literal notranslate"><span class="pre">storage</span></code> and <code class="docutils literal notranslate"><span class="pre">coordinator</span></code> in this process with the following arguments:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">storage</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
 <span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">tlog</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
 <span class="o">--</span><span class="n">path</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">source</span><span class="o">/</span><span class="n">datadir</span> <span class="o">--</span><span class="n">version</span> <span class="mf">6.2.6</span> <span class="o">--</span><span class="n">role</span> <span class="n">coord</span> <span class="o">--</span><span class="n">uid</span> <span class="mi">69</span><span class="n">a5e0576621892f85f55b4ebfeb4312</span> <span class="o">--</span><span class="n">destdir</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">backup</span>
 </pre></div>
 </div>
 </li>
-<li><p class="first">Snapshot is successful and all the snapshot images are in <code class="docutils literal"><span class="pre">destdir</span></code> specified by the user in the command line argument to <code class="docutils literal"><span class="pre">snapshot</span></code> command, here is a sample directory listing of one of the coordinator backup directory:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>$ ls /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/
+<li><p>Snapshot is successful and all the snapshot images are in <code class="docutils literal notranslate"><span class="pre">destdir</span></code> specified by the user in the command line argument to <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command, here is a sample directory listing of one of the coordinator backup directory:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ ls /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/
 coordination-0.fdq                                     log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite-wal  processId
 coordination-1.fdq                                     logqueue-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792-0.fdq   storage-f0e72cdfed12a233e0e58291150ca597.sqlite
 log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite  logqueue-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792-1.fdq   storage-f0e72cdfed12a233e0e58291150ca597.sqlite-wal
 </pre></div>
 </div>
 </li>
-<li><p class="first">To restore the <code class="docutils literal"><span class="pre">coordinator</span></code> backup image, setup a restore <code class="docutils literal"><span class="pre">datadir</span></code> and copy all the <code class="docutils literal"><span class="pre">coordinator</span></code> related files to it:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>$ cp /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/coord* /mnt/restore/datadir/
+<li><p>To restore the <code class="docutils literal notranslate"><span class="pre">coordinator</span></code> backup image, setup a restore <code class="docutils literal notranslate"><span class="pre">datadir</span></code> and copy all the <code class="docutils literal notranslate"><span class="pre">coordinator</span></code> related files to it:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ cp /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/coord* /mnt/restore/datadir/
 </pre></div>
 </div>
 </li>
-<li><p class="first">Repeat the above steps to restore <code class="docutils literal"><span class="pre">storage</span></code> and <code class="docutils literal"><span class="pre">tlog</span></code> backup images</p>
-</li>
-<li><p class="first">Prepare the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> for the restore with new <code class="docutils literal"><span class="pre">coordinator</span></code> IP address, example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2.80.40</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-&gt;</span> <span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2.80.41</span><span class="p">:</span><span class="mi">4500</span>
+<li><p>Repeat the above steps to restore <code class="docutils literal notranslate"><span class="pre">storage</span></code> and <code class="docutils literal notranslate"><span class="pre">tlog</span></code> backup images</p></li>
+<li><p>Prepare the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> for the restore with new <code class="docutils literal notranslate"><span class="pre">coordinator</span></code> IP address, example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2.80.40</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-&gt;</span> <span class="n">znC1NC5b</span><span class="p">:</span><span class="n">iYHJLq7z</span><span class="o">@</span><span class="mf">10.2.80.41</span><span class="p">:</span><span class="mi">4500</span>
 </pre></div>
 </div>
 </li>
-<li><p class="first"><code class="docutils literal"><span class="pre">foundationdb.conf</span></code> can be exact same copy as the source cluster for this example</p>
-</li>
-<li><p class="first">Once all the backup images are restored, start a new fdbserver with the <code class="docutils literal"><span class="pre">datadir</span></code> pointing to <code class="docutils literal"><span class="pre">/mnt/restore/datadir</span></code> and the new <code class="docutils literal"><span class="pre">fdb.cluster</span></code>.</p>
-</li>
-<li><p class="first">Verify the cluster is healthy and check the sample keys that we added are there:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>fdb&gt; status
+<li><p><code class="docutils literal notranslate"><span class="pre">foundationdb.conf</span></code> can be exact same copy as the source cluster for this example</p></li>
+<li><p>Once all the backup images are restored, start a new fdbserver with the <code class="docutils literal notranslate"><span class="pre">datadir</span></code> pointing to <code class="docutils literal notranslate"><span class="pre">/mnt/restore/datadir</span></code> and the new <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code>.</p></li>
+<li><p>Verify the cluster is healthy and check the sample keys that we added are there:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; status
 
 Using cluster file `/mnt/restore/fdb.cluster&#39;.
 
@@ -556,8 +652,8 @@ fdb&gt; get key2
 </div>
 </li>
 </ul>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -579,7 +675,7 @@ fdb&gt; get key2
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>

@@ -1,43 +1,29 @@
 <!DOCTYPE html>
 
-
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 7.1</title>
-    
-    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
-    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
-    
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '7.1.25',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true,
-        SOURCELINK_SUFFIX: '.txt'
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
-    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 7.2</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
     <link rel="search" title="Search" href="search.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
 
-  </head>
-  <body role="document">
+  </head><body>
 
   <div id="navbar" class="navbar navbar-default navbar-fixed-top">
     <div class="container">
@@ -50,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,7 +53,136 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul>
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -88,37 +203,37 @@
 <li><a class="reference internal" href="#signing-protocol">Signing Protocol</a></li>
 <li><a class="reference internal" href="#blob-credential-files">Blob Credential Files</a></li>
 <li><a class="reference internal" href="#tls-support">TLS Support</a></li>
-<li><a class="reference internal" href="#fdbbackup-command-line-tool"><code class="docutils literal"><span class="pre">fdbbackup</span></code> command line tool</a><ul>
-<li><a class="reference internal" href="#start"><code class="docutils literal"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#modify"><code class="docutils literal"><span class="pre">modify</span></code></a></li>
-<li><a class="reference internal" href="#abort"><code class="docutils literal"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#discontinue"><code class="docutils literal"><span class="pre">discontinue</span></code></a></li>
-<li><a class="reference internal" href="#wait"><code class="docutils literal"><span class="pre">wait</span></code></a></li>
-<li><a class="reference internal" href="#status"><code class="docutils literal"><span class="pre">status</span></code></a></li>
-<li><a class="reference internal" href="#delete"><code class="docutils literal"><span class="pre">delete</span></code></a></li>
-<li><a class="reference internal" href="#expire"><code class="docutils literal"><span class="pre">expire</span></code></a></li>
-<li><a class="reference internal" href="#describe"><code class="docutils literal"><span class="pre">describe</span></code></a></li>
-<li><a class="reference internal" href="#list"><code class="docutils literal"><span class="pre">list</span></code></a></li>
-<li><a class="reference internal" href="#tags"><code class="docutils literal"><span class="pre">tags</span></code></a></li>
-<li><a class="reference internal" href="#cleanup"><code class="docutils literal"><span class="pre">cleanup</span></code></a></li>
+<li><a class="reference internal" href="#fdbbackup-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
+<li><a class="reference internal" href="#modify"><code class="docutils literal notranslate"><span class="pre">modify</span></code></a></li>
+<li><a class="reference internal" href="#abort"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#discontinue"><code class="docutils literal notranslate"><span class="pre">discontinue</span></code></a></li>
+<li><a class="reference internal" href="#wait"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
+<li><a class="reference internal" href="#status"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#delete"><code class="docutils literal notranslate"><span class="pre">delete</span></code></a></li>
+<li><a class="reference internal" href="#expire"><code class="docutils literal notranslate"><span class="pre">expire</span></code></a></li>
+<li><a class="reference internal" href="#describe"><code class="docutils literal notranslate"><span class="pre">describe</span></code></a></li>
+<li><a class="reference internal" href="#list"><code class="docutils literal notranslate"><span class="pre">list</span></code></a></li>
+<li><a class="reference internal" href="#tags"><code class="docutils literal notranslate"><span class="pre">tags</span></code></a></li>
+<li><a class="reference internal" href="#cleanup"><code class="docutils literal notranslate"><span class="pre">cleanup</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
-<li><a class="reference internal" href="#restore-start"><code class="docutils literal"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#id3"><code class="docutils literal"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id4"><code class="docutils literal"><span class="pre">wait</span></code></a></li>
-<li><a class="reference internal" href="#id5"><code class="docutils literal"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#restore-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
+<li><a class="reference internal" href="#id3"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id4"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
+<li><a class="reference internal" href="#id5"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#backup-agent-command-line-tool"><code class="docutils literal"><span class="pre">backup_agent</span></code> command line tool</a></li>
-<li><a class="reference internal" href="#fdbdr-command-line-tool"><code class="docutils literal"><span class="pre">fdbdr</span></code> command line tool</a><ul>
-<li><a class="reference internal" href="#dr-start"><code class="docutils literal"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#switch"><code class="docutils literal"><span class="pre">switch</span></code></a></li>
-<li><a class="reference internal" href="#id7"><code class="docutils literal"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id8"><code class="docutils literal"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#backup-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> command line tool</a></li>
+<li><a class="reference internal" href="#fdbdr-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#dr-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
+<li><a class="reference internal" href="#switch"><code class="docutils literal notranslate"><span class="pre">switch</span></code></a></li>
+<li><a class="reference internal" href="#id7"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id8"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal"><span class="pre">dr_agent</span></code> command line tool</a></li>
+<li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> command line tool</a></li>
 </ul>
 </li>
 </ul>
@@ -163,98 +278,98 @@
 <li><a class="reference internal" href="#signing-protocol">Signing Protocol</a></li>
 <li><a class="reference internal" href="#blob-credential-files">Blob Credential Files</a></li>
 <li><a class="reference internal" href="#tls-support">TLS Support</a></li>
-<li><a class="reference internal" href="#fdbbackup-command-line-tool"><code class="docutils literal"><span class="pre">fdbbackup</span></code> command line tool</a><ul>
-<li><a class="reference internal" href="#start"><code class="docutils literal"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#modify"><code class="docutils literal"><span class="pre">modify</span></code></a></li>
-<li><a class="reference internal" href="#abort"><code class="docutils literal"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#discontinue"><code class="docutils literal"><span class="pre">discontinue</span></code></a></li>
-<li><a class="reference internal" href="#wait"><code class="docutils literal"><span class="pre">wait</span></code></a></li>
-<li><a class="reference internal" href="#status"><code class="docutils literal"><span class="pre">status</span></code></a></li>
-<li><a class="reference internal" href="#delete"><code class="docutils literal"><span class="pre">delete</span></code></a></li>
-<li><a class="reference internal" href="#expire"><code class="docutils literal"><span class="pre">expire</span></code></a></li>
-<li><a class="reference internal" href="#describe"><code class="docutils literal"><span class="pre">describe</span></code></a></li>
-<li><a class="reference internal" href="#list"><code class="docutils literal"><span class="pre">list</span></code></a></li>
-<li><a class="reference internal" href="#tags"><code class="docutils literal"><span class="pre">tags</span></code></a></li>
-<li><a class="reference internal" href="#cleanup"><code class="docutils literal"><span class="pre">cleanup</span></code></a></li>
+<li><a class="reference internal" href="#fdbbackup-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
+<li><a class="reference internal" href="#modify"><code class="docutils literal notranslate"><span class="pre">modify</span></code></a></li>
+<li><a class="reference internal" href="#abort"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#discontinue"><code class="docutils literal notranslate"><span class="pre">discontinue</span></code></a></li>
+<li><a class="reference internal" href="#wait"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
+<li><a class="reference internal" href="#status"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#delete"><code class="docutils literal notranslate"><span class="pre">delete</span></code></a></li>
+<li><a class="reference internal" href="#expire"><code class="docutils literal notranslate"><span class="pre">expire</span></code></a></li>
+<li><a class="reference internal" href="#describe"><code class="docutils literal notranslate"><span class="pre">describe</span></code></a></li>
+<li><a class="reference internal" href="#list"><code class="docutils literal notranslate"><span class="pre">list</span></code></a></li>
+<li><a class="reference internal" href="#tags"><code class="docutils literal notranslate"><span class="pre">tags</span></code></a></li>
+<li><a class="reference internal" href="#cleanup"><code class="docutils literal notranslate"><span class="pre">cleanup</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
-<li><a class="reference internal" href="#restore-start"><code class="docutils literal"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#id3"><code class="docutils literal"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id4"><code class="docutils literal"><span class="pre">wait</span></code></a></li>
-<li><a class="reference internal" href="#id5"><code class="docutils literal"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#restore-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
+<li><a class="reference internal" href="#id3"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id4"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
+<li><a class="reference internal" href="#id5"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#backup-agent-command-line-tool"><code class="docutils literal"><span class="pre">backup_agent</span></code> command line tool</a></li>
-<li><a class="reference internal" href="#fdbdr-command-line-tool"><code class="docutils literal"><span class="pre">fdbdr</span></code> command line tool</a><ul>
-<li><a class="reference internal" href="#dr-start"><code class="docutils literal"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#switch"><code class="docutils literal"><span class="pre">switch</span></code></a></li>
-<li><a class="reference internal" href="#id7"><code class="docutils literal"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id8"><code class="docutils literal"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#backup-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> command line tool</a></li>
+<li><a class="reference internal" href="#fdbdr-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#dr-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
+<li><a class="reference internal" href="#switch"><code class="docutils literal notranslate"><span class="pre">switch</span></code></a></li>
+<li><a class="reference internal" href="#id7"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id8"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal"><span class="pre">dr_agent</span></code> command line tool</a></li>
+<li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> command line tool</a></li>
 </ul>
 </li>
 </ul>
 
         </div>
       </div>
-    <div class="col-md-9 content">
+    <div class="body col-md-9 content" role="main">
       
-  <div class="section" id="backup-restore-and-replication-for-disaster-recovery">
+  <section id="backup-restore-and-replication-for-disaster-recovery">
 <span id="backups"></span><h1>Backup, Restore, and Replication for Disaster Recovery</h1>
 <p>This document covers backup and restoration of a FoundationDB database. While FoundationDB itself is fault tolerant, the backup tool provides an additional level of protection by supporting recovery from disasters or unintentional modification of the database.</p>
-<div class="section" id="introduction">
+<section id="introduction">
 <span id="backup-introduction"></span><h2>Introduction</h2>
-<p>FoundationDB&#8217;s backup tool makes a consistent, point-in-time backup of a FoundationDB database without downtime. Like FoundationDB itself, the backup/restore software is distributed, with multiple backup agents cooperating to perform a backup or restore faster than a single machine can send or receive data and to continue the backup process seamlessly even when some backup agents fail.</p>
+<p>FoundationDB’s backup tool makes a consistent, point-in-time backup of a FoundationDB database without downtime. Like FoundationDB itself, the backup/restore software is distributed, with multiple backup agents cooperating to perform a backup or restore faster than a single machine can send or receive data and to continue the backup process seamlessly even when some backup agents fail.</p>
 <p>The FoundationDB database usually cannot maintain a consistent snapshot long enough to read the entire database, so full backup consists of an <em>inconsistent</em> copy of the data with a log of database changes that took place during the creation of that inconsistent copy.  During a restore, the inconsistent copy and the log of changes are combined to reconstruct  a consistent, point-in-time snapshot of the original database.</p>
-<p>A FoundationDB Backup job can run continuously, pushing multiple inconsistent snapshots and logs of changes over time to maintain the backup&#8217;s restorable point-in-time very close to now.</p>
-</div>
-<div class="section" id="backup-vs-dr">
+<p>A FoundationDB Backup job can run continuously, pushing multiple inconsistent snapshots and logs of changes over time to maintain the backup’s restorable point-in-time very close to now.</p>
+</section>
+<section id="backup-vs-dr">
 <h2>Backup vs DR</h2>
 <p>FoundationDB can backup a database to local disks, a blob store (such as Amazon S3), or to another FoundationDB database.</p>
-<p>Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached &#8216;differential&#8217; mode, the secondary database (the destination of the DR job) will always contain a <em>consistent</em> copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the &#8220;ACI&#8221; in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.</p>
+<p>Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached ‘differential’ mode, the secondary database (the destination of the DR job) will always contain a <em>consistent</em> copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the “ACI” in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.</p>
 <p>While a cluster is being used as the destination for a DR operation it will be locked to prevent accidental use or modification.</p>
-</div>
-<div class="section" id="limitations">
+</section>
+<section id="limitations">
 <h2>Limitations</h2>
 <p>Backup data is not encrypted at rest on disk or in a blob store account.</p>
-</div>
-<div class="section" id="tools">
+</section>
+<section id="tools">
 <h2>Tools</h2>
 <p>There are 5 command line tools for working with Backup and DR operations:</p>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">fdbbackup</span></code></dt>
-<dd>This command line tool is used to control (but not execute) backup jobs and manage backup data.  It can <code class="docutils literal"><span class="pre">start</span></code>, <code class="docutils literal"><span class="pre">modify</span></code> or <code class="docutils literal"><span class="pre">abort</span></code> a backup, <code class="docutils literal"><span class="pre">discontinue</span></code> a continuous backup, get the <code class="docutils literal"><span class="pre">status</span></code> of an ongoing backup, or <code class="docutils literal"><span class="pre">wait</span></code> for a backup to complete.  It can also <code class="docutils literal"><span class="pre">describe</span></code>, <code class="docutils literal"><span class="pre">delete</span></code>, <code class="docutils literal"><span class="pre">expire</span></code> data in a backup, or <code class="docutils literal"><span class="pre">list</span></code> the backups at a destination folder URL.</dd>
-<dt><code class="docutils literal"><span class="pre">fdbrestore</span></code></dt>
-<dd>This command line tool is used to control (but not execute) restore jobs.  It can <code class="docutils literal"><span class="pre">start</span></code> or <code class="docutils literal"><span class="pre">abort</span></code> a restore, get the <code class="docutils literal"><span class="pre">status</span></code> of current and recent restore tasks, or <code class="docutils literal"><span class="pre">wait</span></code> for a restore task to complete while printing ongoing progress details.</dd>
-<dt><code class="docutils literal"><span class="pre">backup_agent</span></code></dt>
-<dd>The backup agent is a daemon that actually executes the work of the backup and restore jobs.  Any number of backup agents pointed at the same database will cooperate to perform  backups and restores. The Backup URL specified for a backup or restore must be accessible by all <code class="docutils literal"><span class="pre">backup_agent</span></code> processes.</dd>
-<dt><code class="docutils literal"><span class="pre">fdbdr</span></code></dt>
-<dd>This command line tool is used to control (but not execute) DR jobs - backups from one database to another.  It can <code class="docutils literal"><span class="pre">start</span></code>, <code class="docutils literal"><span class="pre">abort</span></code> a DR job, or <code class="docutils literal"><span class="pre">switch</span></code> the DR direction.  It can also get the <code class="docutils literal"><span class="pre">status</span></code> of a running DR job.</dd>
-<dt><code class="docutils literal"><span class="pre">dr_agent</span></code></dt>
-<dd>The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code></dt><dd><p>This command line tool is used to control (but not execute) backup jobs and manage backup data.  It can <code class="docutils literal notranslate"><span class="pre">start</span></code>, <code class="docutils literal notranslate"><span class="pre">modify</span></code> or <code class="docutils literal notranslate"><span class="pre">abort</span></code> a backup, <code class="docutils literal notranslate"><span class="pre">discontinue</span></code> a continuous backup, get the <code class="docutils literal notranslate"><span class="pre">status</span></code> of an ongoing backup, or <code class="docutils literal notranslate"><span class="pre">wait</span></code> for a backup to complete.  It can also <code class="docutils literal notranslate"><span class="pre">describe</span></code>, <code class="docutils literal notranslate"><span class="pre">delete</span></code>, <code class="docutils literal notranslate"><span class="pre">expire</span></code> data in a backup, or <code class="docutils literal notranslate"><span class="pre">list</span></code> the backups at a destination folder URL.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code></dt><dd><p>This command line tool is used to control (but not execute) restore jobs.  It can <code class="docutils literal notranslate"><span class="pre">start</span></code> or <code class="docutils literal notranslate"><span class="pre">abort</span></code> a restore, get the <code class="docutils literal notranslate"><span class="pre">status</span></code> of current and recent restore tasks, or <code class="docutils literal notranslate"><span class="pre">wait</span></code> for a restore task to complete while printing ongoing progress details.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">backup_agent</span></code></dt><dd><p>The backup agent is a daemon that actually executes the work of the backup and restore jobs.  Any number of backup agents pointed at the same database will cooperate to perform  backups and restores. The Backup URL specified for a backup or restore must be accessible by all <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> processes.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fdbdr</span></code></dt><dd><p>This command line tool is used to control (but not execute) DR jobs - backups from one database to another.  It can <code class="docutils literal notranslate"><span class="pre">start</span></code>, <code class="docutils literal notranslate"><span class="pre">abort</span></code> a DR job, or <code class="docutils literal notranslate"><span class="pre">switch</span></code> the DR direction.  It can also get the <code class="docutils literal notranslate"><span class="pre">status</span></code> of a running DR job.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code></dt><dd><p>The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.</p>
+</dd>
 </dl>
-<p>By default, the FoundationDB packages are configured to start a single <code class="docutils literal"><span class="pre">backup_agent</span></code> process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the <code class="docutils literal"><span class="pre">fdbbackup</span> <span class="pre">start</span></code> command from any machine with access to your cluster to start the backup</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup start -d &lt;BACKUP_URL&gt;
+<p>By default, the FoundationDB packages are configured to start a single <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">start</span></code> command from any machine with access to your cluster to start the backup</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup start -d &lt;BACKUP_URL&gt;
 </pre></div>
 </div>
-<p>If instead you want to perform a backup to the local disk of a particular machine or machines which are not network accessible to the FoundationDB servers, then you should disable the backup agents on the FoundationDB servers. This is accomplished by commenting out all of the <code class="docutils literal"><span class="pre">[backup_agent.&lt;ID&gt;]</span></code> sections in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>. Do not comment out the global <code class="docutils literal"><span class="pre">[backup_agent]</span></code> section. Next, start backup agents on the destination machine or machines. Now, when you start a backup, you can specify the destination directory (as a Backup URL) using a local path on the destination machines. The backup agents will fetch data from the database and store it locally on the destination machines.</p>
-</div>
-<div class="section" id="backup-urls">
+<p>If instead you want to perform a backup to the local disk of a particular machine or machines which are not network accessible to the FoundationDB servers, then you should disable the backup agents on the FoundationDB servers. This is accomplished by commenting out all of the <code class="docutils literal notranslate"><span class="pre">[backup_agent.&lt;ID&gt;]</span></code> sections in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>. Do not comment out the global <code class="docutils literal notranslate"><span class="pre">[backup_agent]</span></code> section. Next, start backup agents on the destination machine or machines. Now, when you start a backup, you can specify the destination directory (as a Backup URL) using a local path on the destination machines. The backup agents will fetch data from the database and store it locally on the destination machines.</p>
+</section>
+<section id="backup-urls">
 <h2>Backup URLs</h2>
 <p>Backup and Restore locations are specified by Backup URLs.  Currently there are two valid Backup URL formats.</p>
 <p>Note that items in angle brackets (&lt; and &gt;) are just placeholders and must be replaced (including the brackets) with meaningful values.  Items within square brackets ([ and ]) are optional.</p>
 <p>For local directories, the Backup URL format is</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">file</span><span class="p">:</span><span class="o">//&lt;/</span><span class="n">absolute</span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">base_dir</span><span class="o">&gt;</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">file</span><span class="p">:</span><span class="o">//&lt;/</span><span class="n">absolute</span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">base_dir</span><span class="o">&gt;</span>
 </pre></div>
 </div>
-<p>An example would be <code class="docutils literal"><span class="pre">file:///home/backups</span></code> which would refer to the directory <code class="docutils literal"><span class="pre">/home/backups</span></code>.
+<p>An example would be <code class="docutils literal notranslate"><span class="pre">file:///home/backups</span></code> which would refer to the directory <code class="docutils literal notranslate"><span class="pre">/home/backups</span></code>.
 Note that since paths must be absolute this will result in three slashes (/) in a row in the URL.</p>
 <p>Note that for local directory URLs the actual backup files will not be written to &lt;base_dir&gt; directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.</p>
 <p>For blob store backup locations, the Backup URL format is</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>blobstore://[&lt;api_key&gt;][:&lt;secret&gt;[:&lt;security_token&gt;]]@&lt;hostname&gt;[:&lt;port&gt;]/&lt;name&gt;?bucket=&lt;bucket_name&gt;[&amp;&lt;param&gt;=&lt;value&gt;]...]
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>blobstore://[&lt;api_key&gt;][:&lt;secret&gt;[:&lt;security_token&gt;]]@&lt;hostname&gt;[:&lt;port&gt;]/&lt;name&gt;?bucket=&lt;bucket_name&gt;[&amp;region=&lt;region_name&gt;][&amp;&lt;param&gt;=&lt;value&gt;]...]
 
   &lt;api_key&gt; - API key to use for authentication. Optional.
   &lt;secret&gt; - API key&#39;s secret.  Optional.
@@ -263,14 +378,15 @@ Note that since paths must be absolute this will result in three slashes (/) in 
   &lt;port&gt; - Remote port to connect to.  Optional.  Default is 80.
   &lt;name&gt; - Name of the backup within the backup bucket.  It can contain &#39;/&#39; characters in order to organize backups into a folder-like structure.
   &lt;bucket_name&gt; - Name of the bucket to use for backup data.
+  &lt;region_name&gt; - If &lt;hostname&gt; is not in s3 compatible form (s3.region-name.example.com) and aws v4 signature is enabled, region name is required.
 
   &lt;param&gt;=&lt;value&gt; - Optional URL parameters.  See below for details.
 </pre></div>
 </div>
 <p>A single bucket (specified by &lt;bucket_name&gt;) can hold any number of backups, each with a different &lt;name&gt;.</p>
 <p>If &lt;secret&gt; is not specified, it will be looked up in <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">blob credential sources</span></a>.</p>
-<p>An example blob store Backup URL would be <code class="docutils literal"><span class="pre">blobstore://myKey:mySecret&#64;something.domain.com:80/dec_1_2017_0400?bucket=backups</span></code>.</p>
-<p>Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive.  The most likely parameter a user would want to change is <code class="docutils literal"><span class="pre">max_send_bytes_per_second</span></code> (or <code class="docutils literal"><span class="pre">sbps</span></code> for short) which determines the upload speed to the blob service.</p>
+<p>An example blob store Backup URL would be <code class="docutils literal notranslate"><span class="pre">blobstore://myKey:mySecret&#64;something.domain.com:80/dec_1_2017_0400?bucket=backups</span></code>.</p>
+<p>Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive.  The most likely parameter a user would want to change is <code class="docutils literal notranslate"><span class="pre">max_send_bytes_per_second</span></code> (or <code class="docutils literal notranslate"><span class="pre">sbps</span></code> for short) which determines the upload speed to the blob service.</p>
 <p>Here is a complete list of valid parameters:</p>
 <blockquote>
 <div><p><em>secure_connection</em> (or <em>sc</em>) - Set 1 for secure connection and 0 for unsecure connection. Defaults to secure connection.</p>
@@ -297,23 +413,25 @@ Note that since paths must be absolute this will result in three slashes (/) in 
 <p><em>max_send_bytes_per_second</em> (or <em>sbps</em>) - Max send bytes per second for all requests combined.</p>
 <p><em>max_recv_bytes_per_second</em> (or <em>rbps</em>) - Max receive bytes per second for all requests combined.</p>
 <p><em>header</em> - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is <em>header=&lt;FieldName&gt;:&lt;FieldValue&gt;</em> where both strings are non-empty.</p>
+<p><em>sdk_auth</em> (or <em>sa</em>) - Use the AWS SDK to do credentials and authentication. This supports all aws authentication types, including credential-less iam role-based authentication in aws. Experimental, and only works if FDB was compiled with BUILD_AWS_BACKUP=ON. When this parameter is set, all other credential parts of the backup url can be ignored.</p>
 <blockquote>
-<div><strong>Example</strong>: The URL parameter <em>header=x-amz-storage-class:REDUCED_REDUNDANCY</em> would send the HTTP header required to use the reduced redundancy storage option in the S3 API.</div></blockquote>
+<div><p><strong>Example</strong>: The URL parameter <em>header=x-amz-storage-class:REDUCED_REDUNDANCY</em> would send the HTTP header required to use the reduced redundancy storage option in the S3 API.</p>
 </div></blockquote>
-</div>
-<div class="section" id="signing-protocol">
+</div></blockquote>
+</section>
+<section id="signing-protocol">
 <h2>Signing Protocol</h2>
-<p>AWS signature version 4 is the default signing protocol choice. This boolean knob <code class="docutils literal"><span class="pre">--knob_http_request_aws_v4_header</span></code> can be used to select between v4 style and v2 style signatures.
-If the knob is set to <code class="docutils literal"><span class="pre">true</span></code> then v4 signature will be used and if set to <code class="docutils literal"><span class="pre">false</span></code> then v2 signature will be used.</p>
-</div>
-<div class="section" id="blob-credential-files">
+<p>AWS signature version 4 is the default signing protocol choice. This boolean knob <code class="docutils literal notranslate"><span class="pre">--knob_http_request_aws_v4_header</span></code> can be used to select between v4 style and v2 style signatures.
+If the knob is set to <code class="docutils literal notranslate"><span class="pre">true</span></code> then v4 signature will be used and if set to <code class="docutils literal notranslate"><span class="pre">false</span></code> then v2 signature will be used.</p>
+</section>
+<section id="blob-credential-files">
 <span id="id1"></span><h2>Blob Credential Files</h2>
 <p>In order to help safeguard blob store credentials, the &lt;SECRET&gt; can optionally be omitted from blobstore:// URLs on the command line.  Omitted secrets will be resolved at connect time using 1 or more Blob Credential files.</p>
-<p>Blob Credential files can be specified on the command line (via &#8211;blob-credentials &lt;FILE&gt;) or via the environment variable FDB_BLOB_CREDENTIALS which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.</p>
+<p>Blob Credential files can be specified on the command line (via –blob-credentials &lt;FILE&gt;) or via the environment variable FDB_BLOB_CREDENTIALS which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.</p>
 <p>At connect time, the specified files are read in order and the first matching account specification (<a class="reference external" href="mailto:user&#37;&#52;&#48;host">user<span>&#64;</span>host</a>)
 will be used to obtain the secret key.</p>
 <p>The Blob Credential File format is JSON with the following schema:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">{</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
   <span class="s2">&quot;accounts&quot;</span> <span class="p">:</span> <span class="p">{</span>
     <span class="s2">&quot;user@host&quot;</span> <span class="p">:</span>   <span class="p">{</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY&quot;</span> <span class="p">},</span>
     <span class="s2">&quot;user2@host2&quot;</span> <span class="p">:</span> <span class="p">{</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY2&quot;</span> <span class="p">}</span>
@@ -322,7 +440,7 @@ will be used to obtain the secret key.</p>
 </pre></div>
 </div>
 <p>If temporary credentials are being used, the following schema is also supported</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">{</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
   <span class="s2">&quot;accounts&quot;</span> <span class="p">:</span> <span class="p">{</span>
     <span class="s2">&quot;@host&quot;</span> <span class="p">:</span>     <span class="p">{</span> <span class="s2">&quot;api_key&quot;</span> <span class="p">:</span> <span class="n">user</span><span class="p">,</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">:</span> <span class="s2">&quot;TOKEN1&quot;</span> <span class="p">},</span>
     <span class="s2">&quot;@host2&quot;</span> <span class="p">:</span>    <span class="p">{</span> <span class="s2">&quot;api_key&quot;</span> <span class="p">:</span> <span class="n">user2</span><span class="p">,</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY2&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">:</span> <span class="s2">&quot;TOKEN2&quot;</span> <span class="p">}</span>
@@ -330,375 +448,368 @@ will be used to obtain the secret key.</p>
 <span class="p">}</span>
 </pre></div>
 </div>
-</div>
-<div class="section" id="tls-support">
+</section>
+<section id="tls-support">
 <h2>TLS Support</h2>
-<p>In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in <code class="docutils literal"><span class="pre">foundationdb.conf</span></code> for backup agents.</p>
-<table border="1" class="docutils">
-<colgroup>
-<col width="35%" />
-<col width="65%" />
-</colgroup>
-<thead valign="bottom">
-<tr class="row-odd"><th class="head">Environment Variable</th>
-<th class="head">Purpose</th>
+<p>In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in <code class="docutils literal notranslate"><span class="pre">foundationdb.conf</span></code> for backup agents.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Environment Variable</p></th>
+<th class="head"><p>Purpose</p></th>
 </tr>
 </thead>
-<tbody valign="top">
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">FDB_TLS_CERTIFICATE_FILE</span></code></td>
-<td>Path to the file from which the local certificates
-can be loaded, used by the plugin</td>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_CERTIFICATE_FILE</span></code></p></td>
+<td><p>Path to the file from which the local certificates
+can be loaded, used by the plugin</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">FDB_TLS_KEY_FILE</span></code></td>
-<td>Path to the file from which to load the private
-key, used by the plugin</td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_KEY_FILE</span></code></p></td>
+<td><p>Path to the file from which to load the private
+key, used by the plugin</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">FDB_TLS_PASSWORD</span></code></td>
-<td>The byte-string representing the passcode for
-unencrypting the private key</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_PASSWORD</span></code></p></td>
+<td><p>The byte-string representing the passcode for
+unencrypting the private key</p></td>
 </tr>
-<tr class="row-odd"><td><code class="docutils literal"><span class="pre">FDB_TLS_CA_FILE</span></code></td>
-<td>Path to the file containing the CA certificates
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_CA_FILE</span></code></p></td>
+<td><p>Path to the file containing the CA certificates
 to trust. Specify to override the default openssl
-location.</td>
+location.</p></td>
 </tr>
-<tr class="row-even"><td><code class="docutils literal"><span class="pre">FDB_TLS_VERIFY_PEERS</span></code></td>
-<td>The byte-string for the verification of peer
-certificates and sessions.</td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">FDB_TLS_VERIFY_PEERS</span></code></p></td>
+<td><p>The byte-string for the verification of peer
+certificates and sessions.</p></td>
 </tr>
 </tbody>
 </table>
-<p>Blob store backups can be configured to use HTTPS/TLS by setting the <code class="docutils literal"><span class="pre">secure_connection</span></code> or <code class="docutils literal"><span class="pre">sc</span></code> backup URL option to <code class="docutils literal"><span class="pre">1</span></code>, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the <code class="docutils literal"><span class="pre">fdbdr</span></code> and <code class="docutils literal"><span class="pre">dr_agent</span></code> commands.</p>
-</div>
-<div class="section" id="fdbbackup-command-line-tool">
-<h2><code class="docutils literal"><span class="pre">fdbbackup</span></code> command line tool</h2>
-<p>The <code class="docutils literal"><span class="pre">fdbbackup</span></code> command line tool is used to control backup jobs or to manage backup data.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup [-h] &lt;SUBCOMMAND&gt; &lt;SUBCOMMAND_OPTIONS&gt;
+<p>Blob store backups can be configured to use HTTPS/TLS by setting the <code class="docutils literal notranslate"><span class="pre">secure_connection</span></code> or <code class="docutils literal notranslate"><span class="pre">sc</span></code> backup URL option to <code class="docutils literal notranslate"><span class="pre">1</span></code>, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the <code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> and <code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> commands.</p>
+</section>
+<section id="fdbbackup-command-line-tool">
+<h2><code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code> command line tool</h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code> command line tool is used to control backup jobs or to manage backup data.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup [-h] &lt;SUBCOMMAND&gt; &lt;SUBCOMMAND_OPTIONS&gt;
 </pre></div>
 </div>
 <p>The following options apply to most subcommands:</p>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-C</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</dd>
-<dt><code class="docutils literal"><span class="pre">-d</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt>
-<dd>The Backup URL which the subcommand should read, write, or modify.  For <code class="docutils literal"><span class="pre">start</span></code> and <code class="docutils literal"><span class="pre">modify</span></code> operations, the Backup URL must be accessible by the <code class="docutils literal"><span class="pre">backup_agent</span></code> processes.</dd>
-<dt><code class="docutils literal"><span class="pre">-t</span> <span class="pre">&lt;TAG&gt;</span></code></dt>
-<dd>A &#8220;tag&#8221; is a named slot in which a backup task executes.  Backups on different named tags make progress and are controlled independently, though their executions are handled by the same set of backup agent processes.  Any number of unique backup tags can be active at once.  It the tag is not specified, the default tag name &#8220;default&#8221; is used.</dd>
-<dt><code class="docutils literal"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
-<dd>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-C</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt><dd><p>Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-d</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt><dd><p>The Backup URL which the subcommand should read, write, or modify.  For <code class="docutils literal notranslate"><span class="pre">start</span></code> and <code class="docutils literal notranslate"><span class="pre">modify</span></code> operations, the Backup URL must be accessible by the <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> processes.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-t</span> <span class="pre">&lt;TAG&gt;</span></code></dt><dd><p>A “tag” is a named slot in which a backup task executes.  Backups on different named tags make progress and are controlled independently, though their executions are handled by the same set of backup agent processes.  Any number of unique backup tags can be active at once.  It the tag is not specified, the default tag name “default” is used.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt><dd><p>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</p>
+</dd>
 </dl>
-<div class="section" id="start">
-<span id="backup-start"></span><h3><code class="docutils literal"><span class="pre">start</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">start</span></code> subcommand is used to start a backup.  If there is already a backup in progress, the command will fail and the current backup will be unaffected.  Otherwise, a backup is started. If the wait option is used, the command will wait for the backup to complete; otherwise, it returns immediately.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup start [-t &lt;TAG&gt;] -d &lt;BACKUP_URL&gt; [-z] [-s &lt;DURATION&gt;] [--partitioned-log-experimental] [-w] [-k &#39;&lt;BEGIN&gt;[ &lt;END&gt;]&#39;]...
+<section id="start">
+<span id="backup-start"></span><h3><code class="docutils literal notranslate"><span class="pre">start</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">start</span></code> subcommand is used to start a backup.  If there is already a backup in progress, the command will fail and the current backup will be unaffected.  Otherwise, a backup is started. If the wait option is used, the command will wait for the backup to complete; otherwise, it returns immediately.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup start [-t &lt;TAG&gt;] -d &lt;BACKUP_URL&gt; [-z] [-s &lt;DURATION&gt;] [--partitioned-log-experimental] [-w] [-k &#39;&lt;BEGIN&gt;[ &lt;END&gt;]&#39;]...
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-z</span></code></dt>
-<dd>Perform the backup continuously rather than terminating once a restorable backup is achieved.  Database mutations within the backup&#8217;s target key ranges will be continuously written to the backup as well as repeated inconsistent snapshots at the configured snapshot rate.</dd>
-<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal"><span class="pre">--snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
-<dd>Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continuous mode.  The default is 864000 which is 10 days.</dd>
-<dt><code class="docutils literal"><span class="pre">--initial-snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
-<dd>Specifies the duration, in seconds, of the first inconsistent snapshot written to the backup.  The default is 0, which means as fast as possible.</dd>
-<dt><code class="docutils literal"><span class="pre">--partitioned-log-experimental</span></code></dt>
-<dd>Specifies the backup uses the partitioned mutation logs generated by backup workers. Since FDB version 6.3, this option is experimental and requires using fast restore for restoring the database from the generated files. The default is to use non-partitioned mutation logs generated by backup agents.</dd>
-<dt><code class="docutils literal"><span class="pre">-w</span></code></dt>
-<dd>Wait for the backup to complete with behavior identical to that of the <a class="reference internal" href="#backup-wait"><span class="std std-ref">wait command</span></a>.</dd>
-<dt><code class="docutils literal"><span class="pre">-k</span> <span class="pre">'&lt;BEGIN&gt;[</span> <span class="pre">&lt;END&gt;]'</span></code></dt>
-<dd><p class="first">Specify a key range to be included in the backup.  Can be used multiple times to specify multiple key ranges.  The argument should be a single string containing either a BEGIN alone or both a BEGIN and END separated by a space.  If only the BEGIN is specified, the END is assumed to be BEGIN + &#8216;xff&#8217;.  If no key ranges are different, the default is all user keys (&#8216;&#8217; to &#8216;xff&#8217;).</p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">-z</span></code></dt><dd><p>Perform the backup continuously rather than terminating once a restorable backup is achieved.  Database mutations within the backup’s target key ranges will be continuously written to the backup as well as repeated inconsistent snapshots at the configured snapshot rate.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">--snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt><dd><p>Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continuous mode.  The default is 864000 which is 10 days.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--initial-snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt><dd><p>Specifies the duration, in seconds, of the first inconsistent snapshot written to the backup.  The default is 0, which means as fast as possible.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--partitioned-log-experimental</span></code></dt><dd><p>Specifies the backup uses the partitioned mutation logs generated by backup workers. Since FDB version 6.3, this option is experimental and requires using fast restore for restoring the database from the generated files. The default is to use non-partitioned mutation logs generated by backup agents.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-w</span></code></dt><dd><p>Wait for the backup to complete with behavior identical to that of the <a class="reference internal" href="#backup-wait"><span class="std std-ref">wait command</span></a>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-k</span> <span class="pre">'&lt;BEGIN&gt;[</span> <span class="pre">&lt;END&gt;]'</span></code></dt><dd><p>Specify a key range to be included in the backup.  Can be used multiple times to specify multiple key ranges.  The argument should be a single string containing either a BEGIN alone or both a BEGIN and END separated by a space.  If only the BEGIN is specified, the END is assumed to be BEGIN + ‘xff’.  If no key ranges are different, the default is all user keys (’’ to ‘xff’).</p>
 <p>Each key range should be quoted in a manner appropriate for your command line environment. Here are some examples for Bash:</p>
-<div class="last highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup start -k &#39;apple bananna&#39; -k &#39;mango pineapple&#39; -d &lt;BACKUP_URL&gt;
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup start -k &#39;apple bananna&#39; -k &#39;mango pineapple&#39; -d &lt;BACKUP_URL&gt;
 user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!e&#39; -d &lt;BACKUP_URL&gt;
 </pre></div>
 </div>
 </dd>
 </dl>
-</div>
-<div class="section" id="modify">
-<h3><code class="docutils literal"><span class="pre">modify</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">modify</span></code> subcommand is used to modify parameters of a running backup.  All specified changes are made in a single transaction.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup modify [-t &lt;TAG&gt;] [-d &lt;BACKUP_URL&gt;] [-s &lt;DURATION&gt;] [--active-snapshot-interval &lt;DURATION&gt;] [--verify-uid &lt;UID&gt;]
+</section>
+<section id="modify">
+<h3><code class="docutils literal notranslate"><span class="pre">modify</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">modify</span></code> subcommand is used to modify parameters of a running backup.  All specified changes are made in a single transaction.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup modify [-t &lt;TAG&gt;] [-d &lt;BACKUP_URL&gt;] [-s &lt;DURATION&gt;] [--active-snapshot-interval &lt;DURATION&gt;] [--verify-uid &lt;UID&gt;]
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-d</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt>
-<dd>Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.</dd>
-<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal"><span class="pre">--snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
-<dd>Sets a new duration for backup snapshots, in seconds.</dd>
-<dt><code class="docutils literal"><span class="pre">--active-snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
-<dd>Sets new duration for the backup&#8217;s currently active snapshot, in seconds, relative to the start of the snapshot.</dd>
-<dt><code class="docutils literal"><span class="pre">--verify-uid</span> <span class="pre">&lt;UID&gt;</span></code></dt>
-<dd>Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters (if the UID matches).</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-d</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt><dd><p>Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">--snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt><dd><p>Sets a new duration for backup snapshots, in seconds.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--active-snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt><dd><p>Sets new duration for the backup’s currently active snapshot, in seconds, relative to the start of the snapshot.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--verify-uid</span> <span class="pre">&lt;UID&gt;</span></code></dt><dd><p>Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters (if the UID matches).</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="abort">
-<h3><code class="docutils literal"><span class="pre">abort</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">abort</span></code> subcommand is used to abort a backup that is currently in progress.  If there is no backup in progress, the command will return an error.  The destination backup is NOT deleted automatically, and it may or may not be restorable depending on when the abort is done.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup abort [-t &lt;TAG&gt;]
+</section>
+<section id="abort">
+<h3><code class="docutils literal notranslate"><span class="pre">abort</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">abort</span></code> subcommand is used to abort a backup that is currently in progress.  If there is no backup in progress, the command will return an error.  The destination backup is NOT deleted automatically, and it may or may not be restorable depending on when the abort is done.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup abort [-t &lt;TAG&gt;]
 </pre></div>
 </div>
-</div>
-<div class="section" id="discontinue">
-<h3><code class="docutils literal"><span class="pre">discontinue</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">discontinue</span></code> subcommand is only available for backups that were started with the continuous (<code class="docutils literal"><span class="pre">-z</span></code>) option. Its effect is to discontinue the continuous backup. Note that the subcommand does <em>not</em> abort the backup; it simply allows the backup to complete as a noncontinuous backup would.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup discontinue [-t &lt;TAG&gt;] [-w]
+</section>
+<section id="discontinue">
+<h3><code class="docutils literal notranslate"><span class="pre">discontinue</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">discontinue</span></code> subcommand is only available for backups that were started with the continuous (<code class="docutils literal notranslate"><span class="pre">-z</span></code>) option. Its effect is to discontinue the continuous backup. Note that the subcommand does <em>not</em> abort the backup; it simply allows the backup to complete as a noncontinuous backup would.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup discontinue [-t &lt;TAG&gt;] [-w]
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-w</span></code></dt>
-<dd>Wait for the backup to complete with behavior identical to that of the <a class="reference internal" href="#backup-wait"><span class="std std-ref">wait command</span></a>.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-w</span></code></dt><dd><p>Wait for the backup to complete with behavior identical to that of the <a class="reference internal" href="#backup-wait"><span class="std std-ref">wait command</span></a>.</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="wait">
-<span id="backup-wait"></span><h3><code class="docutils literal"><span class="pre">wait</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">wait</span></code> subcommand is used to wait for a backup to complete, which is useful for scripting purposes.  If there is a backup in progress, it waits for it to complete or be aborted and returns a status based on the result of the backup.  If there is no backup in progress, it returns immediately based on the result of the previous backup.  The exit code is zero (success) if the backup was completed successfully and nonzero if it was aborted.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup wait [-t &lt;TAG&gt;]
+</section>
+<section id="wait">
+<span id="backup-wait"></span><h3><code class="docutils literal notranslate"><span class="pre">wait</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">wait</span></code> subcommand is used to wait for a backup to complete, which is useful for scripting purposes.  If there is a backup in progress, it waits for it to complete or be aborted and returns a status based on the result of the backup.  If there is no backup in progress, it returns immediately based on the result of the previous backup.  The exit code is zero (success) if the backup was completed successfully and nonzero if it was aborted.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup wait [-t &lt;TAG&gt;]
 </pre></div>
 </div>
-</div>
-<div class="section" id="status">
-<h3><code class="docutils literal"><span class="pre">status</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">status</span></code> subcommand is used to get information on the current status of backup.  It will show several backup metrics as well as recent errors which organized by whether or not they appear to be preventing backup progress.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup status [-t &lt;TAG&gt;]
+</section>
+<section id="status">
+<h3><code class="docutils literal notranslate"><span class="pre">status</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">status</span></code> subcommand is used to get information on the current status of backup.  It will show several backup metrics as well as recent errors which organized by whether or not they appear to be preventing backup progress.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup status [-t &lt;TAG&gt;]
 </pre></div>
 </div>
-</div>
-<div class="section" id="delete">
-<h3><code class="docutils literal"><span class="pre">delete</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">delete</span></code> subcommand will delete the specified backup.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup delete -d &lt;BACKUP_URL&gt;
+</section>
+<section id="delete">
+<h3><code class="docutils literal notranslate"><span class="pre">delete</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">delete</span></code> subcommand will delete the specified backup.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup delete -d &lt;BACKUP_URL&gt;
 </pre></div>
 </div>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">If you cancel a delete operation while it is in progress the specified backup is in an unknown state and is likely no longer usable.  Repeat the delete command to finish deleting the backup.</p>
+<p class="admonition-title">Warning</p>
+<p>If you cancel a delete operation while it is in progress the specified backup is in an unknown state and is likely no longer usable.  Repeat the delete command to finish deleting the backup.</p>
 </div>
-</div>
-<div class="section" id="expire">
-<h3><code class="docutils literal"><span class="pre">expire</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">expire</span></code> subcommand will remove data from a backup prior to some point in time referred to as the &#8216;cutoff&#8217;.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup expire -d &lt;BACKUP_URL&gt; &lt;CUTOFF&gt; [&lt;RESTORABILITY&gt;] [--force]
+</section>
+<section id="expire">
+<h3><code class="docutils literal notranslate"><span class="pre">expire</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">expire</span></code> subcommand will remove data from a backup prior to some point in time referred to as the ‘cutoff’.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup expire -d &lt;BACKUP_URL&gt; &lt;CUTOFF&gt; [&lt;RESTORABILITY&gt;] [--force]
 </pre></div>
 </div>
 <p>The expiration CUTOFF must be specified by one of the two following arguments:</p>
 <blockquote>
-<div><dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--expire-before-timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
-<dd>Specifies the expiration cutoff to DATETIME.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form &#8220;YYYY/MM/DD.HH:MI:SS+hhmm&#8221;, for example &#8220;2018/12/31.23:59:59-0800&#8221;.</dd>
-<dt><code class="docutils literal"><span class="pre">--expire-before-version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt>
-<dd>Specifies the cutoff by a database commit version.</dd>
+<div><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">--expire-before-timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt><dd><p>Specifies the expiration cutoff to DATETIME.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form “YYYY/MM/DD.HH:MI:SS+hhmm”, for example “2018/12/31.23:59:59-0800”.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--expire-before-version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt><dd><p>Specifies the cutoff by a database commit version.</p>
+</dd>
 </dl>
 </div></blockquote>
 <p>Optionally, the user can specify a minimum RESTORABILITY guarantee with one of the following options.</p>
 <blockquote>
-<div><dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--restorable-after-timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
-<dd>Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form &#8220;YYYY/MM/DD.HH:MI:SS+hhmm&#8221;, for example &#8220;2018/12/31.23:59:59-0800&#8221;.</dd>
-<dt><code class="docutils literal"><span class="pre">--restorable-after-version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt>
-<dd>Specifies that the backup must be restorable as of VERSION and later.</dd>
+<div><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">--restorable-after-timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt><dd><p>Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form “YYYY/MM/DD.HH:MI:SS+hhmm”, for example “2018/12/31.23:59:59-0800”.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--restorable-after-version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt><dd><p>Specifies that the backup must be restorable as of VERSION and later.</p>
+</dd>
 </dl>
 </div></blockquote>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-f</span></code> or <code class="docutils literal"><span class="pre">--force</span></code></dt>
-<dd>If the designated cutoff will result in removal of data such that the backup&#8217;s restorability would be reduced to either unrestorable or less restorable than the optional restorability requirement then the &#8211;force option must be given or the result will be an error and no action will be taken.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-f</span></code> or <code class="docutils literal notranslate"><span class="pre">--force</span></code></dt><dd><p>If the designated cutoff will result in removal of data such that the backup’s restorability would be reduced to either unrestorable or less restorable than the optional restorability requirement then the –force option must be given or the result will be an error and no action will be taken.</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="describe">
-<h3><code class="docutils literal"><span class="pre">describe</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">describe</span></code> subcommand will analyze the given backup and print a summary of the snapshot and mutation data versions it contains as well as the version range of restorability the backup can currently provide.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup describe -d &lt;BACKUP_URL&gt; [--version-timestamps] [-C &lt;CLUSTER_FILE&gt;]
+</section>
+<section id="describe">
+<h3><code class="docutils literal notranslate"><span class="pre">describe</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">describe</span></code> subcommand will analyze the given backup and print a summary of the snapshot and mutation data versions it contains as well as the version range of restorability the backup can currently provide.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup describe -d &lt;BACKUP_URL&gt; [--version-timestamps] [-C &lt;CLUSTER_FILE&gt;]
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--version-timestamps</span></code></dt>
-<dd>If the originating cluster is still available and is passed on the command line, this option can be specified in order for all versions in the output to also be converted to timestamps for better human readability.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">--version-timestamps</span></code></dt><dd><p>If the originating cluster is still available and is passed on the command line, this option can be specified in order for all versions in the output to also be converted to timestamps for better human readability.</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="list">
-<h3><code class="docutils literal"><span class="pre">list</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">list</span></code> subcommand will list the backups at a given &#8216;base&#8217; or shortened Backup URL.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup list -b &lt;BASE_URL&gt;
+</section>
+<section id="list">
+<h3><code class="docutils literal notranslate"><span class="pre">list</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">list</span></code> subcommand will list the backups at a given ‘base’ or shortened Backup URL.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup list -b &lt;BASE_URL&gt;
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-b</span> <span class="pre">&lt;BASE_URL&gt;</span></code> or <code class="docutils literal"><span class="pre">--base-url</span> <span class="pre">&lt;BASE_URL&gt;</span></code></dt>
-<dd>This a shortened Backup URL which looks just like a Backup URL but without the backup &lt;name&gt; so that the list command will discover and list all of the backups in the bucket.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-b</span> <span class="pre">&lt;BASE_URL&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">--base-url</span> <span class="pre">&lt;BASE_URL&gt;</span></code></dt><dd><p>This a shortened Backup URL which looks just like a Backup URL but without the backup &lt;name&gt; so that the list command will discover and list all of the backups in the bucket.</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="tags">
-<h3><code class="docutils literal"><span class="pre">tags</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">tags</span></code> subcommand will list the tags of all backups on a source cluster.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup tags [-C &lt;CLUSTER_FILE&gt;]
+</section>
+<section id="tags">
+<h3><code class="docutils literal notranslate"><span class="pre">tags</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">tags</span></code> subcommand will list the tags of all backups on a source cluster.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup tags [-C &lt;CLUSTER_FILE&gt;]
 </pre></div>
 </div>
-</div>
-<div class="section" id="cleanup">
-<h3><code class="docutils literal"><span class="pre">cleanup</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">cleanup</span></code> subcommand will list orphaned backups and DRs and optionally remove their mutations.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup cleanup [--delete-data] [--min-cleanup-seconds] [-C &lt;CLUSTER_FILE&gt;]
+</section>
+<section id="cleanup">
+<h3><code class="docutils literal notranslate"><span class="pre">cleanup</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">cleanup</span></code> subcommand will list orphaned backups and DRs and optionally remove their mutations.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbbackup cleanup [--delete-data] [--min-cleanup-seconds] [-C &lt;CLUSTER_FILE&gt;]
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--delete-data</span></code></dt>
-<dd>This flag will cause <code class="docutils literal"><span class="pre">cleanup</span></code> to remove mutations for the most stale backup or DR.</dd>
-<dt><code class="docutils literal"><span class="pre">--min-cleanup-seconds</span></code></dt>
-<dd>Specifies the amount of time a backup or DR needs to be stale before <code class="docutils literal"><span class="pre">cleanup</span></code> will remove mutations for it. By default this is set to one hour.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">--delete-data</span></code></dt><dd><p>This flag will cause <code class="docutils literal notranslate"><span class="pre">cleanup</span></code> to remove mutations for the most stale backup or DR.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--min-cleanup-seconds</span></code></dt><dd><p>Specifies the amount of time a backup or DR needs to be stale before <code class="docutils literal notranslate"><span class="pre">cleanup</span></code> will remove mutations for it. By default this is set to one hour.</p>
+</dd>
 </dl>
-</div>
-</div>
-<div class="section" id="fdbrestore-command-line-tool">
-<h2><code class="docutils literal"><span class="pre">fdbrestore</span></code> command line tool</h2>
-<p>The <code class="docutils literal"><span class="pre">fdbrestore</span></code> command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore.</p>
+</section>
+</section>
+<section id="fdbrestore-command-line-tool">
+<h2><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool</h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore.</p>
 <div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">It is your responsibility to ensure that no clients are accessing the database while it is being restored. During the restore process the database is in an inconsistent state, and writes that happen during the restore process might be partially or completely overwritten by restored data.</p>
+<p class="admonition-title">Warning</p>
+<p>It is your responsibility to ensure that no clients are accessing the database while it is being restored. During the restore process the database is in an inconsistent state, and writes that happen during the restore process might be partially or completely overwritten by restored data.</p>
 </div>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbrestore (start | abort | wait | status) [OPTIONS]
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbrestore (start | abort | wait | status) [OPTIONS]
 </pre></div>
 </div>
 <p>The following options apply to all commands:</p>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-h</span></code></dt>
-<dd>Get help on the <code class="docutils literal"><span class="pre">fdbrestore</span></code> command.</dd>
-<dt><code class="docutils literal"><span class="pre">-t</span> <span class="pre">&lt;TAG&gt;</span></code></dt>
-<dd><p class="first">Specify the tag for the restore task.  Multiple restore tasks can be in progress at once so long as each task uses a different tag.  The default tag is &#8220;default&#8221;.</p>
-<div class="last admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">If multiple restore tasks are in progress they should be restoring to different prefixes or the result is undefined.</p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">-h</span></code></dt><dd><p>Get help on the <code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-t</span> <span class="pre">&lt;TAG&gt;</span></code></dt><dd><p>Specify the tag for the restore task.  Multiple restore tasks can be in progress at once so long as each task uses a different tag.  The default tag is “default”.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>If multiple restore tasks are in progress they should be restoring to different prefixes or the result is undefined.</p>
 </div>
 </dd>
-<dt><code class="docutils literal"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
-<dd>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</dd>
-<dt><code class="docutils literal"><span class="pre">--dest-cluster-file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
-<dd>Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt><dd><p>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--dest-cluster-file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt><dd><p>Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.</p>
+</dd>
 </dl>
-<div class="section" id="restore-start">
-<span id="id2"></span><h3><code class="docutils literal"><span class="pre">start</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">start</span></code> command will start a new restore on the specified (or default) tag.  The command will fail if a tag is already in use by an active restore.</p>
-<dl class="docutils">
-<dt>::</dt>
-<dd>user&#64;host$ fdbrestore start -r &lt;BACKUP_URL&gt; [OPTIONS]</dd>
-<dt><code class="docutils literal"><span class="pre">-r</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt>
-<dd>Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the <code class="docutils literal"><span class="pre">backup_agent</span></code> processes for the cluster.</dd>
-<dt><code class="docutils literal"><span class="pre">-w</span></code></dt>
-<dd>Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.</dd>
-<dt><code class="docutils literal"><span class="pre">-k</span> <span class="pre">&lt;KEYS&gt;</span></code></dt>
-<dd>Specify list of key ranges from the backup to restore to the database</dd>
-<dt><code class="docutils literal"><span class="pre">--remove-prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt>
-<dd>Remove PREFIX from the keys read from the backup</dd>
-<dt><code class="docutils literal"><span class="pre">--add-prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt>
-<dd>Add PREFIX to restored keys before writing them to the database</dd>
-<dt><code class="docutils literal"><span class="pre">-n</span></code></dt>
-<dd>Perform a trial run without actually restoring any data.</dd>
-<dt><code class="docutils literal"><span class="pre">-v</span> <span class="pre">&lt;VERSION&gt;</span></code></dt>
-<dd>Instead of the latest version the backup can be restored to, restore to VERSION.</dd>
-<dt><code class="docutils literal"><span class="pre">--timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
-<dd>Instead of the latest version the backup can be restored to, restore to a version from approximately the given timestamp.  Requires orig_cluster_file to be specified.  DATETIME must be in the form &#8220;YYYY/MM/DD.HH:MI:SS+hhmm&#8221;, for example &#8220;2018/12/31.23:59:59-0800&#8221;.</dd>
-<dt><code class="docutils literal"><span class="pre">--orig-cluster-file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
-<dd>The cluster file for the original database from which the backup was created.  The original database is only needed to convert a &#8211;timestamp argument to a database version.</dd>
-<dt><code class="docutils literal"><span class="pre">--inconsistent-snapshot-only</span></code></dt>
-<dd>Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.</dd>
+<section id="restore-start">
+<span id="id2"></span><h3><code class="docutils literal notranslate"><span class="pre">start</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">start</span></code> command will start a new restore on the specified (or default) tag.  The command will fail if a tag is already in use by an active restore.</p>
+<dl class="simple">
+<dt>::</dt><dd><p>user&#64;host$ fdbrestore start -r &lt;BACKUP_URL&gt; [OPTIONS]</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-r</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt><dd><p>Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> processes for the cluster.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-w</span></code></dt><dd><p>Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-k</span> <span class="pre">&lt;KEYS&gt;</span></code></dt><dd><p>Specify list of key ranges from the backup to restore to the database</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--remove-prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt><dd><p>Remove PREFIX from the keys read from the backup</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--add-prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt><dd><p>Add PREFIX to restored keys before writing them to the database</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-n</span></code></dt><dd><p>Perform a trial run without actually restoring any data.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-v</span> <span class="pre">&lt;VERSION&gt;</span></code></dt><dd><p>Instead of the latest version the backup can be restored to, restore to VERSION.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt><dd><p>Instead of the latest version the backup can be restored to, restore to a version from approximately the given timestamp.  Requires orig_cluster_file to be specified.  DATETIME must be in the form “YYYY/MM/DD.HH:MI:SS+hhmm”, for example “2018/12/31.23:59:59-0800”.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--orig-cluster-file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt><dd><p>The cluster file for the original database from which the backup was created.  The original database is only needed to convert a –timestamp argument to a database version.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--inconsistent-snapshot-only</span></code></dt><dd><p>Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="id3">
-<h3><code class="docutils literal"><span class="pre">abort</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">abort</span></code> command will stop an active backup on the specified (or default) tag.  It will display the final state of the restore tag.</p>
-</div>
-<div class="section" id="id4">
-<h3><code class="docutils literal"><span class="pre">wait</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">wait</span></code> command will wait for the restore on the specified (or default) tag to reach a final state (such as complete or abort) and then exit.  While waiting it will prints a progress update every few seconds.</p>
-</div>
-<div class="section" id="id5">
-<h3><code class="docutils literal"><span class="pre">status</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">status</span></code> command will print a detailed status report on restore job progress.  If a tag is specified, it will only show status for that specific tag, otherwise status for all tags will be shown.</p>
-</div>
-</div>
-<div class="section" id="backup-agent-command-line-tool">
-<h2><code class="docutils literal"><span class="pre">backup_agent</span></code> command line tool</h2>
-<p><code class="docutils literal"><span class="pre">backup_agent</span></code> is started automatically on each server in the default configuration of FoundationDB, so you will not normally need to invoke it at the command line.  One case in which you would need to do so would be to perform a backup to a destination which is not accessible via a shared filesystem.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ backup_agent [-h] [-v] [-C &lt;CLUSTER_FILE&gt;]
+</section>
+<section id="id3">
+<h3><code class="docutils literal notranslate"><span class="pre">abort</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">abort</span></code> command will stop an active backup on the specified (or default) tag.  It will display the final state of the restore tag.</p>
+</section>
+<section id="id4">
+<h3><code class="docutils literal notranslate"><span class="pre">wait</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">wait</span></code> command will wait for the restore on the specified (or default) tag to reach a final state (such as complete or abort) and then exit.  While waiting it will prints a progress update every few seconds.</p>
+</section>
+<section id="id5">
+<h3><code class="docutils literal notranslate"><span class="pre">status</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">status</span></code> command will print a detailed status report on restore job progress.  If a tag is specified, it will only show status for that specific tag, otherwise status for all tags will be shown.</p>
+</section>
+</section>
+<section id="backup-agent-command-line-tool">
+<h2><code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> command line tool</h2>
+<p><code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> is started automatically on each server in the default configuration of FoundationDB, so you will not normally need to invoke it at the command line.  One case in which you would need to do so would be to perform a backup to a destination which is not accessible via a shared filesystem.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ backup_agent [-h] [-v] [-C &lt;CLUSTER_FILE&gt;]
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-h</span></code></dt>
-<dd>Get help on the <code class="docutils literal"><span class="pre">backup_agent</span></code> command.</dd>
-<dt><code class="docutils literal"><span class="pre">-v</span></code></dt>
-<dd>Get the version of FoundationDB in use.</dd>
-<dt><code class="docutils literal"><span class="pre">-C</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd><p class="first">Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file that should be used to connect to the FoundationDB cluster you want to back up.</p>
-<p class="last">If not specified, a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">-h</span></code></dt><dd><p>Get help on the <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> command.</p>
 </dd>
-<dt><code class="docutils literal"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
-<dd>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-v</span></code></dt><dd><p>Get the version of FoundationDB in use.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-C</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt><dd><p>Specify the path to the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file that should be used to connect to the FoundationDB cluster you want to back up.</p>
+<p>If not specified, a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt><dd><p>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="fdbdr-command-line-tool">
-<span id="fdbdr-intro"></span><h2><code class="docutils literal"><span class="pre">fdbdr</span></code> command line tool</h2>
-<p>The <code class="docutils literal"><span class="pre">fdbdr</span></code> command line tool is used to manage DR tasks.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbdr [-h] &lt;SUBCOMMAND&gt; [&lt;SUBCOMMAND_OPTIONS&gt;] -d &lt;CLUSTER_FILE&gt; -s &lt;CLUSTER_FILE&gt; [-v]
+</section>
+<section id="fdbdr-command-line-tool">
+<span id="fdbdr-intro"></span><h2><code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command line tool</h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command line tool is used to manage DR tasks.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbdr [-h] &lt;SUBCOMMAND&gt; [&lt;SUBCOMMAND_OPTIONS&gt;] -d &lt;CLUSTER_FILE&gt; -s &lt;CLUSTER_FILE&gt; [-v]
 </pre></div>
 </div>
 <p>The following arguments are used by multiple subcommands:</p>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-h</span></code></dt>
-<dd>Get help on the <code class="docutils literal"><span class="pre">fdbdr</span></code> command.</dd>
-<dt><code class="docutils literal"><span class="pre">-v</span></code></dt>
-<dd>Get the version of FoundationDB in use.</dd>
-<dt><code class="docutils literal"><span class="pre">-d</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operation.</dd>
-<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the source cluster of the DR operation.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-h</span></code></dt><dd><p>Get help on the <code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-v</span></code></dt><dd><p>Get the version of FoundationDB in use.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-d</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt><dd><p>Specify the path to the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operation.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-s</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt><dd><p>Specify the path to the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file for the source cluster of the DR operation.</p>
+</dd>
 </dl>
-<div class="section" id="dr-start">
-<span id="id6"></span><h3><code class="docutils literal"><span class="pre">start</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">start</span></code> subcommand is used to start a DR backup.  If there is already a DR backup in progress, the command will fail and the current DR backup will be unaffected.</p>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-k</span> <span class="pre">'&lt;BEGIN&gt;[</span> <span class="pre">&lt;END&gt;]'</span></code></dt>
-<dd>Specify a key range to be included in the DR.  Can be used multiple times to specify multiple key ranges.  The argument should be a single string containing either a BEGIN alone or both a BEGIN and END separated by a space.  If only the BEGIN is specified, the END is assumed to be BEGIN + &#8216;xff&#8217;.  If no key ranges are different, the default is all user keys (&#8216;&#8217; to &#8216;xff&#8217;).</dd>
+<section id="dr-start">
+<span id="id6"></span><h3><code class="docutils literal notranslate"><span class="pre">start</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">start</span></code> subcommand is used to start a DR backup.  If there is already a DR backup in progress, the command will fail and the current DR backup will be unaffected.</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-k</span> <span class="pre">'&lt;BEGIN&gt;[</span> <span class="pre">&lt;END&gt;]'</span></code></dt><dd><p>Specify a key range to be included in the DR.  Can be used multiple times to specify multiple key ranges.  The argument should be a single string containing either a BEGIN alone or both a BEGIN and END separated by a space.  If only the BEGIN is specified, the END is assumed to be BEGIN + ‘xff’.  If no key ranges are different, the default is all user keys (’’ to ‘xff’).</p>
+</dd>
 </dl>
-</div>
-<div class="section" id="switch">
-<h3><code class="docutils literal"><span class="pre">switch</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">switch</span></code> subcommand is used to swap the source and destination database clusters of an active DR in differential mode.  This means the destination will be unlocked and start streaming data into the source database, which will subsequently be locked.</p>
-<p>This command requires both databases to be available.  On the destination cluster, a <code class="docutils literal"><span class="pre">dr_agent</span></code> that points to the source cluster must be running.  While the switch command is working, both databases will be locked for a few seconds.</p>
-</div>
-<div class="section" id="id7">
-<h3><code class="docutils literal"><span class="pre">abort</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">abort</span></code> subcommand is used to abort a DR that is currently in progress.  If there is no backup in progress, the command will return an error.  If the DR had already reached differential status, the abort command will leave the destination database at consistent snapshot of the source database from sometime in the past.</p>
+</section>
+<section id="switch">
+<h3><code class="docutils literal notranslate"><span class="pre">switch</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">switch</span></code> subcommand is used to swap the source and destination database clusters of an active DR in differential mode.  This means the destination will be unlocked and start streaming data into the source database, which will subsequently be locked.</p>
+<p>This command requires both databases to be available.  On the destination cluster, a <code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> that points to the source cluster must be running.  While the switch command is working, both databases will be locked for a few seconds.</p>
+</section>
+<section id="id7">
+<h3><code class="docutils literal notranslate"><span class="pre">abort</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">abort</span></code> subcommand is used to abort a DR that is currently in progress.  If there is no backup in progress, the command will return an error.  If the DR had already reached differential status, the abort command will leave the destination database at consistent snapshot of the source database from sometime in the past.</p>
 <blockquote>
 <div><div class="admonition warning">
-<p class="first admonition-title">Warning</p>
-<p class="last">The <code class="docutils literal"><span class="pre">abort</span></code> command will lose some amount of prior commits.</p>
+<p class="admonition-title">Warning</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">abort</span></code> command will lose some amount of prior commits.</p>
 </div>
 </div></blockquote>
-</div>
-<div class="section" id="id8">
-<h3><code class="docutils literal"><span class="pre">status</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">status</span></code> subcommand is used to get information on the current status of DR backup.  It tells whether or not there is a DR in progress and whether or not there are active DR agents.  It will also report any errors that have been encountered by the DR agents.</p>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-e</span> <span class="pre">&lt;LIMIT&gt;</span></code></dt>
-<dd>Print the last (up to) <code class="docutils literal"><span class="pre">&lt;LIMIT&gt;</span></code> errors that were logged into the database by backup agents.  The default is 10.</dd>
+</section>
+<section id="id8">
+<h3><code class="docutils literal notranslate"><span class="pre">status</span></code></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">status</span></code> subcommand is used to get information on the current status of DR backup.  It tells whether or not there is a DR in progress and whether or not there are active DR agents.  It will also report any errors that have been encountered by the DR agents.</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-e</span> <span class="pre">&lt;LIMIT&gt;</span></code></dt><dd><p>Print the last (up to) <code class="docutils literal notranslate"><span class="pre">&lt;LIMIT&gt;</span></code> errors that were logged into the database by backup agents.  The default is 10.</p>
+</dd>
 </dl>
-</div>
-</div>
-<div class="section" id="dr-agent-command-line-tool">
-<h2><code class="docutils literal"><span class="pre">dr_agent</span></code> command line tool</h2>
-<p>Unlike <code class="docutils literal"><span class="pre">backup_agent</span></code>, <code class="docutils literal"><span class="pre">dr_agent</span></code> is not started automatically in a default FoundationDB installation.  A <code class="docutils literal"><span class="pre">dr_agent</span></code> needs the cluster files for both the source database and the destination database, and can only perform a backup in one direction (from source to destination) at a time.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ dr_agent [-h] [-v] -d &lt;CLUSTER_FILE&gt; -s &lt;CLUSTER_FILE&gt;
+</section>
+</section>
+<section id="dr-agent-command-line-tool">
+<h2><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> command line tool</h2>
+<p>Unlike <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code>, <code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> is not started automatically in a default FoundationDB installation.  A <code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> needs the cluster files for both the source database and the destination database, and can only perform a backup in one direction (from source to destination) at a time.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ dr_agent [-h] [-v] -d &lt;CLUSTER_FILE&gt; -s &lt;CLUSTER_FILE&gt;
 </pre></div>
 </div>
-<dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-h</span></code></dt>
-<dd>Get help on the <code class="docutils literal"><span class="pre">fdbdr</span></code> command.</dd>
-<dt><code class="docutils literal"><span class="pre">-v</span></code></dt>
-<dd>Get the version of FoundationDB in use.</dd>
-<dt><code class="docutils literal"><span class="pre">-d</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operation.</dd>
-<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the source cluster of the DR operation.</dd>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-h</span></code></dt><dd><p>Get help on the <code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-v</span></code></dt><dd><p>Get the version of FoundationDB in use.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-d</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt><dd><p>Specify the path to the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operation.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-s</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt><dd><p>Specify the path to the <code class="docutils literal notranslate"><span class="pre">fdb.cluster</span></code> file for the source cluster of the DR operation.</p>
+</dd>
 </dl>
-</div>
-</div>
+</section>
+</section>
 
 
     </div>
@@ -720,7 +831,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 08, 2022.<br/>
+      Last updated on Nov 30, 2022.<br/>
     </p>
   </div>
 </footer>
