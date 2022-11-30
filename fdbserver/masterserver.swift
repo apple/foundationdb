@@ -21,6 +21,16 @@ extension Swift.Optional where Wrapped == Version {
     }
 }
 
+extension Swift.Optional where Wrapped == SetTag {
+    init(cxxOptional value: OptionalSetTag) {
+        guard value.present() else {
+            self = nil
+            return
+        }
+        self = value.__getUnsafe().pointee
+    }
+}
+
 @_expose(Cxx)
 public func figureVersion(current: Version,
                    now: Double,
@@ -45,6 +55,33 @@ public func figureVersion(current: Version,
                            upperBound: current + toAdd + maxOffset)
 }
 
+@_expose(Cxx)
+public func updateLiveCommittedVersion(myself: MasterData, req: ReportRawCommittedVersionRequest) {
+    myself.minKnownCommittedVersion = max(myself.minKnownCommittedVersion, req.minKnownCommittedVersion)
+
+    if req.version > myself.liveCommittedVersion.get() {
+        if getServerKnobs().ENABLE_VERSION_VECTOR,
+           let writtenTags = Swift.Optional(cxxOptional: req.writtenTags) {
+            let primaryLocality = getServerKnobs().ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ?
+                    myself.locality : Int8(tagLocalityInvalid)
+            myself.ssVersionVector.setVersion(writtenTags, req.version, primaryLocality)
+            myself.versionVectorTagUpdates.addMeasurement(Double(writtenTags.size()))
+        }
+
+        let curTime = now();
+        // add debug here to change liveCommittedVersion to time bound of now()
+        debug_advanceVersionTimestamp(Int64(myself.liveCommittedVersion.get()), curTime + getClientKnobs().MAX_VERSION_CACHE_LAG)
+        // also add req.version but with no time bound
+        debug_advanceVersionTimestamp(Int64(req.version), Double.greatestFiniteMagnitude)
+        myself.databaseLocked = req.locked;
+        myself.proxyMetadataVersion = req.metadataVersion
+        // Note the set call switches context to any waiters on liveCommittedVersion before continuing.
+        myself.liveCommittedVersion.set(Int(req.version))
+    }
+	myself.reportLiveCommittedVersionRequests += 1
+}
+
+
 extension NotifiedVersionValue {
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
         var f: FutureVoid = self.whenAtLeast(limit)
@@ -55,7 +92,7 @@ extension NotifiedVersionValue {
 public class CommitProxyVersionReplies {
     var replies: [UInt64: GetCommitVersionReply] = [:]
     var latestRequestNum: NotifiedVersionValue
-    
+
     public init() {
         latestRequestNum = NotifiedVersionValue(0)
     }
@@ -137,7 +174,7 @@ public actor MasterDataActor {
 
             // NOTE: CODE_PROBE is macro, won't be imported
             // CODE_PROBE(self.version - rep.prevVersion == 1, "Minimum possible version gap");
-            let maxVersionGap = myself.version - rep.prevVersion == getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS
+            let _ /*maxVersionGap*/ = myself.version - rep.prevVersion == getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS
             // CODE_PROBE(maxVersionGap, "Maximum possible version gap");
 
             myself.lastVersionTime = t1
@@ -207,7 +244,7 @@ public actor MasterDataActor {
         // Add the C++ declaration to the .h...
         // Note:  To fix. cannot convert value of type 'MasterData' to expected argument type '__CxxTemplateInst9ReferenceI10MasterDataE'
         // Change the C++ method to take a raw C++ reference instead of an FDB Reference<Foo>
-        updateLiveCommittedVersion(myself, req)
+        updateLiveCommittedVersion(myself: myself, req: req)
 
         return Void()
     }
@@ -299,7 +336,7 @@ public actor MasterDataActor {
           (myself.liveCommittedVersion.get() < prevVersion) {
             return await waitForPrev(myself: myself, req: req)
         } else {
-            updateLiveCommittedVersion(myself, req)
+            updateLiveCommittedVersion(myself: myself, req: req)
             myself.nonWaitForPrevCommitRequests += 1
             return Void()
         }

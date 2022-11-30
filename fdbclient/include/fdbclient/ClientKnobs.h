@@ -29,7 +29,7 @@
 FDB_DECLARE_BOOLEAN_PARAM(Randomize);
 FDB_DECLARE_BOOLEAN_PARAM(IsSimulated);
 
-class ClientKnobs : public KnobsImpl<ClientKnobs> {
+class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 

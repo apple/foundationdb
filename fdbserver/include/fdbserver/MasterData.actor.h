@@ -138,8 +138,6 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
     }
 };
 
-void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequest req);
-
 // FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
 inline void addrefMasterData(MasterData* ptr) {
     addref(ptr);

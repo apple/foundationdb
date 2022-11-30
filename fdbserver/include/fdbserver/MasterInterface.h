@@ -37,6 +37,11 @@
 
 using DBRecoveryCount = uint64_t;
 
+// A concrete type that can be referenced (in the context of Optional<set<Tag>>) in Swift.
+using SetTag = std::set<Tag>;
+using OptionalSetTag = Optional<SetTag>;
+
+
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
 	LocalityData locality;
@@ -207,7 +212,7 @@ struct SWIFT_CXX_IMPORT_OWNED ReportRawCommittedVersionRequest {
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
 	Optional<Version> prevVersion; // if present, wait for prevVersion to be committed before replying
-	Optional<std::set<Tag>> writtenTags;
+	Optional<SetTag> writtenTags;
 	ReplyPromise<Void> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
@@ -216,7 +221,7 @@ struct SWIFT_CXX_IMPORT_OWNED ReportRawCommittedVersionRequest {
 	                                 Optional<Value> metadataVersion,
 	                                 Version minKnownCommittedVersion,
 	                                 Optional<Version> prevVersion,
-	                                 Optional<std::set<Tag>> writtenTags = Optional<std::set<Tag>>())
+	                                 Optional<SetTag> writtenTags = Optional<SetTag>())
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
 	    minKnownCommittedVersion(minKnownCommittedVersion), prevVersion(prevVersion), writtenTags(writtenTags) {}
 

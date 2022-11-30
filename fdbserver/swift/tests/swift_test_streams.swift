@@ -94,8 +94,6 @@ struct StreamTests: SimpleSwiftTestSuite {
             //            }
             //        }
             //    }
-            var counter = 0
-
             let promise = PromiseVoid()
 
             Task {

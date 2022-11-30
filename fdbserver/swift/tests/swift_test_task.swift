@@ -32,7 +32,7 @@ struct TaskTests: SimpleSwiftTestSuite {
 
             var void = Flow.Void()
             p.send(&void)
-            try await voidF.waitValue
+            _ = try await voidF.waitValue
         }
 
         // FIXME(swift): Somehow the waitValue is broken on FutureCInt: https://github.com/FoundationDB/foundationdb-swift/pull/31

@@ -143,7 +143,10 @@ SWIFT_ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	return Void();
 }
 
-// TODO: rewrite in Swift, even though just plain C++ code here
+#define COMPILE_OUT_REPLACED_FUNCTIONS 1
+#if COMPILE_OUT_REPLACED_FUNCTIONS
+using fdbserver_swift::updateLiveCommittedVersion;
+#else
 void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequest req) {
 	self.minKnownCommittedVersion = std::max(self.minKnownCommittedVersion, req.minKnownCommittedVersion);
 
@@ -167,6 +170,7 @@ void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequ
 	}
 	++self.reportLiveCommittedVersionRequests;
 }
+#endif
 
 SWIFT_ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	auto promise = Promise<Void>();
