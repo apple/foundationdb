@@ -647,12 +647,13 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			Reference<BlobCipherKey> cipherKey = wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId()));
 			self->cipherKeys.textCipherKey = cipherKey;
 		}
-		EncryptBlobCipherAes265Ctr encryptor(self->cipherKeys.textCipherKey,
-		                                     self->cipherKeys.headerCipherKey,
-		                                     self->cipherKeys.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BACKUP);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    self->cipherKeys.textCipherKey,
+		    self->cipherKeys.headerCipherKey,
+		    self->cipherKeys.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BACKUP);
 		Arena arena;
 		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
 		auto encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, self->encryptHeader, arena);
