@@ -32,6 +32,13 @@ from bindingtester.tests import test_util
 fdb.api_version(FDB_API_VERSION)
 
 
+def matches_op(op, target_op):
+    return op == target_op or op == target_op + '_SNAPSHOT' or op == target_op + '_DATABASE' or op == target_op + '_TENANT'
+
+def is_non_transaction_op(op):
+    return op.endswith('_DATABASE') or op.endswith('_TENANT')
+
+
 class ApiTest(Test):
     def __init__(self, subspace):
         super(ApiTest, self).__init__(subspace)
@@ -210,7 +217,7 @@ class ApiTest(Test):
 
             # print 'Adding instruction %s at %d' % (op, index)
 
-            if args.concurrency == 1 and (op in database_mutations or op in ['TENANT_CREATE', 'TENANT_DELETE']):
+            if args.concurrency == 1 and (op in database_mutations or op in tenant_mutations or op in ['TENANT_CREATE', 'TENANT_DELETE']):
                 self.wait_for_reads(instructions)
                 test_util.blocking_commit(instructions)
                 self.can_get_commit_version = False
@@ -242,15 +249,15 @@ class ApiTest(Test):
                 self.can_use_key_selectors = True
                 self.add_strings(1)
 
-            elif op == 'GET' or op == 'GET_SNAPSHOT' or op == 'GET_DATABASE':
+            elif matches_op(op, 'GET'):
                 self.ensure_key(instructions, 1)
                 instructions.append(op)
                 self.add_strings(1)
                 self.can_set_version = False
                 read_performed = True
 
-            elif op == 'GET_KEY' or op == 'GET_KEY_SNAPSHOT' or op == 'GET_KEY_DATABASE':
-                if op.endswith('_DATABASE') or self.can_use_key_selectors:
+            elif matches_op(op, 'GET_KEY'):
+                if is_non_transaction_op(op) or self.can_use_key_selectors:
                     self.ensure_key(instructions, 1)
                     instructions.push_args(self.workspace.key())
                     instructions.push_args(*self.random.random_selector_params())
@@ -262,7 +269,7 @@ class ApiTest(Test):
                     self.can_set_version = False
                     read_performed = True
 
-            elif op == 'GET_RANGE' or op == 'GET_RANGE_SNAPSHOT' or op == 'GET_RANGE_DATABASE':
+            elif matches_op(op, 'GET_RANGE'):
                 self.ensure_key(instructions, 2)
                 range_params = self.random.random_range_params()
                 instructions.push_args(*range_params)
@@ -278,7 +285,7 @@ class ApiTest(Test):
                 self.can_set_version = False
                 read_performed = True
 
-            elif op == 'GET_RANGE_STARTS_WITH' or op == 'GET_RANGE_STARTS_WITH_SNAPSHOT' or op == 'GET_RANGE_STARTS_WITH_DATABASE':
+            elif matches_op(op, 'GET_RANGE_STARTS_WITH'):
                 # TODO: not tested well
                 self.ensure_key(instructions, 1)
                 range_params = self.random.random_range_params()
@@ -294,8 +301,8 @@ class ApiTest(Test):
                 self.can_set_version = False
                 read_performed = True
 
-            elif op == 'GET_RANGE_SELECTOR' or op == 'GET_RANGE_SELECTOR_SNAPSHOT' or op == 'GET_RANGE_SELECTOR_DATABASE':
-                if op.endswith('_DATABASE') or self.can_use_key_selectors:
+            elif matches_op(op, 'GET_RANGE_SELECTOR'):
+                if is_non_transaction_op(op) or self.can_use_key_selectors:
                     self.ensure_key(instructions, 2)
                     instructions.push_args(self.workspace.key())
                     range_params = self.random.random_range_params()
@@ -314,15 +321,15 @@ class ApiTest(Test):
                     self.can_set_version = False
                     read_performed = True
 
-            elif op == 'GET_READ_VERSION' or op == 'GET_READ_VERSION_SNAPSHOT':
+            elif matches_op(op, 'GET_READ_VERSION'):
                 instructions.append(op)
                 self.has_version = self.can_set_version
                 self.add_strings(1)
 
-            elif op == 'SET' or op == 'SET_DATABASE':
+            elif matches_op(op, 'SET'):
                 self.ensure_key_value(instructions)
                 instructions.append(op)
-                if op == 'SET_DATABASE':
+                if is_non_transaction_op(op):
                     self.add_stack_items(1)
 
             elif op == 'SET_READ_VERSION':
@@ -330,13 +337,13 @@ class ApiTest(Test):
                     instructions.append(op)
                     self.can_set_version = False
 
-            elif op == 'CLEAR' or op == 'CLEAR_DATABASE':
+            elif matches_op(op, 'CLEAR'):
                 self.ensure_key(instructions, 1)
                 instructions.append(op)
-                if op == 'CLEAR_DATABASE':
+                if is_non_transaction_op(op):
                     self.add_stack_items(1)
 
-            elif op == 'CLEAR_RANGE' or op == 'CLEAR_RANGE_DATABASE':
+            elif matches_op(op, 'CLEAR_RANGE'):
                 # Protect against inverted range
                 key1 = self.workspace.pack(self.random.random_tuple(5))
                 key2 = self.workspace.pack(self.random.random_tuple(5))
@@ -347,24 +354,24 @@ class ApiTest(Test):
                 instructions.push_args(key1, key2)
 
                 instructions.append(op)
-                if op == 'CLEAR_RANGE_DATABASE':
+                if is_non_transaction_op(op):
                     self.add_stack_items(1)
 
-            elif op == 'CLEAR_RANGE_STARTS_WITH' or op == 'CLEAR_RANGE_STARTS_WITH_DATABASE':
+            elif matches_op(op, 'CLEAR_RANGE_STARTS_WITH'):
                 self.ensure_key(instructions, 1)
                 instructions.append(op)
-                if op == 'CLEAR_RANGE_STARTS_WITH_DATABASE':
+                if is_non_transaction_op(op):
                     self.add_stack_items(1)
 
-            elif op == 'ATOMIC_OP' or op == 'ATOMIC_OP_DATABASE':
+            elif matches_op(op, 'ATOMIC_OP'):
                 self.ensure_key_value(instructions)
-                if op == 'ATOMIC_OP' or args.concurrency > 1:
-                    instructions.push_args(random.choice(atomic_ops))
-                else:
+                if is_non_transaction_op(op) and args.concurrency == 1:
                     instructions.push_args(random.choice(idempotent_atomic_ops))
+                else:
+                    instructions.push_args(random.choice(atomic_ops))
 
                 instructions.append(op)
-                if op == 'ATOMIC_OP_DATABASE':
+                if is_non_transaction_op(op):
                     self.add_stack_items(1)
 
             elif op == 'VERSIONSTAMP':
@@ -614,10 +621,10 @@ class ApiTest(Test):
             else:
                 assert False, 'Unknown operation: ' + op
 
-            if read_performed and op not in database_reads:
+            if read_performed and op not in database_reads and op not in tenant_reads:
                 self.outstanding_ops.append((self.stack_size, len(instructions) - 1))
 
-            if args.concurrency == 1 and (op in database_reads or op in database_mutations or op in ['TENANT_CREATE', 'TENANT_DELETE']):
+            if args.concurrency == 1 and (op in database_reads or op in database_mutations or op in tenant_reads or op in tenant_mutations or op in ['TENANT_CREATE', 'TENANT_DELETE']):
                 instructions.append('WAIT_FUTURE')
 
         instructions.begin_finalization()
