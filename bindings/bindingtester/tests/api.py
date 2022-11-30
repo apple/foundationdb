@@ -35,6 +35,7 @@ fdb.api_version(FDB_API_VERSION)
 def matches_op(op, target_op):
     return op == target_op or op == target_op + '_SNAPSHOT' or op == target_op + '_DATABASE' or op == target_op + '_TENANT'
 
+
 def is_non_transaction_op(op):
     return op.endswith('_DATABASE') or op.endswith('_TENANT')
 
