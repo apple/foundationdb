@@ -287,9 +287,15 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			state int64_t tenantId = std::stoi(tokens[2].toString());
+			int64_t tenantId;
+			int n;
 			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 				fmt::print(stderr, "ERROR: delete by ID should only be run on a management cluster.\n");
+				return false;
+			}
+			if (sscanf(tokens[2].toString().c_str(), "%d%n", &tenantId, &n) != 1 || n != tokens[2].size() ||
+			    tenantId < 0) {
+				fmt::print(stderr, "ERROR: invalid ID `{}'\n", token.toString().c_str());
 				return false;
 			}
 			wait(MetaclusterAPI::deleteTenant(db, tenantId));

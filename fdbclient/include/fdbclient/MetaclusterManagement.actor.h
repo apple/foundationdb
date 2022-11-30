@@ -1372,9 +1372,9 @@ struct DeleteTenantImpl {
 	MetaclusterOperationContext<DB> ctx;
 
 	// Initialization parameters
-	TenantName tenantName = TenantName();
-
-	// Parameters set in getAssignedLocation
+	// Either one can be specified, and the other will be looked up
+	// and filled in by reading the metacluster metadata
+	TenantName tenantName;
 	int64_t tenantId = -1;
 
 	// Parameters set in markTenantInRemovingState
