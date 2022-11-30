@@ -42,7 +42,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-FDB_DEFINE_BOOLEAN_PARAM(FetchKvs);
+FDB_DEFINE_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 // Enforcing rocksdb version to be 7.7.3.
@@ -944,11 +944,11 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 }
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
-                                              const FetchKvs fetchKvs,
+                                              const CheckpointAsKeyValues checkpointAsKeyValues,
                                               UID logID) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	const CheckpointFormat format = checkpoint.getFormat();
-	if (format == DataMoveRocksCF && !fetchKvs) {
+	if (format == DataMoveRocksCF && !checkpointAsKeyValues) {
 		return new RocksDBCFCheckpointReader(checkpoint, logID);
 	} else {
 		return new RocksDBCheckpointReader(checkpoint, logID);

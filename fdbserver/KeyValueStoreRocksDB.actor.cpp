@@ -2577,7 +2577,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	TraceEvent(SevDebug, "RocksDBCreatedCheckpoint");
 	state Standalone<StringRef> token = BinaryWriter::toValue(KeyRangeRef("foo"_sr, "foobar"_sr), IncludeVersion());
 	state ICheckpointReader* cpReader =
-	    newCheckpointReader(metaData, FetchKvs::True, deterministicRandom()->randomUniqueID());
+	    newCheckpointReader(metaData, CheckpointAsKeyValues::True, deterministicRandom()->randomUniqueID());
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderCreated");
 	ASSERT(cpReader != nullptr);
 	wait(cpReader->init(token));

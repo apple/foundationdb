@@ -2437,7 +2437,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	}
 
 	try {
-		reader = newCheckpointReader(it->second, FetchKvs::False, deterministicRandom()->randomUniqueID());
+		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::False, deterministicRandom()->randomUniqueID());
 		wait(reader->init(req.token));
 
 		loop {
@@ -2492,7 +2492,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 	state ICheckpointReader* reader = nullptr;
 	try {
-		reader = newCheckpointReader(it->second, FetchKvs::True, self->thisServerID);
+		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
 
 		loop {

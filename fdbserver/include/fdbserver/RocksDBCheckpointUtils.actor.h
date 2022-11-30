@@ -255,7 +255,7 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 // Clean up on-disk files associated with checkpoint.
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 
-ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, const FetchKvs fetchKvs, UID logID);
+ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, const CheckpointAsKeyValues checkpointAsKeyValues, UID logID);
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 
