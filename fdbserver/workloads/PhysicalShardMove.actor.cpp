@@ -505,17 +505,18 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
 				wait(moveKeys(cx,
-				              MoveKeysParams{ dataMoveId,
-				                              keys,
-				                              dests,
-				                              dests,
-				                              moveKeysLock,
-				                              Promise<Void>(),
-				                              &self->startMoveKeysParallelismLock,
-				                              &self->finishMoveKeysParallelismLock,
-				                              false,
-				                              deterministicRandom()->randomUniqueID(), // for logging only
-				                              &ddEnabledState }));
+				              MoveKeysParams(dataMoveId,
+				                             std::vector<KeyRange>{ keys },
+				                             dests,
+				                             dests,
+				                             moveKeysLock,
+				                             Promise<Void>(),
+				                             &self->startMoveKeysParallelismLock,
+				                             &self->finishMoveKeysParallelismLock,
+				                             false,
+				                             deterministicRandom()->randomUniqueID(), // for logging only
+				                             &ddEnabledState,
+				                             CancelConflictingDataMoves::False)));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_movekeys_conflict) {

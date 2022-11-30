@@ -49,8 +49,8 @@ struct VersionedMessage {
 	Arena decryptArena; // Arena used for decrypt buffer.
 	size_t bytes; // arena's size when inserted, which can grow afterwards
 
-	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
-	  : version(v), message(m), tags(t), arena(a), bytes(a.getSize()) {}
+	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a, size_t n)
+	  : version(v), message(m), tags(t), arena(a), bytes(n) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
 
@@ -977,15 +977,17 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
+			state size_t takeBytes = 0;
 			if (!prev.sameArena(r->arena())) {
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 				    .detail("Take", r->arena().getSize())
 				    .detail("Current", self->lock->activePermits());
 
-				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
+				takeBytes = r->arena().getSize(); // more bytes can be allocated after the wait.
+				wait(self->lock->take(TaskPriority::DefaultYield, takeBytes));
 				prev = r->arena();
 			}
-			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
+			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena(), takeBytes);
 			r->nextMessage();
 		}
 

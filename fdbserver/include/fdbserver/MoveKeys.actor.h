@@ -58,7 +58,12 @@ public:
 
 struct MoveKeysParams {
 	UID dataMoveId;
-	KeyRange keys;
+
+	// Only one of `keys` and `ranges` can be set. `ranges` is created mainly for physical shard moves to move a full
+	// physical shard with multiple key ranges.
+	Optional<KeyRange> keys;
+	Optional<std::vector<KeyRange>> ranges;
+
 	std::vector<UID> destinationTeam, healthyDestinations;
 	MoveKeysLock lock;
 	Promise<Void> dataMovementComplete;
@@ -68,6 +73,46 @@ struct MoveKeysParams {
 	UID relocationIntervalId;
 	const DDEnabledState* ddEnabledState = nullptr;
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
+
+	MoveKeysParams() {}
+
+	MoveKeysParams(UID dataMoveId,
+	               const KeyRange& keys,
+	               const std::vector<UID>& destinationTeam,
+	               const std::vector<UID>& healthyDestinations,
+	               const MoveKeysLock& lock,
+	               const Promise<Void>& dataMovementComplete,
+	               FlowLock* startMoveKeysParallelismLock,
+	               FlowLock* finishMoveKeysParallelismLock,
+	               bool hasRemote,
+	               UID relocationIntervalId,
+	               const DDEnabledState* ddEnabledState,
+	               CancelConflictingDataMoves cancelConflictingDataMoves)
+	  : dataMoveId(dataMoveId), keys(keys), destinationTeam(destinationTeam), healthyDestinations(healthyDestinations),
+	    lock(lock), dataMovementComplete(dataMovementComplete),
+	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
+	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
+	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
+	    cancelConflictingDataMoves(cancelConflictingDataMoves) {}
+
+	MoveKeysParams(UID dataMoveId,
+	               const std::vector<KeyRange>& ranges,
+	               const std::vector<UID>& destinationTeam,
+	               const std::vector<UID>& healthyDestinations,
+	               const MoveKeysLock& lock,
+	               const Promise<Void>& dataMovementComplete,
+	               FlowLock* startMoveKeysParallelismLock,
+	               FlowLock* finishMoveKeysParallelismLock,
+	               bool hasRemote,
+	               UID relocationIntervalId,
+	               const DDEnabledState* ddEnabledState,
+	               CancelConflictingDataMoves cancelConflictingDataMoves)
+	  : dataMoveId(dataMoveId), ranges(ranges), destinationTeam(destinationTeam),
+	    healthyDestinations(healthyDestinations), lock(lock), dataMovementComplete(dataMovementComplete),
+	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
+	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
+	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
+	    cancelConflictingDataMoves(cancelConflictingDataMoves) {}
 };
 
 // read the lock value in system keyspace but do not change anything

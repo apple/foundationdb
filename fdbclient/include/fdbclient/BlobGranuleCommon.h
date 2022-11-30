@@ -314,13 +314,19 @@ struct BlobManifest {
 };
 
 // Defines blob restore status
+enum BlobRestorePhase { INIT = 0, LOAD_MANIFEST = 1, MANIFEST_DONE = 2, MIGRATE = 3, APPLY_MLOGS = 4, DONE = 5 };
 struct BlobRestoreStatus {
 	constexpr static FileIdentifier file_identifier = 378657;
+	BlobRestorePhase phase;
 	int progress;
+
+	BlobRestoreStatus() : phase(BlobRestorePhase::INIT){};
+	BlobRestoreStatus(BlobRestorePhase pha) : phase(pha), progress(0){};
+	BlobRestoreStatus(BlobRestorePhase pha, int prog) : phase(pha), progress(prog){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, progress);
+		serializer(ar, phase, progress);
 	}
 };
 

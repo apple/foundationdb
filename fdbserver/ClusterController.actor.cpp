@@ -26,6 +26,7 @@
 #include <tuple>
 #include <vector>
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
@@ -2565,8 +2566,8 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
 			if (blobRestoreCommand.present()) {
 				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
-				TraceEvent("WatchBlobRestoreCommand").detail("Progress", status.progress);
-				if (status.progress == 0) {
+				TraceEvent("WatchBlobRestoreCommand").detail("Progress", status.progress).detail("Phase", status.phase);
+				if (status.phase == BlobRestorePhase::INIT) {
 					self->db.blobRestoreEnabled.set(true);
 					if (self->db.blobGranulesEnabled.get()) {
 						const auto& blobManager = self->db.serverInfo->get().blobManager;

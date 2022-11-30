@@ -855,7 +855,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "encryption_at_rest_mode": {
              "$enum":[
              "disabled",
-             "aes_256_ctr"
+             "domain_aware",
+             "cluster_aware"
          ]}
       },
       "consistency_scan_info":{
