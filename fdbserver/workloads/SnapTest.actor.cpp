@@ -31,69 +31,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
-void getVersionAndnumTags(TraceEventFields md, Version& version, int& numTags) {
-	version = -1;
-	numTags = -1;
-
-	version = boost::lexical_cast<int64_t>(md.getValue("Version"));
-	numTags = boost::lexical_cast<int>(md.getValue("NumTags"));
-}
-
-void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Version& durableVersion) {
-	durableVersion = -1;
-
-	// verify version:
-	boost::lexical_cast<int64_t>(md.getValue("Version"));
-	std::string tagString = md.getValue("Tag");
-	int colon = tagString.find_first_of(':');
-	std::string localityString = tagString.substr(0, colon);
-	std::string idString = tagString.substr(colon + 1);
-	tag.locality = boost::lexical_cast<int>(localityString);
-	tag.id = boost::lexical_cast<int>(idString);
-
-	durableVersion = boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
-}
-
-void getMinAndMaxTLogVersions(TraceEventFields md,
-                              Version version,
-                              Tag tag,
-                              Version& minTLogVersion,
-                              Version& maxTLogVersion) {
-	Tag verifyTag;
-	minTLogVersion = maxTLogVersion = -1;
-
-	// verify version:
-	boost::lexical_cast<int64_t>(md.getValue("Version"));
-	std::string tagString = md.getValue("Tag");
-	int colon = tagString.find_first_of(':');
-	std::string localityString = tagString.substr(0, colon);
-	std::string idString = tagString.substr(colon + 1);
-	verifyTag.locality = boost::lexical_cast<int>(localityString);
-	verifyTag.id = boost::lexical_cast<int>(idString);
-	if (tag != verifyTag) {
-		return;
-	}
-	minTLogVersion = boost::lexical_cast<int64_t>(md.getValue("PoppedTagVersion"));
-	maxTLogVersion = boost::lexical_cast<int64_t>(md.getValue("QueueCommittedVersion"));
-}
-
-void filterEmptyMessages(std::vector<Future<TraceEventFields>>& messages) {
-	messages.erase(std::remove_if(messages.begin(),
-	                              messages.end(),
-	                              [](Future<TraceEventFields> const& msgFuture) {
-		                              return !msgFuture.isReady() || msgFuture.get().size() == 0;
-	                              }),
-	               messages.end());
-	return;
-}
-
-void printMessages(std::vector<Future<TraceEventFields>>& messages) {
-	for (int i = 0; i < messages.size(); i++) {
-		TraceEvent("SnapTestMessages").detail("I", i).detail("Value", messages[i].get().toString());
-	}
-	return;
-}
-
 struct SnapTestWorkload : TestWorkload {
 	static constexpr auto NAME = "SnapTest";
 
