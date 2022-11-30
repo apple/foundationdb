@@ -84,9 +84,6 @@ public:
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
 
-	// Destroys the physical shards if they're empty.
-	virtual Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) { return Void(); };
-
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes
