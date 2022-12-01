@@ -334,16 +334,6 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
 	                                                               readVersion,
 	                                                               &context);
 
-	// DO NOT SUBMIT
-	/*
-	FdbCApi::FDBResult* r = api->transactionReadBlobGranules(tr,
-	                                                         keyRange.begin.begin(),
-	                                                         keyRange.begin.size(),
-	                                                         keyRange.end.begin(),
-	                                                         keyRange.end.size(),
-	                                                         beginVersion,
-	                                                         rv,
-	                                                         context);
 	const FdbCApi::FDBKeyValue* kvs;
 	int count;
 	FdbCApi::fdb_bool_t more;
@@ -366,8 +356,6 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
 
 	return ThreadResult<RangeResult>(
 	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), arena));
-	*/
-	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
 };
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
