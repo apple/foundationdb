@@ -232,6 +232,12 @@ public:
 private:
 	std::string name;
 	UID id;
+	// These UIDs below are needed to emit the tail latencies as gauges
+	//
+	// If an OTEL aggregator is able to directly accept and process histograms
+	// the tail latency gauges won't necessarily be needed anymore since they can be
+	// calculated directly from the emitted buckets. To support users who have an aggregator
+	// who cannot accept histograms, the tails latencies are still directly emitted.
 	UID p50id;
 	UID p90id;
 	UID p95id;

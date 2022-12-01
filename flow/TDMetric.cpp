@@ -22,8 +22,6 @@
 #include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/flow.h"
-#include "flow/serialize.h"
-#include "flow/singleton.h"
 #include <cctype>
 #include <cstddef>
 #include <string>
