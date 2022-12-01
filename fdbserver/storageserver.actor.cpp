@@ -784,8 +784,7 @@ public:
 
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
-	TenantMap tenantMap;
-	TenantPrefixIndex tenantPrefixIndex;
+	VersionedMap<int64_t, TenantName> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -832,12 +831,11 @@ public:
 	void clearWatchMetadata();
 
 	// tenant map operations
-	bool insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version);
-	void insertTenant(TenantNameRef tenantName, ValueRef value, Version version);
-	void clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version);
+	void insertTenant(StringRef tenantPrefix, TenantName tenantName, Version version, bool persist);
+	void clearTenants(StringRef startTenant, StringRef endTenant, Version version);
 
-	Optional<TenantMapEntry> getTenantEntry(Version version, TenantInfo tenant);
-	KeyRangeRef clampRangeToTenant(KeyRangeRef range, Optional<TenantMapEntry> tenantEntry, Arena& arena);
+	void checkTenantEntry(Version version, TenantInfo tenant);
+	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
 
@@ -1657,8 +1655,8 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
-			Optional<TenantMapEntry> entry = getTenantEntry(version.get(), req.tenantInfo);
-			metrics.getSplitPoints(req, entry.map<Key>([](TenantMapEntry e) { return e.prefix; }));
+			checkTenantEntry(version.get(), req.tenantInfo);
+			metrics.getSplitPoints(req, req.tenantInfo.prefix);
 		} catch (Error& e) {
 			req.reply.sendError(e);
 		}
@@ -2010,26 +2008,22 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
-Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, TenantInfo tenantInfo) {
-	if (tenantInfo.name.present()) {
+void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
+	if (tenantInfo.hasTenant()) {
 		auto view = tenantMap.at(version);
-		auto itr = view.find(tenantInfo.name.get());
+		auto itr = view.find(tenantInfo.tenantId);
 		if (itr == view.end()) {
-			TraceEvent(SevWarn, "StorageUnknownTenant", thisServerID).detail("Tenant", tenantInfo.name).backtrace();
-			throw unknown_tenant();
-		} else if (itr->id != tenantInfo.tenantId) {
-			TraceEvent(SevWarn, "StorageTenantIdMismatch", thisServerID)
-			    .detail("Tenant", tenantInfo.name)
-			    .detail("TenantId", tenantInfo.tenantId)
-			    .detail("ExistingId", itr->id)
+			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID)
+			    .detail("Tenant", tenantInfo.tenantId)
 			    .backtrace();
 			throw unknown_tenant();
 		}
 
-		return *itr;
+		// TENANT_TODO: this is temporary pending other changes to remove reliance on names
+		if (*itr != tenantInfo.name.get()) {
+			throw unknown_tenant();
+		}
 	}
-
-	return Optional<TenantMapEntry>();
 }
 
 std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRef range) {
@@ -2043,9 +2037,6 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, req.spanContext);
-	if (req.tenantInfo.name.present()) {
-		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
-	}
 	span.addAttribute("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
@@ -2080,9 +2071,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
-		if (entry.present()) {
-			req.key = req.key.withPrefix(entry.get().prefix);
+		data->checkTenantEntry(version, req.tenantInfo);
+		if (req.tenantInfo.hasTenant()) {
+			req.key = req.key.withPrefix(req.tenantInfo.prefix.get());
 		}
 		state uint64_t changeCounter = data->shardChangeCounter;
 
@@ -3414,7 +3405,7 @@ ACTOR Future<Void> getShardStateQ(StorageServer* data, GetShardStateRequest req)
 	return Void();
 }
 
-KeyRef addPrefix(KeyRef const& key, Optional<Key> prefix, Arena& arena) {
+KeyRef addPrefix(KeyRef const& key, Optional<KeyRef> prefix, Arena& arena) {
 	if (prefix.present()) {
 		return key.withPrefix(prefix.get(), arena);
 	} else {
@@ -3422,7 +3413,7 @@ KeyRef addPrefix(KeyRef const& key, Optional<Key> prefix, Arena& arena) {
 	}
 }
 
-KeyValueRef removePrefix(KeyValueRef const& src, Optional<Key> prefix) {
+KeyValueRef removePrefix(KeyValueRef const& src, Optional<KeyRef> prefix) {
 	if (prefix.present()) {
 		return KeyValueRef(src.key.removePrefix(prefix.get()), src.value);
 	} else {
@@ -3439,7 +3430,7 @@ void merge(Arena& arena,
            bool stopAtEndOfBase,
            int& pos,
            int limitBytes,
-           Optional<Key> tenantPrefix)
+           Optional<KeyRef> tenantPrefix)
 // Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up
 // to) |limit| rows to output If limit<0, base and output are in descending order, and start->key()>end->key(), but
 // start is still inclusive and end is exclusive
@@ -3557,7 +3548,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int* pLimitBytes,
                                           SpanContext parentSpan,
                                           Optional<ReadOptions> options,
-                                          Optional<Key> tenantPrefix) {
+                                          Optional<KeyRef> tenantPrefix) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -3794,12 +3785,12 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	return result;
 }
 
-KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range, Optional<TenantMapEntry> tenantEntry, Arena& arena) {
-	if (tenantEntry.present()) {
-		return KeyRangeRef(range.begin.startsWith(tenantEntry.get().prefix) ? range.begin : tenantEntry.get().prefix,
-		                   range.end.startsWith(tenantEntry.get().prefix)
+KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena) {
+	if (tenantInfo.hasTenant()) {
+		return KeyRangeRef(range.begin.startsWith(tenantInfo.prefix.get()) ? range.begin : tenantInfo.prefix.get(),
+		                   range.end.startsWith(tenantInfo.prefix.get())
 		                       ? range.end
-		                       : allKeys.end.withPrefix(tenantEntry.get().prefix, arena));
+		                       : allKeys.end.withPrefix(tenantInfo.prefix.get(), arena));
 	} else {
 		return range;
 	}
@@ -3851,7 +3842,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	              &maxBytes,
 	              span.context,
 	              options,
-	              Optional<Key>()));
+	              {}));
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
@@ -3859,14 +3850,8 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	if (more && !forward && rep.data.size() == 1) {
 		CODE_PROBE(true, "Reverse key selector returned only one result in range read");
 		maxBytes = std::numeric_limits<int>::max();
-		GetKeyValuesReply rep2 = wait(readRange(data,
-		                                        version,
-		                                        KeyRangeRef(range.begin, keyAfter(sel.getKey())),
-		                                        -2,
-		                                        &maxBytes,
-		                                        span.context,
-		                                        options,
-		                                        Optional<Key>()));
+		GetKeyValuesReply rep2 = wait(readRange(
+		    data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options, {}));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -3950,10 +3935,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 
-	if (req.tenantInfo.name.present()) {
-		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
-	}
-
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getRangeQueries;
@@ -3987,11 +3968,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		                                                                         : UID());
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
-		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-		if (tenantPrefix.present()) {
-			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
-			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
+		data->checkTenantEntry(version, req.tenantInfo);
+		if (req.tenantInfo.hasTenant()) {
+			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
+			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 		}
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -4013,7 +3993,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -4073,7 +4053,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                                      &remainingLimitBytes,
 			                                      span.context,
 			                                      req.options,
-			                                      tenantPrefix));
+			                                      req.tenantInfo.prefix));
 			const double duration = g_network->timer() - kvReadRange;
 			data->counters.kvReadRangeLatencySample.addMeasurement(duration);
 			GetKeyValuesReply r = _r;
@@ -4089,9 +4069,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey()))));
 			if (EXPENSIVE_VALIDATION) {
 				for (int i = 0; i < r.data.size(); i++) {
-					if (tenantPrefix.present()) {
-						ASSERT(r.data[i].key >= begin.removePrefix(tenantPrefix.get()) &&
-						       r.data[i].key < end.removePrefix(tenantPrefix.get()));
+					if (req.tenantInfo.prefix.present()) {
+						ASSERT(r.data[i].key >= begin.removePrefix(req.tenantInfo.prefix.get()) &&
+						       r.data[i].key < end.removePrefix(req.tenantInfo.prefix.get()));
 					} else {
 						ASSERT(r.data[i].key >= begin && r.data[i].key < end);
 					}
@@ -4106,10 +4086,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
-				data->metrics.notifyBytesReadPerKSecond(addPrefix(r.data[0].key, tenantPrefix, req.arena),
+				data->metrics.notifyBytesReadPerKSecond(addPrefix(r.data[0].key, req.tenantInfo.prefix, req.arena),
 				                                        bytesReadPerKSecond);
 				data->metrics.notifyBytesReadPerKSecond(
-				    addPrefix(r.data[r.data.size() - 1].key, tenantPrefix, req.arena), bytesReadPerKSecond);
+				    addPrefix(r.data[r.data.size() - 1].key, req.tenantInfo.prefix, req.arena), bytesReadPerKSecond);
 			}
 
 			r.penalty = data->getPenalty();
@@ -4914,118 +4894,126 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	return result;
 }
 
-bool rangeIntersectsAnyTenant(TenantPrefixIndex& prefixIndex, KeyRangeRef range, Version ver) {
-	auto view = prefixIndex.at(ver);
-	auto beginItr = view.lastLessOrEqual(range.begin);
-	auto endItr = view.lastLess(range.end);
+bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyRangeRef range, Version ver) {
+	auto view = tenantMap.at(ver);
 
-	// If the begin and end reference different spots in the tenant index, then the tenant pointed to
-	// by endItr intersects the range
-	if (beginItr != endItr) {
-		return true;
+	// There are no tenants, so we don't need to do any work
+	if (view.begin() == view.end()) {
+		return false;
 	}
 
-	// If the iterators point to the same entry and that entry contains begin, then we are wholly in
-	// one tenant
-	if (beginItr != view.end() && range.begin.startsWith(beginItr.key())) {
-		return true;
+	int64_t beginId;
+	int64_t endId;
+
+	if (range.begin.size() >= 8) {
+		beginId = Tenant::prefixToId(range.begin.substr(0, 8));
+	} else {
+		KeyRef prefix = makeString(8);
+		uint8_t* bytes = mutateString(prefix);
+		range.begin.copyTo(bytes);
+		memset(bytes + range.begin.size(), 0, 8 - range.begin.size());
+		beginId = Tenant::prefixToId(prefix);
 	}
 
-	return false;
+	if (range.end.size() >= 8) {
+		endId = Tenant::prefixToId(range.end.substr(0, 8));
+	} else {
+		KeyRef prefix = makeString(8);
+		uint8_t* bytes = mutateString(prefix);
+		range.end.copyTo(bytes);
+		memset(bytes + range.end.size(), 0, 8 - range.end.size());
+		endId = Tenant::prefixToId(prefix);
+	}
+
+	// Don't include the end prefix in the tenant search if our range doesn't extend into that prefix
+	if (range.end.size() <= 8) {
+		--endId;
+	}
+
+	auto beginItr = view.lower_bound(beginId);
+
+	// If beginItr has a value less than or equal to endId, then it points to a tenant intersecting the range
+	return beginItr != view.end() && beginItr.key() <= endId;
 }
 
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
-	std::map<TenantName, TenantMapEntry> entries = {
-		std::make_pair("tenant0"_sr, TenantMapEntry(0, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
-		std::make_pair("tenant2"_sr, TenantMapEntry(2, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
-		std::make_pair("tenant3"_sr, TenantMapEntry(3, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
-		std::make_pair("tenant4"_sr, TenantMapEntry(4, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
-		std::make_pair("tenant6"_sr, TenantMapEntry(6, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION))
-	};
-	TenantPrefixIndex index;
-	index.createNewVersion(1);
+	std::set<int64_t> entries = { 0, 2, 3, 4, 6 };
+
+	VersionedMap<int64_t, TenantName> tenantMap;
+	tenantMap.createNewVersion(1);
 	for (auto entry : entries) {
-		TenantNameUniqueSet nameSet;
-		nameSet.insert(entry.first);
-		index.insert(entry.second.prefix, nameSet);
+		tenantMap.insert(entry, ""_sr);
 	}
 
 	// Before all tenants
-	ASSERT(!rangeIntersectsAnyTenant(index, KeyRangeRef(""_sr, "\x00"_sr), index.getLatestVersion()));
+	ASSERT(!rangeIntersectsAnyTenant(tenantMap, KeyRangeRef(""_sr, "\x00"_sr), tenantMap.getLatestVersion()));
 
 	// After all tenants
-	ASSERT(!rangeIntersectsAnyTenant(index, KeyRangeRef("\xfe"_sr, "\xff"_sr), index.getLatestVersion()));
+	ASSERT(!rangeIntersectsAnyTenant(tenantMap, KeyRangeRef("\xfe"_sr, "\xff"_sr), tenantMap.getLatestVersion()));
 
 	// In between tenants
-	ASSERT(!rangeIntersectsAnyTenant(
-	    index,
-	    KeyRangeRef(TenantMapEntry::idToPrefix(1), TenantMapEntry::idToPrefix(1).withSuffix("\xff"_sr)),
-	    index.getLatestVersion()));
+	ASSERT(!rangeIntersectsAnyTenant(tenantMap,
+	                                 KeyRangeRef(Tenant::idToPrefix(1), Tenant::idToPrefix(1).withSuffix("\xff"_sr)),
+	                                 tenantMap.getLatestVersion()));
 
 	// In between tenants with end intersecting tenant start
 	ASSERT(!rangeIntersectsAnyTenant(
-	    index, KeyRangeRef(TenantMapEntry::idToPrefix(5), entries["tenant6"_sr].prefix), index.getLatestVersion()));
+	    tenantMap, KeyRangeRef(Tenant::idToPrefix(5), Tenant::idToPrefix(6)), tenantMap.getLatestVersion()));
 
 	// Entire tenants
 	ASSERT(rangeIntersectsAnyTenant(
-	    index, KeyRangeRef(entries["tenant0"_sr].prefix, TenantMapEntry::idToPrefix(1)), index.getLatestVersion()));
+	    tenantMap, KeyRangeRef(Tenant::idToPrefix(0), Tenant::idToPrefix(1)), tenantMap.getLatestVersion()));
 	ASSERT(rangeIntersectsAnyTenant(
-	    index, KeyRangeRef(entries["tenant2"_sr].prefix, entries["tenant3"_sr].prefix), index.getLatestVersion()));
+	    tenantMap, KeyRangeRef(Tenant::idToPrefix(2), Tenant::idToPrefix(3)), tenantMap.getLatestVersion()));
 
 	// Partial tenants
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(Tenant::idToPrefix(0), Tenant::idToPrefix(0).withSuffix("foo"_sr)),
+	                                tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(Tenant::idToPrefix(3).withSuffix("foo"_sr), Tenant::idToPrefix(4)),
+	                                tenantMap.getLatestVersion()));
 	ASSERT(rangeIntersectsAnyTenant(
-	    index,
-	    KeyRangeRef(entries["tenant0"_sr].prefix, entries["tenant0"_sr].prefix.withSuffix("foo"_sr)),
-	    index.getLatestVersion()));
-	ASSERT(rangeIntersectsAnyTenant(
-	    index,
-	    KeyRangeRef(entries["tenant3"_sr].prefix.withSuffix("foo"_sr), entries["tenant4"_sr].prefix),
-	    index.getLatestVersion()));
-	ASSERT(rangeIntersectsAnyTenant(index,
-	                                KeyRangeRef(entries["tenant4"_sr].prefix.withSuffix("bar"_sr),
-	                                            entries["tenant4"_sr].prefix.withSuffix("foo"_sr)),
-	                                index.getLatestVersion()));
+	    tenantMap,
+	    KeyRangeRef(Tenant::idToPrefix(4).withSuffix("bar"_sr), Tenant::idToPrefix(4).withSuffix("foo"_sr)),
+	    tenantMap.getLatestVersion()));
 
 	// Begin outside, end inside tenant
-	ASSERT(rangeIntersectsAnyTenant(
-	    index,
-	    KeyRangeRef(TenantMapEntry::idToPrefix(1), entries["tenant2"_sr].prefix.withSuffix("foo"_sr)),
-	    index.getLatestVersion()));
-	ASSERT(rangeIntersectsAnyTenant(
-	    index,
-	    KeyRangeRef(TenantMapEntry::idToPrefix(1), entries["tenant3"_sr].prefix.withSuffix("foo"_sr)),
-	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(Tenant::idToPrefix(1), Tenant::idToPrefix(2).withSuffix("foo"_sr)),
+	                                tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(Tenant::idToPrefix(1), Tenant::idToPrefix(3).withSuffix("foo"_sr)),
+	                                tenantMap.getLatestVersion()));
 
 	// Begin inside, end outside tenant
-	ASSERT(rangeIntersectsAnyTenant(
-	    index,
-	    KeyRangeRef(entries["tenant3"_sr].prefix.withSuffix("foo"_sr), TenantMapEntry::idToPrefix(5)),
-	    index.getLatestVersion()));
-	ASSERT(rangeIntersectsAnyTenant(
-	    index,
-	    KeyRangeRef(entries["tenant4"_sr].prefix.withSuffix("foo"_sr), TenantMapEntry::idToPrefix(5)),
-	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(Tenant::idToPrefix(3).withSuffix("foo"_sr), Tenant::idToPrefix(5)),
+	                                tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap,
+	                                KeyRangeRef(Tenant::idToPrefix(4).withSuffix("foo"_sr), Tenant::idToPrefix(5)),
+	                                tenantMap.getLatestVersion()));
 
 	// Both inside different tenants
-	ASSERT(rangeIntersectsAnyTenant(index,
-	                                KeyRangeRef(entries["tenant0"_sr].prefix.withSuffix("foo"_sr),
-	                                            entries["tenant2"_sr].prefix.withSuffix("foo"_sr)),
-	                                index.getLatestVersion()));
-	ASSERT(rangeIntersectsAnyTenant(index,
-	                                KeyRangeRef(entries["tenant0"_sr].prefix.withSuffix("foo"_sr),
-	                                            entries["tenant3"_sr].prefix.withSuffix("foo"_sr)),
-	                                index.getLatestVersion()));
-	ASSERT(rangeIntersectsAnyTenant(index,
-	                                KeyRangeRef(entries["tenant2"_sr].prefix.withSuffix("foo"_sr),
-	                                            entries["tenant6"_sr].prefix.withSuffix("foo"_sr)),
-	                                index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    tenantMap,
+	    KeyRangeRef(Tenant::idToPrefix(0).withSuffix("foo"_sr), Tenant::idToPrefix(2).withSuffix("foo"_sr)),
+	    tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    tenantMap,
+	    KeyRangeRef(Tenant::idToPrefix(0).withSuffix("foo"_sr), Tenant::idToPrefix(3).withSuffix("foo"_sr)),
+	    tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    tenantMap,
+	    KeyRangeRef(Tenant::idToPrefix(2).withSuffix("foo"_sr), Tenant::idToPrefix(6).withSuffix("foo"_sr)),
+	    tenantMap.getLatestVersion()));
 
 	// Both outside tenants with tenant in the middle
 	ASSERT(rangeIntersectsAnyTenant(
-	    index, KeyRangeRef(""_sr, TenantMapEntry::idToPrefix(1).withSuffix("foo"_sr)), index.getLatestVersion()));
-	ASSERT(rangeIntersectsAnyTenant(index, KeyRangeRef(""_sr, "\xff"_sr), index.getLatestVersion()));
+	    tenantMap, KeyRangeRef(""_sr, Tenant::idToPrefix(1).withSuffix("foo"_sr)), tenantMap.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(tenantMap, KeyRangeRef(""_sr, "\xff"_sr), tenantMap.getLatestVersion()));
 	ASSERT(rangeIntersectsAnyTenant(
-	    index, KeyRangeRef(TenantMapEntry::idToPrefix(5).withSuffix("foo"_sr), "\xff"_sr), index.getLatestVersion()));
+	    tenantMap, KeyRangeRef(Tenant::idToPrefix(5).withSuffix("foo"_sr), "\xff"_sr), tenantMap.getLatestVersion()));
 
 	return Void();
 }
@@ -5038,10 +5026,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-
-	if (req.tenantInfo.name.present()) {
-		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
-	}
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
@@ -5068,11 +5052,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(req.version, req.tenantInfo);
-		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-		if (tenantPrefix.present()) {
-			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
-			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
+		data->checkTenantEntry(req.version, req.tenantInfo);
+		if (req.tenantInfo.hasTenant()) {
+			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
+			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 		}
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -5095,7 +5078,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -5110,7 +5093,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
-		if (!tenantPrefix.present()) {
+		if (!req.tenantInfo.hasTenant()) {
 			// We do not support raw flat map requests when using tenants.
 			// When tenants are required, we disable raw flat map requests entirely.
 			// If tenants are optional, we check whether the range intersects a tenant and fail if it does.
@@ -5118,7 +5101,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				throw tenant_name_required();
 			}
 
-			if (rangeIntersectsAnyTenant(data->tenantPrefixIndex, KeyRangeRef(begin, end), req.version)) {
+			if (rangeIntersectsAnyTenant(data->tenantMap, KeyRangeRef(begin, end), req.version)) {
 				throw tenant_name_required();
 			}
 		}
@@ -5172,7 +5155,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			                                                     &bytesForIndex,
 			                                                     span.context,
 			                                                     req.options,
-			                                                     tenantPrefix));
+			                                                     req.tenantInfo.prefix));
 
 			// Unlock read lock before the subqueries because each
 			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
@@ -5212,10 +5195,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			}
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
-				data->metrics.notifyBytesReadPerKSecond(addPrefix(r.data[0].key, tenantPrefix, req.arena),
+				data->metrics.notifyBytesReadPerKSecond(addPrefix(r.data[0].key, req.tenantInfo.prefix, req.arena),
 				                                        bytesReadPerKSecond);
 				data->metrics.notifyBytesReadPerKSecond(
-				    addPrefix(r.data[r.data.size() - 1].key, tenantPrefix, req.arena), bytesReadPerKSecond);
+				    addPrefix(r.data[r.data.size() - 1].key, req.tenantInfo.prefix, req.arena), bytesReadPerKSecond);
 			}
 
 			r.penalty = data->getPenalty();
@@ -5262,10 +5245,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 
-	if (req.tenantInfo.name.present()) {
-		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
-	}
-
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;
 	++data->counters.allQueries;
@@ -5284,11 +5263,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
 
-		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
-		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-		if (tenantPrefix.present()) {
-			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
-			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
+		data->checkTenantEntry(version, req.tenantInfo);
+		if (req.tenantInfo.hasTenant()) {
+			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
+			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 		}
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -5311,7 +5289,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -5390,7 +5368,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                                      &byteLimit,
 				                                      span.context,
 				                                      req.options,
-				                                      tenantPrefix));
+				                                      req.tenantInfo.prefix));
 				readLock.release();
 				GetKeyValuesStreamReply r(_r);
 
@@ -5405,9 +5383,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey()))));
 				if (EXPENSIVE_VALIDATION) {
 					for (int i = 0; i < r.data.size(); i++) {
-						if (tenantPrefix.present()) {
-							ASSERT(r.data[i].key >= begin.removePrefix(tenantPrefix.get()) &&
-							       r.data[i].key < end.removePrefix(tenantPrefix.get()));
+						if (req.tenantInfo.hasTenant()) {
+							ASSERT(r.data[i].key >= begin.removePrefix(req.tenantInfo.prefix.get()) &&
+							       r.data[i].key < end.removePrefix(req.tenantInfo.prefix.get()));
 						} else {
 							ASSERT(r.data[i].key >= begin && r.data[i].key < end);
 						}
@@ -5424,11 +5402,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 				KeyRef lastKey;
 				if (!r.data.empty()) {
-					lastKey = addPrefix(r.data.back().key, tenantPrefix, req.arena);
+					lastKey = addPrefix(r.data.back().key, req.tenantInfo.prefix, req.arena);
 				}
 				if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 					int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
-					KeyRef firstKey = addPrefix(r.data[0].key, tenantPrefix, req.arena);
+					KeyRef firstKey = addPrefix(r.data[0].key, req.tenantInfo.prefix, req.arena);
 					data->metrics.notifyBytesReadPerKSecond(firstKey, bytesReadPerKSecond);
 					data->metrics.notifyBytesReadPerKSecond(lastKey, bytesReadPerKSecond);
 				}
@@ -5471,9 +5449,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, req.spanContext);
-	if (req.tenantInfo.name.present()) {
-		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
-	}
 	state int64_t resultSize = 0;
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
@@ -5497,14 +5472,14 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
-		if (tenantEntry.present()) {
-			req.sel.setKeyUnlimited(req.sel.getKey().withPrefix(tenantEntry.get().prefix, req.arena));
+		data->checkTenantEntry(version, req.tenantInfo);
+		if (req.tenantInfo.hasTenant()) {
+			req.sel.setKeyUnlimited(req.sel.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 		}
 		state uint64_t changeCounter = data->shardChangeCounter;
 
 		KeyRange shard = getShardKeyRange(data, req.sel);
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset;
 		Key absoluteKey = wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, req.options));
@@ -5514,8 +5489,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		                                     std::max<KeyRef>(req.sel.getKey(), absoluteKey)));
 
 		KeyRef k = absoluteKey;
-		if (tenantEntry.present()) {
-			k = k.removePrefix(tenantEntry.get().prefix);
+		if (req.tenantInfo.hasTenant()) {
+			k = k.removePrefix(req.tenantInfo.prefix.get());
 		}
 
 		KeySelector updated;
@@ -8522,8 +8497,9 @@ private:
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.startsWith(TenantMetadata::tenantMapPrivatePrefix())) {
 			if (m.type == MutationRef::SetValue) {
-				data->insertTenant(
-				    m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix()), m.param2, currentVersion);
+				TenantName tenantName = m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix());
+				TenantMapEntry entry = TenantMapEntry::decode(m.param2);
+				data->insertTenant(entry.prefix, tenantName, currentVersion, true);
 			} else if (m.type == MutationRef::ClearRange) {
 				data->clearTenants(m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
 				                   m.param2.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
@@ -8621,66 +8597,47 @@ private:
 	}
 };
 
-bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version) {
+void StorageServer::insertTenant(StringRef tenantPrefix, TenantName tenantName, Version version, bool persist) {
 	if (version >= tenantMap.getLatestVersion()) {
+		int64_t tenantId = Tenant::prefixToId(tenantPrefix);
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex.createNewVersion(version);
+		tenantMap.insert(tenantId, tenantName);
 
-		tenantMap.insert(tenantName, tenantEntry);
-
-		auto view = tenantPrefixIndex.at(version);
-		auto itr = view.find(tenantEntry.prefix);
-		TenantNameUniqueSet nameSet;
-		if (itr != view.end()) {
-			nameSet = *itr;
+		if (persist) {
+			auto& mLV = addVersionToMutationLog(version);
+			addMutationToMutationLog(
+			    mLV,
+			    MutationRef(MutationRef::SetValue, tenantPrefix.withPrefix(persistTenantMapKeys.begin), tenantName));
 		}
 
-		nameSet.insert(tenantName);
-		tenantPrefixIndex.insert(tenantEntry.prefix, nameSet);
-
-		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
-		return true;
-	} else {
-		return false;
+		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantId).detail("Version", version);
 	}
 }
 
-void StorageServer::insertTenant(TenantNameRef tenantName, ValueRef value, Version version) {
-	if (insertTenant(tenantName, TenantMapEntry::decode(value), version)) {
-		auto& mLV = addVersionToMutationLog(version);
-		addMutationToMutationLog(
-		    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
-	}
-}
-
-void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version) {
+void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex.createNewVersion(version);
 
 		auto view = tenantMap.at(version);
-		for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
-			auto indexView = tenantPrefixIndex.at(version);
-			// Trigger any watches on the prefix associated with the tenant.
-			watches.triggerRange(itr->prefix, strinc(itr->prefix));
-			auto indexItr = indexView.find(itr->prefix);
-			ASSERT(indexItr != indexView.end());
-			TenantNameUniqueSet nameSet = *indexItr;
-			if (nameSet.remove(itr.key())) {
-				tenantPrefixIndex.erase(itr->prefix);
-			} else {
-				tenantPrefixIndex.insert(itr->prefix, nameSet);
+		auto& mLV = addVersionToMutationLog(version);
+		std::set<int64_t> tenantsToClear;
+		for (auto itr = view.begin(); itr != view.end(); ++itr) {
+			if (*itr >= startTenant && *itr < endTenant) {
+				// Trigger any watches on the prefix associated with the tenant.
+				Key tenantPrefix = Tenant::idToPrefix(itr.key());
+				watches.triggerRange(tenantPrefix, strinc(tenantPrefix));
+				TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
+				tenantsToClear.insert(itr.key());
+				addMutationToMutationLog(mLV,
+				                         MutationRef(MutationRef::ClearRange,
+				                                     tenantPrefix.withPrefix(persistTenantMapKeys.begin),
+				                                     keyAfter(tenantPrefix.withPrefix(persistTenantMapKeys.begin))));
 			}
-			TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
 		}
 
-		tenantMap.erase(startTenant, endTenant);
-
-		auto& mLV = addVersionToMutationLog(version);
-		addMutationToMutationLog(mLV,
-		                         MutationRef(MutationRef::ClearRange,
-		                                     startTenant.withPrefix(persistTenantMapKeys.begin),
-		                                     endTenant.withPrefix(persistTenantMapKeys.begin)));
+		for (auto tenantId : tenantsToClear) {
+			tenantMap.erase(tenantId);
+		}
 	}
 }
 
@@ -9357,15 +9314,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
-				data->tenantPrefixIndex.createNewVersion(newOldestVersion);
 			}
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
 			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
 			// immediately (without waiting) but asynchronously frees memory.
 			Future<Void> finishedForgetting =
 			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
-			    data->tenantMap.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
-			    data->tenantPrefixIndex.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
+			    data->tenantMap.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
 			data->oldestVersion.set(newOldestVersion);
 			wait(finishedForgetting);
 			wait(yield(TaskPriority::UpdateStorage));
@@ -9676,7 +9631,7 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), itr->encode()));
+		storage->set(KeyValueRef(Tenant::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), *itr));
 	}
 }
 
@@ -10169,25 +10124,13 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int tenantMapLoc;
 	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
 		auto const& result = tenantMap[tenantMapLoc];
-		TenantName tenantName = result.key.substr(persistTenantMapKeys.begin.size());
-		TenantMapEntry tenantEntry = TenantMapEntry::decode(result.value);
+		int64_t tenantId = Tenant::prefixToId(result.key.substr(persistTenantMapKeys.begin.size()));
 
-		data->tenantMap.insert(tenantName, tenantEntry);
-
-		auto view = data->tenantPrefixIndex.at(version);
-		auto itr = view.find(tenantEntry.prefix);
-		TenantNameUniqueSet nameSet;
-		if (itr != view.end()) {
-			nameSet = *itr;
-		}
-
-		nameSet.insert(tenantName);
-		data->tenantPrefixIndex.insert(tenantEntry.prefix, nameSet);
+		data->tenantMap.insert(tenantId, result.value);
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
-		    .detail("TenantName", tenantName)
-		    .detail("Prefix", tenantEntry.prefix);
+		    .detail("Tenant", tenantId);
 
 		wait(yield());
 	}
@@ -10442,22 +10385,19 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #endif
 
 ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
-	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
-		state Optional<TenantMapEntry> entry;
+	if (req.tenantInfo.hasTenant()) {
 		try {
 			// The call to `waitForVersionNoTooOld()` can throw `future_version()`. Since we're requesting
 			// `latestVersion`, this can only happen if the version at the storage server is currently `0`.
 			// It is okay for the caller to retry after a delay to give the server some time to catch up.
 			state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
-			entry = self->getTenantEntry(version, req.tenantInfo.get());
+			self->checkTenantEntry(version, req.tenantInfo);
 		} catch (Error& e) {
 			self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 			return Void();
 		}
-		Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-		if (tenantPrefix.present()) {
-			req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
-		}
+
+		req.keys = req.keys.withPrefix(req.tenantInfo.prefix.get(), req.arena);
 	}
 
 	if (!self->isReadable(req.keys)) {
@@ -10626,15 +10566,13 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
                                             WatchValueRequest req,
                                             PromiseStream<WatchValueRequest> stream) {
 	state Span span("SS:watchValueWaitForVersion"_loc, req.spanContext);
-	if (req.tenantInfo.name.present()) {
-		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
-	}
+
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
-		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
-		if (entry.present()) {
-			req.key = req.key.withPrefix(entry.get().prefix);
+		self->checkTenantEntry(latestVersion, req.tenantInfo);
+		if (req.tenantInfo.hasTenant()) {
+			req.key = req.key.withPrefix(req.tenantInfo.prefix.get());
 		}
 		stream.send(req);
 	} catch (Error& e) {
@@ -11051,8 +10989,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
 			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
-			    wait(TenantMetadata::tenantMap().getRange(
-			        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+			    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 			ASSERT(entries.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !entries.more);
 
 			TraceEvent("InitTenantMap", self->thisServerID)
@@ -11060,7 +10997,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			    .detail("NumTenants", entries.results.size());
 
 			for (auto entry : entries.results) {
-				self->insertTenant(entry.first, entry.second, version);
+				self->insertTenant(entry.second.prefix, entry.first, version, false);
 			}
 			break;
 		} catch (Error& e) {

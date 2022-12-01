@@ -30,10 +30,14 @@
 #include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"
 
-typedef StringRef TenantNameRef;
-typedef Standalone<TenantNameRef> TenantName;
-typedef StringRef TenantGroupNameRef;
-typedef Standalone<TenantGroupNameRef> TenantGroupName;
+FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+
+namespace Tenant {
+Key idToPrefix(int64_t id);
+int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
+
+constexpr static int PREFIX_SIZE = sizeof(int64_t);
+} // namespace Tenant
 
 // Represents the various states that a tenant could be in.
 // In a standalone cluster, a tenant should only ever be in the READY state.
@@ -61,17 +65,10 @@ enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, R
 
 // Represents the lock state the tenant could be in.
 // Can be used in conjunction with the other tenant states above.
-enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
-
-constexpr int TENANT_PREFIX_SIZE = sizeof(int64_t);
-
-FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+enum class TenantLockState : uint8_t { UNLOCKED, READ_ONLY, LOCKED };
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
-
-	static Key idToPrefix(int64_t id);
-	static int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceTenantId = EnforceValidTenantId::True);
 
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
@@ -91,8 +88,6 @@ struct TenantMapEntry {
 
 	// Can be set to an error string if the tenant is in the ERROR state
 	std::string error;
-
-	constexpr static int PREFIX_SIZE = sizeof(id);
 
 	TenantMapEntry();
 	TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted);
@@ -123,7 +118,7 @@ struct TenantMapEntry {
 		           error);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
-				prefix = idToPrefix(id);
+				prefix = Tenant::idToPrefix(id);
 			}
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 		}

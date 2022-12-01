@@ -335,16 +335,16 @@ public:
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, systemKeysPrefix.size() };
 		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
-		if (key.size() < TENANT_PREFIX_SIZE) {
+		if (key.size() < Tenant::PREFIX_SIZE) {
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
-		StringRef prefix = key.substr(0, TENANT_PREFIX_SIZE);
-		int64_t tenantId = TenantMapEntry::prefixToId(prefix, EnforceValidTenantId::False);
+		StringRef prefix = key.substr(0, Tenant::PREFIX_SIZE);
+		int64_t tenantId = Tenant::prefixToId(prefix, EnforceValidTenantId::False);
 		// Tenant id must be non-negative.
 		if (tenantId < 0) {
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
-		return { tenantId, TENANT_PREFIX_SIZE };
+		return { tenantId, Tenant::PREFIX_SIZE };
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
