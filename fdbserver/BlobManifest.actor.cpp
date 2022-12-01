@@ -529,6 +529,13 @@ ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider
 
 // Return true if the given key range is restoring
 ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
+	KeyRange range = wait(getRestoringRange(db, keys));
+	return !range.empty();
+}
+
+// Check the given key range and return subrange that is doing restore. Returns empty range if no restoring
+// for any portion of the given range.
+ACTOR Future<KeyRange> getRestoringRange(Database db, KeyRangeRef keys) {
 	state Transaction tr(db);
 	loop {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -543,9 +550,11 @@ ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
 				RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
 				for (auto& r : ranges) {
 					KeyRange keyRange = decodeBlobRestoreCommandKeyFor(r.key);
-					if (keyRange.contains(keys)) {
+					if (keys.intersects(keyRange)) {
 						Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(r.value);
-						return status.phase < BlobRestorePhase::DONE;
+						if (status.phase < BlobRestorePhase::DONE) {
+							return KeyRangeRef(std::max(keys.begin, keyRange.begin), std::min(keys.end, keyRange.end));
+						}
 					}
 				}
 				if (!ranges.more) {
@@ -557,7 +566,7 @@ ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
 					begin = firstGreaterThan(ranges.end()[-1].key);
 				}
 			}
-			return false;
+			return KeyRangeRef();
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
