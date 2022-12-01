@@ -100,9 +100,9 @@ void CounterCollection::logToTraceEvent(TraceEvent& te) {
 			switch (c->model) {
 			case MetricsDataModel::OTLP: {
 				if (metrics->sumMap.find(c->id) != metrics->sumMap.end()) {
-					metrics->sumMap[c->id].points.emplace_back(val);
+					metrics->sumMap[c->id].points.emplace_back(static_cast<int64_t>(val));
 				} else {
-					metrics->sumMap[c->id] = OTEL::OTELSum(c->getName(), val);
+					metrics->sumMap[c->id] = OTEL::OTELSum(name + "." + c->getName(), val);
 				}
 				metrics->sumMap[c->id].points.back().addAttribute("ip", ip_str);
 				metrics->sumMap[c->id].points.back().addAttribute("port", port_str);
@@ -221,6 +221,11 @@ LatencySample::LatencySample(std::string name, UID id, double loggingInterval, d
   : name(name), IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id), sampleEmit(now()), sketch(accuracy),
     latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 	logger = recurring([this]() { logSample(); }, loggingInterval);
+	p50id = deterministicRandom()->randomUniqueID();
+	p90id = deterministicRandom()->randomUniqueID();
+	p95id = deterministicRandom()->randomUniqueID();
+	p99id = deterministicRandom()->randomUniqueID();
+	p999id = deterministicRandom()->randomUniqueID();
 }
 
 void LatencySample::addMeasurement(double measurement) {
@@ -228,18 +233,24 @@ void LatencySample::addMeasurement(double measurement) {
 }
 
 void LatencySample::logSample() {
+	double p25 = sketch.percentile(0.25);
+	double p50 = sketch.mean();
+	double p90 = sketch.percentile(0.9);
+	double p95 = sketch.percentile(0.95);
+	double p99 = sketch.percentile(0.99);
+	double p99_9 = sketch.percentile(0.999);
 	TraceEvent(name.c_str(), id)
 	    .detail("Count", sketch.getPopulationSize())
 	    .detail("Elapsed", now() - sampleEmit)
 	    .detail("Min", sketch.min())
 	    .detail("Max", sketch.max())
 	    .detail("Mean", sketch.mean())
-	    .detail("Median", sketch.median())
-	    .detail("P25", sketch.percentile(0.25))
-	    .detail("P90", sketch.percentile(0.9))
-	    .detail("P95", sketch.percentile(0.95))
-	    .detail("P99", sketch.percentile(0.99))
-	    .detail("P99.9", sketch.percentile(0.999))
+	    .detail("Median", p50)
+	    .detail("P25", p25)
+	    .detail("P90", p90)
+	    .detail("P95", p95)
+	    .detail("P99", p99)
+	    .detail("P99.9", p99_9)
 	    .trackLatest(latencySampleEventHolder->trackingKey);
 	MetricCollection* metrics = MetricCollection::getMetricCollection();
 	if (metrics != nullptr) {
@@ -258,20 +269,25 @@ void LatencySample::logSample() {
 			metrics->histMap[IMetric::id].points.back().addAttribute("ip", ip_str);
 			metrics->histMap[IMetric::id].points.back().addAttribute("port", port_str);
 			metrics->histMap[IMetric::id].points.back().startTime = sampleEmit;
+			createOtelGauge(p50id, name + "p50", p50);
+			createOtelGauge(p90id, name + "p90", p90);
+			createOtelGauge(p95id, name + "p95", p95);
+			createOtelGauge(p99id, name + "p99", p99);
+			createOtelGauge(p999id, name + "p99_9", p99_9);
 		}
 		case MetricsDataModel::STATSD: {
 			std::vector<std::pair<std::string, std::string>> statsd_attributes{ { "ip", ip_str },
 				                                                                { "port", port_str } };
-			auto median_gauge = createStatsdMessage(
-			    name + "p50", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.5)) /*, statsd_attributes*/);
-			auto p90_gauge = createStatsdMessage(
-			    name + "p90", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.9)) /*, statsd_attributes*/);
-			auto p95_gauge = createStatsdMessage(
-			    name + "p95", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.95)) /*, statsd_attributes*/);
-			auto p99_gauge = createStatsdMessage(
-			    name + "p99", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.99)) /*, statsd_attributes*/);
-			auto p999_gauge = createStatsdMessage(
-			    name + "p99.9", StatsDMetric::GAUGE, std::to_string(sketch.percentile(0.999)) /*, statsd_attributes*/);
+			auto median_gauge =
+			    createStatsdMessage(name + "p50", StatsDMetric::GAUGE, std::to_string(p50) /*, statsd_attributes*/);
+			auto p90_gauge =
+			    createStatsdMessage(name + "p90", StatsDMetric::GAUGE, std::to_string(p90) /*, statsd_attributes*/);
+			auto p95_gauge =
+			    createStatsdMessage(name + "p95", StatsDMetric::GAUGE, std::to_string(p95) /*, statsd_attributes*/);
+			auto p99_gauge =
+			    createStatsdMessage(name + "p99", StatsDMetric::GAUGE, std::to_string(p99) /*, statsd_attributes*/);
+			auto p999_gauge =
+			    createStatsdMessage(name + "p99.9", StatsDMetric::GAUGE, std::to_string(p99_9) /*, statsd_attributes*/);
 		}
 		case MetricsDataModel::NONE:
 		default: {

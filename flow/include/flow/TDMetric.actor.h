@@ -1485,6 +1485,10 @@ std::vector<std::string> splitString(const std::string& str, const std::string& 
 
 bool verifyStatsdMessage(const std::string& msg);
 
+void createOtelGauge(UID id, const std::string& name, double value);
+
+void createOtelGauge(UID id, const std::string& name, double value, const std::vector<OTEL::Attribute>&);
+
 #include "flow/unactorcompiler.h"
 
 #endif

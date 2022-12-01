@@ -19,6 +19,7 @@
  */
 
 #include "flow/Error.h"
+#include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
@@ -377,4 +378,30 @@ bool verifyStatsdMessage(const std::string& msg) {
 		}
 	}
 	return true;
+}
+
+void createOtelGauge(UID id, const std::string& name, double value) {
+	MetricCollection* metrics = MetricCollection::getMetricCollection();
+	if (metrics != nullptr) {
+		NetworkAddress addr = g_network->getLocalAddress();
+		std::string ip_str = addr.ip.toString();
+		std::string port_str = std::to_string(addr.port);
+		if (metrics->gaugeMap.find(id) != metrics->gaugeMap.end()) {
+			metrics->gaugeMap[id].points.emplace_back(value);
+		} else {
+			metrics->gaugeMap[id] = OTEL::OTELGauge(name, value);
+		}
+		metrics->gaugeMap[id].points.back().addAttribute("ip", ip_str);
+		metrics->gaugeMap[id].points.back().addAttribute("port", port_str);
+	}
+}
+
+void createOtelGauge(UID id, const std::string& name, double value, const std::vector<OTEL::Attribute>& attrs) {
+	MetricCollection* metrics = MetricCollection::getMetricCollection();
+	createOtelGauge(id, name, value);
+	if (metrics != nullptr) {
+		for (const auto& attr : attrs) {
+			metrics->gaugeMap[id].points.back().addAttribute(attr.key, attr.value);
+		}
+	}
 }
