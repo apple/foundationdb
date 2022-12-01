@@ -21,6 +21,7 @@
 #define FLOW_OTELMETRIC_H
 #include "flow/flow.h"
 #include "flow/Msgpack.h"
+#include <variant>
 #include <vector>
 
 /*
@@ -68,12 +69,12 @@ public:
 	double startTime;
 	double recordTime;
 	std::vector<Attribute> attributes;
-	int64_t val;
+	std::variant<int64_t, double> val;
 	DataPointFlags flags;
 
-	NumberDataPoint() : recordTime{ now() }, val{ 0 }, flags{ DataPointFlags::FLAG_NONE } {}
-
 	NumberDataPoint(int64_t v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
+
+	NumberDataPoint(double v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
 
 	NumberDataPoint& addAttribute(const std::string& key, const std::string& value) {
 		attributes.emplace_back(Attribute(key, value));
@@ -89,10 +90,10 @@ public:
 	std::vector<NumberDataPoint> points;
 	AggregationTemporality aggregation;
 	bool isMonotonic;
-	OTELSum() : aggregation{ AGGREGATION_TEMPORALITY_DELTA }, isMonotonic{ true } {}
-	OTELSum(const std::string& n) : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_DELTA }, isMonotonic{ true } {}
+	OTELSum() : aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
+	OTELSum(const std::string& n) : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
 	OTELSum(const std::string& n, int64_t v)
-	  : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_DELTA }, isMonotonic{ true } {
+	  : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {
 		points.emplace_back(v);
 	}
 };
@@ -103,6 +104,7 @@ public:
 	std::vector<NumberDataPoint> points;
 	OTELGauge() {}
 	OTELGauge(const std::string& n) : name{ n } {}
+	OTELGauge(const std::string& n, double v) : name{ n } { points.emplace_back(v); }
 };
 
 class HistogramDataPoint {
@@ -154,7 +156,11 @@ inline void serialize(const NumberDataPoint& point, MsgpackBuffer& buf) {
 	typedef void (*func_ptr)(const Attribute&, MsgpackBuffer&);
 	func_ptr f = serialize;
 	serialize_vector(point.attributes, buf, f);
-	serialize_value(point.val, buf, 0xd3);
+	if (std::holds_alternative<int64_t>(point.val)) {
+		serialize_value(std::get<int64_t>(point.val), buf, 0xd3);
+	} else {
+		serialize_value(std::get<double>(point.val), buf, 0xcb);
+	}
 	serialize_value<uint8_t>(point.flags, buf, 0xcc);
 }
 

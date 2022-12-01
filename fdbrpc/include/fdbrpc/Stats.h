@@ -232,6 +232,11 @@ public:
 private:
 	std::string name;
 	UID id;
+	UID p50id;
+	UID p90id;
+	UID p95id;
+	UID p99id;
+	UID p999id;
 	double sampleEmit;
 
 	DDSketch<double> sketch;
