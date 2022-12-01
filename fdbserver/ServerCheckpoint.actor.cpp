@@ -25,7 +25,7 @@
 
 ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
 	const CheckpointFormat format = checkpoint.getFormat();
-	if (format == RocksDBColumnFamily || format == RocksDB) {
+	if (format == DataMoveRocksCF || format == RocksDB) {
 		return newRocksDBCheckpointReader(checkpoint, logID);
 	} else {
 		throw not_implemented();
@@ -37,7 +37,7 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
 	state CheckpointFormat format = checkpoint.getFormat();
-	if (format == RocksDBColumnFamily || format == RocksDB) {
+	if (format == DataMoveRocksCF || format == RocksDB) {
 		wait(deleteRocksCheckpoint(checkpoint));
 	} else {
 		throw not_implemented();
@@ -53,7 +53,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 	TraceEvent("FetchCheckpointBegin", initialState.checkpointID).detail("CheckpointMetaData", initialState.toString());
 	state CheckpointMetaData result;
 	const CheckpointFormat format = initialState.getFormat();
-	if (format == RocksDBColumnFamily || format == RocksDB) {
+	if (format == DataMoveRocksCF || format == RocksDB) {
 		CheckpointMetaData _result = wait(fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
 		result = _result;
 	} else {
