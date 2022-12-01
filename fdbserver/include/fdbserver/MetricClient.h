@@ -19,6 +19,7 @@
  */
 #include "flow/TDMetric.actor.h"
 #include "flow/Msgpack.h"
+#include "flow/network.h"
 #ifndef METRIC_CLIENT_H
 #define METRIC_CLIENT_H
 class IMetricClient {
@@ -32,6 +33,9 @@ public:
 
 class UDPMetricClient : public IMetricClient {
 private:
+	// Since we can't quickly determine the exact packet size for OTELSum in msgpack
+	// we play on the side of caution and make our maximum 3/4 of the official one
+	static constexpr uint32_t MAX_OTELSUM_PACKET_SIZE = 0.75 * IUDPSocket::MAX_PACKET_SIZE;
 	MetricsDataModel model;
 	Future<Reference<IUDPSocket>> socket;
 	int socket_fd;

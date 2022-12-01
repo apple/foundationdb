@@ -1794,24 +1794,25 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	folder = abspath(folder);
 
-	// if (metricsPrefix.size() > 0) {
-	// 	if (metricsConnFile.size() > 0) {
-	// 		try {
-	// 			state Database db =
-	// 			    Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
-	// 			metricsLogger = runMetrics();
-	// 			db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	// 		} catch (Error& e) {
-	// 			TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
-	// 		}
-	// 	} else {
-	// 		auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
-	// 		auto database = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware);
-	// 		metricsLogger = runMetrics();
-	// 		database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	// 	}
-	// }
-	metricsLogger = runMetrics();
+	if (metricsPrefix.size() > 0) {
+		if (metricsConnFile.size() > 0) {
+			try {
+				state Database db =
+				    Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
+				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
+				db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
+			}
+		} else {
+			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
+			auto database = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware);
+			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
+			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+		}
+	} else {
+		metricsLogger = runMetrics();
+	}
 
 	errorForwarders.add(resetAfter(degraded,
 	                               SERVER_KNOBS->DEGRADED_RESET_INTERVAL,

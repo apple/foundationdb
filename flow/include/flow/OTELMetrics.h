@@ -66,12 +66,13 @@ enum DataPointFlags { FLAG_NONE = 0, FLAG_NO_RECORDED_VALUE };
 
 class NumberDataPoint {
 public:
-	double startTime;
-	double recordTime;
-	std::vector<Attribute> attributes;
-	std::variant<int64_t, double> val;
-	DataPointFlags flags;
-
+	double startTime; // 9 bytes in msgpack
+	double recordTime; // 9 bytes in msgpack
+	std::vector<Attribute> attributes; // Variable size: assume to be 23 bytes
+	std::variant<int64_t, double> val; // 9 bytes in msgpack
+	DataPointFlags flags; // 1 byte in msgpack
+	// If we take the sum of above, we get 51 bytes
+	static const uint32_t MsgpackBytes = 51;
 	NumberDataPoint(int64_t v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
 
 	NumberDataPoint(double v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
@@ -95,6 +96,15 @@ public:
 	OTELSum(const std::string& n, int64_t v)
 	  : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {
 		points.emplace_back(v);
+	}
+	// Returns the approximate number of msgpack bytes needed to serialize this object
+	// Since NumberDataPoint can have variable sized attributes, we play on the same side
+	// and assume that they are always a constant value
+	uint32_t getMsgpackBytes() const {
+		uint32_t name_bytes = name.size() + 4;
+		uint32_t datapoint_bytes = points.size() * NumberDataPoint::MsgpackBytes;
+		// Both the isMonotonic and aggregation occupy 1 byte each, so we add 2 to the result
+		return name_bytes + datapoint_bytes + 2;
 	}
 };
 

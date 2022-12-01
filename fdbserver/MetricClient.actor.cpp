@@ -58,7 +58,7 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 	if (socket_fd == -1)
 		return;
 	if (model == OTLP) {
-		std::vector<OTEL::OTELSum> sums;
+		std::vector<std::vector<OTEL::OTELSum>> sums;
 		std::vector<OTEL::OTELGauge> gauges;
 
 		// Define custom serialize functions
@@ -80,16 +80,27 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 			serialize_vector(vec, buf, f);
 		};
 
+		std::vector<OTEL::OTELSum> currentSums;
+		size_t current_msgpack = 0;
 		for (const auto& [_, s] : metrics->sumMap) {
-			sums.push_back(std::move(s));
+			if (current_msgpack < MAX_OTELSUM_PACKET_SIZE) {
+				currentSums.push_back(std::move(s));
+				current_msgpack += s.getMsgpackBytes();
+			} else {
+				sums.push_back(std::move(currentSums));
+				currentSums.clear();
+				current_msgpack = 0;
+			}
 		}
 		if (!sums.empty()) {
-			serialize_ext(sums, buf, OTEL::OTELMetricType::Sum, f_sums);
-			send_packet(socket_fd, buf.buffer.get(), buf.data_size);
-			int error = errno;
-			TraceEvent("MetricsSumUdpErrno", UID()).detail("Errno", error);
+			for (const auto& currSums : sums) {
+				serialize_ext(currSums, buf, OTEL::OTELMetricType::Sum, f_sums);
+				send_packet(socket_fd, buf.buffer.get(), buf.data_size);
+				int error = errno;
+				TraceEvent("MetricsSumUdpErrno", UID()).detail("Errno", error);
+				buf.reset();
+			}
 			metrics->sumMap.clear();
-			buf.reset();
 		}
 
 		// Each histogram should be in a seperate because of their large sizes
