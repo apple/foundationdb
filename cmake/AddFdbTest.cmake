@@ -441,6 +441,7 @@ function(package_bindingtester)
     add_custom_command(
       TARGET copy_binding_output_files
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${bdir}/tests/go/build/bin/_stacktester
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${bdir}/tests/go/src/fdb/
       COMMAND ${CMAKE_COMMAND} -E copy
         ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
         ${bdir}/tests/go/src/fdb/ # DEST
