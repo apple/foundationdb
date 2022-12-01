@@ -2877,27 +2877,6 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 
 } // anonymous namespace
 
-ACTOR Future<EncryptionAtRestMode> getEncryptionAtRestMode(Reference<AsyncVar<ServerDBInfo> const> db) {
-	loop {
-		state UID randomUID = deterministicRandom()->randomUniqueID();
-		state GetEncryptionAtRestModeRequest req(randomUID);
-		try {
-			choose {
-				when(wait(db->onChange())) {}
-				when(GetEncryptionAtRestModeResponse resp =
-				         wait(brokenPromiseToNever(db->get().clusterInterface.getEncryptionAtRestMode.getReply(req)))) {
-					EncryptionAtRestMode mode = (EncryptionAtRestMode::Mode)resp.mode;
-					TraceEvent(SevDebug, "CPEncryptionAtRestMode", randomUID).detail("Mode", mode.toString());
-					return mode;
-				}
-			}
-		} catch (Error& e) {
-			TraceEvent("GetEncryptionAtRestError", randomUID).error(e);
-			throw;
-		}
-	}
-}
-
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
                                          LifetimeToken masterLifetime,
@@ -2905,9 +2884,16 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          LogEpoch epoch,
                                          Version recoveryTransactionVersion,
                                          bool firstProxy,
-                                         std::string whitelistBinPaths) {
-	state ProxyCommitData commitData(
-	    proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
+                                         std::string whitelistBinPaths,
+                                         EncryptionAtRestMode encryptMode) {
+	state ProxyCommitData commitData(proxy.id(),
+	                                 master,
+	                                 proxy.getConsistentReadVersion,
+	                                 recoveryTransactionVersion,
+	                                 proxy.commit,
+	                                 db,
+	                                 firstProxy,
+	                                 encryptMode);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
 	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
@@ -2920,8 +2906,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
-	EncryptionAtRestMode mode = wait(getEncryptionAtRestMode(db));
-	commitData.encryptMode = mode;
+	TraceEvent(SevDebug, "CPEncryptionAtRestMode").detail("Mode", commitData.encryptMode.toString());
 
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::COMMIT_PROXY, proxy.id()));
@@ -3084,7 +3069,8 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		                                                req.recoveryCount,
 		                                                req.recoveryTransactionVersion,
 		                                                req.firstProxy,
-		                                                whitelistBinPaths);
+		                                                whitelistBinPaths,
+		                                                req.encryptMode);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);

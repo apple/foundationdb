@@ -32,6 +32,13 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
+	TraceEvent(SevDebug, "CREncryptionAtRestMode").detail("Mode", config.encryptionAtRestMode.toString());
+	return config.encryptionAtRestMode;
+}
+} // namespace
+
 static std::set<int> const& normalClusterRecoveryErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -191,6 +198,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
+		req.encryptMode = getEncryptionAtRest(self->configuration);
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
@@ -430,14 +438,6 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 		req.reply.send(true);
 	}
 }
-
-namespace {
-EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
-	// TODO: Remove the guard on the server knob once all locations have been updated to use the DB config
-	TraceEvent(SevDebug, "CCEncryptionAtRestMode").detail("Mode", config.encryptionAtRestMode.toString());
-	return config.encryptionAtRestMode;
-}
-} // namespace
 
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
