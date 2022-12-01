@@ -304,7 +304,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				self->verifyServerKeyDest(params);
 				// test finish or started but cancelled movement
 				if (self->testStartOnly || deterministicRandom()->coinflip()) {
-					CODE_PROBE(true, "RawMovementApi partial started", probe::decoration::rare);
+					CODE_PROBE(true, "RawMovementApi partial started");
 					break;
 				}
 

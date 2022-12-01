@@ -320,7 +320,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		}
 	}
 	if (!tenantFound) {
-		CODE_PROBE(true, "Valid token doesn't reference tenant", probe::decoration::rare);
+		CODE_PROBE(true, "Valid token doesn't reference tenant");
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
 	}

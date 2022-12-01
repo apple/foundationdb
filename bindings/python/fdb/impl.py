@@ -166,6 +166,7 @@ def add_operation(fname, v):
     )
     setattr(globals()["Database"], fname, f)
     setattr(globals()["Transaction"], fname, f)
+    setattr(globals()["Tenant"], fname, f)
 
 
 def fill_operations():
