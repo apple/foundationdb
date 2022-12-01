@@ -27,6 +27,8 @@
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 
+#include "flow/DebugPrint.h"
+
 // template <class AsyncFileType>
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:
@@ -81,7 +83,7 @@ public:
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		Arena arena;
 		char* pdata = nullptr;
-		unsigned corruptedBlock = 0;
+		Optional<uint64_t> corruptedBytePosition;
 
 		// Check if a bit flip event was injected, if so, copy the buffer contents
 		// with a random bit flipped in a new buffer and use that for the write
@@ -97,10 +99,10 @@ public:
 					auto corruptedPos = deterministicRandom()->randomInt(0, length);
 					pdata[corruptedPos] ^= (1 << deterministicRandom()->randomInt(0, 8));
 					// mark the block as corrupted
-					corruptedBlock = (offset + corruptedPos) / 4096;
-					TraceEvent("CorruptedBlock")
+					corruptedBytePosition = offset + corruptedPos;
+					TraceEvent("CorruptedByteInjection")
 					    .detail("Filename", file->getFilename())
-					    .detail("Block", corruptedBlock)
+					    .detail("Position", corruptedBytePosition)
 					    .log();
 
 					// increment the metric for bit flips
@@ -115,19 +117,21 @@ public:
 
 		// Wait for diskDelay before submitting the write
 		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(getDelay()), [=, file = file](Void _) -> Future<Void> {
-			if (pdata) {
-				return map(holdWhile(arena, file->write(pdata, length, offset)),
-				           [corruptedBlock, file = file](auto res) {
-					           if (g_network->isSimulated()) {
-						           g_simulator->corruptedBlocks.emplace(file->getFilename(), corruptedBlock);
-					           }
-					           return res;
-				           });
-			}
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+		    delay(getDelay()), [=, file = file](Void _) -> Future<Void> {
+			    if (pdata) {
+				    return map(holdWhile(arena, file->write(pdata, length, offset)),
+				               [corruptedBytePosition, file = file](auto res) {
+					               if (g_network->isSimulated() && corruptedBytePosition.present()) {
+						               g_simulator->corruptedBytes.mark(file->getFilename(),
+						                                                corruptedBytePosition.get());
+					               }
+					               return res;
+				               });
+			    }
 
-			return file->write(data, length, offset);
-		});
+			    return file->write(data, length, offset);
+		    });
 	}
 
 	Future<Void> truncate(int64_t size) override {
@@ -139,13 +143,7 @@ public:
 		// Capture file by value in case this is destroyed during the delay
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
 		    delay(diskDelay), [size, file = file](Void _) -> Future<Void> {
-			    constexpr auto maxBlockValue =
-			        std::numeric_limits<decltype(g_simulator->corruptedBlocks)::key_type::second_type>::max();
-			    auto firstDeletedBlock =
-			        g_simulator->corruptedBlocks.lower_bound(std::make_pair(file->getFilename(), size / 4096));
-			    auto lastFileBlock =
-			        g_simulator->corruptedBlocks.upper_bound(std::make_pair(file->getFilename(), maxBlockValue));
-			    g_simulator->corruptedBlocks.erase(firstDeletedBlock, lastFileBlock);
+			    g_simulator->corruptedBytes.truncate(file->getFilename(), size);
 			    return file->truncate(size);
 		    });
 	}

@@ -56,6 +56,41 @@
 #include "flow/TaskQueue.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+void CorruptedBytesRecorder::mark(const std::string& fileName, const uint64_t position) {
+	corruptedBytes[fileName].insert(position);
+}
+
+void CorruptedBytesRecorder::truncate(const std::string& fileName, const uint64_t truncatedSize) {
+	if (corruptedBytes.count(fileName) == 0) {
+		return;
+	}
+	corruptedBytes[fileName].erase(corruptedBytes[fileName].upper_bound(truncatedSize),
+	                               std::end(corruptedBytes[fileName]));
+}
+
+void CorruptedBytesRecorder::rename(const std::string& originalFileName, const std::string& newFileName) {
+	corruptedBytes[newFileName].swap(corruptedBytes[originalFileName]);
+	corruptedBytes.erase(originalFileName);
+}
+
+bool CorruptedBytesRecorder::isByteCorrupted(const std::string& fileName, const uint64_t position) const {
+	if (const auto iter = corruptedBytes.find(fileName); iter != std::end(corruptedBytes)) {
+		return iter->second.count(position);
+	}
+	return false;
+}
+
+bool CorruptedBytesRecorder::isByteCorruptedInRange(const std::string& fileName,
+                                                    const uint64_t begin,
+                                                    const uint64_t end) const {
+	ASSERT(begin <= end);
+	if (const auto iter = corruptedBytes.find(fileName); iter != std::end(corruptedBytes)) {
+		const auto lbound = iter->second.lower_bound(begin);
+		return lbound != std::end(iter->second) && *lbound < end;
+	}
+	return false;
+}
+
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 
@@ -785,25 +820,13 @@ private:
 
 			if (machineCache.count(sourceFilename)) {
 				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
-				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
 				TraceEvent("SimpleFileRename")
 				    .detail("From", sourceFilename)
 				    .detail("To", self->filename)
 				    .detail("SourceCount", machineCache.count(sourceFilename))
 				    .detail("FileCount", machineCache.count(self->filename));
-				auto maxBlockValue = std::numeric_limits<block_value_type>::max();
-				g_simulator->corruptedBlocks.erase(
-				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(self->filename, maxBlockValue)));
-				// next we need to rename all files. In practice, the number of corruptions for a given file should be
-				// very small
-				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
-				for (auto iter = begin; iter != end; ++iter) {
-					g_simulator->corruptedBlocks.emplace(self->filename, iter->second);
-				}
-				g_simulator->corruptedBlocks.erase(begin, end);
 				renameFile(sourceFilename.c_str(), self->filename.c_str());
+				g_simulator->corruptedBytes.rename(sourceFilename, self->filename);
 
 				machineCache[self->filename] = machineCache[sourceFilename];
 				machineCache.erase(sourceFilename);
@@ -2753,18 +2776,7 @@ ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
 	// rename all keys in the corrupted list
 	// first we have to delete all corruption of the destination, since this file will be unlinked if it exists
 	TraceEvent("RenamingFile").detail("From", from).detail("To", to).log();
-	// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
-	using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
-	auto maxBlockValue = std::numeric_limits<block_value_type>::max();
-	g_simulator->corruptedBlocks.erase(g_simulator->corruptedBlocks.lower_bound(std::make_pair(to, 0u)),
-	                                   g_simulator->corruptedBlocks.upper_bound(std::make_pair(to, maxBlockValue)));
-	// next we need to rename all files. In practice, the number of corruptions for a given file should be very small
-	auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(from, 0u)),
-	     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(from, maxBlockValue));
-	for (auto iter = begin; iter != end; ++iter) {
-		g_simulator->corruptedBlocks.emplace(to, iter->second);
-	}
-	g_simulator->corruptedBlocks.erase(begin, end);
+	g_simulator->corruptedBytes.rename(from, to);
 	// do the rename
 	::renameFile(from, to);
 	wait(delay(0.5 * deterministicRandom()->random01()));

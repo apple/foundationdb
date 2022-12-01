@@ -1233,13 +1233,11 @@ public:
 				} catch (Error& e) {
 					bool isInjected = false;
 					if (g_network->isSimulated()) {
-						auto num4kBlocks = std::max(self->pager->getPhysicalPageSize() / 4096, 1);
-						auto startBlock = (c.pageID * self->pager->getPhysicalPageSize()) / 4096;
-						auto iter = g_simulator->corruptedBlocks.lower_bound(
-						    std::make_pair(self->pager->getName(), startBlock));
-						if (iter->first == self->pager->getName() && iter->second < startBlock + num4kBlocks) {
-							isInjected = true;
-						}
+						const auto fileName = self->pager->getName();
+						const auto physicalPageSize = self->pager->getPhysicalPageSize();
+						const auto begin = c.pageID * physicalPageSize;
+						const auto end = begin + physicalPageSize;
+						isInjected |= g_simulator->corruptedBytes.isByteCorruptedInRange(fileName, begin, end);
 					}
 					TraceEvent(isInjected ? SevWarnAlways : SevError, "RedwoodChecksumFailed")
 					    .error(e)

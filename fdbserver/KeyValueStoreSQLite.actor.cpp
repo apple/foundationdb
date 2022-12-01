@@ -27,6 +27,7 @@
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 
+#include "flow/DebugPrint.h"
 // for unprintable
 #include "fdbclient/NativeAPI.actor.h"
 
@@ -151,18 +152,17 @@ struct PageChecksumCodec {
 		if (!silent) {
 			auto severity = SevError;
 			if (g_network->isSimulated()) {
-				auto firstBlock = pageNumber == 1 ? 0 : ((pageNumber - 1) * pageLen) / 4096,
-				     lastBlock = (pageNumber * pageLen) / 4096;
-				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, firstBlock));
-				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename && iter->second < lastBlock) {
+				const auto pageStartOffset = (pageNumber - 1) * pageLen;
+				const auto pageEndOffset = pageNumber * pageLen;
+				// Check if there is any injected corrupted byte inside the page range.
+				// NOTE It is NOT guaranteed that the injected corrupted byte is the cause of hash failure.
+				if (g_simulator->corruptedBytes.isByteCorruptedInRange(filename, pageStartOffset, pageEndOffset)) {
 					severity = SevWarnAlways;
 				}
 				TraceEvent("CheckCorruption")
 				    .detail("Filename", filename)
-				    .detail("NextFile", iter->first)
-				    .detail("FirstBlock", firstBlock)
-				    .detail("LastBlock", lastBlock)
-				    .detail("NextBlock", iter->second);
+				    .detail("StartOffset", pageStartOffset)
+				    .detail("EndOffset", pageEndOffset);
 			}
 			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())

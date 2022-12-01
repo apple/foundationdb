@@ -22,11 +22,11 @@
 #define FLOW_SIMULATOR_H
 #pragma once
 #include <algorithm>
-#include <string>
-#include <random>
 #include <limits>
-
-#include <boost/unordered_set.hpp>
+#include <random>
+#include <string>
+#include <map>
+#include <set>
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"
@@ -45,6 +45,28 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 struct ValidationData {
 	// global validation that missing refreshed feeds were previously destroyed
 	std::unordered_set<std::string> allDestroyedChangeFeedIDs;
+};
+
+class CorruptedBytesRecorder {
+	// Records the positions with corruption injected
+	std::map<std::string, std::set<uint64_t>> corruptedBytes;
+
+public:
+	// Records an injected corrupted byte.
+	void mark(const std::string& fileName, const uint64_t position);
+
+	// Truncate the file, drop all corrupted bytes that are truncated.
+	void truncate(const std::string& fileName, const uint64_t truncatedSize);
+
+	// Rename file name
+	void rename(const std::string& originalFileName, const std::string& newFileName);
+
+	// Check if the byte at the position is corrupted
+	bool isByteCorrupted(const std::string& fileName, const uint64_t position) const;
+
+	// Check if any bytes in the range [begin, end) is corrupted
+	bool isByteCorruptedInRange(const std::string& fileName, const uint64_t begin, const uint64_t end) const;
+
 };
 
 class ISimulator : public INetwork {
@@ -511,7 +533,7 @@ public:
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
-	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
+	CorruptedBytesRecorder corruptedBytes;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
