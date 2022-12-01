@@ -2744,6 +2744,23 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
+	// Checks and waits for few seconds if rocskdb is overloaded.
+	ACTOR Future<Void> checkRocksdbState(rocksdb::DB* db) {
+		state uint64_t estPendCompactBytes;
+		state int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+		db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
+		while (count && estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT) {
+			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
+			count--;
+			db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
+			                             &estPendCompactBytes);
+		}
+
+		return Void();
+	}
+
+	Future<Void> canCommit() override { return checkRocksdbState(shardManager.getDb()); }
+
 	Future<Void> commit(bool) override {
 		auto a = new Writer::CommitAction(shardManager.getDb(),
 		                                  shardManager.getWriteBatch(),
