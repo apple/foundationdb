@@ -7147,7 +7147,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				hold = tryGetRangeFromBlob(results, &tr, keys, fetchVersion, data->blobConn);
+				KeyRange range = wait(getRestoringRange(data->cx, keys));
+				hold = tryGetRangeFromBlob(results, &tr, range, fetchVersion, data->blobConn);
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 			}
