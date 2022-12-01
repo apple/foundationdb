@@ -159,8 +159,7 @@ bool canReplyWith(Error e) {
 
 #define PERSIST_PREFIX "\xff\xff"
 
-FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
-FDB_DEFINE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+FDB_BOOLEAN_PARAM(UnlimitedCommitBytes);
 
 // Immutable
 static const KeyValueRef persistFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/4"_sr);
@@ -2355,15 +2354,22 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 
 	TraceEvent(SevDebug, "ServeGetCheckpointVersionSatisfied", self->thisServerID)
 	    .detail("Version", req.version)
-	    .detail("Range", req.range.toString())
+	    .detail("Ranges", describe(req.ranges))
 	    .detail("Format", static_cast<int>(req.format));
+	ASSERT(req.ranges.size() == 1);
+	for (const auto& range : req.ranges) {
+		if (!self->isReadable(range)) {
+			req.reply.sendError(wrong_shard_server());
+			return Void();
+		}
+	}
 
 	try {
 		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
 		for (; it != self->checkpoints.end(); ++it) {
 			const CheckpointMetaData& md = it->second;
-			if (md.version == req.version && md.format == req.format && !md.ranges.empty() &&
-			    md.ranges.front().contains(req.range) && md.getState() == CheckpointMetaData::Complete) {
+			if (md.version == req.version && md.format == req.format && req.actionId == md.actionId &&
+			    md.hasRanges(req.ranges) && md.getState() == CheckpointMetaData::Complete) {
 				req.reply.send(md);
 				TraceEvent(SevDebug, "ServeGetCheckpointEnd", self->thisServerID).detail("Checkpoint", md.toString());
 				break;
@@ -2412,11 +2418,12 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
-	state ICheckpointReader* reader = nullptr;
-	state int64_t totalSize = 0;
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
+
+	state ICheckpointReader* reader = nullptr;
+	state int64_t totalSize = 0;
 
 	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
 
@@ -7140,7 +7147,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				hold = tryGetRangeFromBlob(results, &tr, keys, fetchVersion, data->blobConn);
+				KeyRange range = wait(getRestoringRange(data->cx, keys));
+				hold = tryGetRangeFromBlob(results, &tr, range, fetchVersion, data->blobConn);
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 			}
@@ -9201,7 +9209,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 }
 
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
-	ASSERT(metaData.ssID == data->thisServerID && !metaData.ranges.empty());
+	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
+	       !metaData.ranges.empty());
 	const CheckpointRequest req(metaData.version,
 	                            metaData.ranges,
 	                            static_cast<CheckpointFormat>(metaData.format),
@@ -9209,10 +9218,10 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
 	state CheckpointMetaData checkpointResult;
 	try {
-		state CheckpointMetaData res = wait(data->storage.checkpoint(req));
-		checkpointResult = res;
-		checkpointResult.ssID = data->thisServerID;
-		ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
+		wait(store(checkpointResult, data->storage.checkpoint(req)));
+		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
+		checkpointResult.src.push_back(data->thisServerID);
+		checkpointResult.actionId = metaData.actionId;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
@@ -10916,12 +10925,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					doUpdate = update(self, &updateReceived);
 			}
 			when(GetCheckpointRequest req = waitNext(ssi.checkpoint.getFuture())) {
-				if (!self->isReadable(req.range)) {
-					req.reply.sendError(wrong_shard_server());
-					continue;
-				} else {
-					self->actors.add(getCheckpointQ(self, req));
-				}
+				self->actors.add(getCheckpointQ(self, req));
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
