@@ -257,9 +257,7 @@ ACTOR template <class Tr>
 Future<bool> getValidAutoEnabled(Reference<Tr> tr) {
 	state bool result;
 	loop {
-		// hold the returned standalone object's memory
-		state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
-		Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+		Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
 		if (!value.present()) {
 			tr->reset();
 			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
@@ -288,9 +286,8 @@ Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int li
 			if (enableAuto) {
 				return std::vector<TagThrottleInfo>();
 			}
-			state typename DB::TransactionT::template FutureT<RangeResult> f =
-			    tr->getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
+			RangeResult throttles = wait(safeThreadFutureToFuture(
+			    tr->getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit)));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
 				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
@@ -314,9 +311,8 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 			if (!containsRecommended) {
 				wait(store(reportAuto, getValidAutoEnabled(tr)));
 			}
-			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
-			    reportAuto ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
+			RangeResult throttles = wait(safeThreadFutureToFuture(tr->getRange(
+			    reportAuto ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit)));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
 				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
@@ -383,9 +379,7 @@ Future<bool> unthrottleMatchingThrottles(Reference<DB> db,
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			// holds memory of the RangeResult
-			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(begin, end, 1000);
-			state RangeResult tags = wait(safeThreadFutureToFuture(f));
+			state RangeResult tags = wait(safeThreadFutureToFuture(tr->getRange(begin, end, 1000)));
 			state uint64_t unthrottledTags = 0;
 			uint64_t manualUnthrottledTags = 0;
 			for (auto tag : tags) {
@@ -549,9 +543,7 @@ Future<Void> throttleTags(Reference<DB> db,
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			if (throttleType == TagThrottleType::MANUAL) {
-				// hold the returned standalone object's memory
-				state typename DB::TransactionT::template FutureT<Optional<Value>> oldThrottleF = tr->get(key);
-				Optional<Value> oldThrottle = wait(safeThreadFutureToFuture(oldThrottleF));
+				Optional<Value> oldThrottle = wait(safeThreadFutureToFuture(tr->get(key)));
 				if (!oldThrottle.present()) {
 					wait(updateThrottleCount(tr, 1));
 				}
@@ -579,9 +571,7 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			// hold the returned standalone object's memory
-			state typename DB::TransactionT::template FutureT<Optional<Value>> valueF =
-			    tr->get(tagThrottleAutoEnabledKey);
-			Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+			Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
 			if (!value.present() || (enabled && value.get() != "1"_sr) || (!enabled && value.get() != "0"_sr)) {
 				tr->set(tagThrottleAutoEnabledKey, enabled ? "1"_sr : "0"_sr);
 				signalThrottleChange<typename DB::TransactionT>(tr);

@@ -665,8 +665,7 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
-		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
+		Optional<Value> statusValue = wait(safeThreadFutureToFuture(tr->get("\xff\xff/status/json"_sr)));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
 			return Void();
@@ -1577,9 +1576,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 								continue;
 							}
 						}
-						state ThreadFuture<Optional<Value>> valueF =
-						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]);
-						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
+						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(
+						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]))));
 
 						if (v.present())
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
@@ -1740,8 +1738,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						}
 
 						getTransaction(db, tenant, tr, options, intrans);
-						state ThreadFuture<RangeResult> kvsF = tr->getRange(KeyRangeRef(tokens[1], endKey), limit);
-						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
+						RangeResult kvs = wait(makeInterruptable(
+						    safeThreadFutureToFuture(tr->getRange(KeyRangeRef(tokens[1], endKey), limit))));
 
 						printf("\nRange limited to %d keys\n", limit);
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {

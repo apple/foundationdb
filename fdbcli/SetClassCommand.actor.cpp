@@ -38,7 +38,6 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			// Hold the reference to the memory
 			state ThreadFuture<RangeResult> classTypeFuture =
 			    tr->getRange(fdb_cli::processClassTypeSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 			state ThreadFuture<RangeResult> classSourceFuture =
@@ -77,9 +76,8 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			state ThreadFuture<Optional<Value>> result =
-			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
-			Optional<Value> val = wait(safeThreadFutureToFuture(result));
+			Optional<Value> val = wait(safeThreadFutureToFuture(
+			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin))));
 			if (!val.present()) {
 				printf("No matching addresses found\n");
 				return false;

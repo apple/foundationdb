@@ -47,9 +47,7 @@ void printUsage(StringRef command) {
 }
 
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
-	// hold the returned standalone object's memory
-	state ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
-	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(errorMsgF));
+	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(tr->get(fdb_cli::errorMsgSpecialKey)));
 	// Error message should be present
 	ASSERT(errorMsg.present());
 	// Read the json string
@@ -95,10 +93,8 @@ ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->set(workerInterfacesVerifyOptionSpecialKey, ValueRef());
 	}
-	// Hold the reference to the standalone's memory
-	state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
-	    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
-	state RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
+	state RangeResult kvs = wait(safeThreadFutureToFuture(tr->getRange(
+	    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY)));
 	ASSERT(!kvs.more);
 	if (verify) {
 		// remove the option if set

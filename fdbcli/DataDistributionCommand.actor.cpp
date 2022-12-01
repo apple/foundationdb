@@ -41,10 +41,8 @@ ACTOR Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 			tr->set(fdb_cli::ddModeSpecialKey, boost::lexical_cast<std::string>(mode));
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
-				// hold the returned standalone object's memory
-				state ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
+				RangeResult res = wait(safeThreadFutureToFuture(
+				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY)));
 				ASSERT(res.size() <= 1);
 				if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 					// only clear the key if it is currently being used to disable all SS failure data movement

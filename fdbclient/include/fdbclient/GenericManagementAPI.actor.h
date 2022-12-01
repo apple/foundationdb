@@ -156,10 +156,8 @@ Future<Void> changeCachedRange(Reference<DB> db, KeyRangeRef range, bool add) {
 			tr->clear(sysRangeClear);
 			tr->clear(privateRange);
 			tr->addReadConflictRange(privateRange);
-			// hold the returned standalone object's memory
-			state typename DB::TransactionT::template FutureT<RangeResult> previousFuture =
-			    tr->getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, Snapshot::False, Reverse::True);
-			RangeResult previous = wait(safeThreadFutureToFuture(previousFuture));
+			RangeResult previous = wait(safeThreadFutureToFuture(
+			    tr->getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, Snapshot::False, Reverse::True)));
 			bool prevIsCached = false;
 			if (!previous.empty()) {
 				std::vector<uint16_t> prevVal;
@@ -175,10 +173,8 @@ Future<Void> changeCachedRange(Reference<DB> db, KeyRangeRef range, bool add) {
 				tr->set(sysRange.begin, trueValue);
 				tr->set(privateRange.begin, serverKeysTrue);
 			}
-			// hold the returned standalone object's memory
-			state typename DB::TransactionT::template FutureT<RangeResult> afterFuture =
-			    tr->getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, Snapshot::False, Reverse::False);
-			RangeResult after = wait(safeThreadFutureToFuture(afterFuture));
+			RangeResult after = wait(safeThreadFutureToFuture(
+			    tr->getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, Snapshot::False, Reverse::False)));
 			bool afterIsCached = false;
 			if (!after.empty()) {
 				std::vector<uint16_t> afterVal;
@@ -216,11 +212,10 @@ ACTOR template <class Tr>
 Future<std::vector<ProcessData>> getWorkers(Reference<Tr> tr,
                                             typename Tr::template FutureT<RangeResult> processClassesF,
                                             typename Tr::template FutureT<RangeResult> processDataF) {
-	// processClassesF and processDataF are used to hold standalone memory
-	processClassesF = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	processDataF = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-	state Future<RangeResult> processClasses = safeThreadFutureToFuture(processClassesF);
-	state Future<RangeResult> processData = safeThreadFutureToFuture(processDataF);
+	state Future<RangeResult> processClasses =
+	    safeThreadFutureToFuture(tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+	state Future<RangeResult> processData =
+	    safeThreadFutureToFuture(tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY));
 
 	wait(success(processClasses) && success(processData));
 	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
@@ -307,9 +302,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
 			if (!creating && !force) {
-				state typename DB::TransactionT::template FutureT<RangeResult> fConfigF =
-				    tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> fConfig = safeThreadFutureToFuture(fConfigF);
+				state Future<RangeResult> fConfig =
+				    safeThreadFutureToFuture(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 				state typename DB::TransactionT::template FutureT<RangeResult> processClassesF;
 				state typename DB::TransactionT::template FutureT<RangeResult> processDataF;
 				state Future<std::vector<ProcessData>> fWorkers = getWorkers(tr, processClassesF, processDataF);
@@ -368,16 +362,15 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						}
 					}
 
-					state typename DB::TransactionT::template FutureT<RangeResult> fServerListF =
-					    tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 					state Future<RangeResult> fServerList =
-					    (newConfig.regions.size()) ? safeThreadFutureToFuture(fServerListF) : Future<RangeResult>();
+					    (newConfig.regions.size())
+					        ? safeThreadFutureToFuture(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY))
+					        : Future<RangeResult>();
 
 					if (newConfig.usableRegions == 2) {
 						if (oldReplicationUsesDcId) {
-							state typename DB::TransactionT::template FutureT<RangeResult> fLocalityListF =
-							    tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
-							state Future<RangeResult> fLocalityList = safeThreadFutureToFuture(fLocalityListF);
+							state Future<RangeResult> fLocalityList =
+							    safeThreadFutureToFuture(tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY));
 							wait(success(fLocalityList) || tooLong);
 							if (!fLocalityList.isReady()) {
 								return ConfigurationResult::DATABASE_UNAVAILABLE;
@@ -562,8 +555,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-						state typename DB::TransactionT::template FutureT<Optional<Value>> vF = tr->get(initIdKey);
-						Optional<Value> v = wait(safeThreadFutureToFuture(vF));
+						Optional<Value> v = wait(safeThreadFutureToFuture(tr->get(initIdKey)));
 						if (v != m[initIdKey.toString()])
 							return ConfigurationResult::DATABASE_ALREADY_CREATED;
 						else if (m[configKeysPrefix.toString() + "storage_engine"] ==

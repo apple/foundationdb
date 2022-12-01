@@ -130,7 +130,11 @@ void Arena::dependsOn(const Arena& p) {
 }
 
 void* Arena::allocate4kAlignedBuffer(uint32_t size) {
-	return ArenaBlock::dependOn4kAlignedBuffer(impl, size);
+	return ArenaBlock::makeDependent4kAlignedBuffer(impl, size);
+}
+
+void Arena::addResourceWithDestructor(void* resource, void (*destructor)(void*)) {
+	ArenaBlock::addDependentResourceWithDestructor(impl, resource, destructor);
 }
 
 FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
@@ -216,15 +220,23 @@ size_t ArenaBlock::totalSize() const {
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
-		if (r->aligned4kBufferSize != 0) {
-			totalSizeEstimate += r->aligned4kBufferSize;
-		} else {
-			allowAccess(r->next);
-			totalSizeEstimate += r->next->totalSize();
-			disallowAccess(r->next);
-		}
 		o = r->nextBlockOffset;
-		makeNoAccess(r, sizeof(ArenaBlockRef));
+		if (r->type == ArenaBlockRef::Type::kAligned4kBuffer) {
+			makeDefined(r, sizeof(Aligned4kBufferRef));
+			auto* b = static_cast<Aligned4kBufferRef*>(r);
+			totalSizeEstimate += b->aligned4kBufferSize;
+			makeNoAccess(r, sizeof(Aligned4kBufferRef));
+		} else if (r->type == ArenaBlockRef::Type::kResourceWithDestructor) {
+			// No size estimate available
+			makeNoAccess(r, sizeof(ArenaBlockRef));
+		} else {
+			makeDefined(r, sizeof(BlockRef));
+			auto* b = static_cast<BlockRef*>(r);
+			allowAccess(b->next);
+			totalSizeEstimate += b->next->totalSize();
+			disallowAccess(b->next);
+			makeNoAccess(r, sizeof(BlockRef));
+		}
 	}
 	return totalSizeEstimate;
 }
@@ -245,14 +257,17 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
-
-		// If next is valid recursively count its blocks
-		if (r->aligned4kBufferSize == 0) {
-			r->next->getUniqueBlocks(a);
-		}
-
 		o = r->nextBlockOffset;
-		makeNoAccess(r, sizeof(ArenaBlockRef));
+		if (r->type == ArenaBlockRef::Type::kBlock) {
+			makeDefined(r, sizeof(BlockRef));
+			auto* b = static_cast<BlockRef*>(r);
+			allowAccess(b->next);
+			b->next->getUniqueBlocks(a);
+			disallowAccess(b->next);
+			makeNoAccess(r, sizeof(BlockRef));
+		} else {
+			makeNoAccess(r, sizeof(ArenaBlockRef));
+		}
 	}
 	return;
 }
@@ -270,35 +285,54 @@ int ArenaBlock::addUsed(int bytes) {
 }
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
-	makeDefined(r, sizeof(ArenaBlockRef));
-	r->aligned4kBufferSize = 0;
-	r->next = next;
+	ASSERT(!isTiny());
+	ASSERT(unused() >= sizeof(BlockRef));
+	BlockRef* r = (BlockRef*)((char*)getData() + bigUsed);
+	makeDefined(r, sizeof(BlockRef));
+	r->type = ArenaBlockRef::Type::kBlock;
 	r->nextBlockOffset = nextBlockOffset;
-	makeNoAccess(r, sizeof(ArenaBlockRef));
+	r->next = next;
+	makeNoAccess(r, sizeof(BlockRef));
 	nextBlockOffset = bigUsed;
-	bigUsed += sizeof(ArenaBlockRef);
+	bigUsed += sizeof(BlockRef);
 	totalSizeEstimate += next->estimatedTotalSize();
 }
 
 void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
-	makeDefined(r, sizeof(ArenaBlockRef));
+	ASSERT(!isTiny());
+	ASSERT(unused() >= sizeof(Aligned4kBufferRef));
+	Aligned4kBufferRef* r = (Aligned4kBufferRef*)((char*)getData() + bigUsed);
+	makeDefined(r, sizeof(Aligned4kBufferRef));
+	r->type = ArenaBlockRef::Type::kAligned4kBuffer;
+	r->nextBlockOffset = nextBlockOffset;
 	r->aligned4kBufferSize = size;
 	r->aligned4kBuffer = allocateFast4kAligned(size);
 	// printf("Arena::aligned4kBuffer alloc size=%u ptr=%p\n", size, r->aligned4kBuffer);
-	r->nextBlockOffset = nextBlockOffset;
 	auto result = r->aligned4kBuffer;
-	makeNoAccess(r, sizeof(ArenaBlockRef));
+	makeNoAccess(r, sizeof(Aligned4kBufferRef));
 	nextBlockOffset = bigUsed;
-	bigUsed += sizeof(ArenaBlockRef);
+	bigUsed += sizeof(Aligned4kBufferRef);
 	totalSizeEstimate += size;
 	return result;
 }
 
+void ArenaBlock::addResourceWithDestructor(void* resource, void (*destructor)(void*)) {
+	ASSERT(!isTiny());
+	ASSERT(unused() >= sizeof(ResourceWithDestructorRef));
+	ResourceWithDestructorRef* r = (ResourceWithDestructorRef*)((char*)getData() + bigUsed);
+	makeDefined(r, sizeof(ResourceWithDestructorRef));
+	r->type = ArenaBlockRef::Type::kResourceWithDestructor;
+	r->nextBlockOffset = nextBlockOffset;
+	r->resource = resource;
+	r->destructor = destructor;
+	makeNoAccess(r, sizeof(ResourceWithDestructorRef));
+	nextBlockOffset = bigUsed;
+	bigUsed += sizeof(ResourceWithDestructorRef);
+}
+
 void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 	other->addref();
-	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
+	if (!self || self->isTiny() || self->unused() < sizeof(BlockRef)) {
 		create(SMALL, self)->makeReference(other);
 	} else {
 		ASSERT(self->getData() != other->getData());
@@ -306,11 +340,21 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 	}
 }
 
-void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size) {
-	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
+void* ArenaBlock::makeDependent4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size) {
+	if (!self || self->isTiny() || self->unused() < sizeof(Aligned4kBufferRef)) {
 		return create(SMALL, self)->make4kAlignedBuffer(size);
 	} else {
 		return self->make4kAlignedBuffer(size);
+	}
+}
+
+void ArenaBlock::addDependentResourceWithDestructor(Reference<ArenaBlock>& self,
+                                                    void* resource,
+                                                    void (*destructor)(void*)) {
+	if (!self || self->isTiny() || self->unused() < sizeof(ResourceWithDestructorRef)) {
+		return create(SMALL, self)->addResourceWithDestructor(resource, destructor);
+	} else {
+		return self->addResourceWithDestructor(resource, destructor);
 	}
 }
 
@@ -349,7 +393,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	} else {
 		int reqSize = dataSize + sizeof(ArenaBlock);
 		if (next)
-			reqSize += sizeof(ArenaBlockRef);
+			reqSize += sizeof(BlockRef);
 
 		if (reqSize < LARGE) {
 			// Each block should be larger than the previous block, up to a limit, to minimize allocations
@@ -417,6 +461,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->nextBlockOffset = 0;
 				b->setrefCountUnsafe(1);
 				next->makeReference(b);
+				makeNoAccess(reinterpret_cast<uint8_t*>(b) + b->used(), b->unused());
 				return b;
 			}
 		}
@@ -449,15 +494,22 @@ void ArenaBlock::destroy() {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
 				makeDefined(br, sizeof(ArenaBlockRef));
 
-				// If aligned4kBuffer is valid, free it
-				if (br->aligned4kBufferSize != 0) {
+				if (br->type == ArenaBlockRef::Type::kAligned4kBuffer) {
+					auto* r = static_cast<Aligned4kBufferRef*>(br);
+					makeDefined(r, sizeof(Aligned4kBufferRef));
 					// printf("Arena::aligned4kBuffer free %p\n", br->aligned4kBuffer);
-					freeFast4kAligned(br->aligned4kBufferSize, br->aligned4kBuffer);
-				} else {
-					allowAccess(br->next);
-					if (br->next->delref_no_destroy())
-						stack.push_back(stackArena, br->next);
-					disallowAccess(br->next);
+					freeFast4kAligned(r->aligned4kBufferSize, r->aligned4kBuffer);
+				} else if (br->type == ArenaBlockRef::Type::kBlock) {
+					auto* r = static_cast<BlockRef*>(br);
+					makeDefined(r, sizeof(BlockRef));
+					allowAccess(r->next);
+					if (r->next->delref_no_destroy())
+						stack.push_back(stackArena, r->next);
+					disallowAccess(r->next);
+				} else if (br->type == ArenaBlockRef::Type::kResourceWithDestructor) {
+					auto* r = static_cast<ResourceWithDestructorRef*>(br);
+					makeDefined(r, sizeof(ResourceWithDestructorRef));
+					r->destructor(r->resource);
 				}
 
 				o = br->nextBlockOffset;
