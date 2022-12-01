@@ -18,12 +18,15 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -36,6 +39,7 @@ struct BulkSetupWorkload : TestWorkload {
 	double maxNumTenants;
 	double minNumTenants;
 	std::vector<TenantName> tenantNames;
+	bool deleteTenants;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
@@ -44,6 +48,7 @@ struct BulkSetupWorkload : TestWorkload {
 		// maximum and minimum number of tenants per client
 		maxNumTenants = getOption(options, "maxNumTenants"_sr, 0);
 		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
+		deleteTenants = getOption(options, "deleteTenants"_sr, false);
 		ASSERT(minNumTenants <= maxNumTenants);
 	}
 
@@ -77,22 +82,61 @@ struct BulkSetupWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> _start(BulkSetupWorkload* workload, Database cx) {
+		wait(bulkSetup(cx,
+		               workload,
+		               workload->nodeCount,
+		               Promise<double>(),
+		               false,
+		               0.0,
+		               1e12,
+		               std::vector<uint64_t>(),
+		               Promise<std::vector<std::pair<uint64_t, double>>>(),
+		               0,
+		               0.1,
+		               0,
+		               0,
+		               workload->tenantNames));
+		if (workload->deleteTenants) {
+			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenantNames.size() + 1);
+			if (numTenantsToDelete > 0) {
+				state int i;
+				for (i = 0; i < numTenantsToDelete; i++) {
+					state TenantName tenant = deterministicRandom()->randomChoice(workload->tenantNames);
+					TraceEvent("BulkSetupTenantDeletionClearing")
+					    .detail("Tenant", tenant)
+					    .detail("TotalNumTenants", workload->tenantNames.size());
+					// clear the tenant
+					state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
+					loop {
+						try {
+							tr.clear(normalKeys);
+							wait(tr.commit());
+							break;
+						} catch (Error& e) {
+							wait(tr.onError(e));
+						}
+					}
+					// delete the tenant
+					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant)));
+					for (auto it = workload->tenantNames.begin(); it != workload->tenantNames.end(); it++) {
+						if (*it == tenant) {
+							workload->tenantNames.erase(it);
+							break;
+						}
+					}
+					TraceEvent("BulkSetupTenantDeletionDone")
+					    .detail("Tenant", tenant)
+					    .detail("TotalNumTenants", workload->tenantNames.size());
+				}
+			}
+		}
+		return Void();
+	}
+
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			return bulkSetup(cx,
-			                 this,
-			                 nodeCount,
-			                 Promise<double>(),
-			                 false,
-			                 0.0,
-			                 1e12,
-			                 std::vector<uint64_t>(),
-			                 Promise<std::vector<std::pair<uint64_t, double>>>(),
-			                 0,
-			                 0.1,
-			                 0,
-			                 0,
-			                 tenantNames);
+			return _start(this, cx);
 		}
 		return Void();
 	}

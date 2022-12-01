@@ -820,6 +820,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			return false;
 		}
 		state EncryptCipherDomainId curKeyDomainId = wait(getEncryptionDomainDetails(k, self->tenantCache));
+		TraceEvent("Nim::here2").detail("Key", k).detail("Did", curKeyDomainId);
 		state EncryptCipherDomainId prevKeyDomainId =
 		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
 		if (curKeyDomainId != prevKeyDomainId) {
@@ -1057,6 +1058,15 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			}
 			EncryptCipherDomainId curDomainId =
 			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, tenantCache.get()));
+			if (!curKey.empty() && !prevKey.empty()) {
+				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+					TraceEvent("Nim::here").detail("Key", curKey).detail("Did", curDomainId);
+					ASSERT(curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID);
+				}
+				if (prevDomainId.get() != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+					ASSERT(curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID);
+				}
+			}
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
 				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
