@@ -131,8 +131,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Directory for temporary files of the client.\n"
 	       "  --ignore-external-client-failures\n"
 	       "                 Ignore failures to initialize external clients.\n"
-	       "  --ignore-incompatible-client\n"
-	       "                 Do not fail if there is no client matching the server version.\n"
+	       "  --fail-incompatible-client\n"
+	       "                 Fail if there is no client matching the server version.\n"
 	       "  --expected-error ERR\n"
 	       "                 FDB error code the test expected to fail with (default: 0).\n"
 	       "  -h, --help     Display this help and exit.\n",
