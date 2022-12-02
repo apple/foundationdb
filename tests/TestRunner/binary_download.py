@@ -50,8 +50,6 @@ class FdbBinaryDownloader:
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         self.platform = platform.machine()
         assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(self.platform)
-        self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
-        self.tmp_dir.mkdir(parents=True)
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
         self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
         if not self.local_binary_repo.exists():
