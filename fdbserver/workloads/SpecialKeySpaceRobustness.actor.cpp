@@ -61,9 +61,8 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceRobustnessWorkload* self) {
-		// All management api related tests
-		state Database cx = cx_->clone();
+	ACTOR Future<Void> managementApiCorrectnessActor(Database cx, SpecialKeySpaceRobustnessWorkload* self) {
+		// Management api related tests that can run during failure injections
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
 		// test ordered option keys
 		{
