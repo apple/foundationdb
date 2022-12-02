@@ -366,7 +366,7 @@ if(NOT WIN32)
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-	  --upgrade-path ${CMAKE_PROJECT_VERSION} "7.3.0" ${CMAKE_PROJECT_VERSION}
+      --upgrade-path ${CMAKE_PROJECT_VERSION} "7.3.0" ${CMAKE_PROJECT_VERSION}
       --process-number 3
       )
     set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
