@@ -361,7 +361,10 @@ func ExampleOpenWithConnectionString() {
 		return
 	}
 
-	_ = db
+	// Close the database after usage
+	defer db.Close()
+
+	// Do work here
 
 	// Output:
 }

@@ -344,7 +344,7 @@ func createDatabase(clusterFile string) (Database, error) {
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{clusterFile, db}, nil
+	return Database{clusterFile, true, db}, nil
 }
 
 // OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
@@ -372,7 +372,7 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{db}, nil
+	return Database{"", false, db}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.
