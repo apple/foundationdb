@@ -21,6 +21,7 @@ extension Swift.Optional where Wrapped == Version {
     }
 }
 
+// FIXME: This should be synthesized?
 extension Swift.Optional where Wrapped == SetTag {
     init(cxxOptional value: OptionalSetTag) {
         guard value.present() else {
@@ -68,7 +69,7 @@ public func updateLiveCommittedVersion(myself: MasterData, req: ReportRawCommitt
             myself.versionVectorTagUpdates.addMeasurement(Double(writtenTags.size()))
         }
 
-        let curTime = now();
+        let curTime = now()
         // add debug here to change liveCommittedVersion to time bound of now()
         debug_advanceVersionTimestamp(Int64(myself.liveCommittedVersion.get()), curTime + getClientKnobs().MAX_VERSION_CACHE_LAG)
         // also add req.version but with no time bound
@@ -80,7 +81,6 @@ public func updateLiveCommittedVersion(myself: MasterData, req: ReportRawCommitt
     }
 	myself.reportLiveCommittedVersionRequests += 1
 }
-
 
 extension NotifiedVersionValue {
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
@@ -219,7 +219,7 @@ public actor MasterDataActor {
 
         let startTime = now()
 
-        // wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+        // wait(myself.liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
         // NOTE.  To fix: error: value of type 'MasterData' has no member 'liveCommittedVersion'
         // change type of liveCommittedVersion from NotifiedVersion to NotifiedVersionValue
         // To fix: note: C++ method 'get' that returns unsafe projection of type 'reference' not imported
@@ -262,7 +262,7 @@ public actor MasterDataActor {
         //  state ActorCollection versionActors(false);
         //
         //	loop choose {
-        //		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
+        //		when(GetCommitVersionRequest req = waitNext(myself.myInterface.getCommitVersion.getFuture())) {
         //			versionActors.add(getVersion(self, req));
         //		}
         //		when(wait(versionActors.getResult())) {}
@@ -291,21 +291,12 @@ public actor MasterDataActor {
             //			"MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
         }
 
-        // if (self->liveCommittedVersion.get() == invalidVersion) {
-        //     self->liveCommittedVersion.set(self->recoveryTransactionVersion);
-        // }
         if myself.liveCommittedVersion.get() == invalidVersion {
             myself.liveCommittedVersion.set(Int(myself.recoveryTransactionVersion));
         }
 
-        // ++self->getLiveCommittedVersionRequests;
         myself.getLiveCommittedVersionRequests += 1
 
-        // GetRawCommittedVersionReply reply;
-        // reply.version = self->liveCommittedVersion.get();
-        // reply.locked = self->databaseLocked;
-        // reply.metadataVersion = self->proxyMetadataVersion;
-        // reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
         var reply = GetRawCommittedVersionReply()
         let liveCommittedVersion: Int = myself.liveCommittedVersion.get()
         reply.version = Version(liveCommittedVersion)
@@ -313,10 +304,6 @@ public actor MasterDataActor {
         reply.metadataVersion = myself.proxyMetadataVersion
         reply.minKnownCommittedVersion = myself.minKnownCommittedVersion
 
-        // if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-        //     self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-        //     self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
-        // }
         if (getServerKnobs().ENABLE_VERSION_VECTOR) {
              // myself.ssVersionVector.getDelta(req.maxVersion, &reply.ssVersionVectorDelta) // FIXME: help!
             // FIXME:
@@ -364,6 +351,67 @@ public actor MasterDataActor {
 
             var result = Flow.Void()
             promise.send(&result)
+        }
+    }
+
+    func updateRecoveryData(myself: MasterData, req: UpdateRecoveryDataRequest) async -> Flow.Void {
+        // TODO: trace event here
+        //        TraceEvent("UpdateRecoveryData", myself.dbgid)
+        //                .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
+        //                .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
+        //                .detail("CurrentRecoveryTxnVersion", myself.recoveryTransactionVersion)
+        //                .detail("CurrentLastEpochEnd", myself.lastEpochEnd)
+        //                .detail("NumCommitProxies", req.commitProxies.size())
+        //                .detail("VersionEpoch", req.versionEpoch)
+        //                .detail("PrimaryLocality", req.primaryLocality)
+
+        myself.recoveryTransactionVersion = req.recoveryTransactionVersion
+        myself.lastEpochEnd = req.lastEpochEnd
+
+        if (req.commitProxies.size() > 0) {
+            var registeredUIDs = [UID]()
+            for j in 0..<req.commitProxies.size() { // TODO(swift): can we make this be a Sequence?
+                registeredUIDs.append(req.commitProxies[j].id())
+            }
+            await self.registerLastCommitProxyVersionReplies(uids: registeredUIDs)
+        }
+
+        if let versionEpoch = Swift.Optional(cxxOptional: req.versionEpoch) {
+            myself.referenceVersion = OptionalVersion(versionEpoch)
+        } else if BUGGIFY() {
+            // Cannot use a positive version epoch in simulation because of the
+            // clock starting at 0. A positive version epoch would mean the initial
+            // cluster version was negative.
+            // TODO: Increase the size of this interval after fixing the issue
+            // with restoring ranges with large version gaps.
+            let v = swift_get_randomInt64(deterministicRandom(), Int64(-1e6), 0)
+            myself.referenceVersion = OptionalVersion(v)
+        }
+
+        myself.getResolutionBalancer().setCommitProxies(req.commitProxies)
+        myself.getResolutionBalancer().setResolvers(req.resolvers)
+
+        myself.locality = req.primaryLocality
+
+        return Void()
+    }
+
+    nonisolated public func serveUpdateRecoveryData(myself: MasterData, promise: PromiseVoid) {
+        Task {
+            try await withThrowingTaskGroup(of: Swift.Void.self) { group in
+                // Note: this is an example of one-by-one handling requests, notice the group.next() below.
+                for try await req in myself.myInterface.updateRecoveryData.getFuture() {
+                    group.addTask {
+                        var rep = await self.updateRecoveryData(myself: myself, req: req)
+                        req.reply.send(&rep)
+                    }
+
+                    try await group.next()
+                }
+            }
+
+            var void = Flow.Void()
+            promise.send(&void)
         }
     }
 

@@ -144,6 +144,7 @@ SWIFT_ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 }
 
 #define COMPILE_OUT_REPLACED_FUNCTIONS 1
+
 #if COMPILE_OUT_REPLACED_FUNCTIONS
 using fdbserver_swift::updateLiveCommittedVersion;
 #else
@@ -179,47 +180,11 @@ SWIFT_ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	return Void();
 }
 
-ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	loop {
-		state UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
-		TraceEvent("UpdateRecoveryData", self->dbgid)
-		    .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
-		    .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
-		    .detail("CurrentRecoveryTxnVersion", self->recoveryTransactionVersion)
-		    .detail("CurrentLastEpochEnd", self->lastEpochEnd)
-		    .detail("NumCommitProxies", req.commitProxies.size())
-		    .detail("VersionEpoch", req.versionEpoch)
-		    .detail("PrimaryLocality", req.primaryLocality);
-
-		self->recoveryTransactionVersion = req.recoveryTransactionVersion;
-		self->lastEpochEnd = req.lastEpochEnd;
-
-		if (req.commitProxies.size() > 0) {
-            auto registeredUIDs = Swift::Array<UID>::init();
-            for (size_t j = 0; j < req.commitProxies.size(); ++j)
-                registeredUIDs.append(req.commitProxies[j].id());
-            auto promise = Promise<Void>();
-            self->swiftImpl->registerLastCommitProxyVersionReplies(registeredUIDs, promise);
-            wait(promise.getFuture());
-		}
-		if (req.versionEpoch.present()) {
-			self->referenceVersion = req.versionEpoch.get();
-		} else if (BUGGIFY) {
-			// Cannot use a positive version epoch in simulation because of the
-			// clock starting at 0. A positive version epoch would mean the initial
-			// cluster version was negative.
-			// TODO: Increase the size of this interval after fixing the issue
-			// with restoring ranges with large version gaps.
-			self->referenceVersion = deterministicRandom()->randomInt64(-1e6, 0);
-		}
-
-		self->resolutionBalancer.setCommitProxies(req.commitProxies);
-		self->resolutionBalancer.setResolvers(req.resolvers);
-
-		self->locality = req.primaryLocality;
-
-		req.reply.send(Void());
-	}
+SWIFT_ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
+	auto promise = Promise<Void>();
+	self->swiftImpl->serveUpdateRecoveryData(self.getPtr(), /*result=*/promise);
+	wait(promise.getFuture());
+	return Void();
 }
 
 static std::set<int> const& normalMasterErrors() {

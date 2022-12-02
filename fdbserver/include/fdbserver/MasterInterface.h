@@ -40,6 +40,7 @@ using DBRecoveryCount = uint64_t;
 // A concrete type that can be referenced (in the context of Optional<set<Tag>>) in Swift.
 using SetTag = std::set<Tag>;
 using OptionalSetTag = Optional<SetTag>;
+using OptionalInt64 = Optional<int64_t>;
 
 
 struct MasterInterface {
@@ -280,6 +281,7 @@ private:
 };
 
 using NotifiedVersionValue = NotifiedValue<NotifiedVersion>;
+using OptionalNotifiedVersionValue = Optional<NotifiedVersion>;
 
 struct CommitProxyVersionReplies {
   MAP_UInt64_GetCommitVersionReply replies;
