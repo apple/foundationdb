@@ -663,12 +663,12 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 				cpBytesAndLength(pByte, pLength, kvm.value);
 				cpBytesAndLength(pByte, pLength, kvm.getRange.begin.key);
 				cpBytesAndLength(pByte, pLength, kvm.getRange.end.key);
-				cpBytesAndLengthInner(pByte, pLength, (uint8_t*)&(kvm.boundaryAndExist), sizeof(kvm.boundaryAndExist));
 				for (int kvm_i = 0; kvm_i < kvm_count; kvm_i++) {
 					auto kv = kvm.getRange.data[kvm_i];
 					cpBytesAndLengthInner(pByte, pLength, kv.key, kv.key_length);
 					cpBytesAndLengthInner(pByte, pLength, kv.value, kv.value_length);
 				}
+				cpBytesAndLengthInner(pByte, pLength, (uint8_t*)&(kvm.boundaryAndExist), sizeof(kvm.boundaryAndExist));
 			}
 		}
 		// After native arrays are released

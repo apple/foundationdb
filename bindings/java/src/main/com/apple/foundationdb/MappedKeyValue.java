@@ -69,9 +69,6 @@ public class MappedKeyValue extends KeyValue {
 		byte[] value = takeBytes(offset, bytes, lengths);
 		byte[] rangeBegin = takeBytes(offset, bytes, lengths);
 		byte[] rangeEnd = takeBytes(offset, bytes, lengths);
-		byte[] boundaryAndExistBytes = takeBytes(offset, bytes, lengths);
-		int boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
-
 		if ((lengths.length - TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue) % 2 != 0) {
 			throw new IllegalArgumentException("There needs to be an even number of lengths!");
 		}
@@ -82,6 +79,8 @@ public class MappedKeyValue extends KeyValue {
 			byte[] v = takeBytes(offset, bytes, lengths);
 			rangeResult.add(new KeyValue(k, v));
 		}
+		byte[] boundaryAndExistBytes = takeBytes(offset, bytes, lengths);
+		int boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
 		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult, boundaryAndExist);
 	}
 

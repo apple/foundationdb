@@ -38,7 +38,7 @@ public class MultiClientHelper implements BeforeAllCallback,AfterEachCallback{
 		 * Reads the cluster file lists from the ENV variable
 		 * FDB_CLUSTERS.
 		 */
-		String clusterFilesProp = System.getenv("FDB_CLUSTERS");
+		String clusterFilesProp = System.getenv("FDB_CLUSTER_FILE");
 		if (clusterFilesProp == null) {
 			throw new IllegalStateException("Missing FDB cluster connection file names");
 		}
