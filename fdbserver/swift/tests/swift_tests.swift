@@ -20,8 +20,6 @@
 
 import Flow
 import flow_swift
-import FlowFutureSupport
-import flow_swift_future
 
 // Don't do this at home;
 // We assume we run single-threadedly in Net2 in these tests,
