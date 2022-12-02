@@ -67,8 +67,8 @@ TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
 			UNREACHABLE();
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(),
-			          encodingType == AESEncryptionWithAuth ? error_code_encrypt_header_authtoken_mismatch
-			                                                : error_code_page_decoding_failed);
+			          (encodingType == AESEncryptionWithAuth) ? error_code_encrypt_header_authtoken_mismatch
+			                                                  : error_code_page_decoding_failed);
 		}
 	}
 	return Void();
