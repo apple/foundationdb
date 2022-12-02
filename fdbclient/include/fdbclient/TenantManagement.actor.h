@@ -658,6 +658,83 @@ Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGrou
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> lockTenantTransaction(Transaction tr, TenantLockState lockType, TenantName tenant, UID lockID) {
+	ASSERT(lockType != TenantLockState::UNLOCKED); // this management function can't be used to unlock a tenant
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	Optional<TenantMapEntry> mapEntryOptional = wait(TenantMetadata::tenantMap().get(tr, tenant));
+	if (!mapEntryOptional.present()) {
+		throw tenant_not_found();
+	}
+	TenantMapEntry mapEntry = mapEntryOptional.get();
+	ASSERT((mapEntry.tenantLockState != TenantLockState::UNLOCKED) == mapEntry.lockID.present());
+	if (mapEntry.lockID.present()) {
+		if (mapEntry.tenantLockState == lockType && mapEntry.lockID.get() == lockID) {
+			return Void();
+		} else {
+			throw tenant_locked();
+		}
+	}
+	mapEntry.tenantLockState = lockType;
+	mapEntry.lockID = lockID;
+	TenantMetadata::tenantMap().set(tr, tenant, mapEntry);
+	tr->addWriteConflictRange(prefixRange(mapEntry.prefix));
+	return Void();
+}
+
+ACTOR template <class DB>
+Future<Void> lockTenant(Reference<DB> db, TenantLockState lockType, TenantName tenant, UID lockID) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	loop {
+		try {
+			wait(lockTenantTransaction(tr, lockType, tenant, lockID));
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	};
+}
+
+ACTOR template <class Transaction>
+Future<Void> unlockTenantTransaction(Transaction tr, TenantName tenant, UID lockID) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	Optional<TenantMapEntry> mapEntryOpt = wait(TenantMetadata::tenantMap().get(tr, tenant));
+	if (!mapEntryOpt.present()) {
+		throw tenant_not_found();
+	}
+	auto mapEntry = mapEntryOpt.get();
+	ASSERT((mapEntry.tenantLockState != TenantLockState::UNLOCKED) == mapEntry.lockID.present());
+	if (mapEntry.tenantLockState == TenantLockState::UNLOCKED) {
+		return Void();
+	}
+	if (mapEntry.lockID.get() != lockID) {
+		throw tenant_locked();
+	}
+	mapEntry.lockID = Optional<UID>();
+	mapEntry.tenantLockState = TenantLockState::UNLOCKED;
+	TenantMetadata::instance().tenantMap.template set(tr, tenant, mapEntry);
+	return Void();
+}
+
+ACTOR template <class DB>
+Future<Void> unlockTenant(Reference<DB> db, TenantName tenant, UID lockID) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	loop {
+		try {
+			wait(unlockTenantTransaction(tr, tenant, lockID));
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	};
+}
+
 } // namespace TenantAPI
 
 #include "flow/unactorcompiler.h"

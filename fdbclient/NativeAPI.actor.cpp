@@ -6884,12 +6884,20 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::LOCK_AWARE:
 		validateOptionValueNotPresent(value);
+		if (!trState->readOptions.present()) {
+			trState->readOptions = ReadOptions();
+		}
+		trState->readOptions.get().lockAware = true;
 		trState->options.lockAware = true;
 		trState->options.readOnly = false;
 		break;
 
 	case FDBTransactionOptions::READ_LOCK_AWARE:
 		validateOptionValueNotPresent(value);
+		if (!trState->readOptions.present()) {
+			trState->readOptions = ReadOptions();
+		}
+		trState->readOptions.get().lockAware = true;
 		if (!trState->options.lockAware) {
 			trState->options.lockAware = true;
 			trState->options.readOnly = true;
@@ -7212,8 +7220,9 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 		                                                                  trState->options.priority,
 		                                                                  rep.version,
 		                                                                  trState->tenant()));
-	if (rep.locked && !trState->options.lockAware)
+	if (rep.locked && !trState->options.lockAware) {
 		throw database_locked();
+	}
 
 	++trState->cx->transactionReadVersionsCompleted;
 	switch (trState->options.priority) {

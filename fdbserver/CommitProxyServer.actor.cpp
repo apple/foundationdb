@@ -1194,6 +1194,9 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			if (result.isError()) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
 				trs[t].reply.sendError(result.getError());
+			} else if (result.get().present() && result.get().get().tenantLockState != TenantLockState::UNLOCKED &&
+			           !trs[t].isLockAware()) {
+				self->committed[t] = ConflictBatch::TransactionTenantLocked;
 			} else {
 				self->commitCount++;
 				applyMetadataMutations(trs[t].spanContext,
@@ -1961,6 +1964,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure) {
 			// We already sent the error
 			ASSERT(tr.reply.isSet());
+		} else if (self->committed[t] == ConflictBatch::TransactionTenantLocked) {
+			tr.reply.sendError(tenant_locked());
 		} else {
 			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
 			// through CommitID

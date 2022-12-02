@@ -138,6 +138,7 @@ bool canReplyWith(Error e) {
 	case error_code_change_feed_popped:
 	case error_code_tenant_name_required:
 	case error_code_unknown_tenant:
+	case error_code_tenant_locked:
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -2082,6 +2083,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
 		if (entry.present()) {
+			if (entry.get().tenantLockState == TenantLockState::LOCKED && !(req.options.present() && req.options.get().lockAware)) {
+				throw tenant_locked();
+			}
 			req.key = req.key.withPrefix(entry.get().prefix);
 		}
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -3990,6 +3994,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
+			if (tenantEntry.get().tenantLockState == TenantLockState::LOCKED && !(req.options.present() && req.options.get().lockAware)) {
+				throw tenant_locked();
+			}
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
 		}
@@ -5071,6 +5078,9 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(req.version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
+			if (tenantEntry.get().tenantLockState == TenantLockState::LOCKED && !(req.options.present() && req.options.get().lockAware)) {
+				throw tenant_locked();
+			}
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
 		}
@@ -5287,6 +5297,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
+			if (tenantEntry.get().tenantLockState == TenantLockState::LOCKED && !(req.options.present() && req.options.get().lockAware)) {
+				throw tenant_locked();
+			}
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
 		}
@@ -5499,6 +5512,9 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		if (tenantEntry.present()) {
+			if (tenantEntry.get().tenantLockState == TenantLockState::LOCKED && !(req.options.present() && req.options.get().lockAware)) {
+				throw tenant_locked();
+			}
 			req.sel.setKeyUnlimited(req.sel.getKey().withPrefix(tenantEntry.get().prefix, req.arena));
 		}
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -10633,6 +10649,9 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
 		wait(success(waitForVersionNoTooOld(self, req.version)));
 		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
 		if (entry.present()) {
+			if (entry.get().tenantLockState == TenantLockState::LOCKED && !(req.options.present() && req.options.get().lockAware)) {
+				throw tenant_locked();
+			}
 			req.key = req.key.withPrefix(entry.get().prefix);
 		}
 		stream.send(req);

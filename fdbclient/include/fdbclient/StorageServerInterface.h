@@ -346,6 +346,7 @@ struct WatchValueRequest {
 	Key key;
 	Optional<Value> value;
 	Version version;
+	Optional<ReadOptions> options;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<WatchValueReply> reply;
@@ -366,7 +367,7 @@ struct WatchValueRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo);
+		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo, options);
 	}
 };
 

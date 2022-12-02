@@ -2130,6 +2130,9 @@ ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
 		actualError = e;
 		// The test failed as expected
 		if (!expectedError.present() || actualError.code() == expectedError.get().code()) {
+			if (successFlag.present()) {
+				*(successFlag.get()) = false;
+			}
 			return Void();
 		}
 	}

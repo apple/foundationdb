@@ -83,6 +83,7 @@ struct TenantMapEntry {
 	Key prefix;
 	TenantState tenantState = TenantState::READY;
 	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
+	Optional<UID> lockID = Optional<UID>();
 	Optional<TenantGroupName> tenantGroup;
 	bool encrypted = false;
 	Optional<ClusterName> assignedCluster;
@@ -120,7 +121,8 @@ struct TenantMapEntry {
 		           assignedCluster,
 		           configurationSequenceNum,
 		           renamePair,
-		           error);
+		           error,
+		           lockID);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = idToPrefix(id);
