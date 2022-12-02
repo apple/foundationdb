@@ -23,6 +23,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // create a peek stream for cursor when it's possible

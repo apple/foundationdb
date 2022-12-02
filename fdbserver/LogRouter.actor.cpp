@@ -34,6 +34,7 @@
 #include "flow/Arena.h"
 #include "flow/Histogram.h"
 #include "flow/Trace.h"
+#include "flow/DebugTrace.h"
 #include "flow/network.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
