@@ -2450,8 +2450,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 			// hence, the process only waits for the master recruitment and not the full cluster recovery.
 			state bool noEncryptKeyServer = !self->db.serverInfo->get().encryptKeyProxy.present();
 			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::LOCKING_CSTATE) {
+			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId()) {
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
 			if (noEncryptKeyServer && self->db.serverInfo->get().encryptKeyProxy.present()) {

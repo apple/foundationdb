@@ -3450,7 +3450,14 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
 
-	wait(recoveredDiskFiles);
+	// When encryption is enabled, and if the worker is a storage node, it needs to get the cluster controller
+	// interface in order to further obtain the updated EncryptKeyProxy interface to open local storage engine.
+	// Waiting for recoveredDiskFiles here will prevent the worker receive cluster controller interface,
+	// and create a deadlock.
+	// TODO(yiwu): can we remove the wait even when encryption is not enabled?
+	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
+		wait(recoveredDiskFiles);
+	}
 
 	loop {
 		if (currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() &&
