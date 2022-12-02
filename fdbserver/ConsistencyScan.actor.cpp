@@ -423,8 +423,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	for (int k = 0; k < ranges.size(); k++)
 		shardOrder.push_back(k);
 	if (shuffleShards) {
-		uint32_t seed = sharedRandomNumber + repetitions;
-		DeterministicRandom sharedRandom(seed == 0 ? 1 : seed);
+		DeterministicRandom sharedRandom(sharedRandomNumber + repetitions);
 		sharedRandom.randomShuffle(shardOrder);
 	}
 
