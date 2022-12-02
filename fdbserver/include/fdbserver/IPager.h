@@ -230,13 +230,12 @@ public:
 	int rawSize() const { return bufferSize; }
 
 	// Encryption key used to encrypt a page. Different encoding types may use different structs to represent
-	// an encryption key, and EncryptionKeyRef is a union of these structs.
-	struct EncryptionKeyRef {
+	// an encryption key, and EncryptionKey is a union of these structs.
+	struct EncryptionKey {
 		TextAndHeaderCipherKeys aesKey; // For AESEncryption and AESEncryptionWithAuth
 		uint8_t xorKey; // For XOREncryption_TestOnly
 		uint8_t xorWith; // For XOREncryption_TestOnly
 	};
-	using EncryptionKey = Standalone<EncryptionKeyRef>;
 
 #pragma pack(push, 1)
 

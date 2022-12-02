@@ -174,7 +174,7 @@ public:
 		MAX,
 	};
 
-	explicit RandomEncryptionKeyProvider(EncryptionDomainMode mode) : mode(mode) {
+	explicit RandomEncryptionKeyProvider(EncryptionDomainMode mode = DISABLED) : mode(mode) {
 		ASSERT(mode < EncryptionDomainMode::MAX);
 		for (unsigned i = 0; i < NUM_CIPHER; i++) {
 			BlobCipherDetails cipherDetails;
@@ -186,7 +186,7 @@ public:
 	}
 	virtual ~RandomEncryptionKeyProvider() = default;
 
-	EncodingType expectedEncodingType() const override { return EncodingType::AESEncryption; }
+	EncodingType expectedEncodingType() const override { return encodingType; }
 
 	bool enableEncryption() const override { return true; }
 
