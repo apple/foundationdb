@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include <functional>
+#include <limits>
 #include <type_traits>
 #include <unordered_map>
 
@@ -4902,32 +4903,37 @@ bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyR
 		return false;
 	}
 
+	if (range.begin >= "\x80"_sr) {
+		return false;
+	}
+
 	int64_t beginId;
 	int64_t endId;
 
 	if (range.begin.size() >= 8) {
 		beginId = Tenant::prefixToId(range.begin.substr(0, 8));
 	} else {
-		KeyRef prefix = makeString(8);
+		Key prefix = makeString(8);
 		uint8_t* bytes = mutateString(prefix);
 		range.begin.copyTo(bytes);
 		memset(bytes + range.begin.size(), 0, 8 - range.begin.size());
 		beginId = Tenant::prefixToId(prefix);
 	}
 
-	if (range.end.size() >= 8) {
+	if (range.end >= "\x80"_sr) {
+		endId = std::numeric_limits<int64_t>::max();
+	} else if (range.end.size() >= 8) {
 		endId = Tenant::prefixToId(range.end.substr(0, 8));
+		if (range.end.size() == 8) {
+			// Don't include the end prefix in the tenant search if our range doesn't extend into that prefix
+			--endId;
+		}
 	} else {
-		KeyRef prefix = makeString(8);
+		Key prefix = makeString(8);
 		uint8_t* bytes = mutateString(prefix);
 		range.end.copyTo(bytes);
 		memset(bytes + range.end.size(), 0, 8 - range.end.size());
-		endId = Tenant::prefixToId(prefix);
-	}
-
-	// Don't include the end prefix in the tenant search if our range doesn't extend into that prefix
-	if (range.end.size() <= 8) {
-		--endId;
+		endId = Tenant::prefixToId(prefix) - 1;
 	}
 
 	auto beginItr = view.lower_bound(beginId);
@@ -5014,6 +5020,44 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	ASSERT(rangeIntersectsAnyTenant(tenantMap, KeyRangeRef(""_sr, "\xff"_sr), tenantMap.getLatestVersion()));
 	ASSERT(rangeIntersectsAnyTenant(
 	    tenantMap, KeyRangeRef(Tenant::idToPrefix(5).withSuffix("foo"_sr), "\xff"_sr), tenantMap.getLatestVersion()));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
+	VersionedMap<int64_t, TenantName> tenantMap;
+	std::set<Key> tenantPrefixes;
+	tenantMap.createNewVersion(1);
+	int numEntries = deterministicRandom()->randomInt(0, 20);
+	for (int i = 0; i < numEntries; ++i) {
+		int64_t tenantId = deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
+		tenantMap.insert(tenantId, ""_sr);
+		tenantPrefixes.insert(Tenant::idToPrefix(tenantId));
+	}
+
+	for (int i = 0; i < 1000; ++i) {
+		Standalone<StringRef> startBytes = makeString(deterministicRandom()->randomInt(0, 16));
+		Standalone<StringRef> endBytes = makeString(deterministicRandom()->randomInt(0, 16));
+
+		uint8_t* buf = mutateString(startBytes);
+		deterministicRandom()->randomBytes(buf, startBytes.size());
+
+		buf = mutateString(endBytes);
+		deterministicRandom()->randomBytes(buf, endBytes.size());
+
+		if (startBytes > endBytes) {
+			std::swap(startBytes, endBytes);
+		}
+
+		bool hasIntersection =
+		    rangeIntersectsAnyTenant(tenantMap, KeyRangeRef(startBytes, endBytes), tenantMap.getLatestVersion());
+
+		auto startItr = tenantPrefixes.lower_bound(startBytes);
+		auto endItr = tenantPrefixes.upper_bound(endBytes);
+
+		// If the iterators are the same, then that means there were no intersecting prefixes
+		ASSERT((startItr == endItr) != hasIntersection);
+	}
 
 	return Void();
 }
