@@ -26,7 +26,7 @@
 #include "swift_stream_support.h"
 #include "pthread.h"
 #include "unsafe_swift_compat.h"
-#include "SwiftModules/Flow"
+#include "SwiftModules/Flow_CheckedContinuation.h"
 #include <stdint.h>
 
 // ==== ----------------------------------------------------------------------------------------------------------------

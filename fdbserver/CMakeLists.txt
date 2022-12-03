@@ -63,7 +63,7 @@ target_include_directories(fdbserver_swift PRIVATE
 )
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
-target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
+target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
 
 # Ensure that C++ code in fdbserver can import Swift using a compatibility header.
 include(SwiftToCXXInterop)
@@ -74,7 +74,7 @@ add_swift_to_cxx_header_gen_target(
   "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/FDBServer_CxxTypeConformances.h"
    "${CMAKE_CURRENT_SOURCE_DIR}/swift_fdbserver_cxx_swift_value_conformance.swift"
    FLAGS
--Xcc -std=c++17 -enable-experimental-cxx-interop -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
+-Xcc -std=c++17 -enable-experimental-cxx-interop -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
 # Important: This is needed to avoid including header that depends on this generated header.
 -Xcc -DFOUNDATIONDB_FDBSERVER_STREAM_SUPPORT_H
 )
@@ -86,7 +86,6 @@ add_dependencies(fdbserver_swift fdbserver_swift_to_cxx_conformance_header)
 
 add_dependencies(fdbserver_swift flow_swift)
 add_dependencies(fdbserver_swift flow_actors)
-add_dependencies(fdbserver_swift flow_swift_future)
 add_dependencies(fdbserver_swift fdbclient_swift)
 add_dependencies(fdbserver_swift fdbserver_actors)
 # This does not work! (see rdar://99107402)
@@ -95,13 +94,11 @@ add_dependencies(fdbserver fdbserver_swift)
 
 # This does not work! (see rdar://99107402)
 # target_link_libraries(fdbserver PRIVATE flow_swift fdbserver_swift)
-add_dependencies(fdbserver flow_swift flow_swift_future fdbclient_swift fdbserver_swift)
+add_dependencies(fdbserver flow_swift fdbclient_swift fdbserver_swift)
 add_custom_target(show_fdbserver_swift_objs COMMAND ${CMAKE_COMMAND} -E echo "$<TARGET_OBJECTS:fdbserver_swift>")
 
 target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:flow_swift>")
-target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:flow_swift_future>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:flow_swift>")
-target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:flow_swift_future>")
 
 target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:fdbclient_swift>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbclient_swift>")

@@ -20,8 +20,6 @@
 
 import Flow
 import flow_swift
-import FlowFutureSupport
-import flow_swift_future
 
 struct StreamTests: SimpleSwiftTestSuite {
     var tests: [TestCase] {
