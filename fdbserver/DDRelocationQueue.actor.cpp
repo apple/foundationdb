@@ -173,11 +173,19 @@ struct RelocateData {
 	bool isRestore() const { return this->dataMove != nullptr; }
 
 	// Note: standard library set  expect a Compare operator here, and equiv(a,b) is equivalent to !comp(a, b) &&
-	// !comp(b, a). So the operators == and != below is not used by set!
+	// !comp(b, a). So the operators == and != below is not used by std::set!
 	bool operator>(const RelocateData& rhs) const {
-		return priority != rhs.priority
-		           ? priority > rhs.priority
-		           : (startTime != rhs.startTime ? startTime < rhs.startTime : randomId > rhs.randomId);
+		if (priority != rhs.priority)
+			return priority > rhs.priority;
+		if (startTime != rhs.startTime)
+			return startTime < rhs.startTime;
+		if (randomId != rhs.randomId)
+			return randomId > rhs.randomId;
+		if (keys.begin != rhs.keys.begin)
+			return keys.begin > rhs.keys.begin;
+		if (keys.end != rhs.keys.end)
+			return keys.end > rhs.keys.end;
+		return false;
 	}
 
 	bool operator==(const RelocateData& rhs) const {
