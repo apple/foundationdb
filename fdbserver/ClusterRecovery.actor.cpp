@@ -435,7 +435,7 @@ namespace {
 EncryptionAtRestMode getEncryptionAtRest() {
 	// TODO: Use db-config encryption config to determine cluster encryption status
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		return EncryptionAtRestMode(EncryptionAtRestMode::Mode::AES_256_CTR);
+		return EncryptionAtRestMode(EncryptionAtRestMode::Mode::DOMAIN_AWARE);
 	} else {
 		return EncryptionAtRestMode();
 	}

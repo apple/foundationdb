@@ -159,8 +159,7 @@ bool canReplyWith(Error e) {
 
 #define PERSIST_PREFIX "\xff\xff"
 
-FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
-FDB_DEFINE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+FDB_BOOLEAN_PARAM(UnlimitedCommitBytes);
 
 // Immutable
 static const KeyValueRef persistFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/4"_sr);
@@ -786,7 +785,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	TenantMap tenantMap;
-	Reference<TenantPrefixIndex> tenantPrefixIndex;
+	TenantPrefixIndex tenantPrefixIndex;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -805,7 +804,7 @@ public:
 		FetchKeysHistograms()
 		  : latency(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 		                                    FETCH_KEYS_LATENCY_HISTOGRAM,
-		                                    Histogram::Unit::microseconds)),
+		                                    Histogram::Unit::milliseconds)),
 		    bytes(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 		                                  FETCH_KEYS_BYTES_HISTOGRAM,
 		                                  Histogram::Unit::bytes)),
@@ -1369,31 +1368,31 @@ public:
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
 	              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
-	  : tenantPrefixIndex(makeReference<TenantPrefixIndex>()), encryptionKeyProvider(encryptionKeyProvider),
-	    shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
-	                                                                               Histogram::Unit::microseconds)),
+	  : encryptionKeyProvider(encryptionKeyProvider), shardAware(false),
+	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                            Histogram::Unit::milliseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
-	                                                          Histogram::Unit::microseconds)),
+	                                                          Histogram::Unit::milliseconds)),
 	    eagerReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                       EAGER_READS_LATENCY_HISTOGRAM,
-	                                                       Histogram::Unit::microseconds)),
+	                                                       Histogram::Unit::milliseconds)),
 	    fetchKeysPTreeUpdatesLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                  FETCH_KEYS_PTREE_UPDATES_LATENCY_HISTOGRAM,
-	                                                                  Histogram::Unit::microseconds)),
+	                                                                  Histogram::Unit::milliseconds)),
 	    tLogMsgsPTreeUpdatesLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                 TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM,
-	                                                                 Histogram::Unit::microseconds)),
+	                                                                 Histogram::Unit::milliseconds)),
 	    storageUpdatesDurableLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                  STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM,
-	                                                                  Histogram::Unit::microseconds)),
+	                                                                  Histogram::Unit::milliseconds)),
 	    storageCommitLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          STORAGE_COMMIT_LATENCY_HISTOGRAM,
-	                                                          Histogram::Unit::microseconds)),
+	                                                          Histogram::Unit::milliseconds)),
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
-	                                                                   Histogram::Unit::microseconds)),
+	                                                                   Histogram::Unit::milliseconds)),
 	    readRangeBytesReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                            SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM,
 	                                                            Histogram::Unit::bytes)),
@@ -2355,15 +2354,22 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 
 	TraceEvent(SevDebug, "ServeGetCheckpointVersionSatisfied", self->thisServerID)
 	    .detail("Version", req.version)
-	    .detail("Range", req.range.toString())
+	    .detail("Ranges", describe(req.ranges))
 	    .detail("Format", static_cast<int>(req.format));
+	ASSERT(req.ranges.size() == 1);
+	for (const auto& range : req.ranges) {
+		if (!self->isReadable(range)) {
+			req.reply.sendError(wrong_shard_server());
+			return Void();
+		}
+	}
 
 	try {
 		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
 		for (; it != self->checkpoints.end(); ++it) {
 			const CheckpointMetaData& md = it->second;
-			if (md.version == req.version && md.format == req.format && !md.ranges.empty() &&
-			    md.ranges.front().contains(req.range) && md.getState() == CheckpointMetaData::Complete) {
+			if (md.version == req.version && md.format == req.format && req.actionId == md.actionId &&
+			    md.hasRanges(req.ranges) && md.getState() == CheckpointMetaData::Complete) {
 				req.reply.send(md);
 				TraceEvent(SevDebug, "ServeGetCheckpointEnd", self->thisServerID).detail("Checkpoint", md.toString());
 				break;
@@ -2412,11 +2418,12 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
-	state ICheckpointReader* reader = nullptr;
-	state int64_t totalSize = 0;
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
+
+	state ICheckpointReader* reader = nullptr;
+	state int64_t totalSize = 0;
 
 	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
 
@@ -5111,7 +5118,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				throw tenant_name_required();
 			}
 
-			if (rangeIntersectsAnyTenant(*(data->tenantPrefixIndex), KeyRangeRef(begin, end), req.version)) {
+			if (rangeIntersectsAnyTenant(data->tenantPrefixIndex, KeyRangeRef(begin, end), req.version)) {
 				throw tenant_name_required();
 			}
 		}
@@ -7140,7 +7147,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				hold = tryGetRangeFromBlob(results, &tr, keys, fetchVersion, data->blobConn);
+				KeyRange range = wait(getRestoringRange(data->cx, keys));
+				hold = tryGetRangeFromBlob(results, &tr, range, fetchVersion, data->blobConn);
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 			}
@@ -8616,11 +8624,11 @@ private:
 bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex->createNewVersion(version);
+		tenantPrefixIndex.createNewVersion(version);
 
 		tenantMap.insert(tenantName, tenantEntry);
 
-		auto view = tenantPrefixIndex->at(version);
+		auto view = tenantPrefixIndex.at(version);
 		auto itr = view.find(tenantEntry.prefix);
 		TenantNameUniqueSet nameSet;
 		if (itr != view.end()) {
@@ -8628,7 +8636,7 @@ bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenant
 		}
 
 		nameSet.insert(tenantName);
-		tenantPrefixIndex->insert(tenantEntry.prefix, nameSet);
+		tenantPrefixIndex.insert(tenantEntry.prefix, nameSet);
 
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
 		return true;
@@ -8648,20 +8656,20 @@ void StorageServer::insertTenant(TenantNameRef tenantName, ValueRef value, Versi
 void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex->createNewVersion(version);
+		tenantPrefixIndex.createNewVersion(version);
 
 		auto view = tenantMap.at(version);
 		for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
-			auto indexView = tenantPrefixIndex->at(version);
+			auto indexView = tenantPrefixIndex.at(version);
 			// Trigger any watches on the prefix associated with the tenant.
 			watches.triggerRange(itr->prefix, strinc(itr->prefix));
 			auto indexItr = indexView.find(itr->prefix);
 			ASSERT(indexItr != indexView.end());
 			TenantNameUniqueSet nameSet = *indexItr;
 			if (nameSet.remove(itr.key())) {
-				tenantPrefixIndex->erase(itr->prefix);
+				tenantPrefixIndex.erase(itr->prefix);
 			} else {
-				tenantPrefixIndex->insert(itr->prefix, nameSet);
+				tenantPrefixIndex.insert(itr->prefix, nameSet);
 			}
 			TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
 		}
@@ -9201,7 +9209,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 }
 
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
-	ASSERT(metaData.ssID == data->thisServerID && !metaData.ranges.empty());
+	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
+	       !metaData.ranges.empty());
 	const CheckpointRequest req(metaData.version,
 	                            metaData.ranges,
 	                            static_cast<CheckpointFormat>(metaData.format),
@@ -9209,10 +9218,10 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
 	state CheckpointMetaData checkpointResult;
 	try {
-		state CheckpointMetaData res = wait(data->storage.checkpoint(req));
-		checkpointResult = res;
-		checkpointResult.ssID = data->thisServerID;
-		ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
+		wait(store(checkpointResult, data->storage.checkpoint(req)));
+		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
+		checkpointResult.src.push_back(data->thisServerID);
+		checkpointResult.actionId = metaData.actionId;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
@@ -9348,7 +9357,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
-				data->tenantPrefixIndex->createNewVersion(newOldestVersion);
+				data->tenantPrefixIndex.createNewVersion(newOldestVersion);
 			}
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
 			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
@@ -9356,7 +9365,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			Future<Void> finishedForgetting =
 			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
 			    data->tenantMap.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
-			    data->tenantPrefixIndex->forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
+			    data->tenantPrefixIndex.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
 			data->oldestVersion.set(newOldestVersion);
 			wait(finishedForgetting);
 			wait(yield(TaskPriority::UpdateStorage));
@@ -9468,7 +9477,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
 		}
 
-		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
+		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
@@ -10165,7 +10174,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 
 		data->tenantMap.insert(tenantName, tenantEntry);
 
-		auto view = data->tenantPrefixIndex->at(version);
+		auto view = data->tenantPrefixIndex.at(version);
 		auto itr = view.find(tenantEntry.prefix);
 		TenantNameUniqueSet nameSet;
 		if (itr != view.end()) {
@@ -10173,7 +10182,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		}
 
 		nameSet.insert(tenantName);
-		data->tenantPrefixIndex->insert(tenantEntry.prefix, nameSet);
+		data->tenantPrefixIndex.insert(tenantEntry.prefix, nameSet);
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
@@ -10916,12 +10925,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					doUpdate = update(self, &updateReceived);
 			}
 			when(GetCheckpointRequest req = waitNext(ssi.checkpoint.getFuture())) {
-				if (!self->isReadable(req.range)) {
-					req.reply.sendError(wrong_shard_server());
-					continue;
-				} else {
-					self->actors.add(getCheckpointQ(self, req));
-				}
+				self->actors.add(getCheckpointQ(self, req));
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
@@ -11275,7 +11279,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			self.tag = seedTag;
 		}
 
-		self.encryptionKeyProvider->setTenantPrefixIndex(self.tenantPrefixIndex);
 		self.storage.makeNewStorageServerDurable(self.shardAware);
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
@@ -11357,13 +11360,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			if (recovered.canBeSet())
 				recovered.send(Void());
 			return Void();
-		}
-		// Pass a reference of tenantPrefixIndex to the storage engine to support per-tenant data encryption,
-		// after the tenant map is recovered in restoreDurableState. In case of a storage server reboot,
-		// it is possible that the storage engine is still holding a pre-reboot tenantPrefixIndex, and use that
-		// for its own recovery, before we set the tenantPrefixIndex here.
-		if (self.encryptionKeyProvider.isValid()) {
-			self.encryptionKeyProvider->setTenantPrefixIndex(self.tenantPrefixIndex);
 		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 

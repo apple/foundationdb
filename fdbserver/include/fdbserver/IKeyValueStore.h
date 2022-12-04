@@ -105,6 +105,14 @@ public:
 	// Restore from a checkpoint.
 	virtual Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { throw not_implemented(); }
 
+	// Same as above, with a target shardId, and a list of target ranges, ranges must be a subset of the checkpoint
+	// ranges.
+	virtual Future<Void> restore(const std::string& shardId,
+	                             const std::vector<KeyRange>& ranges,
+	                             const std::vector<CheckpointMetaData>& checkpoints) {
+		throw not_implemented();
+	}
+
 	// Delete a checkpoint.
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
