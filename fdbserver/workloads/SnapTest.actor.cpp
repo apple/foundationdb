@@ -45,6 +45,7 @@ public: // variables
 	bool skipCheck = false; // disable check if the exec fails
 	int retryLimit; // -1 if no limit
 	bool snapSucceeded = false; // When taking snapshot, tracks snapshot success
+	bool attemptDuplicateSnapshot = false;
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
@@ -59,6 +60,12 @@ public: // ctor & dtor
 		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		retryLimit = getOption(options, "retryLimit"_sr, 5);
 		g_simulator->allowLogSetKills = false;
+		{
+			double duplicateSnapshotProbability = getOption(options, "duplicateSnapshotProbability"_sr, 0.1);
+			if (deterministicRandom()->random01() < duplicateSnapshotProbability) {
+				attemptDuplicateSnapshot = true;
+			}
+		}
 	}
 
 public: // workload functions
@@ -127,6 +134,7 @@ public: // workload functions
 	ACTOR Future<Void> _start(Database cx, SnapTestWorkload* self) {
 		state Transaction tr(cx);
 		state bool snapFailed = false;
+		state Future<Void> duplicateSnapStatus;
 
 		if (self->testID == 0) {
 			// create even keys before the snapshot
@@ -142,8 +150,13 @@ public: // workload functions
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
-					StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
-					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					state StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
+
+					state Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					if (self->attemptDuplicateSnapshot) {
+						wait(delay(deterministicRandom()->random01()));
+						duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
+					}
 					wait(status);
 					break;
 				} catch (Error& e) {
