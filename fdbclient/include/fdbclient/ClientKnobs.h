@@ -199,7 +199,6 @@ public:
 	int32_t DEFAULT_MAX_GRV_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
-	bool DELETE_NATIVE_LIB_AFTER_LOADING;
 
 	double GLOBAL_CONFIG_REFRESH_BACKOFF;
 	double GLOBAL_CONFIG_REFRESH_MAX_BACKOFF;
@@ -235,6 +234,7 @@ public:
 	int BLOBSTORE_CONCURRENT_LISTS;
 	int BLOBSTORE_CONCURRENT_WRITES_PER_FILE;
 	int BLOBSTORE_CONCURRENT_READS_PER_FILE;
+	int BLOBSTORE_ENABLE_READ_CACHE;
 	int BLOBSTORE_READ_BLOCK_SIZE;
 	int BLOBSTORE_READ_AHEAD_BLOCKS;
 	int BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
@@ -260,10 +260,9 @@ public:
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
-	int64_t WRITE_COST_BYTE_FACTOR; // Used to round up the cost of write operations
-	int64_t READ_COST_BYTE_FACTOR; // Used to round up the cost of read operations
-	double PROXY_MAX_TAG_THROTTLE_DURATION; // Maximum duration that a transaction can be tag throttled by proxy before
-	                                        // being rejected
+	int64_t TAG_THROTTLING_PAGE_SIZE; // Used to round up the cost of operations
+	// Cost multiplier for writes (because write operations are more expensive than reads):
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -290,6 +289,7 @@ public:
 	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
 	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
+	bool CLIENT_ENABLE_USING_CLUSTER_ID_KEY;
 
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;

@@ -1,5 +1,5 @@
 /*
- * GrvProxyTransactionTagThrottler.h
+ * GrvProxyTagThrottler.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,8 +23,9 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/GrvTransactionRateInfo.h"
+#include "fdbserver/LatencyBandsMap.h"
 
-// GrvProxyTransactionTagThrottler is used to throttle GetReadVersionRequests based on tag quotas
+// GrvProxyTagThrottler is used to throttle GetReadVersionRequests based on tag quotas
 // before they're pushed into priority-partitioned queues.
 //
 // A GrvTransactionRateInfo object and a request queue are maintained for each tag.
@@ -33,7 +34,7 @@
 // Between each set of waits, releaseTransactions is run, releasing queued transactions
 // that have passed the tag throttling stage. Transactions that are not yet ready
 // are requeued during releaseTransactions.
-class GrvProxyTransactionTagThrottler {
+class GrvProxyTagThrottler {
 	class DelayedRequest {
 		static uint64_t lastSequenceNumber;
 		double startTime;
@@ -45,8 +46,8 @@ class GrvProxyTransactionTagThrottler {
 		explicit DelayedRequest(GetReadVersionRequest const& req)
 		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
 
-		void updateProxyTagThrottledDuration();
-		bool isMaxThrottled() const;
+		void updateProxyTagThrottledDuration(LatencyBandsMap&);
+		bool isMaxThrottled(double maxThrottleDuration) const;
 	};
 
 	struct TagQueue {
@@ -57,14 +58,21 @@ class GrvProxyTransactionTagThrottler {
 		explicit TagQueue(double rate) : rateInfo(rate) {}
 
 		void setRate(double rate);
-		bool isMaxThrottled() const;
-		void rejectRequests();
+		bool isMaxThrottled(double maxThrottleDuration) const;
+		void rejectRequests(LatencyBandsMap&);
+		void endReleaseWindow(int64_t numStarted, double elapsed);
 	};
 
 	// Track the budgets for each tag
 	TransactionTagMap<TagQueue> queues;
+	double maxThrottleDuration;
+
+	// Track latency bands for each tag
+	LatencyBandsMap latencyBandsMap;
 
 public:
+	explicit GrvProxyTagThrottler(double maxThrottleDuration);
+
 	// Called with rates received from ratekeeper
 	void updateRates(TransactionTagMap<double> const& newRates);
 
@@ -77,7 +85,9 @@ public:
 
 	void addRequest(GetReadVersionRequest const&);
 
+	void addLatencyBandThreshold(double value);
+
 public: // testing
 	// Returns number of tags tracked
-	uint32_t size();
+	uint32_t size() const;
 };

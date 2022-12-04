@@ -140,7 +140,7 @@ public:
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
-	bool isSet() { return sav->isSet(); }
+	bool isSet() const { return sav->isSet(); }
 	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
@@ -515,7 +515,7 @@ public:
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
-	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+	bool connected() const { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
 
 	Future<Void> onConnected() {
 		if (connected()) {
@@ -734,6 +734,7 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) const {
+		// Ensure the same request isn't used multiple times
 		ASSERT(!getReplyPromise(value).getFuture().isReady());
 		if (queue->isRemoteEndpoint()) {
 			return sendCanceler(getReplyPromise(value),

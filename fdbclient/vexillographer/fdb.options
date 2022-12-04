@@ -120,6 +120,12 @@ description is not currently required but encouraged.
     <Option name="future_version_client_library" code="66"
             paramType="String" paramDescription="path to client library"
             description="Adds an external client library to be used with a future version protocol. This option can be used testing purposes only!" />
+    <Option name="retain_client_library_copies" code="67"
+            description="Retain temporary external client library copies that are created for enabling multi-threading." />
+    <Option name="ignore_external_client_failures" code="68"
+            description="Ignore the failure to initialize some of the external clients" />
+    <Option name="fail_incompatible_client" code="69"
+            description="Fail with an error if there is no client matching the server version the client is connecting to" />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
@@ -249,6 +255,8 @@ description is not currently required but encouraged.
             description="Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access."/>
     <Option name="raw_access" code="303"
             description="Allows this transaction to access the raw key-space when tenant mode is on."/>
+    <Option name="bypass_storage_quota" code="304"
+            description="Allows this transaction to bypass storage quota enforcement. Should only be used for transactions that directly or indirectly decrease the size of the tenant group's data."/>
     <Option name="debug_dump" code="400" 
             hidden="true" />
     <Option name="debug_retry_logging" code="401" paramType="String" paramDescription="Optional transaction name" />

@@ -38,7 +38,7 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include <cstddef>
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 
 struct ICounter {
 	// All counters have a name and value
@@ -182,47 +182,12 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 	new SpecialCounter<F>(collection, name, std::move(f));
 }
 
+FDB_DECLARE_BOOLEAN_PARAM(Filtered);
+
 class LatencyBands {
-public:
-	LatencyBands(std::string name, UID id, double loggingInterval)
-	  : name(name), id(id), loggingInterval(loggingInterval) {}
-
-	void addThreshold(double value) {
-		if (value > 0 && bands.count(value) == 0) {
-			if (bands.size() == 0) {
-				ASSERT(!cc && !filteredCount);
-				cc = std::make_unique<CounterCollection>(name, id.toString());
-				logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name);
-				filteredCount = std::make_unique<Counter>("Filtered", *cc);
-				insertBand(std::numeric_limits<double>::infinity());
-			}
-
-			insertBand(value);
-		}
-	}
-
-	void addMeasurement(double measurement, bool filtered = false) {
-		if (filtered && filteredCount) {
-			++(*filteredCount);
-		} else if (bands.size() > 0) {
-			auto itr = bands.upper_bound(measurement);
-			ASSERT(itr != bands.end());
-			++(*itr->second);
-		}
-	}
-
-	void clearBands() {
-		logger = Void();
-		bands.clear();
-		filteredCount.reset();
-		cc.reset();
-	}
-
-	~LatencyBands() { clearBands(); }
-
-private:
 	std::map<double, std::unique_ptr<Counter>> bands;
 	std::unique_ptr<Counter> filteredCount;
+	std::function<void(TraceEvent&)> decorator;
 
 	std::string name;
 	UID id;
@@ -231,47 +196,64 @@ private:
 	std::unique_ptr<CounterCollection> cc;
 	Future<Void> logger;
 
-	void insertBand(double value) {
-		bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
-	}
+	void insertBand(double value);
+
+public:
+	LatencyBands(
+	    std::string const& name,
+	    UID id,
+	    double loggingInterval,
+	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
+
+	LatencyBands(LatencyBands&&) = default;
+	LatencyBands& operator=(LatencyBands&&) = default;
+
+	void addThreshold(double value);
+	void addMeasurement(double measurement, int count = 1, Filtered = Filtered::False);
+	void clearBands();
+	~LatencyBands();
 };
 
 class LatencySample {
 public:
-	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
-	  : name(name), id(id), sampleStart(now()), sample(sampleSize),
+	LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
+	  : name(name), id(id), sampleStart(now()), sketch(accuracy),
 	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
+		assert(accuracy > 0);
+		if (accuracy <= 0) {
+			fmt::print(stderr, "ERROR: LatencySample {} has invalid accuracy ({})", name, accuracy);
+		}
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 
-	void addMeasurement(double measurement) { sample.addSample(measurement); }
+	void addMeasurement(double measurement) { sketch.addSample(measurement); }
 
 private:
 	std::string name;
 	UID id;
 	double sampleStart;
 
-	ContinuousSample<double> sample;
+	DDSketch<double> sketch;
 	Future<Void> logger;
 
 	Reference<EventCacheHolder> latencySampleEventHolder;
 
 	void logSample() {
 		TraceEvent(name.c_str(), id)
-		    .detail("Count", sample.getPopulationSize())
+		    .detail("Count", sketch.getPopulationSize())
 		    .detail("Elapsed", now() - sampleStart)
-		    .detail("Min", sample.min())
-		    .detail("Max", sample.max())
-		    .detail("Mean", sample.mean())
-		    .detail("Median", sample.median())
-		    .detail("P25", sample.percentile(0.25))
-		    .detail("P90", sample.percentile(0.9))
-		    .detail("P95", sample.percentile(0.95))
-		    .detail("P99", sample.percentile(0.99))
-		    .detail("P99.9", sample.percentile(0.999))
+		    .detail("Min", sketch.min())
+		    .detail("Max", sketch.max())
+		    .detail("Mean", sketch.mean())
+		    .detail("Median", sketch.median())
+		    .detail("P25", sketch.percentile(0.25))
+		    .detail("P90", sketch.percentile(0.9))
+		    .detail("P95", sketch.percentile(0.95))
+		    .detail("P99", sketch.percentile(0.99))
+		    .detail("P99.9", sketch.percentile(0.999))
 		    .trackLatest(latencySampleEventHolder->trackingKey);
 
-		sample.clear();
+		sketch.clear();
 		sampleStart = now();
 	}
 };

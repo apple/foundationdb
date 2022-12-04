@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -33,8 +33,8 @@ struct FileSystemWorkload : TestWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter queries, writes;
-	ContinuousSample<double> latencies;
-	ContinuousSample<double> writeLatencies;
+	DDSketch<double> latencies;
+	DDSketch<double> writeLatencies;
 
 	class FileSystemOp {
 	public:
@@ -44,7 +44,7 @@ struct FileSystemWorkload : TestWorkload {
 	};
 
 	FileSystemWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), queries("Queries"), writes("Latency"), latencies(2500), writeLatencies(1000) {
+	  : TestWorkload(wcx), queries("Queries"), writes("Latency"), latencies(), writeLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		double allowedLatency = getOption(options, "allowedLatency"_sr, 0.250);

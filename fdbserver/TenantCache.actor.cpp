@@ -124,22 +124,56 @@ public:
 
 		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL;
 		state double lastTenantListFetchTime = now();
+		state double lastTraceTime = 0;
 
 		loop {
 			state double fetchStartTime = now();
-			state std::vector<TenantName> tenants = tenantCache->getTenantList();
+
+			state bool toTrace = false;
+			if (fetchStartTime - lastTraceTime > SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL) {
+				toTrace = true;
+				lastTraceTime = fetchStartTime;
+			}
+
+			state std::vector<TenantGroupName> groups;
+			for (const auto& [group, storage] : tenantCache->tenantStorageMap) {
+				groups.push_back(group);
+			}
 			state int i;
-			for (i = 0; i < tenants.size(); i++) {
-				state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenants[i]);
-				loop {
-					try {
-						state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-						tenantCache->tenantStorageMap[tenants[i]].usage = size;
-						break;
-					} catch (Error& e) {
-						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
-						wait(tr.onError(e));
+			for (i = 0; i < groups.size(); i++) {
+				state TenantGroupName group = groups[i];
+				state int64_t usage = 0;
+				// `tenants` needs to be a copy so that the erase (below) or inserts/erases from other
+				// functions (when this actor yields) do not interfere with the iteration
+				state std::unordered_set<TenantName> tenants = tenantCache->tenantStorageMap[group].tenants;
+				state std::unordered_set<TenantName>::iterator iter = tenants.begin();
+				for (; iter != tenants.end(); iter++) {
+					state TenantName tenant = *iter;
+					state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenant);
+					loop {
+						try {
+							state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
+							usage += size;
+							break;
+						} catch (Error& e) {
+							if (e.code() == error_code_tenant_not_found) {
+								tenantCache->tenantStorageMap[group].tenants.erase(tenant);
+								break;
+							} else {
+								TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
+								wait(tr.onError(e));
+							}
+						}
 					}
+				}
+				tenantCache->tenantStorageMap[group].usage = usage;
+
+				if (toTrace) {
+					// Trace the storage used by all tenant groups for visibility.
+					TraceEvent(SevInfo, "StorageUsageUpdated", tenantCache->id())
+					    .detail("TenantGroup", group)
+					    .detail("Quota", tenantCache->tenantStorageMap[group].quota)
+					    .detail("Usage", tenantCache->tenantStorageMap[group].usage);
 				}
 			}
 
@@ -157,22 +191,24 @@ public:
 		state Transaction tr(tenantCache->dbcx());
 
 		loop {
-			loop {
-				try {
-					state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-					for (auto const kv : currentQuotas) {
-						TenantName const tenant = kv.key.removePrefix(storageQuotaPrefix);
-						int64_t const quota = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
-						tenantCache->tenantStorageMap[tenant].quota = quota;
-					}
-					tr.reset();
-					break;
-				} catch (Error& e) {
-					TraceEvent("TenantCacheGetStorageQuotaError", tenantCache->id()).error(e);
-					wait(tr.onError(e));
+			try {
+				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+				// Reset the quota for all groups; this essentially sets the quota to `max` for groups where the
+				// quota might have been cleared (i.e., groups that will not be returned in `getRange` request above).
+				for (auto& [group, storage] : tenantCache->tenantStorageMap) {
+					storage.quota = std::numeric_limits<int64_t>::max();
 				}
+				for (const auto kv : currentQuotas) {
+					const TenantGroupName group = kv.key.removePrefix(storageQuotaPrefix);
+					const int64_t quota = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+					tenantCache->tenantStorageMap[group].quota = quota;
+				}
+				tr.reset();
+				wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
+			} catch (Error& e) {
+				TraceEvent("TenantCacheGetStorageQuotaError", tenantCache->id()).error(e);
+				wait(tr.onError(e));
 			}
-			wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
 		}
 	}
 };
@@ -184,6 +220,10 @@ void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	TenantInfo tenantInfo(tenantName, Optional<Standalone<StringRef>>(), tenant.id);
 	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix);
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
+
+	if (tenant.tenantGroup.present()) {
+		tenantStorageMap[tenant.tenantGroup.get()].tenants.insert(tenantName);
+	}
 }
 
 void TenantCache::startRefresh() {
@@ -283,14 +323,14 @@ Optional<Reference<TCTenantInfo>> TenantCache::tenantOwning(KeyRef key) const {
 	return it->value;
 }
 
-std::vector<TenantName> TenantCache::getTenantsOverQuota() const {
-	std::vector<TenantName> tenants;
-	for (const auto& [tenant, storage] : tenantStorageMap) {
+std::unordered_set<TenantName> TenantCache::getTenantsOverQuota() const {
+	std::unordered_set<TenantName> tenantsOverQuota;
+	for (const auto& [tenantGroup, storage] : tenantStorageMap) {
 		if (storage.usage > storage.quota) {
-			tenants.push_back(tenant);
+			tenantsOverQuota.insert(storage.tenants.begin(), storage.tenants.end());
 		}
 	}
-	return tenants;
+	return tenantsOverQuota;
 }
 
 Future<Void> TenantCache::monitorTenantMap() {

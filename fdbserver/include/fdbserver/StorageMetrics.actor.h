@@ -44,6 +44,8 @@ const StringRef TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM = "TLogMsgsPTreeUpdate
 const StringRef STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM = "StorageUpdatesDurableLatency"_sr;
 const StringRef STORAGE_COMMIT_LATENCY_HISTOGRAM = "StorageCommitLatency"_sr;
 const StringRef SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = "SSDurableVersionUpdateLatency"_sr;
+const StringRef SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM = "SSReadRangeBytesReturned"_sr;
+const StringRef SS_READ_RANGE_BYTES_LIMIT_HISTOGRAM = "SSReadRangeBytesLimit"_sr;
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
@@ -77,14 +79,14 @@ private:
 struct StorageServerMetrics {
 	KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>> waitMetricsMap;
 	StorageMetricSample byteSample;
-	TransientStorageMetricSample iopsSample,
-	    bandwidthSample; // FIXME: iops and bandwidth calculations are not effectively tested, since they aren't
-	                     // currently used by data distribution
+
+	// FIXME: iops is not effectively tested, and is not used by data distribution
+	TransientStorageMetricSample iopsSample, bytesWriteSample;
 	TransientStorageMetricSample bytesReadSample;
 
 	StorageServerMetrics()
 	  : byteSample(0), iopsSample(SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE),
-	    bandwidthSample(SERVER_KNOBS->BANDWIDTH_UNITS_PER_SAMPLE),
+	    bytesWriteSample(SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE),
 	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE) {}
 
 	StorageMetrics getMetrics(KeyRangeRef const& keys) const;
@@ -156,7 +158,10 @@ struct ByteSampleInfo {
 
 // Determines whether a key-value pair should be included in a byte sample
 // Also returns size information about the sample
-ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
+ByteSampleInfo isKeyValueInSample(KeyRef key, int64_t totalKvSize);
+inline ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
+	return isKeyValueInSample(keyValue.key, keyValue.key.size() + keyValue.value.size());
+}
 
 class IStorageMetricsService {
 public:
@@ -187,7 +192,7 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 		choose {
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				if (!req.tenantInfo.present() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
+					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()", probe::decoration::rare);
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->addActor(self->waitMetricsTenantAware(req));
@@ -227,6 +232,5 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 		}
 	}
 }
-
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_STORAGEMETRICS_H

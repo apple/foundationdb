@@ -21,7 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -82,7 +82,8 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		       code == error_code_grv_proxy_memory_limit_exceeded ||
 		       code == error_code_commit_proxy_memory_limit_exceeded ||
 		       code == error_code_batch_transaction_throttled || code == error_code_process_behind ||
-		       code == error_code_tag_throttled || code == error_code_unknown_tenant;
+		       code == error_code_tag_throttled || code == error_code_unknown_tenant ||
+		       code == error_code_proxy_tag_throttled;
 	}
 	return false;
 }
@@ -903,6 +904,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_commit(FDBTransaction* tr) {
 
 extern "C" DLLEXPORT fdb_error_t fdb_transaction_get_committed_version(FDBTransaction* tr, int64_t* out_version) {
 	CATCH_AND_RETURN(*out_version = TXN(tr)->getCommittedVersion(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr) {
+	return (FDBFuture*)TXN(tr)->getTotalCost().extractPtr();
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {

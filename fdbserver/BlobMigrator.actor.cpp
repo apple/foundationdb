@@ -17,13 +17,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#include "fdbserver/BlobMigratorInterface.h"
-#include "fdbserver/Knobs.h"
+#include <algorithm>
+#include <string>
+#include "flow/network.h"
+#include "flow/flow.h"
 #include "flow/ActorCollection.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
-#include "flow/flow.h"
+#include "flow/Platform.h"
+#include "flow/Trace.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/FDBTypes.h"
@@ -31,14 +34,14 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/BlobMigratorInterface.h"
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // has to be last include
-#include "flow/network.h"
-#include <algorithm>
-#include <string>
 
 #define ENABLE_DEBUG_MG true
 
@@ -63,21 +66,48 @@ public:
 
 	// Start migration
 	ACTOR static Future<Void> start(Reference<BlobMigrator> self) {
-		if (!isFullRestoreMode()) {
-			return Void();
-		}
-		wait(delay(10)); // TODO need to wait for a signal for readiness of blob manager
-
-		BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
-		self->blobGranules_ = granules;
-
+		wait(checkIfReadyForMigration(self));
 		wait(prepare(self, normalKeys));
-
+		wait(advanceVersion(self));
 		wait(serverLoop(self));
 		return Void();
 	}
 
 private:
+	// Check if blob manifest is loaded so that blob migration can start
+	ACTOR static Future<Void> checkIfReadyForMigration(Reference<BlobMigrator> self) {
+		loop {
+			Optional<BlobRestoreStatus> status = wait(getRestoreStatus(self->db_, normalKeys));
+			if (canStartMigration(status)) {
+				BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
+				if (!granules.empty()) {
+					self->blobGranules_ = granules;
+					for (BlobGranuleRestoreVersion granule : granules) {
+						TraceEvent("RestorableGranule", self->interf_.id())
+						    .detail("GranuleId", granule.granuleID.toString())
+						    .detail("KeyRange", granule.keyRange.toString())
+						    .detail("Version", granule.version)
+						    .detail("SizeInBytes", granule.sizeInBytes);
+					}
+
+					BlobRestoreStatus status(BlobRestorePhase::MIGRATE, 0);
+					wait(updateRestoreStatus(self->db_, normalKeys, status));
+					return Void();
+				}
+			}
+			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
+		}
+	}
+
+	// Check if we should start migration. Migration can be started after manifest is fully loaded
+	static bool canStartMigration(Optional<BlobRestoreStatus> status) {
+		if (status.present()) {
+			BlobRestoreStatus value = status.get();
+			return value.phase == BlobRestorePhase::MANIFEST_DONE; // manifest is loaded successfully
+		}
+		return false;
+	}
+
 	// Prepare for data migration for given key range.
 	ACTOR static Future<Void> prepare(Reference<BlobMigrator> self, KeyRangeRef keys) {
 		// Register as a storage server, so that DataDistributor could start data movement after
@@ -104,8 +134,8 @@ private:
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				state Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
-				wait(krmSetRange(&tr, keyServersPrefix, keys, value));
-				wait(krmSetRange(&tr, serverKeysPrefixFor(serverUID), keys, serverKeysTrue));
+				wait(krmSetRangeCoalescing(&tr, keyServersPrefix, keys, allKeys, value));
+				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue));
 				wait(tr.commit());
 				dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
 				return Void();
@@ -136,8 +166,9 @@ private:
 						}
 					}
 					if (owning) {
+						wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(id), keys, allKeys, serverKeysFalse));
 						dprint("Unassign {} from storage server {}\n", keys.toString(), id.toString());
-						wait(krmSetRange(&tr, serverKeysPrefixFor(id), keys, serverKeysFalse));
+						TraceEvent("UnassignKeys", self->interf_.id()).detail("Keys", keys).detail("SS", id);
 					}
 				}
 				wait(tr.commit());
@@ -148,15 +179,175 @@ private:
 		}
 	}
 
+	// Print migration progress periodically
+	ACTOR static Future<Void> logProgress(Reference<BlobMigrator> self) {
+		loop {
+			bool done = wait(checkProgress(self));
+			if (done) {
+				wait(updateRestoreStatus(self->db_, normalKeys, BlobRestoreStatus(BlobRestorePhase::APPLY_MLOGS)));
+				wait(applyMutationLogs(self));
+				wait(updateRestoreStatus(self->db_, normalKeys, BlobRestoreStatus(BlobRestorePhase::DONE)));
+				return Void();
+			}
+			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
+		}
+	}
+
+	// Check key ranges that are migrated. Return true if all ranges are done
+	ACTOR static Future<bool> checkProgress(Reference<BlobMigrator> self) {
+		state Transaction tr(self->db_);
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				// Get key ranges that are still owned by the migrator. Those ranges are
+				// incompleted migrations
+				state UID serverID = self->interf_.ssi.id();
+				RangeResult ranges = wait(krmGetRanges(&tr, serverKeysPrefixFor(serverID), normalKeys));
+
+				// Count incompleted size
+				int64_t incompleted = 0;
+				for (auto i = 0; i < ranges.size() - 1; ++i) {
+					if (ranges[i].value == serverKeysTrue) {
+						KeyRangeRef range(ranges[i].key, ranges[i + 1].key);
+						int64_t bytes = sizeInBytes(self, range);
+						dprint("   incompleted {}, size: {}\n", range.toString(), bytes);
+						incompleted += bytes;
+					}
+				}
+
+				// Calculated progress
+				int64_t total = sizeInBytes(self);
+				int progress = (total - incompleted) * 100 / total;
+				state bool done = incompleted == 0;
+				dprint("Migration progress :{}%. done {}\n", progress, done);
+				TraceEvent("BlobMigratorProgress", self->interf_.id()).detail("Progress", progress);
+				BlobRestoreStatus status(BlobRestorePhase::MIGRATE, progress);
+				wait(updateRestoreStatus(self->db_, normalKeys, status));
+				return done;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	// Advance version, so that future commits will have a larger version than the restored data
+	ACTOR static Future<Void> advanceVersion(Reference<BlobMigrator> self) {
+		state Transaction tr(self->db_);
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				Version current = wait(tr.getRawReadVersion());
+				Version expected = maxVersion(self);
+				if (current <= expected) {
+					tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(expected + 1, Unversioned()));
+					dprint("Advance version from {} to {}\n", current, expected);
+					TraceEvent("AdvanceVersion", self->interf_.id()).detail("From", current).detail("To", expected);
+					wait(tr.commit());
+				}
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	// Find mutation logs url
+	static std::string mlogsUrl(Reference<BlobMigrator> self) {
+		std::string url = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
+
+		// A special case for local directory.
+		// See FileBackupAgent.actor.cpp. if the container string describes a local directory then "/backup-<timestamp>"
+		// will be added to it. so we need to append this directory name to the url
+		if (url.find("file://") == 0) {
+			std::string path = url.substr(7);
+			path.erase(path.find_last_not_of("\\/") + 1); // Remove trailing slashes
+			std::vector<std::string> dirs = platform::listDirectories(path);
+			if (dirs.empty()) {
+				TraceEvent(SevError, "BlobMigratorMissingMutationLogs").detail("Url", url);
+				throw restore_missing_data();
+			}
+			// Pick the newest backup folder
+			std::sort(dirs.begin(), dirs.end());
+			std::string name = dirs.back();
+			url.erase(url.find_last_not_of("\\/") + 1); // Remove trailing slashes
+			return url + "/" + name;
+		}
+		return url;
+	}
+
+	// Apply mutation logs to blob granules so that they reach to a consistent version for all blob granules
+	ACTOR static Future<Void> applyMutationLogs(Reference<BlobMigrator> self) {
+		state std::string mutationLogsUrl = mlogsUrl(self);
+		TraceEvent("ApplyMutationLogs", self->interf_.id()).detail("Url", mutationLogsUrl);
+
+		// check last version in mutation logs
+		Optional<std::string> proxy; // unused
+		Optional<std::string> encryptionKeyFile; // unused
+		Reference<IBackupContainer> bc = IBackupContainer::openContainer(mutationLogsUrl, proxy, encryptionKeyFile);
+		BackupDescription desc = wait(bc->describeBackup());
+		if (!desc.contiguousLogEnd.present()) {
+			TraceEvent(SevError, "BlobMigratorInvalidMutationLogs").detail("Url", mutationLogsUrl);
+			throw restore_missing_data();
+		}
+		Version targetVersion = desc.contiguousLogEnd.get() - 1;
+		TraceEvent("ApplyMutationLogs", self->interf_.id()).detail("Version", targetVersion);
+
+		// restore to target version
+		Standalone<VectorRef<KeyRangeRef>> ranges;
+		Standalone<VectorRef<Version>> beginVersions;
+		for (auto& granule : self->blobGranules_) {
+			ranges.push_back(ranges.arena(), granule.keyRange);
+			beginVersions.push_back(beginVersions.arena(), granule.version);
+		}
+		std::string tagName = "blobrestore-" + self->interf_.id().shortString();
+		wait(submitRestore(self, KeyRef(tagName), KeyRef(mutationLogsUrl), ranges, beginVersions));
+		return Void();
+	}
+
+	// Submit restore task to backup agent
+	ACTOR static Future<Void> submitRestore(Reference<BlobMigrator> self,
+	                                        Key tagName,
+	                                        Key mutationLogsUrl,
+	                                        Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                        Standalone<VectorRef<Version>> beginVersions) {
+		state Optional<std::string> proxy; // unused
+		state Optional<Database> origDb; // unused
+
+		TraceEvent("ApplyMutationLogsStart", self->interf_.id()).detail("Tag", tagName);
+		Version version = wait(self->backupAgent_.restore(self->db_,
+		                                                  origDb,
+		                                                  KeyRef(tagName),
+		                                                  KeyRef(mutationLogsUrl),
+		                                                  proxy,
+		                                                  ranges,
+		                                                  beginVersions,
+		                                                  WaitForComplete::True,
+		                                                  invalidVersion,
+		                                                  Verbose::False,
+		                                                  ""_sr, // addPrefix
+		                                                  ""_sr, // removePrefix
+		                                                  LockDB::False,
+		                                                  UnlockDB::False,
+		                                                  OnlyApplyMutationLogs::True));
+		TraceEvent("ApplyMutationLogsComplete", self->interf_.id()).detail("Version", version);
+		return Void();
+	}
+
 	// Main server loop
 	ACTOR static Future<Void> serverLoop(Reference<BlobMigrator> self) {
-		self->actors_.add(waitFailureServer(self->interf_.ssi.waitFailure.getFuture()));
+		self->actors_.add(waitFailureServer(self->interf_.waitFailure.getFuture()));
+		self->actors_.add(logProgress(self));
 		self->actors_.add(handleRequest(self));
 		self->actors_.add(handleUnsupportedRequest(self));
 		loop {
 			try {
 				choose {
 					when(HaltBlobMigratorRequest req = waitNext(self->interf_.haltBlobMigrator.getFuture())) {
+						dprint("Stopping blob migrator {}\n", self->interf_.id().toString());
 						req.reply.send(Void());
 						TraceEvent("BlobMigratorHalted", self->interf_.id()).detail("ReqID", req.requesterID);
 						break;
@@ -168,6 +359,8 @@ private:
 				throw;
 			}
 		}
+		self->actors_.clear(true);
+		dprint("Stopped blob migrator {}\n", self->interf_.id().toString());
 		return Void();
 	}
 
@@ -198,7 +391,7 @@ private:
 						req.reply.send(rep);
 					}
 					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-						fmt::print("Handle GetStorageMetrics\n");
+						// fmt::print("Handle GetStorageMetrics\n");
 						StorageMetrics metrics;
 						metrics.bytes = sizeInBytes(self);
 						GetStorageMetricsReply resp;
@@ -262,7 +455,7 @@ private:
 						req.reply.sendError(unsupported_operation());
 					}
 					when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
-						dprint("Unsupported UpdateCommitCostRequest\n");
+						// dprint("Unsupported UpdateCommitCostRequest\n");
 						req.reply.sendError(unsupported_operation());
 					}
 					when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
@@ -289,9 +482,9 @@ private:
 	}
 
 	ACTOR static Future<Void> processStorageQueuingMetricsRequest(StorageQueuingMetricsRequest req) {
-		dprint("Unsupported StorageQueuingMetricsRequest\n");
-		// FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
-		// processes
+		// dprint("Unsupported StorageQueuingMetricsRequest\n");
+		//  FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
+		//  processes
 		wait(delay(1));
 		req.reply.sendError(unsupported_operation());
 		return Void();
@@ -325,11 +518,13 @@ private:
 	BlobGranuleRestoreVersionVector blobGranules_;
 	BlobMigratorInterface interf_;
 	ActorCollection actors_;
+	FileBackupAgent backupAgent_;
 };
 
 // Main entry point
 ACTOR Future<Void> blobMigrator(BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	fmt::print("Start blob migrator {} \n", interf.id().toString());
+	TraceEvent("StartBlobMigrator", interf.id()).detail("Interface", interf.id().toString());
+	dprint("Starting blob migrator {}\n", interf.id().toString());
 	try {
 		Reference<BlobMigrator> self = makeReference<BlobMigrator>(dbInfo, interf);
 		wait(BlobMigrator::start(self));

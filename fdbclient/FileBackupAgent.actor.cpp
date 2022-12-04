@@ -18,23 +18,24 @@
  * limitations under the License.
  */
 
-#include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RestoreInterface.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TaskBucket.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantEntryCache.actor.h"
-
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
@@ -279,23 +280,33 @@ public:
 		return getApplyVersionLag_impl(tr, uid);
 	}
 
-	void initApplyMutations(Reference<ReadYourWritesTransaction> tr, Key addPrefix, Key removePrefix) {
+	void initApplyMutations(Reference<ReadYourWritesTransaction> tr,
+	                        Key addPrefix,
+	                        Key removePrefix,
+	                        OnlyApplyMutationLogs onlyApplyMutationLogs) {
 		// Set these because they have to match the applyMutations values.
 		this->addPrefix().set(tr, addPrefix);
 		this->removePrefix().set(tr, removePrefix);
 
-		clearApplyMutationsKeys(tr);
+		// Skip applyMutationsKeyVersionCount, applyMutationsKeyVersionMap, applyMutationsEnd, applyMutationsBegin
+		// for only-apply-mutation-logs restore. They were initialized in preloadApplyMutationsKeyVersionMap
+		clearApplyMutationsKeys(tr, onlyApplyMutationLogs);
 
 		// Initialize add/remove prefix, range version map count and set the map's start key to InvalidVersion
 		tr->set(uidPrefixKey(applyMutationsAddPrefixRange.begin, uid), addPrefix);
 		tr->set(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid), removePrefix);
-		int64_t startCount = 0;
-		tr->set(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid), StringRef((uint8_t*)&startCount, 8));
-		Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
-		tr->set(mapStart, BinaryWriter::toValue<Version>(invalidVersion, Unversioned()));
+
+		// Skip init applyMutationsKeyVersionCount and applyMutationsKeyVersionMap for only-apply-mutation-logs restore.
+		// They were initialized in preloadApplyMutationsKeyVersionMap
+		if (!onlyApplyMutationLogs) {
+			int64_t startCount = 0;
+			tr->set(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid), StringRef((uint8_t*)&startCount, 8));
+			Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+			tr->set(mapStart, BinaryWriter::toValue<Version>(invalidVersion, Unversioned()));
+		}
 	}
 
-	void clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
+	void clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr, bool skipMutationKeyVersionMap = false) {
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		// Clear add/remove prefix keys
@@ -303,17 +314,21 @@ public:
 		tr->clear(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid));
 
 		// Clear range version map and count key
-		tr->clear(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid));
-		Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
-		tr->clear(KeyRangeRef(mapStart, strinc(mapStart)));
+		if (!skipMutationKeyVersionMap) {
+			tr->clear(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid));
+			Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+			tr->clear(KeyRangeRef(mapStart, strinc(mapStart)));
+		}
 
 		// Clear any loaded mutations that have not yet been applied
 		Key mutationPrefix = mutationLogPrefix();
 		tr->clear(KeyRangeRef(mutationPrefix, strinc(mutationPrefix)));
 
-		// Clear end and begin versions (intentionally in this order)
-		tr->clear(uidPrefixKey(applyMutationsEndRange.begin, uid));
-		tr->clear(uidPrefixKey(applyMutationsBeginRange.begin, uid));
+		if (!skipMutationKeyVersionMap) {
+			// Clear end and begin versions (intentionally in this order)
+			tr->clear(uidPrefixKey(applyMutationsEndRange.begin, uid));
+			tr->clear(uidPrefixKey(applyMutationsBeginRange.begin, uid));
+		}
 	}
 
 	void setApplyBeginVersion(Reference<ReadYourWritesTransaction> tr, Version ver) {
@@ -489,7 +504,6 @@ public:
 
 struct SnapshotFileBackupEncryptionKeys {
 	Reference<BlobCipherKey> textCipherKey;
-	EncryptCipherDomainName textDomain;
 	Reference<BlobCipherKey> headerCipherKey;
 	StringRef ivRef;
 };
@@ -614,11 +628,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Reference<BlobCipherKey>> refreshKey(EncryptedRangeFileWriter* self,
-	                                                         EncryptCipherDomainId domainId,
-	                                                         EncryptCipherDomainName domainName) {
+	                                                         EncryptCipherDomainId domainId) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, domainName, BlobCipherMetrics::BACKUP));
+		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, BlobCipherMetrics::BACKUP));
 		return cipherKeys.cipherTextKey;
 	}
 
@@ -627,12 +640,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// Ensure that the keys we got are still valid before flushing the block
 		if (self->cipherKeys.headerCipherKey->isExpired() || self->cipherKeys.headerCipherKey->needsRefresh()) {
 			Reference<BlobCipherKey> cipherKey =
-			    wait(refreshKey(self, self->cipherKeys.headerCipherKey->getDomainId(), FDB_ENCRYPT_HEADER_DOMAIN_NAME));
+			    wait(refreshKey(self, self->cipherKeys.headerCipherKey->getDomainId()));
 			self->cipherKeys.headerCipherKey = cipherKey;
 		}
 		if (self->cipherKeys.textCipherKey->isExpired() || self->cipherKeys.textCipherKey->needsRefresh()) {
-			Reference<BlobCipherKey> cipherKey =
-			    wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId(), self->cipherKeys.textDomain));
+			Reference<BlobCipherKey> cipherKey = wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId()));
 			self->cipherKeys.textCipherKey = cipherKey;
 		}
 		EncryptBlobCipherAes265Ctr encryptor(self->cipherKeys.textCipherKey,
@@ -651,14 +663,13 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
-		state std::pair<int64_t, TenantName> curTenantInfo = wait(getEncryptionDomainDetails(key, self->tenantCache));
+		state EncryptCipherDomainId curDomainId = wait(getEncryptionDomainDetails(key, self->tenantCache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
-		TextAndHeaderCipherKeys textAndHeaderCipherKeys = wait(getLatestEncryptCipherKeysForDomain(
-		    dbInfo, curTenantInfo.first, curTenantInfo.second, BlobCipherMetrics::BACKUP));
+		TextAndHeaderCipherKeys textAndHeaderCipherKeys =
+		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, curDomainId, BlobCipherMetrics::BACKUP));
 		self->cipherKeys.textCipherKey = textAndHeaderCipherKeys.cipherTextKey;
-		self->cipherKeys.textDomain = curTenantInfo.second;
 		self->cipherKeys.headerCipherKey = textAndHeaderCipherKeys.cipherHeaderKey;
 
 		// Set ivRef
@@ -693,27 +704,26 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	ACTOR static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetailsImpl(
+	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetailsImpl(
 	    KeyRef key,
 	    Reference<TenantEntryCache<Void>> tenantCache) {
 		if (isSystemKey(key)) {
-			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
 		if (key.size() < TENANT_PREFIX_SIZE) {
-			return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+			return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), TENANT_PREFIX_SIZE);
 		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
 		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
 		if (payload.present()) {
-			return std::make_pair(tenantId, payload.get().name);
+			return tenantId;
 		}
-		return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+		return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 	}
 
-	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(
-	    KeyRef key,
-	    Reference<TenantEntryCache<Void>> tenantCache) {
+	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(KeyRef key,
+	                                                                Reference<TenantEntryCache<Void>> tenantCache) {
 		return getEncryptionDomainDetailsImpl(key, tenantCache);
 	}
 
@@ -799,11 +809,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                              Key k,
 	                                              Value v,
 	                                              bool writeValue,
-	                                              std::pair<int64_t, TenantName> curKeyTenantInfo) {
+	                                              EncryptCipherDomainId curKeyDomainId) {
 		state KeyRef endKey = k;
 		// If we are crossing a boundary with a key that has a tenant prefix then truncate it
-		if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
-		    curKeyTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+		if (curKeyDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curKeyDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
 			endKey = StringRef(k.begin(), TENANT_PREFIX_SIZE);
 		}
 
@@ -825,12 +834,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getEncryptionDomainDetails(k, self->tenantCache));
-		state std::pair<int64_t, TenantName> prevKeyTenantInfo =
+		state EncryptCipherDomainId curKeyDomainId = wait(getEncryptionDomainDetails(k, self->tenantCache));
+		state EncryptCipherDomainId prevKeyDomainId =
 		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
-		if (curKeyTenantInfo.first != prevKeyTenantInfo.first) {
+		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
-			wait(handleTenantBondary(self, k, v, writeValue, curKeyTenantInfo));
+			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId));
 			return true;
 		}
 		return false;
@@ -1042,7 +1051,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 	state KeyRef prevKey = KeyRef(k, kLen);
 	state bool done = false;
-	state Optional<std::pair<int64_t, TenantName>> prevTenantInfo;
+	state Optional<EncryptCipherDomainId> prevDomainId;
 
 	// Read kv pairs and end key
 	while (1) {
@@ -1056,27 +1065,26 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			ASSERT(tenantCache.present());
 			ASSERT(encryptHeader.present());
 			state KeyRef curKey = KeyRef(k, kLen);
-			if (!prevTenantInfo.present()) {
-				std::pair<int64_t, TenantName> tenantInfo =
+			if (!prevDomainId.present()) {
+				EncryptCipherDomainId domainId =
 				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, tenantCache.get()));
-				prevTenantInfo = tenantInfo;
+				prevDomainId = domainId;
 			}
-			std::pair<int64_t, TenantName> curTenantInfo =
+			EncryptCipherDomainId curDomainId =
 			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, tenantCache.get()));
-			if (!curKey.empty() && !prevKey.empty() && prevTenantInfo.get().first != curTenantInfo.first) {
+			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
-				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
-				    curTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
 					ASSERT(curKey.size() == TENANT_PREFIX_SIZE);
 				}
 				done = true;
 			}
 			// make sure that all keys (except possibly the last key) in a block are encrypted using the correct key
 			if (!prevKey.empty()) {
-				ASSERT(prevTenantInfo.get().first == encryptHeader.get().cipherTextDetails.encryptDomainId);
+				ASSERT(prevDomainId.get() == encryptHeader.get().cipherTextDetails.encryptDomainId);
 			}
 			prevKey = curKey;
-			prevTenantInfo = curTenantInfo;
+			prevDomainId = curDomainId;
 		}
 
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
@@ -1152,7 +1160,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
 			state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
-			if (g_network && g_simulator->isSimulated()) {
+			if (g_network && g_network->isSimulated()) {
 				tenantCache = makeReference<TenantEntryCache<Void>>(cx.get(), TenantEntryCacheRefreshMode::WATCH);
 				wait(tenantCache.get()->init());
 			}
@@ -4802,14 +4810,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
 		wait(taskBucket->finish(tr, task));
-		state Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
-		wait(success(logsOnly));
-		if (logsOnly.get().present() && logsOnly.get().get()) {
-			// If this is an incremental restore, we need to set the applyMutationsMapPrefix
-			// to the earliest log version so no mutations are missed
-			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
-			wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), allKeys, versionEncoded));
-		}
 		return Void();
 	}
 
@@ -5296,8 +5296,9 @@ public:
 		} else {
 			restore.restoreRanges().set(tr, restoreRanges);
 		}
+
 		// this also sets restore.add/removePrefix.
-		restore.initApplyMutations(tr, addPrefix, removePrefix);
+		restore.initApplyMutations(tr, addPrefix, removePrefix, onlyApplyMutationLogs);
 
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -5867,7 +5868,7 @@ public:
 	//   onlyApplyMutationLogs: only perform incremental restore, by only applying mutation logs
 	//   inconsistentSnapshotOnly: Ignore mutation log files during the restore to speedup the process.
 	//                             When set to true, gives an inconsistent snapshot, thus not recommended
-	//   beginVersion: restore's begin version
+	//   beginVersions: restore's begin version for each range
 	//   randomUid: the UID for lock the database
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
 	                                     Database cx,
@@ -5876,6 +5877,7 @@ public:
 	                                     Key url,
 	                                     Optional<std::string> proxy,
 	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     Standalone<VectorRef<Version>> beginVersions,
 	                                     WaitForComplete waitForComplete,
 	                                     Version targetVersion,
 	                                     Verbose verbose,
@@ -5885,7 +5887,6 @@ public:
 	                                     UnlockDB unlockDB,
 	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
-	                                     Version beginVersion,
 	                                     Optional<std::string> encryptionKeyFileName,
 	                                     UID randomUid) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
@@ -5908,6 +5909,10 @@ public:
 			targetVersion = desc.contiguousLogEnd.get() - 1;
 		}
 
+		state Version beginVersion = invalidVersion; // min begin version for all ranges
+		if (!beginVersions.empty()) {
+			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
+		}
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(targetVersion, cx, ranges, onlyApplyMutationLogs, beginVersion));
 
@@ -5922,6 +5927,12 @@ public:
 
 		if (verbose) {
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
+		}
+
+		// Preload applyMutationsKeyVersionMap for only-apply-mutation-log restore. It's
+		// a workaround for case when the map is large and may exceed transaction limit.
+		if (onlyApplyMutationLogs) {
+			wait(preloadApplyMutationsKeyVersionMap(cx, randomUid, ranges, beginVersions));
 		}
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -5961,6 +5972,82 @@ public:
 		}
 
 		return targetVersion;
+	}
+
+	ACTOR static Future<Void> preloadApplyMutationsKeyVersionMap(Database cx,
+	                                                             UID uid,
+	                                                             Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                                             Standalone<VectorRef<Version>> versions) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+
+		// Init applyMutationsKeyVersionMap, applyMutationsKeyVersionCount, applyMutationsEnd, applyMutationsBegin
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+				tr->clear(KeyRangeRef(mapStart, strinc(mapStart)));
+				int64_t startCount = 0;
+				tr->set(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid),
+				        StringRef((uint8_t*)&startCount, 8));
+				tr->set(mapStart, BinaryWriter::toValue<Version>(invalidVersion, Unversioned()));
+
+				tr->clear(uidPrefixKey(applyMutationsEndRange.begin, uid));
+				tr->clear(uidPrefixKey(applyMutationsBeginRange.begin, uid));
+
+				// If this is an incremental restore, we need to set the applyMutationsMapPrefix
+				// to the earliest log version so no mutations are missed
+				Version beginVersion = *std::min_element(versions.begin(), versions.end());
+				Value versionEncoded = BinaryWriter::toValue(beginVersion, Unversioned());
+				Key prefix = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+				wait(krmSetRange(tr, prefix, allKeys, versionEncoded));
+
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		// Update applyMutationsKeyVersionMap
+		state int i;
+		state int stepSize = 1000;
+		for (i = 0; i < ranges.size(); i += stepSize) {
+			int end = std::min(i + stepSize, ranges.size());
+			wait(preloadApplyMutationsKeyVersionMap(cx, uid, ranges, versions, i, end));
+		}
+		TraceEvent("PreloadApplyMutationsKeyVersionMap", uid).detail("Size", ranges.size());
+		return Void();
+	}
+
+	ACTOR static Future<Void> preloadApplyMutationsKeyVersionMap(Database cx,
+	                                                             UID uid,
+	                                                             Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                                             Standalone<VectorRef<Version>> versions,
+	                                                             int start,
+	                                                             int end) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				state int i;
+				for (i = start; i < end; ++i) {
+					Version version = versions[i];
+					if (version == invalidVersion) {
+						version = 0;
+					}
+					Value versionEncoded = BinaryWriter::toValue(version, Unversioned());
+					Key prefix = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
+					wait(krmSetRangeCoalescing(tr, prefix, ranges[i], allKeys, versionEncoded));
+				}
+				wait(tr->commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 
 	// used for correctness only, locks the database before discontinuing the backup and that same lock is then used
@@ -6117,6 +6204,7 @@ public:
 				                     KeyRef(bc->getURL()),
 				                     bc->getProxy(),
 				                     systemRestoreRange,
+				                     {},
 				                     WaitForComplete::True,
 				                     ::invalidVersion,
 				                     Verbose::True,
@@ -6126,7 +6214,6 @@ public:
 				                     UnlockDB::False,
 				                     OnlyApplyMutationLogs::False,
 				                     InconsistentSnapshotOnly::False,
-				                     ::invalidVersion,
 				                     {},
 				                     randomUid)));
 				state Reference<ReadYourWritesTransaction> rywTransaction =
@@ -6153,6 +6240,7 @@ public:
 			                                 KeyRef(bc->getURL()),
 			                                 bc->getProxy(),
 			                                 restoreRange,
+			                                 {},
 			                                 WaitForComplete::True,
 			                                 ::invalidVersion,
 			                                 Verbose::True,
@@ -6162,7 +6250,6 @@ public:
 			                                 UnlockDB::True,
 			                                 OnlyApplyMutationLogs::False,
 			                                 InconsistentSnapshotOnly::False,
-			                                 ::invalidVersion,
 			                                 {},
 			                                 randomUid));
 			return ver;
@@ -6218,6 +6305,44 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Key url,
                                          Optional<std::string> proxy,
                                          Standalone<VectorRef<KeyRangeRef>> ranges,
+                                         Standalone<VectorRef<Version>> versions,
+                                         WaitForComplete waitForComplete,
+                                         Version targetVersion,
+                                         Verbose verbose,
+                                         Key addPrefix,
+                                         Key removePrefix,
+                                         LockDB lockDB,
+                                         UnlockDB unlockDB,
+                                         OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                         InconsistentSnapshotOnly inconsistentSnapshotOnly,
+                                         Optional<std::string> const& encryptionKeyFileName) {
+	return FileBackupAgentImpl::restore(this,
+	                                    cx,
+	                                    cxOrig,
+	                                    tagName,
+	                                    url,
+	                                    proxy,
+	                                    ranges,
+	                                    versions,
+	                                    waitForComplete,
+	                                    targetVersion,
+	                                    verbose,
+	                                    addPrefix,
+	                                    removePrefix,
+	                                    lockDB,
+	                                    unlockDB,
+	                                    onlyApplyMutationLogs,
+	                                    inconsistentSnapshotOnly,
+	                                    encryptionKeyFileName,
+	                                    deterministicRandom()->randomUniqueID());
+}
+
+Future<Version> FileBackupAgent::restore(Database cx,
+                                         Optional<Database> cxOrig,
+                                         Key tagName,
+                                         Key url,
+                                         Optional<std::string> proxy,
+                                         Standalone<VectorRef<KeyRangeRef>> ranges,
                                          WaitForComplete waitForComplete,
                                          Version targetVersion,
                                          Verbose verbose,
@@ -6229,25 +6354,27 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
                                          Optional<std::string> const& encryptionKeyFileName) {
-	return FileBackupAgentImpl::restore(this,
-	                                    cx,
-	                                    cxOrig,
-	                                    tagName,
-	                                    url,
-	                                    proxy,
-	                                    ranges,
-	                                    waitForComplete,
-	                                    targetVersion,
-	                                    verbose,
-	                                    addPrefix,
-	                                    removePrefix,
-	                                    lockDB,
-	                                    unlockDB,
-	                                    onlyApplyMutationLogs,
-	                                    inconsistentSnapshotOnly,
-	                                    beginVersion,
-	                                    encryptionKeyFileName,
-	                                    deterministicRandom()->randomUniqueID());
+	Standalone<VectorRef<Version>> beginVersions;
+	for (auto i = 0; i < ranges.size(); ++i) {
+		beginVersions.push_back(beginVersions.arena(), beginVersion);
+	}
+	return restore(cx,
+	               cxOrig,
+	               tagName,
+	               url,
+	               proxy,
+	               ranges,
+	               beginVersions,
+	               waitForComplete,
+	               targetVersion,
+	               verbose,
+	               addPrefix,
+	               removePrefix,
+	               lockDB,
+	               unlockDB,
+	               onlyApplyMutationLogs,
+	               inconsistentSnapshotOnly,
+	               encryptionKeyFileName);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -6272,12 +6399,16 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	} else {
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 	}
+	Standalone<VectorRef<Version>> versionRef;
+	versionRef.push_back(versionRef.arena(), beginVersion);
+
 	return restore(cx,
 	               cxOrig,
 	               tagName,
 	               url,
 	               proxy,
 	               rangeRef,
+	               versionRef,
 	               waitForComplete,
 	               targetVersion,
 	               verbose,
@@ -6287,7 +6418,6 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               UnlockDB::True,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               beginVersion,
 	               encryptionKeyFileName);
 }
 

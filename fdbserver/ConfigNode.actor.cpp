@@ -234,10 +234,13 @@ class ConfigNodeImpl {
 			req.reply.sendError(process_behind()); // Reuse the process_behind error
 			return Void();
 		}
+		if (BUGGIFY) {
+			wait(delay(deterministicRandom()->random01() * 2));
+		}
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
+		    wait(getMutations(self, req.lastSeenVersion + 1, req.mostRecentVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
-		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
+		    wait(getAnnotations(self, req.lastSeenVersion + 1, req.mostRecentVersion));
 		TraceEvent(SevInfo, "ConfigNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("ReqMostRecentVersion", req.mostRecentVersion)
@@ -245,7 +248,7 @@ class ConfigNodeImpl {
 		    .detail("NumMutations", versionedMutations.size())
 		    .detail("NumCommits", versionedAnnotations.size());
 		++self->successfulChangeRequests;
-		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations, versionedAnnotations });
+		req.reply.send(ConfigFollowerGetChangesReply{ versionedMutations, versionedAnnotations });
 		return Void();
 	}
 
@@ -316,7 +319,7 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getConfigClasses(ConfigNodeImpl* self, ConfigTransactionGetConfigClassesRequest req) {
 		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
-			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode");
+			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode", probe::decoration::rare);
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -360,7 +363,7 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getKnobs(ConfigNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
 		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
-			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode");
+			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode", probe::decoration::rare);
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -520,6 +523,18 @@ class ConfigNodeImpl {
 			    ObjectReader::fromStringRef<KnobValue>(kv.value, IncludeVersion());
 		}
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
+		if (req.mostRecentVersion < reply.snapshotVersion) {
+			// The version in the request can be less than the last compacted
+			// version in certain circumstances where the coordinators are
+			// being changed and the consumer reads the latest committed
+			// version from a majority of ConfigNodes before they have received
+			// up to date snapshots. This should be fine, it just means the
+			// consumer needs to fetch the latest version and retry its
+			// request.
+			CODE_PROBE(true, "ConfigNode ahead of consumer", probe::decoration::rare);
+			req.reply.sendError(version_already_compacted());
+			return Void();
+		}
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		TraceEvent(SevInfo, "ConfigNodeGettingSnapshot", self->id)

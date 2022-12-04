@@ -1,3 +1,4 @@
+import base64
 import fdb
 import json
 import random
@@ -68,7 +69,7 @@ def token_claim_1h(tenant_name):
         "nbf": now - 1,
         "exp": now + 60 * 60, 
         "jti": random_alphanum_str(10),
-        "tenants": [to_str(tenant_name)],
+        "tenants": [to_str(base64.b64encode(tenant_name))],
     }
 
 # repeat try-wait loop up to max_repeat times until both read and write tr fails for tenant with permission_denied

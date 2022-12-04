@@ -657,29 +657,22 @@ struct TenantManagementWorkload : TestWorkload {
 
 			wait(waitForAll(deleteFutures));
 			wait(tr->commit());
-		} else {
+		} else { // operationType == OperationType::METACLUSTER
 			ASSERT(!endTenant.present() && tenants.size() == 1);
-			wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
+			// Read the entry first and then issue delete by ID
+			// getTenant throwing tenant_not_found will break some test cases because it is not wrapped
+			// by runManagementTransaction. For such cases, fall back to delete by name and allow
+			// the errors to flow through there
+			Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->mvDb, beginTenant));
+			if (entry.present() && deterministicRandom()->coinflip()) {
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.get().id));
+				CODE_PROBE(true, "Deleted tenant by ID");
+			} else {
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
+			}
 		}
 
 		return Void();
-	}
-
-	// Returns GRV and eats GRV errors
-	ACTOR static Future<Version> getReadVersion(Reference<ReadYourWritesTransaction> tr) {
-		loop {
-			try {
-				Version version = wait(tr->getReadVersion());
-				return version;
-			} catch (Error& e) {
-				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_batch_transaction_throttled) {
-					wait(tr->onError(e));
-				} else {
-					throw;
-				}
-			}
-		}
 	}
 
 	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
@@ -772,7 +765,8 @@ struct TenantManagementWorkload : TestWorkload {
 				state bool retried = false;
 				loop {
 					try {
-						state Version beforeVersion = wait(self->getReadVersion(tr));
+						state Version beforeVersion =
+						    wait(getLatestReadVersion(self, OperationType::MANAGEMENT_DATABASE));
 						Optional<Void> result =
 						    wait(timeout(deleteTenantImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
@@ -780,8 +774,8 @@ struct TenantManagementWorkload : TestWorkload {
 						if (result.present()) {
 							if (anyExists) {
 								if (self->oldestDeletionVersion == 0 && !tenants.empty()) {
-									tr->reset();
-									Version afterVersion = wait(self->getReadVersion(tr));
+									Version afterVersion =
+									    wait(self->getLatestReadVersion(self, OperationType::MANAGEMENT_DATABASE));
 									self->oldestDeletionVersion = afterVersion;
 								}
 								self->newestDeletionVersion = beforeVersion;

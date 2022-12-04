@@ -440,6 +440,12 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
+	 * @param matchIndex the mode to return index entries based on whether their
+	 *  corresponding records are present, examples:
+	 *     {@link FDBTransaction#MATCH_INDEX_ALL}
+	 *     {@link FDBTransaction#MATCH_INDEX_NONE}
+	 *     {@link FDBTransaction#MATCH_INDEX_MATCHED_ONLY}
+	 *     {@link FDBTransaction#MATCH_INDEX_UNMATCHED_ONLY}
 	 * @param reverse return results starting at the end of the range in reverse order.
 	 *  Reading ranges in reverse is supported natively by the database and should
 	 *  have minimal extra cost.
@@ -498,6 +504,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param begin the beginning of the range (inclusive)
 	 * @param end the end of the range (exclusive)
+	 * @param chunkSize -- undocumented
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -508,6 +515,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * Note: the returned split points contain the start key and end key of the given range.
 	 *
 	 * @param range the range of the keys
+	 * @param chunkSize -- undocumented
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -519,6 +527,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param begin beginning of the range (inclusive)
 	 * @param end end of the range (exclusive)
+	 * @param rowLimit the limit on the number of returned rows
 
 	 * @return list of blob granules in the given range. May not be all.
 	 */

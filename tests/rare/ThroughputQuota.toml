@@ -4,10 +4,10 @@ testTitle='ThroughputQuotaTest'
   [[test.workload]]
   testName='ThroughputQuota'
   transactionTag='a'
-  totalQuota=1.0
+  totalQuota=16384
 
   [[test.workload]]
   testName = 'Cycle'
-  transactionsPerSecond = 2500.0
-  testDuration = 10.0
+  transactionsPerSecond = 250.0
+  testDuration = 30.0
   expectedRate = 0
