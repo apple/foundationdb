@@ -606,6 +606,13 @@ public:
 	ThreadFuture(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
 	ThreadFuture(Never) : sav(new ThreadSingleAssignmentVar<T>()) {}
 	ThreadFuture(const Error& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
+	ThreadFuture(const ErrorOr<T>& errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
+		if (errorOr.isError()) {
+			sav->sendError(errorOr.getError());
+		} else {
+			sav->send(errorOr.get());
+		}
+	}
 	~ThreadFuture() {
 		if (sav)
 			sav->delref();

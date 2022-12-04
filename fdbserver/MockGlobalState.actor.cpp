@@ -200,11 +200,11 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 
 	// change the old status
 	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
-		CODE_PROBE(true, "Implicitly split single shard to 3 pieces", probe::decoration::rare);
+		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
 	} else {
 		if (ranges.begin().begin() < range.begin) {
-			CODE_PROBE(true, "Implicitly split begin range to 2 pieces", probe::decoration::rare);
+			CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
 			twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
 		}
 		if (ranges.end().begin() > range.end) {
