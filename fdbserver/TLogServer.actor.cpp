@@ -46,6 +46,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Histogram.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TLogQueueEntryRef {
@@ -2182,6 +2183,9 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	if (logData->logSystem->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
+		DebugLogTraceEvent("LogPop", self->dbgid)
+		    .detail("Tag", logData->remoteTag.toString())
+		    .detail("Version", knownCommittedVersion);
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
