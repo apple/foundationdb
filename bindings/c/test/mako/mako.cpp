@@ -496,9 +496,11 @@ transaction_begin:
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
+				future_rc = waitAndHandleError(
+				    tx, f, opTable[op].name(), args.transaction_timeout_txn > 0 || args.transaction_timeout_db > 0);
 			} else {
-				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
+				future_rc = waitAndHandleForOnError(
+				    tx, f, opTable[op].name(), args.transaction_timeout_txn > 0 || args.transaction_timeout_db > 0);
 			}
 			updateErrorStatsRunMode(stats, f.error(), op);
 		}
@@ -544,7 +546,8 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.transaction_timeout > 0);
+		const auto rc = waitAndHandleError(
+		    tx, f, "COMMIT_AT_TX_END", args.transaction_timeout_txn > 0 || args.transaction_timeout_db > 0);
 		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
@@ -639,6 +642,9 @@ int runWorkload(Database db,
 
 		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
 			Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
+			if (args.transaction_timeout_txn > 0) {
+				tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_txn);
+			}
 
 			/* enable transaction trace */
 			if (dotrace) {
@@ -1002,8 +1008,8 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		if (args.disable_ryw) {
 			databases[i].setOption(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
 		}
-		if (args.transaction_timeout > 0 && args.mode == MODE_RUN) {
-			databases[i].setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, args.transaction_timeout);
+		if (args.transaction_timeout_db > 0 && args.mode == MODE_RUN) {
+			databases[i].setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, args.transaction_timeout_db);
 		}
 	}
 
@@ -1117,7 +1123,8 @@ Arguments::Arguments() {
 	bg_materialize_files = false;
 	bg_file_path[0] = '\0';
 	distributed_tracer_client = 0;
-	transaction_timeout = 0;
+	transaction_timeout_db = 0;
+	transaction_timeout_txn = 0;
 	num_report_files = 0;
 }
 
@@ -1308,8 +1315,11 @@ void usage() {
 	printf(
 	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
 	printf("%-24s %s\n",
-	       "    --transaction_timeout=DURATION",
-	       "Duration in milliseconds after which a transaction times out in run mode.");
+	       "    --transaction_timeout_db=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode. Set as database option.");
+	printf("%-24s %s\n",
+	       "    --transaction_timeout_tx=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode. Set as transaction option");
 }
 
 /* parse benchmark paramters */
@@ -1372,7 +1382,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
 			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
 			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
-			{ "transaction_timeout", required_argument, NULL, ARG_TRANSACTION_TIMEOUT },
+			{ "transaction_timeout_txn", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_TXN },
+			{ "transaction_timeout_db", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_DB },
 			{ NULL, 0, NULL, 0 }
 		};
 
@@ -1657,8 +1668,11 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			          args.authorization_tokens.size(),
 			          tokenFilename);
 		} break;
-		case ARG_TRANSACTION_TIMEOUT:
-			args.transaction_timeout = atoi(optarg);
+		case ARG_TRANSACTION_TIMEOUT_TXN:
+			args.transaction_timeout_txn = atoi(optarg);
+			break;
+		case ARG_TRANSACTION_TIMEOUT_DB:
+			args.transaction_timeout_db = atoi(optarg);
 			break;
 		}
 	}
@@ -1747,14 +1761,14 @@ int Arguments::validate() {
 				return -1;
 			}
 		}
-		if (transaction_timeout < 0) {
-			logr.error("--transaction_timeout must be a non-negative integer");
+		if (transaction_timeout_db < 0 || transaction_timeout_txn < 0) {
+			logr.error("--transaction_timeout_[db|txn] must be a non-negative integer");
 			return -1;
 		}
 	}
 
-	if (mode != MODE_RUN && transaction_timeout != 0) {
-		logr.error("--transaction_timeout only supported in run mode");
+	if (mode != MODE_RUN && (transaction_timeout_db != 0 || transaction_timeout_txn != 0)) {
+		logr.error("--transaction_timeout_[txn|db] only supported in run mode");
 		return -1;
 	}
 
@@ -2367,7 +2381,8 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"txntagging_prefix\": \"%s\",", args.txntagging_prefix);
 		fmt::fprintf(fp, "\"streaming_mode\": %d,", args.streaming_mode);
 		fmt::fprintf(fp, "\"disable_ryw\": %d,", args.disable_ryw);
-		fmt::fprintf(fp, "\"transaction_timeout\": %d,", args.transaction_timeout);
+		fmt::fprintf(fp, "\"transaction_timeout_db\": %d,", args.transaction_timeout_db);
+		fmt::fprintf(fp, "\"transaction_timeout_txn\": %d,", args.transaction_timeout_txn);
 		fmt::fprintf(fp, "\"json_output_path\": \"%s\"", args.json_output_path);
 		fmt::fprintf(fp, "},\"samples\": [");
 	}

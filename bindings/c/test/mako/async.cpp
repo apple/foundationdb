@@ -74,6 +74,9 @@ void ResumableStateForPopulate::runOneTick() {
 					stats.incrOpCount(OP_COMMIT);
 					stats.incrOpCount(OP_TRANSACTION);
 					tx.reset();
+					if (args.transaction_timeout_txn > 0) {
+						tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_txn);
+					}
 					watch_tx.startFromStop();
 					key_checkpoint = i + 1;
 					if (i != key_end) {
@@ -133,8 +136,11 @@ repeat_immediate_steps:
 					                       err.what());
 					updateErrorStats(err, iter.op);
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						const auto rc = handleForOnError(
-						    tx, f, fmt::format("{}:{}", iter.opName(), iter.step), args.transaction_timeout > 0);
+						const auto rc =
+						    handleForOnError(tx,
+						                     f,
+						                     fmt::format("{}:{}", iter.opName(), iter.step),
+						                     args.transaction_timeout_txn > 0 || args.transaction_timeout_db > 0);
 						onIterationEnd(rc);
 					});
 				} else {
@@ -150,7 +156,8 @@ repeat_immediate_steps:
 			} else {
 				// blob granules op error
 				updateErrorStats(f.error(), iter.op);
-				FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR", args.transaction_timeout > 0);
+				FutureRC rc = handleForOnError(
+				    tx, f, "BG_ON_ERROR", args.transaction_timeout_txn > 0 || args.transaction_timeout_db > 0);
 				onIterationEnd(rc);
 			}
 		});
@@ -169,6 +176,9 @@ void ResumableStateForRunWorkload::updateStepStats() {
 			stats.addLatency(OP_COMMIT, step_latency);
 		}
 		tx.reset();
+		if (args.transaction_timeout_txn > 0) {
+			tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_txn);
+		}
 		stats.incrOpCount(OP_COMMIT);
 		needs_commit = false;
 	}
@@ -198,7 +208,8 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				                       err.what());
 				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
-					const auto rc = handleForOnError(tx, f, "ON_ERROR", args.transaction_timeout > 0);
+					const auto rc = handleForOnError(
+					    tx, f, "ON_ERROR", args.transaction_timeout_txn > 0 || args.transaction_timeout_db > 0);
 					onIterationEnd(rc);
 				});
 			} else {
@@ -214,6 +225,9 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				stats.incrOpCount(OP_COMMIT);
 				stats.incrOpCount(OP_TRANSACTION);
 				tx.reset();
+				if (args.transaction_timeout_txn > 0) {
+					tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_txn);
+				}
 				watch_tx.startFromStop();
 				onIterationEnd(FutureRC::OK);
 			}
@@ -228,6 +242,9 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		stats.incrOpCount(OP_TRANSACTION);
 		watch_tx.startFromStop();
 		tx.reset();
+		if (args.transaction_timeout_txn > 0) {
+			tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_txn);
+		}
 		onIterationEnd(FutureRC::OK);
 	}
 }
@@ -257,7 +274,8 @@ void ResumableStateForRunWorkload::updateErrorStats(fdb::Error err, int op) {
 	}
 }
 bool ResumableStateForRunWorkload::isExpectedError(fdb::Error err) {
-	return err.retryable() || (args.transaction_timeout > 0 && err.is(1031 /*timeout*/));
+	return err.retryable() ||
+	       ((args.transaction_timeout_txn > 0 || args.transaction_timeout_db > 0) && err.is(1031 /*timeout*/));
 }
 
 } // namespace mako

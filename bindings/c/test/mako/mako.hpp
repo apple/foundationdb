@@ -85,7 +85,8 @@ enum ArgKind {
 	ARG_TLS_KEY_FILE,
 	ARG_TLS_CA_FILE,
 	ARG_AUTHORIZATION_TOKEN_FILE,
-	ARG_TRANSACTION_TIMEOUT,
+	ARG_TRANSACTION_TIMEOUT_TXN,
+	ARG_TRANSACTION_TIMEOUT_DB,
 };
 
 constexpr const int OP_COUNT = 0;
@@ -193,7 +194,8 @@ struct Arguments {
 	std::optional<std::string> tls_key_file;
 	std::optional<std::string> tls_ca_file;
 	std::map<std::string, std::string> authorization_tokens; // maps tenant name to token string
-	int transaction_timeout;
+	int transaction_timeout_db;
+	int transaction_timeout_txn;
 };
 
 } // namespace mako
