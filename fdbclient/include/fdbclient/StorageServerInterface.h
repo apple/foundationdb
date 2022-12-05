@@ -634,42 +634,42 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0; // total storage
-	// FIXME: currently, neither of bytesPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
-	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
-	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
+	int64_t bytesWrittenPerKSecond = 0; // bytes write to SQ
+
+	// FIXME: currently, iosPerKSecond is not used in DataDistribution calculations.
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL << 60;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
-		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
+		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
 		bytes += rhs.bytes;
-		bytesPerKSecond += rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond += rhs.bytesWrittenPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
 	}
 	void operator-=(const StorageMetrics& rhs) {
 		bytes -= rhs.bytes;
-		bytesPerKSecond -= rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond -= rhs.bytesWrittenPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
 		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
 	}
 	template <class F>
 	void operator*=(F f) {
 		bytes *= f;
-		bytesPerKSecond *= f;
+		bytesWrittenPerKSecond *= f;
 		iosPerKSecond *= f;
 		bytesReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
+	bool allZero() const { return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
+		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -697,14 +697,14 @@ struct StorageMetrics {
 	}
 
 	bool operator==(StorageMetrics const& rhs) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
-		       bytesReadPerKSecond == rhs.bytesReadPerKSecond;
+		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
+		return format("Bytes: %lld, BWritePerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
 		              bytes,
-		              bytesPerKSecond,
+		              bytesWrittenPerKSecond,
 		              iosPerKSecond,
 		              bytesReadPerKSecond);
 	}
@@ -926,18 +926,21 @@ struct ChangeFeedPopRequest {
 struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version version; // The FDB version at which the checkpoint is created.
-	KeyRange range;
+	std::vector<KeyRange> ranges;
 	int16_t format; // CheckpointFormat.
-	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	Optional<UID> actionId;
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
-	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
-	  : version(version), range(range), format(format) {}
+	GetCheckpointRequest(std::vector<KeyRange> ranges,
+	                     Version version,
+	                     CheckpointFormat format,
+	                     const Optional<UID>& actionId)
+	  : version(version), ranges(ranges), format(format), actionId(actionId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, checkpointID, reply);
+		serializer(ar, version, ranges, format, actionId, reply);
 	}
 };
 
@@ -1179,5 +1182,14 @@ struct StorageQueuingMetricsRequest {
 		serializer(ar, reply);
 	}
 };
+
+// Memory size for storing mutation in the mutation log and the versioned map.
+inline int mvccStorageBytes(int mutationBytes) {
+	// Why * 2:
+	// - 1 insertion into version map costs 2 nodes in avg;
+	// - The mutation will be stored in both mutation log and versioned map;
+	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
+	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
+}
 
 #endif

@@ -154,7 +154,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 	~EncryptionOpsWorkload() { TraceEvent("EncryptionOpsWorkloadDone").log(); }
 
-	bool isFixedSizePayload() { return mode == 1; }
+	bool isFixedSizePayload() const { return mode == 1; }
 
 	std::string getModeStr() const {
 		if (mode == 1) {
@@ -166,7 +166,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		throw internal_error();
 	}
 
-	void generateRandomBaseCipher(const int maxLen, uint8_t* buff, int* retLen) {
+	static void generateRandomBaseCipher(const int maxLen, uint8_t* buff, int* retLen) {
 		memset(buff, 0, maxLen);
 		*retLen = deterministicRandom()->randomInt(maxLen / 2, maxLen);
 		deterministicRandom()->randomBytes(buff, *retLen);

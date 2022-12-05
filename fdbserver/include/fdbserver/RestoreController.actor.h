@@ -56,7 +56,7 @@ struct VersionBatch {
 		       std::tie(rhs.batchIndex, rhs.beginVersion, rhs.endVersion, rhs.logFiles, rhs.rangeFiles, rhs.size);
 	}
 
-	bool isEmpty() { return logFiles.empty() && rangeFiles.empty(); }
+	bool isEmpty() const { return logFiles.empty() && rangeFiles.empty(); }
 	void reset() {
 		beginVersion = 0;
 		endVersion = 0;
@@ -164,7 +164,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 
 	~RestoreControllerData() override = default;
 
-	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
+	int getVersionBatchState(int batchIndex) const final { return RoleVersionBatchState::INVALID; }
 	void setVersionBatchState(int batchIndex, int vbState) final {}
 
 	void initVersionBatch(int batchIndex) override {
@@ -182,13 +182,13 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		ASSERT(runningVersionBatches.get() == 0);
 	}
 
-	std::string describeNode() override {
+	std::string describeNode() const override {
 		std::stringstream ss;
 		ss << "Controller";
 		return ss.str();
 	}
 
-	void dumpVersionBatches(const std::map<Version, VersionBatch>& versionBatches) {
+	void dumpVersionBatches(const std::map<Version, VersionBatch>& versionBatches) const {
 		int i = 1;
 		double rangeFiles = 0;
 		double rangeSize = 0;

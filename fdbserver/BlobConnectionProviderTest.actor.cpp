@@ -32,6 +32,7 @@ struct ConnectionProviderTestSettings {
 	uint32_t maxFileMemory;
 	uint32_t maxFileSize;
 	uint32_t threads;
+
 	bool uniformProviderChoice;
 	double readWriteSplit;
 
@@ -39,6 +40,7 @@ struct ConnectionProviderTestSettings {
 
 	int writeOps;
 	int readOps;
+	uint32_t targetBytesPerSec;
 
 	ConnectionProviderTestSettings() {
 		numProviders = deterministicRandom()->randomSkewedUInt32(1, 1000);
@@ -56,6 +58,8 @@ struct ConnectionProviderTestSettings {
 
 		writeOps = 0;
 		readOps = 0;
+
+		targetBytesPerSec = 100 * 1024 * 1024;
 	}
 };
 
@@ -68,7 +72,7 @@ struct ProviderTestData {
 	explicit ProviderTestData(Reference<BlobConnectionProvider> provider) : provider(provider) {}
 };
 
-ACTOR Future<Void> createObject(ConnectionProviderTestSettings* settings, ProviderTestData* provider) {
+ACTOR Future<int64_t> createObject(ConnectionProviderTestSettings* settings, ProviderTestData* provider) {
 	// pick object name before wait so no collisions between concurrent writes
 	std::string objName;
 	loop {
@@ -98,10 +102,10 @@ ACTOR Future<Void> createObject(ConnectionProviderTestSettings* settings, Provid
 	// after write, put in the readable list
 	provider->data.push_back({ fullPath, data });
 
-	return Void();
+	return data.size();
 }
 
-ACTOR Future<Void> readAndVerifyObject(ProviderTestData* provider, std::string objFullPath, Value expectedData) {
+ACTOR Future<int64_t> readAndVerifyObject(ProviderTestData* provider, std::string objFullPath, Value expectedData) {
 	Reference<BackupContainerFileSystem> bstore = provider->provider->getForRead(objFullPath);
 	state Reference<IAsyncFile> reader = wait(bstore->readFile(objFullPath));
 
@@ -110,7 +114,7 @@ ACTOR Future<Void> readAndVerifyObject(ProviderTestData* provider, std::string o
 	ASSERT_EQ(expectedData.size(), readSize);
 	ASSERT(expectedData == actualData);
 
-	return Void();
+	return expectedData.size();
 }
 
 Future<Void> deleteObject(ProviderTestData* provider, std::string objFullPath) {
@@ -119,6 +123,10 @@ Future<Void> deleteObject(ProviderTestData* provider, std::string objFullPath) {
 }
 
 ACTOR Future<Void> workerThread(ConnectionProviderTestSettings* settings, std::vector<ProviderTestData>* providers) {
+	// This worker should average settings->targetBytesPerSec / settings->threads.
+	// Then because we randomly 50% of the time don't consult the rateLimiter, bring the rate limiter's rate down by 2
+	state int targetBytesPerSec = std::max((uint32_t)1, settings->targetBytesPerSec / settings->threads / 2);
+	state Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(targetBytesPerSec, 1));
 	state double endTime = now() + settings->runtime;
 	try {
 		while (now() < endTime) {
@@ -133,18 +141,23 @@ ACTOR Future<Void> workerThread(ConnectionProviderTestSettings* settings, std::v
 
 			// randomly pick create or read
 			bool doWrite = deterministicRandom()->random01() < settings->readWriteSplit;
+			state int64_t opSize = 0;
 			if (provider->usedNames.size() < settings->filesPerProvider && (provider->data.empty() || doWrite)) {
 				// create an object
-				wait(createObject(settings, provider));
+				wait(store(opSize, createObject(settings, provider)));
 				settings->writeOps++;
 			} else if (!provider->data.empty()) {
 				// read a random object
 				auto& readInfo = provider->data[deterministicRandom()->randomInt(0, provider->data.size())];
-				wait(readAndVerifyObject(provider, readInfo.first, readInfo.second));
+				wait(store(opSize, readAndVerifyObject(provider, readInfo.first, readInfo.second)));
 				settings->readOps++;
 			} else {
 				// other threads are creating files up to filesPerProvider limit, but none finished yet. Just wait
 				wait(delay(0.1));
+			}
+
+			if (opSize > 0 && deterministicRandom()->coinflip()) {
+				wait(rateLimiter->getAllowance(opSize) && delayJittered(0.01));
 			}
 		}
 
@@ -161,7 +174,7 @@ ACTOR Future<Void> checkAndCleanUp(ProviderTestData* provider) {
 
 	for (i = 0; i < provider->data.size(); i++) {
 		auto& readInfo = provider->data[i];
-		wait(readAndVerifyObject(provider, readInfo.first, readInfo.second));
+		wait(success(readAndVerifyObject(provider, readInfo.first, readInfo.second)));
 		wait(deleteObject(provider, provider->data[i].first));
 	}
 
@@ -176,8 +189,7 @@ TEST_CASE("/fdbserver/blob/connectionprovider") {
 	providers.reserve(settings.numProviders);
 	for (int i = 0; i < settings.numProviders; i++) {
 		std::string nameStr = std::to_string(i);
-		BlobMetadataDomainName name(nameStr);
-		auto metadata = createRandomTestBlobMetadata(SERVER_KNOBS->BG_URL, i, name);
+		auto metadata = createRandomTestBlobMetadata(SERVER_KNOBS->BG_URL, i);
 		providers.emplace_back(BlobConnectionProvider::newBlobConnectionProvider(metadata));
 	}
 	fmt::print("BlobConnectionProviderTest\n");

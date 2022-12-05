@@ -487,12 +487,12 @@ class PaxosConfigConsumerImpl {
 				    .detail("LargestLiveVersion", self->getCommittedVersionQuorum.getLargestLive())
 				    .detail("SmallestCommitted", smallestCommitted);
 				ASSERT_GE(committedVersion, self->lastSeenVersion);
-				self->lastSeenVersion = committedVersion;
+				self->lastSeenVersion = std::max(self->lastSeenVersion, committedVersion);
 				self->compactionVersion = std::max(self->compactionVersion, smallestCommitted);
 				broadcaster->applySnapshotAndChanges(std::move(reply.snapshot),
 				                                     reply.snapshotVersion,
 				                                     reply.changes,
-				                                     committedVersion,
+				                                     self->lastSeenVersion,
 				                                     reply.annotations,
 				                                     self->getCommittedVersionQuorum.getReadReplicas(),
 				                                     self->getCommittedVersionQuorum.getLargestLive(),
@@ -534,6 +534,13 @@ class PaxosConfigConsumerImpl {
 				if (committedVersion > self->lastSeenVersion) {
 					ASSERT(self->getCommittedVersionQuorum.getReadReplicas().size() >= self->cfis.size() / 2 + 1 ||
 					       self->getCommittedVersionQuorum.isSpecialZeroQuorum());
+					if (BUGGIFY) {
+						// Inject a random delay between getting the committed
+						// version and reading any changes. The goal is to
+						// allow attrition to occasionally kill ConfigNodes in
+						// this in-between state.
+						wait(delay(deterministicRandom()->random01() * 5));
+					}
 					state std::vector<ConfigFollowerInterface> readReplicas =
 					    self->getCommittedVersionQuorum.getReadReplicas();
 					std::vector<Future<Void>> fs;
@@ -567,7 +574,7 @@ class PaxosConfigConsumerImpl {
 					Version smallestCommitted = self->getCommittedVersionQuorum.getSmallestCommitted();
 					self->compactionVersion = std::max(self->compactionVersion, smallestCommitted);
 					broadcaster->applyChanges(reply.changes,
-					                          committedVersion,
+					                          self->lastSeenVersion,
 					                          reply.annotations,
 					                          self->getCommittedVersionQuorum.getReadReplicas());
 				} else if (committedVersion == self->lastSeenVersion) {

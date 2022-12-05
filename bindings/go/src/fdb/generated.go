@@ -261,6 +261,11 @@ func (o NetworkOptions) SetIgnoreExternalClientFailures() error {
 	return o.setOpt(68, nil)
 }
 
+// Fail with an error if there is no client matching the server version the client is connecting to
+func (o NetworkOptions) SetFailIncompatibleClient() error {
+	return o.setOpt(69, nil)
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
@@ -495,6 +500,11 @@ func (o TransactionOptions) SetReadSystemKeys() error {
 // Allows this transaction to access the raw key-space when tenant mode is on.
 func (o TransactionOptions) SetRawAccess() error {
 	return o.setOpt(303, nil)
+}
+
+// Allows this transaction to bypass storage quota enforcement. Should only be used for transactions that directly or indirectly decrease the size of the tenant group's data.
+func (o TransactionOptions) SetBypassStorageQuota() error {
+	return o.setOpt(304, nil)
 }
 
 // Not yet implemented.

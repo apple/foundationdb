@@ -11,7 +11,8 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader, CURRENT_VERSION, FUTURE_VERSION
+from binary_download import FdbBinaryDownloader
+from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster, random_secret_string
 
 TENANT_API_VERSION = 720
@@ -168,6 +169,7 @@ class UpgradeTest:
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.cluster.stop_cluster()
+        self.cluster.release_ports()
         if CLEANUP_ON_EXIT:
             shutil.rmtree(self.tmp_dir)
 

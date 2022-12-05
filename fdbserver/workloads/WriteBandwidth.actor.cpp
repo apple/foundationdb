@@ -20,7 +20,7 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -37,11 +37,11 @@ struct WriteBandwidthWorkload : KVWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
-	ContinuousSample<double> commitLatencies, GRVLatencies;
+	DDSketch<double> commitLatencies, GRVLatencies;
 
 	WriteBandwidthWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), loadTime(0.0), transactions("Transactions"), retries("Retries"), commitLatencies(2000),
-	    GRVLatencies(2000) {
+	  : KVWorkload(wcx), loadTime(0.0), transactions("Transactions"), retries("Retries"), commitLatencies(),
+	    GRVLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		keysPerTransaction = getOption(options, "keysPerTransaction"_sr, 100);
 		valueString = std::string(maxValueBytes, '.');

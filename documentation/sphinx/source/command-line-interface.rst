@@ -475,7 +475,7 @@ Deletes a tenant from the cluster. The tenant must be empty.
 list
 ^^^^
 
-``tenant list [BEGIN] [END] [LIMIT]``
+``tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]``
 
 Lists the tenants present in the cluster.
 
@@ -484,6 +484,10 @@ Lists the tenants present in the cluster.
 ``END`` - the exclusive end tenant to list. Defaults to ``\xff\xff``.
 
 ``LIMIT`` - the number of tenants to list. Defaults to 100.
+
+``OFFSET`` - the number of items to skip over, starting from the beginning of the range. Defaults to 0.
+
+``STATE``` - TenantState(s) to filter the list with. Defaults to no filters.
 
 get
 ^^^

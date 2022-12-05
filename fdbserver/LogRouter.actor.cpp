@@ -28,6 +28,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Histogram.h"
+#include "flow/Trace.h"
 #include "flow/network.h"
 #include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -137,7 +138,7 @@ struct LogRouterData {
 	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion - 1), minPopped(0),
 	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
 	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
-	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::microseconds)),
+	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::milliseconds)),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc) {
 		// setup just enough of a logSet to be able to call getPushLocations
@@ -448,6 +449,14 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	state int sequence = -1;
 	state UID peekId;
 
+	DebugLogTraceEvent("LogRouterPeek0", self->dbgid)
+	    .detail("ReturnIfBlocked", reqReturnIfBlocked)
+	    .detail("Tag", reqTag.toString())
+	    .detail("Seq", reqSequence.present() ? reqSequence.get().second : -1)
+	    .detail("SeqCursor", reqSequence.present() ? reqSequence.get().first : UID())
+	    .detail("Ver", self->version.get())
+	    .detail("Begin", reqBegin);
+
 	if (reqSequence.present()) {
 		try {
 			peekId = reqSequence.get().first;
@@ -481,6 +490,13 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 			reqOnlySpilled = prevPeekData.second;
 			wait(yield());
 		} catch (Error& e) {
+			DebugLogTraceEvent("LogRouterPeekError", self->dbgid)
+			    .error(e)
+			    .detail("Tag", reqTag.toString())
+			    .detail("Seq", reqSequence.present() ? reqSequence.get().second : -1)
+			    .detail("SeqCursor", reqSequence.present() ? reqSequence.get().first : UID())
+			    .detail("Begin", reqBegin);
+
 			if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
 				replyPromise.sendError(e);
 				return Void();
@@ -489,12 +505,6 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 			}
 		}
 	}
-
-	DebugLogTraceEvent("LogRouterPeek0", self->dbgid)
-	    .detail("ReturnIfBlocked", reqReturnIfBlocked)
-	    .detail("Tag", reqTag.toString())
-	    .detail("Ver", self->version.get())
-	    .detail("Begin", reqBegin);
 
 	if (reqReturnIfBlocked && self->version.get() < reqBegin) {
 		replyPromise.sendError(end_of_stream());
@@ -528,19 +538,22 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 			TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid)
 			    .detail("Begin", reqBegin)
 			    .detail("Popped", poppedVer)
+			    .detail("Tag", reqTag.toString())
+			    .detail("Seq", reqSequence.present() ? reqSequence.get().second : -1)
+			    .detail("SeqCursor", reqSequence.present() ? reqSequence.get().first : UID())
 			    .detail("Start", self->startVersion);
 			if (std::is_same<PromiseType, Promise<TLogPeekReply>>::value) {
 				// kills logRouterPeekStream actor, otherwise that actor becomes stuck
 				throw operation_obsolete();
 			}
-			replyPromise.send(Never());
-			if (reqSequence.present()) {
-				auto& trackerData = self->peekTracker[peekId];
-				auto& sequenceData = trackerData.sequence_version[sequence + 1];
-				if (!sequenceData.isSet()) {
-					sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
-				}
+			if (std::is_same<PromiseType, ReplyPromise<TLogPeekReply>>::value) {
+				// Send error to avoid a race condition that the peer is really retrying,
+				// otherwise, the peer could be blocked forever.
+				replyPromise.sendError(operation_obsolete());
+			} else {
+				replyPromise.send(Never());
 			}
+
 			return Void();
 		}
 
@@ -681,6 +694,7 @@ ACTOR Future<Void> logRouterPop(LogRouterData* self, TLogPopRequest req) {
 	if (!tagData) {
 		tagData = self->createTagData(req.tag, req.to, req.durableKnownCommittedVersion);
 	} else if (req.to > tagData->popped) {
+		DebugLogTraceEvent("LogRouterPop", self->dbgid).detail("Tag", req.tag.toString()).detail("PopVersion", req.to);
 		tagData->popped = req.to;
 		tagData->durableKnownCommittedVersion = req.durableKnownCommittedVersion;
 		wait(tagData->eraseMessagesBefore(req.to, self, TaskPriority::TLogPop));

@@ -41,9 +41,9 @@ enum BandwidthStatus { BandwidthStatusLow, BandwidthStatusNormal, BandwidthStatu
 enum ReadBandwidthStatus { ReadBandwidthStatusNormal, ReadBandwidthStatusHigh };
 
 BandwidthStatus getBandwidthStatus(StorageMetrics const& metrics) {
-	if (metrics.bytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)
+	if (metrics.bytesWrittenPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC)
 		return BandwidthStatusHigh;
-	else if (metrics.bytesPerKSecond < SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC)
+	else if (metrics.bytesWrittenPerKSecond < SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC)
 		return BandwidthStatusLow;
 
 	return BandwidthStatusNormal;
@@ -176,7 +176,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 		bounds.max.bytes = maxShardSize;
 	}
 
-	bounds.max.bytesPerKSecond = bounds.max.infinity;
+	bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
 	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
 
@@ -187,14 +187,14 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 		bounds.min.bytes = maxShardSize / SERVER_KNOBS->SHARD_BYTES_RATIO;
 	}
 
-	bounds.min.bytesPerKSecond = 0;
+	bounds.min.bytesWrittenPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
 	bounds.min.bytesReadPerKSecond = 0;
 
 	// The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last
 	// shard)
 	bounds.permittedError.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO / 3;
-	bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.bytesWrittenPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
 
@@ -222,18 +222,18 @@ ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
 		                            std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0));
 		bounds.permittedError.bytes = bytes * 0.1;
 		if (bandwidthStatus == BandwidthStatusNormal) { // Not high or low
-			bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
-			bounds.min.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
-			bounds.permittedError.bytesPerKSecond = bounds.min.bytesPerKSecond / 4;
+			bounds.max.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
+			bounds.min.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
+			bounds.permittedError.bytesWrittenPerKSecond = bounds.min.bytesWrittenPerKSecond / 4;
 		} else if (bandwidthStatus == BandwidthStatusHigh) { // > 10MB/sec for 100MB shard, proportionally lower
 			                                                 // for smaller shard, > 200KB/sec no matter what
-			bounds.max.bytesPerKSecond = bounds.max.infinity;
-			bounds.min.bytesPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
-			bounds.permittedError.bytesPerKSecond = bounds.min.bytesPerKSecond / 4;
+			bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
+			bounds.min.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
+			bounds.permittedError.bytesWrittenPerKSecond = bounds.min.bytesWrittenPerKSecond / 4;
 		} else if (bandwidthStatus == BandwidthStatusLow) { // < 10KB/sec
-			bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
-			bounds.min.bytesPerKSecond = 0;
-			bounds.permittedError.bytesPerKSecond = bounds.max.bytesPerKSecond / 4;
+			bounds.max.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
+			bounds.min.bytesWrittenPerKSecond = 0;
+			bounds.permittedError.bytesWrittenPerKSecond = bounds.max.bytesWrittenPerKSecond / 4;
 		} else {
 			ASSERT(false);
 		}
@@ -306,12 +306,12 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					/*TraceEvent("ShardSizeUpdate")
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.metrics.bytes)
-					    .detail("Bandwidth", metrics.metrics.bytesPerKSecond)
+					    .detail("WriteBandwidth", metrics.metrics.bytesWrittenPerKSecond)
 					    .detail("BandwidthStatus", getBandwidthStatus(metrics))
 					    .detail("BytesLower", bounds.min.bytes)
 					    .detail("BytesUpper", bounds.max.bytes)
-					    .detail("BandwidthLower", bounds.min.bytesPerKSecond)
-					    .detail("BandwidthUpper", bounds.max.bytesPerKSecond)
+					    .detail("WriteBandwidthLower", bounds.min.bytesWrittenPerKSecond)
+					    .detail("WriteBandwidthUpper", bounds.max.bytesWrittenPerKSecond)
 					    .detail("ShardSizePresent", shardSize->get().present())
 					    .detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 					    .detail("TrackerID", trackerID);*/
@@ -623,7 +623,9 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				result.emplace_back(shardContainingTenantEnd, faultLines);
 			}
 		} else {
-			CODE_PROBE(true, "Shards that contain tenant key range not split since shard stats are unavailable");
+			CODE_PROBE(true,
+			           "Shards that contain tenant key range not split since shard stats are unavailable",
+			           probe::decoration::rare);
 		}
 	}
 
@@ -879,7 +881,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 
 	StorageMetrics splitMetrics;
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
-	splitMetrics.bytesPerKSecond =
+	splitMetrics.bytesWrittenPerKSecond =
 	    keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
 	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
@@ -902,7 +904,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	            bandwidthStatus == BandwidthStatusHigh     ? "High"
 	            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
 	                                                       : "Low")
-	    .detail("BytesPerKSec", metrics.bytesPerKSecond)
+	    .detail("BytesWrittenPerKSec", metrics.bytesWrittenPerKSecond)
 	    .detail("NumShards", numShards);
 
 	if (numShards > 1) {
@@ -1203,7 +1205,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 	    .detail("TrackerID", trackerID)
 	    .detail("MaxBytes", self()->maxShardSize->get().get())
 	    .detail("ShardSize", shardSize->get().get().bytes)
-	    .detail("BytesPerKSec", shardSize->get().get().bytesPerKSecond);*/
+	    .detail("BytesPerKSec", shardSize->get().get().bytesWrittenPerKSecond);*/
 
 	try {
 		loop {
@@ -1358,7 +1360,7 @@ ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKM
 		when(wait(g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? Never()
 		                                                              : fetchTopKShardMetrics_impl(self, req))) {}
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
-			CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT", probe::decoration::rare);
+			CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT");
 			req.reply.send(GetTopKMetricsReply());
 		}
 	}
@@ -1598,9 +1600,11 @@ void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange
 // At beginning of the transition from the initial state without physical shard notion
 // to the physical shard aware state, the physicalShard set only contains one element which is anonymousShardId[0]
 // After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
-Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
-                                                                               StorageMetrics const& moveInMetrics,
-                                                                               uint64_t debugID) {
+Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
+    ShardsAffectedByTeamFailure::Team team,
+    StorageMetrics const& moveInMetrics,
+    const std::unordered_set<uint64_t>& excludedPhysicalShards,
+    uint64_t debugID) {
 	ASSERT(team.servers.size() > 0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
 	if (teamPhysicalShardIDs.count(team) == 0) {
@@ -1620,6 +1624,9 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(S
 		    .detail("Bytes", physicalShardInstances[physicalShardID].metrics.bytes)
 		    .detail("BelongTeam", team.toString())
 		    .detail("DebugID", debugID);*/
+		if (excludedPhysicalShards.find(physicalShardID) != excludedPhysicalShards.end()) {
+			continue;
+		}
 		if (!checkPhysicalShardAvailable(physicalShardID, moveInMetrics)) {
 			continue;
 		}
@@ -1748,26 +1755,8 @@ InOverSizePhysicalShard PhysicalShardCollection::isInOverSizePhysicalShard(KeyRa
 	return InOverSizePhysicalShard::False;
 }
 
-uint64_t PhysicalShardCollection::determinePhysicalShardIDGivenPrimaryTeam(
-    ShardsAffectedByTeamFailure::Team primaryTeam,
-    StorageMetrics const& metrics,
-    bool forceToUseNewPhysicalShard,
-    uint64_t debugID) {
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
-	ASSERT(primaryTeam.primary == true);
-	if (forceToUseNewPhysicalShard) {
-		return generateNewPhysicalShardID(debugID);
-	}
-	Optional<uint64_t> physicalShardIDFetch = trySelectAvailablePhysicalShardFor(primaryTeam, metrics, debugID);
-	if (!physicalShardIDFetch.present()) {
-		return generateNewPhysicalShardID(debugID);
-	}
-	return physicalShardIDFetch.get();
-}
-
 // May return a problematic remote team
-Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
+std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
     uint64_t inputPhysicalShardID,
     StorageMetrics const& moveInMetrics,
     uint64_t debugID) {
@@ -1775,10 +1764,10 @@ Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvail
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
 	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
 	if (physicalShardInstances.count(inputPhysicalShardID) == 0) {
-		return Optional<ShardsAffectedByTeamFailure::Team>();
+		return { Optional<ShardsAffectedByTeamFailure::Team>(), true };
 	}
 	if (!checkPhysicalShardAvailable(inputPhysicalShardID, moveInMetrics)) {
-		return Optional<ShardsAffectedByTeamFailure::Team>();
+		return { Optional<ShardsAffectedByTeamFailure::Team>(), false };
 	}
 	for (auto team : physicalShardInstances[inputPhysicalShardID].teams) {
 		if (team.primary == false) {
@@ -1788,10 +1777,12 @@ Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvail
 			    .detail("TeamSize", team.servers.size())
 			    .detail("PhysicalShardsOfTeam", convertIDsToString(teamPhysicalShardIDs[team]))
 			    .detail("DebugID", debugID);*/
-			return team;
+			return { team, true };
 		}
 	}
-	UNREACHABLE();
+	// In this case, the physical shard may not be populated in the remote region yet, e.g., we are making a
+	// configuration change to turn a single region cluster into HA mode.
+	return { Optional<ShardsAffectedByTeamFailure::Team>(), true };
 }
 
 // The update of PhysicalShardToTeams, Collection, keyRangePhysicalShardIDMap should be atomic

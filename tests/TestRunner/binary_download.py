@@ -7,11 +7,9 @@ import shutil
 import stat
 from urllib import request
 import hashlib
+from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 
 from local_cluster import random_secret_string
-
-CURRENT_VERSION = "7.3.0"
-FUTURE_VERSION = "7.4.0"
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
@@ -52,8 +50,6 @@ class FdbBinaryDownloader:
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         self.platform = platform.machine()
         assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(self.platform)
-        self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
-        self.tmp_dir.mkdir(parents=True)
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
         self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
         if not self.local_binary_repo.exists():
@@ -110,7 +106,7 @@ class FdbBinaryDownloader:
 
             assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
             assert local_sha256.exists(), "{} does not exist".format(local_sha256)
-            expected_checksum = read_to_str(local_sha256)
+            expected_checksum = read_to_str(local_sha256)[0:64]
             actual_checkum = compute_sha256(local_file_tmp)
             if expected_checksum == actual_checkum:
                 print("Checksum OK")

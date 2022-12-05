@@ -207,12 +207,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
-		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
-		};
+		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-		    wait(getLatestEncryptCipherKeys(db, metadataDomains, BlobCipherMetrics::TLOG));
+		    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
 		cipherKeys = cks;
 	}
 
@@ -634,12 +632,11 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 		ASSERT(!pContext->processed);
 		state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 		if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
-			static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
-				{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-				{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
+			static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = {
+				SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, ENCRYPT_HEADER_DOMAIN_ID
 			};
 			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-			    wait(getLatestEncryptCipherKeys(db, metadataDomains, BlobCipherMetrics::TLOG));
+			    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
 			cipherKeys = cks;
 		}
 		wait(processCompleteTransactionStateRequest(

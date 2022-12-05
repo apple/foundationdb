@@ -43,9 +43,9 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-// Enforcing rocksdb version to be 6.22.1 or greater.
-static_assert(ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR >= 22 && ROCKSDB_PATCH >= 1,
-              "Unsupported rocksdb version. Update the rocksdb to at least 6.22.1 version");
+// Enforcing rocksdb version to be 7.7.3.
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
+              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
 namespace {
 
@@ -461,7 +461,7 @@ private:
 };
 
 Future<Void> RocksDBCFCheckpointReader::init(StringRef token) {
-	ASSERT_EQ(this->checkpoint_.getFormat(), RocksDBColumnFamily);
+	ASSERT_EQ(this->checkpoint_.getFormat(), DataMoveRocksCF);
 	const std::string name = token.toString();
 	this->offset_ = 0;
 	this->path_.clear();
@@ -489,7 +489,7 @@ Future<Void> RocksDBCFCheckpointReader::close() {
 	return doClose(this);
 }
 
-// Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
+// Fetch a single sst file from storage server. The progress is checkpointed via cFun.
 ACTOR Future<Void> fetchCheckpointFile(Database cx,
                                        std::shared_ptr<CheckpointMetaData> metaData,
                                        int idx,
@@ -507,7 +507,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 
 	state std::string remoteFile = rocksCF.sstFiles[idx].name;
 	state std::string localFile = dir + rocksCF.sstFiles[idx].name;
-	state UID ssID = metaData->ssID;
+	ASSERT(!metaData->src.empty());
+	state UID ssID = metaData->src.front();
 
 	state Transaction tr(cx);
 	state StorageServerInterface ssi;
@@ -611,7 +612,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		ASSERT(!file.range.intersects(range));
 	}
 
-	state UID ssID = metaData->ssID;
+	ASSERT(!metaData->src.empty());
+	state UID ssID = metaData->src.front();
 	state Transaction tr(cx);
 	state StorageServerInterface ssi;
 	loop {
@@ -757,7 +759,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
 
-	if (metaData->format == RocksDBColumnFamily) {
+	if (metaData->format == DataMoveRocksCF) {
 		state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
 		TraceEvent(SevDebug, "RocksDBCheckpointMetaData").detail("RocksCF", rocksCF.toString());
 
@@ -767,7 +769,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 			fs.push_back(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 			TraceEvent(SevDebug, "GetCheckpointFetchingFile")
 			    .detail("FileName", rocksCF.sstFiles[i].name)
-			    .detail("Server", metaData->ssID.toString());
+			    .detail("Server", describe(metaData->src));
 		}
 		wait(waitForAll(fs));
 	} else if (metaData->format == RocksDB) {
@@ -782,7 +784,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	state CheckpointFormat format = checkpoint.getFormat();
 	state std::unordered_set<std::string> dirs;
-	if (format == RocksDBColumnFamily) {
+	if (format == DataMoveRocksCF) {
 		RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 		TraceEvent(SevInfo, "DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
 		    .detail("CheckpointID", checkpoint.checkpointID)
@@ -832,7 +834,7 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 	int64_t totalBytes = 0;
 	for (const auto& checkpoint : checkpoints) {
 		const CheckpointFormat format = checkpoint.getFormat();
-		if (format == RocksDBColumnFamily) {
+		if (format == DataMoveRocksCF) {
 			// TODO: Returns the checkpoint size of a RocksDB Column Family.
 		} else if (format == RocksDB) {
 			auto rcp = getRocksCheckpoint(checkpoint);
@@ -847,7 +849,7 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	const CheckpointFormat format = checkpoint.getFormat();
-	if (format == RocksDBColumnFamily) {
+	if (format == DataMoveRocksCF) {
 		return new RocksDBCFCheckpointReader(checkpoint, logID);
 	} else if (format == RocksDB) {
 		return new RocksDBCheckpointReader(checkpoint, logID);
