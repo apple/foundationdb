@@ -31,14 +31,14 @@
 
 FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
 
-namespace Tenant {
+namespace TenantAPI {
 Key idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), Tenant::PREFIX_SIZE);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
 }
 
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
-	ASSERT(prefix.size() == Tenant::PREFIX_SIZE);
+	ASSERT(prefix.size() == TenantAPI::PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);
 	if (enforceValidTenantId) {
@@ -48,7 +48,7 @@ int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 	}
 	return id;
 }
-}; // namespace Tenant
+}; // namespace TenantAPI
 
 std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
@@ -134,7 +134,7 @@ TenantMapEntry::TenantMapEntry(int64_t id,
 void TenantMapEntry::setId(int64_t id) {
 	ASSERT(id >= 0);
 	this->id = id;
-	prefix = Tenant::idToPrefix(id);
+	prefix = TenantAPI::idToPrefix(id);
 }
 
 std::string TenantMapEntry::toJson() const {

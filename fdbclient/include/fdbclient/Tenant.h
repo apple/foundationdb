@@ -32,12 +32,12 @@
 
 FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
 
-namespace Tenant {
+namespace TenantAPI {
 Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
 
 constexpr static int PREFIX_SIZE = sizeof(int64_t);
-} // namespace Tenant
+} // namespace TenantAPI
 
 // Represents the various states that a tenant could be in.
 // In a standalone cluster, a tenant should only ever be in the READY state.
@@ -118,7 +118,7 @@ struct TenantMapEntry {
 		           error);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
-				prefix = Tenant::idToPrefix(id);
+				prefix = TenantAPI::idToPrefix(id);
 			}
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 		}

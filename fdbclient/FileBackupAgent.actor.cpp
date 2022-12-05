@@ -710,11 +710,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
-		if (key.size() < Tenant::PREFIX_SIZE) {
+		if (key.size() < TenantAPI::PREFIX_SIZE) {
 			return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 		}
-		KeyRef tenantPrefix = KeyRef(key.begin(), Tenant::PREFIX_SIZE);
-		state int64_t tenantId = Tenant::prefixToId(tenantPrefix);
+		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
+		state int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
 		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
 		if (payload.present()) {
 			return tenantId;
@@ -813,7 +813,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		state KeyRef endKey = k;
 		// If we are crossing a boundary with a key that has a tenant prefix then truncate it
 		if (curKeyDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curKeyDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-			endKey = StringRef(k.begin(), Tenant::PREFIX_SIZE);
+			endKey = StringRef(k.begin(), TenantAPI::PREFIX_SIZE);
 		}
 
 		state ValueRef newValue = StringRef();
@@ -1075,7 +1075,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
 				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-					ASSERT(curKey.size() == Tenant::PREFIX_SIZE);
+					ASSERT(curKey.size() == TenantAPI::PREFIX_SIZE);
 				}
 				done = true;
 			}
