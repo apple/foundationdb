@@ -309,7 +309,6 @@ private:
 			TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[name];
 			ASSERT(!entry.assignedCluster.present());
 			ASSERT(entry.id == metaclusterEntry.id);
-			ASSERT(entry.encrypted == metaclusterEntry.encrypted);
 
 			ASSERT(entry.tenantState == TenantState::READY);
 			ASSERT(self->allowPartialMetaclusterOperations || metaclusterEntry.tenantState == TenantState::READY);

@@ -171,7 +171,6 @@ private:
 					auto pairMapEntry = metadata.tenantMap[tenantMapEntry.renamePair.get()];
 					ASSERT(pairMapEntry.id == tenantMapEntry.id);
 					ASSERT(pairMapEntry.prefix == tenantMapEntry.prefix);
-					ASSERT(pairMapEntry.encrypted == tenantMapEntry.encrypted);
 					ASSERT(pairMapEntry.configurationSequenceNum == tenantMapEntry.configurationSequenceNum);
 					ASSERT(pairMapEntry.assignedCluster.present());
 					ASSERT(pairMapEntry.assignedCluster.get() == tenantMapEntry.assignedCluster.get());

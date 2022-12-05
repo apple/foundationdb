@@ -55,7 +55,6 @@ struct CreateTenantWorkload : TestWorkload {
 			TenantMapEntry givenEntry;
 			if (self->tenantGroup.present()) {
 				givenEntry.tenantGroup = self->tenantGroup.get();
-				givenEntry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			}
 			Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(db.getReference(), self->tenant, givenEntry));
 			ASSERT(entry.present());
