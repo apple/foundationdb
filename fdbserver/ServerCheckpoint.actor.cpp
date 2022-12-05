@@ -23,7 +23,9 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, const CheckpointAsKeyValues checkpointAsKeyValues, UID logID) {
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
+                                       const CheckpointAsKeyValues checkpointAsKeyValues,
+                                       UID logID) {
 	const CheckpointFormat format = checkpoint.getFormat();
 	if (format == DataMoveRocksCF || format == RocksDB) {
 		return newRocksDBCheckpointReader(checkpoint, checkpointAsKeyValues, logID);
@@ -50,31 +52,23 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
                                                  CheckpointAsKeyValues checkpointAsKeyValues,
+                                                 std::vector<KeyRange> ranges,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent("FetchCheckpointBegin", initialState.checkpointID).detail("CheckpointMetaData", initialState.toString());
+	ASSERT(!ranges.empty() || !checkpointAsKeyValues);
 	state CheckpointMetaData result;
-	const CheckpointFormat format = initialState.getFormat();
-	if (format == DataMoveRocksCF || format == RocksDB) {
-		CheckpointMetaData _result = wait(fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
-		result = _result;
+	CheckpointFormat format = initialState.getFormat();
+	if (checkpointAsKeyValues && format != RocksDBKeyValues) {
+		initialState.setFormat(RocksDBKeyValues);
+		format = RocksDBKeyValues;
+		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(), IncludeVersion());
+	}
+	if (format == DataMoveRocksCF || format == RocksDB || format == RocksDBKeyValues) {
+		wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, checkpointAsKeyValues, ranges, cFun)));
 	} else {
 		throw not_implemented();
 	}
 
 	TraceEvent("FetchCheckpointEnd", initialState.checkpointID).detail("CheckpointMetaData", result.toString());
 	return result;
-}
-
-ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
-    Database cx,
-    std::vector<CheckpointMetaData> initialStates,
-    std::string dir,
-    CheckpointAsKeyValues checkpointAsKeyValues,
-    std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
-	std::vector<Future<CheckpointMetaData>> actors;
-	for (const auto& checkpoint : initialStates) {
-		actors.push_back(fetchCheckpoint(cx, checkpoint, dir, checkpointAsKeyValues, cFun));
-	}
-	std::vector<CheckpointMetaData> res = wait(getAll(actors));
-	return res;
 }

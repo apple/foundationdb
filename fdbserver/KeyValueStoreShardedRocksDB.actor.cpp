@@ -569,38 +569,38 @@ struct PhysicalShard {
 		return status;
 	}
 
-	rocksdb::Status restoreKvs(const std::vector<CheckpointMetaData>& checkpoints) {
-		std::vector<std::string> sstFiles;
-		for (const auto& checkpoint : a.checkpoints) {
-			const RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
-			for (const auto& file : rocksCheckpoint.fetchedFiles) {
-				TraceEvent("RocksDBRestoreFile", id)
-				    .detail("Checkpoint", rocksCheckpoint.toString())
-				    .detail("File", file.toString());
-				sstFiles.push_back(file.path);
-			}
-		}
+	// rocksdb::Status restoreKvs(const std::vector<CheckpointMetaData>& checkpoints) {
+	// 	std::vector<std::string> sstFiles;
+	// 	for (const auto& checkpoint : a.checkpoints) {
+	// 		const RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
+	// 		for (const auto& file : rocksCheckpoint.fetchedFiles) {
+	// 			TraceEvent("RocksDBRestoreFile", id)
+	// 			    .detail("Checkpoint", rocksCheckpoint.toString())
+	// 			    .detail("File", file.toString());
+	// 			sstFiles.push_back(file.path);
+	// 		}
+	// 	}
 
-		if (!sstFiles.empty()) {
-			rocksdb::IngestExternalFileOptions ingestOptions;
-			ingestOptions.move_files = true;
-			ingestOptions.write_global_seqno = false;
-			ingestOptions.verify_checksums_before_ingest = true;
-			status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
-			if (!status.ok()) {
-				logRocksDBError(id, status, "IngestExternalFile", SevWarnAlways);
-				a.done.sendError(statusToError(status));
-				return;
-			}
-		} else {
-			TraceEvent(SevDebug, "RocksDBServeRestoreEmptyRange", id)
-			    .detail("Path", a.path)
-			    .detail("Checkpoint", describe(a.checkpoints));
-		}
-		TraceEvent("RocksDBServeRestoreEnd", id).detail("Path", a.path).detail("Checkpoint", describe(a.checkpoints));
-		a.done.send(Void());
-		return status;
-	}
+	// 	if (!sstFiles.empty()) {
+	// 		rocksdb::IngestExternalFileOptions ingestOptions;
+	// 		ingestOptions.move_files = true;
+	// 		ingestOptions.write_global_seqno = false;
+	// 		ingestOptions.verify_checksums_before_ingest = true;
+	// 		status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
+	// 		if (!status.ok()) {
+	// 			logRocksDBError(id, status, "IngestExternalFile", SevWarnAlways);
+	// 			a.done.sendError(statusToError(status));
+	// 			return;
+	// 		}
+	// 	} else {
+	// 		TraceEvent(SevDebug, "RocksDBServeRestoreEmptyRange", id)
+	// 		    .detail("Path", a.path)
+	// 		    .detail("Checkpoint", describe(a.checkpoints));
+	// 	}
+	// 	TraceEvent("RocksDBServeRestoreEnd", id).detail("Path", a.path).detail("Checkpoint", describe(a.checkpoints));
+	// 	a.done.send(Void());
+	// 	return status;
+	// }
 
 	bool initialized() { return this->isInitialized.load(); }
 

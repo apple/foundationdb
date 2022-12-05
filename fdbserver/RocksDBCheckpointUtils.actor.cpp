@@ -847,6 +847,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
+                                                        CheckpointAsKeyValues checkpointAsKeyValues,
+                                                        std::vector<KeyRange> ranges,
                                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent(SevInfo, "FetchRocksCheckpointBegin")
 	    .detail("InitialState", initialState.toString())
@@ -855,6 +857,9 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 	ASSERT(!initialState.ranges.empty());
 
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
+
+	if (checkpointAsKeyValues) {
+	}
 
 	if (metaData->format == DataMoveRocksCF) {
 		state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
@@ -916,6 +921,8 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
+                                                        CheckpointAsKeyValues checkpointAsKeyValues,
+                                                        std::vector<KeyRange> ranges,
                                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	wait(delay(0));
 	return initialState;
@@ -966,6 +973,13 @@ RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {
 
 RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint) {
 	RocksDBCheckpoint rocksCheckpoint;
+	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	reader.deserialize(rocksCheckpoint);
+	return rocksCheckpoint;
+}
+
+RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(const CheckpointMetaData& checkpoint) {
+	RocksDBCheckpointKeyValues rocksCheckpoint;
 	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;

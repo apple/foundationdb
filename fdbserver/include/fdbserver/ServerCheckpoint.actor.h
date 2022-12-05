@@ -65,14 +65,8 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
                                                  CheckpointAsKeyValues checkpointAsKeyValues,
+												 std::vector<KeyRange> ranges,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
-
-ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
-    Database cx,
-    std::vector<CheckpointMetaData> initialStates,
-    std::string dir,
-    CheckpointAsKeyValues checkpointAsKeyValues,
-    std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 #include "flow/unactorcompiler.h"
 

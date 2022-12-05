@@ -259,7 +259,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			loop {
 				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
 				try {
-					CheckpointMetaData record = wait(fetchCheckpoint(cx, records[i], folder, CheckpointAsKeyValues::False));
+					CheckpointMetaData record =
+					    wait(fetchCheckpoint(cx, records[i], folder, CheckpointAsKeyValues::False, {}));
 					fetchedCheckpoints.push_back(record);
 					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());
 					break;
