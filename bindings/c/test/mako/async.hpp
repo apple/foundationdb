@@ -109,8 +109,8 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 		key1.resize(args.key_length);
 		key2.resize(args.key_length);
 		val.resize(args.value_length);
-		if (args.transaction_timeout_txn > 0) {
-			tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_txn);
+		if (args.transaction_timeout_tx > 0) {
+			tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
 		}
 	}
 	void signalEnd() noexcept { stopcount.fetch_add(1); }
