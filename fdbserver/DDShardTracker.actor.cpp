@@ -33,6 +33,7 @@
 #include "flow/CodeProbe.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
@@ -490,17 +491,17 @@ private:
 
 std::string describeSplit(KeyRange keys, Standalone<VectorRef<KeyRef>>& splitKeys) {
 	std::string s;
-	s += "[" + keys.begin.toString() + ", " + keys.end.toString() + ") -> ";
+	s += "[" + keys.begin.toString() + ", " + keys.end.toString() + ") to ";
 
 	for (auto& sk : splitKeys) {
-		s += sk.printable() + " ";
+		s += sk.toString() + " ";
 	}
 
 	return s;
 }
 void traceSplit(KeyRange keys, Standalone<VectorRef<KeyRef>>& splitKeys) {
 	auto s = describeSplit(keys, splitKeys);
-	TraceEvent(SevInfo, "ExecutingShardSplit").detail("AtKeys", s);
+	DebugRelocationTraceEvent(SevInfo, "ExecutingShardSplit").detail("AtKeys", s);
 }
 
 void executeShardSplit(DataDistributionTracker* self,
@@ -516,7 +517,10 @@ void executeShardSplit(DataDistributionTracker* self,
 	int skipRange = deterministicRandom()->randomInt(0, numShards);
 
 	auto s = describeSplit(keys, splitKeys);
-	TraceEvent(SevInfo, "ExecutingShardSplit").suppressFor(0.5).detail("Splitting", s).detail("NumShards", numShards);
+	DebugRelocationTraceEvent(SevInfo, "ExecutingShardSplit")
+	    .suppressFor(0.5)
+	    .detail("Splitting", s)
+	    .detail("NumShards", numShards);
 
 	// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 	// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)

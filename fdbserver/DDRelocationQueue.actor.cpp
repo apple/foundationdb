@@ -146,12 +146,12 @@ struct RelocateData {
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
-	    wantsNewServers(
-	        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
-	        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
-	    cancellable(true), interval("QueuedRelocation", rs.traceId.isValid() ? rs.traceId : randomId),
-	    dataMove(rs.dataMove) {
+	    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
+	    dataMoveId(rs.dataMoveId), workFactor(0), wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) ||
+	                                                              isDataMovementForValleyFiller(rs.moveReason) ||
+	                                                              rs.moveReason == DataMovementReason::SPLIT_SHARD ||
+	                                                              rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
+	    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
 		if (dataMove != nullptr) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
 		}
@@ -989,6 +989,7 @@ struct DDQueue : public IDDRelocationQueue {
 					fetchingSourcesQueue.erase(fetchingSourcesItr);
 				else if (foundActiveRelocation) {
 					firstQueue->erase(firstRelocationItr);
+					// also erase other source server queues
 					for (int i = 1; i < rrs.src.size(); i++)
 						queue[rrs.src[i]].erase(rrs);
 				}
@@ -996,10 +997,9 @@ struct DDQueue : public IDDRelocationQueue {
 
 			if (foundActiveFetching || foundActiveRelocation) {
 				serversToLaunchFrom.insert(rrs.src.begin(), rrs.src.end());
-				/*TraceEvent(rrs.interval.end(), mi.id()).detail("Result","Cancelled")
-				    .detail("WasFetching", foundActiveFetching).detail("Contained", rd.keys.contains( rrs.keys ));*/
 				queuedRelocations--;
-				TraceEvent(SevVerbose, "QueuedRelocationsChanged")
+				DebugRelocationTraceEvent(rrs.interval.end(), distributorId)
+				    .detail("Event", "QueuedRelocationCancelled")
 				    .detail("DataMoveID", rrs.dataMoveId)
 				    .detail("RandomID", rrs.randomId)
 				    .detail("Total", queuedRelocations);
@@ -1026,8 +1026,13 @@ struct DDQueue : public IDDRelocationQueue {
 			if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.erase(rrs) > 0)) {
 				rrs.keys = affectedQueuedItems[r];
 				rrs.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
-
+				// interval.begin should be called before being copied to getSourceServersForRange
 				DebugRelocationTraceEvent(rrs.interval.begin(), distributorId)
+				    .detail("Event", "FetchSource")
+				    .detail("DataMoveID", rrs.dataMoveId)
+				    .detail("RandomID", rrs.randomId)
+				    .detail("Total", queuedRelocations)
+				    .detail("FetchSourceQueue", fetchingSourcesQueue.size())
 				    .detail("KeyBegin", rrs.keys.begin)
 				    .detail("KeyEnd", rrs.keys.end)
 				    .detail("Priority", rrs.priority)
@@ -1046,6 +1051,7 @@ struct DDQueue : public IDDRelocationQueue {
 			} else {
 				RelocateData newData(rrs);
 				newData.keys = affectedQueuedItems[r];
+				// NOTE: why startTime could be -1? Answer: It's coming from the very first range ["", \xff)
 				ASSERT(rrs.src.size() || rrs.startTime == -1);
 
 				bool foundActiveRelocation = false;
@@ -1058,6 +1064,11 @@ struct DDQueue : public IDDRelocationQueue {
 							    TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
 							DebugRelocationTraceEvent(newData.interval.begin(), distributorId)
+							    .detail("DataMoveID", newData.dataMoveId)
+							    .detail("RandomID", newData.randomId)
+							    .detail("Total", queuedRelocations)
+							    .detail("ServerQueue", serverQueue.size())
+							    .detail("Event", "OverwriteServerQueue")
 							    .detail("KeyBegin", newData.keys.begin)
 							    .detail("KeyEnd", newData.keys.end)
 							    .detail("Priority", newData.priority)
@@ -1080,10 +1091,17 @@ struct DDQueue : public IDDRelocationQueue {
 				// We update the keys of a relocation even if it is "dead" since it helps validate()
 				rrs.keys = affectedQueuedItems[r];
 				rrs.interval = newData.interval;
+
+				DebugRelocationTraceEvent("ReplaceInterval", distributorId)
+				    .detail("RandomId", rrs.randomId)
+				    .detail("Begin", rrs.keys.begin)
+				    .detail("End", rrs.keys.end);
+
 			}
 		}
 
 		DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
+		    .detail("RandomID", rd.randomId)
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
@@ -1093,7 +1111,7 @@ struct DDQueue : public IDDRelocationQueue {
 	void completeSourceFetch(const RelocateData& results) {
 		ASSERT(fetchingSourcesQueue.count(results));
 
-		// logRelocation( results, "GotSourceServers" );
+		logRelocation(results, "GotSourceServers");
 
 		fetchingSourcesQueue.erase(results);
 		queueMap.insert(results.keys, results);
@@ -1110,6 +1128,7 @@ struct DDQueue : public IDDRelocationQueue {
 			busyString += describe(rd.src[i]) + " - (" + busymap[rd.src[i]].toString() + "); ";
 
 		TraceEvent(title, distributorId)
+		    .detail("RandomId", rd.randomId)
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
@@ -1159,9 +1178,8 @@ struct DDQueue : public IDDRelocationQueue {
 		int startedHere = 0;
 		double startTime = now();
 		// kick off relocators from items in the queue as need be
-		std::set<RelocateData, std::greater<RelocateData>>::iterator it = combined.begin();
-		for (; it != combined.end(); it++) {
-			RelocateData rd(*it);
+		for (auto rdIt = combined.begin(); rdIt != combined.end(); rdIt++) {
+			RelocateData rd(*rdIt);
 
 			// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
 			bool overlappingInFlight = false;
@@ -1214,7 +1232,8 @@ struct DDQueue : public IDDRelocationQueue {
 
 			if (!rd.isRestore()) {
 				queuedRelocations--;
-				TraceEvent(SevVerbose, "QueuedRelocationsChanged")
+				DebugRelocationTraceEvent("QueuedRelocationsChanged")
+				    .detail("Event", "DequeueToLaunch")
 				    .detail("DataMoveID", rd.dataMoveId)
 				    .detail("RandomID", rd.randomId)
 				    .detail("Total", queuedRelocations);
