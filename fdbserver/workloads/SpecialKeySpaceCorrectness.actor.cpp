@@ -1223,7 +1223,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 							ASSERT(valueObj["command"].get_str() == "coordinators");
 							if (valueObj["retriable"].get_bool()) { // coordinators not reachable, retry
 								if (++retries >= 10) {
-									CODE_PROBE(true, "ChangeCoordinators Exceeded retry limit");
+									CODE_PROBE(
+									    true, "ChangeCoordinators Exceeded retry limit", probe::decoration::rare);
 									changeCoordinatorsSucceeded = false;
 									tx->reset();
 									break;
