@@ -140,8 +140,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			loop {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
 				try {
-					state CheckpointMetaData record =
-					    wait(fetchCheckpoint(cx, records[0], folder, CheckpointAsKeyValues::False, {}));
+					state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[0], folder));
 					fetchedCheckpoints.push_back(record);
 					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
 					break;

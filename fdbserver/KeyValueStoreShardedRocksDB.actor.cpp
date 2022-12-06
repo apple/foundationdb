@@ -80,15 +80,6 @@ struct ShardedRocksDBKeyValueStore;
 
 using rocksdb::BackgroundErrorReason;
 
-struct RangeLessThan {
-	inline bool operator()(const KeyRange& l, const KeyRange& r) {
-		if (l.begin == r.begin) {
-			return l.end < r.end;
-		}
-		return l.begin < r.begin;
-	}
-};
-
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
 // https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
@@ -2292,8 +2283,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::WriteBatch writeBatch;
 			if (format == DataMoveRocksCF && !a.checkpointAsKeyValues) {
 				CheckpointMetaData& checkpoint = a.checkpoints.front();
-				std::sort(a.ranges.begin(), a.ranges.end(), RangeLessThan());
-				std::sort(checkpoint.ranges.begin(), checkpoint.ranges.end(), RangeLessThan());
+				std::sort(a.ranges.begin(), a.ranges.end(), KeyRangeRef::ArbitraryOrder());
+				std::sort(checkpoint.ranges.begin(), checkpoint.ranges.end(), KeyRangeRef::ArbitraryOrder());
 				if (a.ranges.empty() || checkpoint.ranges.empty() || a.ranges.size() > checkpoint.ranges.size() ||
 				    a.ranges.front().begin != checkpoint.ranges.front().begin) {
 					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)

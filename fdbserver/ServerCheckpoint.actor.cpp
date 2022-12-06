@@ -51,24 +51,43 @@ ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
-                                                 CheckpointAsKeyValues checkpointAsKeyValues,
-                                                 std::vector<KeyRange> ranges,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent("FetchCheckpointBegin", initialState.checkpointID).detail("CheckpointMetaData", initialState.toString());
-	ASSERT(!ranges.empty() || !checkpointAsKeyValues);
+
 	state CheckpointMetaData result;
-	CheckpointFormat format = initialState.getFormat();
-	if (checkpointAsKeyValues && format != RocksDBKeyValues) {
-		initialState.setFormat(RocksDBKeyValues);
-		format = RocksDBKeyValues;
-		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(), IncludeVersion());
-	}
-	if (format == DataMoveRocksCF || format == RocksDB || format == RocksDBKeyValues) {
-		wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, checkpointAsKeyValues, ranges, cFun)));
+	const CheckpointFormat format = initialState.getFormat();
+	ASSERT(format != RocksDBKeyValues);
+	if (format == DataMoveRocksCF || format == RocksDB) {
+		wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun)));
 	} else {
 		throw not_implemented();
 	}
 
 	TraceEvent("FetchCheckpointEnd", initialState.checkpointID).detail("CheckpointMetaData", result.toString());
+	return result;
+}
+
+ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
+                                                       CheckpointMetaData initialState,
+                                                       std::string dir,
+                                                       std::vector<KeyRange> ranges,
+                                                       std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	TraceEvent(SevDebug, "FetchCheckpointRangesBegin", initialState.checkpointID)
+	    .detail("CheckpointMetaData", initialState.toString())
+	    .detail("Ranges", describe(ranges));
+	ASSERT(!ranges.empty());
+
+	state CheckpointMetaData result;
+	const CheckpointFormat format = initialState.getFormat();
+	if (format != RocksDBKeyValues) {
+		initialState.setFormat(RocksDBKeyValues);
+		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion());
+	}
+
+	wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun)));
+
+	TraceEvent(SevDebug, "FetchCheckpointRangesEnd", initialState.checkpointID)
+	    .detail("CheckpointMetaData", result.toString())
+	    .detail("Ranges", describe(ranges));
 	return result;
 }

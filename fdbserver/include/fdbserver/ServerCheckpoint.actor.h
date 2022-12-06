@@ -53,7 +53,9 @@ protected:
 	virtual ~ICheckpointReader() {}
 };
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, const CheckpointAsKeyValues checkpointAsKeyValues, UID logID);
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
+                                       const CheckpointAsKeyValues checkpointAsKeyValues,
+                                       UID logID);
 
 // Delete a checkpoint.
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
@@ -64,9 +66,14 @@ ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
-                                                 CheckpointAsKeyValues checkpointAsKeyValues,
-												 std::vector<KeyRange> ranges,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+
+ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
+    Database cx,
+    CheckpointMetaData initialState,
+    std::string dir,
+    std::vector<KeyRange> ranges,
+    std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 #include "flow/unactorcompiler.h"
 

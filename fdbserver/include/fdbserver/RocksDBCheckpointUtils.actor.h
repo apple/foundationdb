@@ -244,13 +244,15 @@ struct RocksDBCheckpoint {
 struct RocksDBCheckpointKeyValues {
 	constexpr static FileIdentifier file_identifier = 13804349;
 	std::vector<CheckpointFile> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
+	std::vector<KeyRange> ranges; // The ranges we want to fetch.
 
-	RocksDBCheckpointKeyValues () = default;
+	RocksDBCheckpointKeyValues(std::vector<KeyRange> ranges) : ranges(ranges) {}
+	RocksDBCheckpointKeyValues() = default;
 
 	CheckpointFormat format() const { return RocksDBKeyValues; }
 
 	std::string toString() const {
-		std::string res = "RocksDBKeyValuesCheckpoint: [Fetched Files]: ";
+		std::string res = "RocksDBKeyValuesCheckpoint: [Target Ranges]: " + describe(ranges) + " [Fetched Files]: ";
 		for (const auto& file : fetchedFiles) {
 			res += file.toString();
 		}
@@ -259,20 +261,17 @@ struct RocksDBCheckpointKeyValues {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, fetchedFiles);
+		serializer(ar, fetchedFiles, ranges);
 	}
 };
 
 // Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
 // If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
 // can be continued, in case of crash.
-ACTOR Future<CheckpointMetaData>
-fetchRocksDBCheckpoint(Database cx,
-                       CheckpointMetaData initialState,
-                       std::string dir,
-                       CheckpointAsKeyValues checkpointAsKeyValues,
-                       std::vector<KeyRange> ranges,
-                       std::function<Future<Void>(const CheckpointMetaData&)> cFun);
+ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                        CheckpointMetaData initialState,
+                                                        std::string dir,
+                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun);
 
 // Returns the total logical bytes of all *fetched* checkpoints.
 int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints);
