@@ -78,10 +78,10 @@ struct TenantMapEntry {
 
 	int64_t id = -1;
 	Key prefix;
+	TenantName tenantName;
 	TenantState tenantState = TenantState::READY;
 	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
 	Optional<TenantGroupName> tenantGroup;
-	bool encrypted = false;
 	Optional<ClusterName> assignedCluster;
 	int64_t configurationSequenceNum = 0;
 	Optional<TenantName> renamePair;
@@ -90,8 +90,8 @@ struct TenantMapEntry {
 	std::string error;
 
 	TenantMapEntry();
-	TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted);
-	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup, bool encrypted);
+	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState);
+	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
 
 	void setId(int64_t id);
 	std::string toJson() const;
@@ -108,10 +108,10 @@ struct TenantMapEntry {
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           id,
+		           tenantName,
 		           tenantState,
 		           tenantLockState,
 		           tenantGroup,
-		           encrypted,
 		           assignedCluster,
 		           configurationSequenceNum,
 		           renamePair,

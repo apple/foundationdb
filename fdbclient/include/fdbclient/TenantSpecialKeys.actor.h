@@ -112,7 +112,6 @@ private:
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		state TenantMapEntry tenantEntry;
 		tenantEntry.setId(tenantId);
-		tenantEntry.encrypted = ryw->getTransactionState()->cx->clientInfo->get().isEncryptionEnabled;
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);

@@ -306,6 +306,11 @@ private:
 	bool tenantSet;
 };
 
+class Tenant {
+	Future<int64_t> id;
+	TenantName name;
+};
+
 class Transaction : NonCopyable {
 public:
 	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
