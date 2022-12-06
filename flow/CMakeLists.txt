@@ -141,9 +141,9 @@ target_link_directories(flow PUBLIC "${SWIFT_LINK_PATHS}")
 # We need to make sure that Swift, and the concurrency library is linked
 # in every module that uses flow, because we implement the Swift hooks in flow.
 # TODO(swift): With upcoming CMake 3.26 we can get rid of this as it should realize
-#              that modules need Swift and use Swift for the linking which 
+#              that modules need Swift and use Swift for the linking which
 #              will do the right thing.
-target_link_options(flow PUBLIC 
+target_link_options(flow PUBLIC
     "-lswiftCore"
     "-lswift_Concurrency"
     "-lswift_StringProcessing")
@@ -171,17 +171,25 @@ add_swift_to_cxx_header_gen_target(
   flow_swift
   flow_swift_checked_continuation_header
   "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/Flow_CheckedContinuation.h"
+  SOURCES
    "${CMAKE_CURRENT_SOURCE_DIR}/FlowCheckedContinuation.swift"
    FLAGS
--Xcc -std=c++17 -enable-experimental-cxx-interop -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
+-Xcc -std=c++17 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
 # Important: This is needed to avoid including header that depends on this generated header.
 -Xcc -DSWIFT_FUTURE_SUPPORT_H
 )
 
-generate_cxx_compat_header(flow_swift "Flow")
+add_swift_to_cxx_header_gen_target(
+  flow_swift
+  flow_swift_header
+  "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/Flow"
+   FLAGS
+-Xcc -std=c++17 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
+)
 
-add_dependencies(flow_swift_checked_continuation_header flow_actors)
-add_dependencies(flow_swift flow_swift_checked_continuation_header)
+add_dependencies(flow_swift_checked_continuation_header flow_actors boost_targetProject)
+add_dependencies(flow_swift_header flow_swift_checked_continuation_header)
+add_dependencies(flow_swift flow_swift_header)
 
 add_dependencies(flow_swift flow_actors)
 add_dependencies(flow_swift boost_targetProject)
