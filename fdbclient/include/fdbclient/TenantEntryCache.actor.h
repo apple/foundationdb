@@ -398,7 +398,7 @@ private:
 			ASSERT(tenantId.present() != tenantPrefix.present());
 			ASSERT(!tenantName.present());
 
-			int64_t tId = tenantId.present() ? tenantId.get() : TenantMapEntry::prefixToId(tenantPrefix.get());
+			int64_t tId = tenantId.present() ? tenantId.get() : TenantAPI::prefixToId(tenantPrefix.get());
 			TraceEvent("TenantEntryCacheRemoveEntry").detail("Id", tId);
 			itrId = mapByTenantId.find(tId);
 			if (itrId == mapByTenantId.end()) {
@@ -578,7 +578,7 @@ public:
 
 	Future<Optional<TenantEntryCachePayload<T>>> getById(int64_t tenantId) { return getByIdImpl(this, tenantId); }
 	Future<Optional<TenantEntryCachePayload<T>>> getByPrefix(KeyRef prefix) {
-		int64_t id = TenantMapEntry::prefixToId(prefix);
+		int64_t id = TenantAPI::prefixToId(prefix);
 		return getByIdImpl(this, id);
 	}
 	Future<Optional<TenantEntryCachePayload<T>>> getByName(TenantName name) { return getByNameImpl(this, name); }
