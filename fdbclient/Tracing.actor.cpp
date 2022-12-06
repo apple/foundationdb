@@ -446,21 +446,25 @@ Span& Span::operator=(Span&& o) {
 		g_tracer->trace(*this);
 	}
 	arena = std::move(o.arena);
-	context = o.context;
-	parentContext = o.parentContext;
-	begin = o.begin;
-	end = o.end;
-	location = o.location;
-	links = std::move(o.links);
-	events = std::move(o.events);
-	status = o.status;
-	kind = o.kind;
-	o.context = SpanContext();
-	o.parentContext = SpanContext();
-	o.kind = SpanKind::INTERNAL;
-	o.begin = 0.0;
-	o.end = 0.0;
-	o.status = SpanStatus::UNSET;
+	// All memory referenced in *Ref fields of Span is now (potentially)
+	// invalid, and o no longer has ownership of any memory referenced by *Ref
+	// fields of o. We must ensure that o no longer references any memory it no
+	// longer owns, and that *this no longer references any memory it no longer
+	// owns. Not every field references arena memory, but this std::exchange
+	// pattern provides a nice template for getting this right in a concise way
+	// should we add more fields to Span.
+
+	attributes = std::exchange(o.attributes, decltype(o.attributes)());
+	begin = std::exchange(o.begin, decltype(o.begin)());
+	context = std::exchange(o.context, decltype(o.context)());
+	end = std::exchange(o.end, decltype(o.end)());
+	events = std::exchange(o.events, decltype(o.events)());
+	kind = std::exchange(o.kind, decltype(o.kind)());
+	links = std::exchange(o.links, decltype(o.links)());
+	location = std::exchange(o.location, decltype(o.location)());
+	parentContext = std::exchange(o.parentContext, decltype(o.parentContext)());
+	status = std::exchange(o.status, decltype(o.status)());
+
 	return *this;
 }
 

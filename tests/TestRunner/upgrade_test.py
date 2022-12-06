@@ -443,7 +443,7 @@ if __name__ == "__main__":
         print("Testing with {} processes".format(args.process_number))
 
     assert len(args.upgrade_path) > 0, "Upgrade path must be specified"
-    assert args.upgrade_path[0] in SUPPORTED_VERSIONS, "Upgrade path begin with a valid version number"
+    assert args.upgrade_path[0] in SUPPORTED_VERSIONS, "Upgrade path begin with a valid version number, got {}".format(args.upgrade_path[0])
 
     if args.run_with_gdb:
         RUN_WITH_GDB = True

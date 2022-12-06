@@ -282,12 +282,12 @@ public:
 	                                                      const std::unordered_set<uint64_t>& excludedPhysicalShards,
 	                                                      uint64_t debugID);
 
-	// Step 2: get a remote team which has the input physical shard
-	// Return empty if no such remote team
-	// May return a problematic remote team, and re-selection is required for this case
-	Optional<ShardsAffectedByTeamFailure::Team> tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID,
-	                                                                          StorageMetrics const& moveInMetrics,
-	                                                                          uint64_t debugID);
+	// Step 2: get a remote team which has the input physical shard.
+	// Second field in the returned pair indicates whether this physical shard is available or not.
+	// Return empty if no such remote team.
+	// May return a problematic remote team, and re-selection is required for this case.
+	std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool>
+	tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID, StorageMetrics const& moveInMetrics, uint64_t debugID);
 	// Invariant:
 	// (1) If forceToUseNewPhysicalShard is set, use the bestTeams selected by getTeam(), and create a new physical
 	// shard for the teams
