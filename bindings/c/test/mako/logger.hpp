@@ -81,7 +81,7 @@ public:
 	template <typename... Args>
 	void printWithLogLevel(int log_level,
 	                       std::string_view header,
-	                       fmt::format_string<Args...> fmt_str,
+	                       const fmt::format_string<Args...>& fmt_str,
 	                       Args&&... args) {
 		assert(log_level >= VERBOSE_NONE && log_level <= VERBOSE_DEBUG);
 		if (log_level <= verbosity) {
@@ -95,22 +95,22 @@ public:
 	}
 
 	template <typename... Args>
-	void error(fmt::format_string<Args...> fmt_str, Args&&... args) {
+	void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_NONE, "ERROR", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void info(fmt::format_string<Args...> fmt_str, Args&&... args) {
+	void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_DEFAULT, "INFO", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void warn(fmt::format_string<Args...> fmt_str, Args&&... args) {
+	void warn(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_WARN, "WARNING", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void debug(fmt::format_string<Args...> fmt_str, Args&&... args) {
+	void debug(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_DEBUG, "DEBUG", fmt_str, std::forward<Args>(args)...);
 	}
 };
