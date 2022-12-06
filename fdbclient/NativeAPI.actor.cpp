@@ -2171,14 +2171,14 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 	}
 }
 
-void DatabaseContext::addWatch() {
+void DatabaseContext::increaseWatchCounter() {
 	if (outstandingWatches >= maxOutstandingWatches)
 		throw too_many_watches();
 
 	++outstandingWatches;
 }
 
-void DatabaseContext::removeWatch() {
+void DatabaseContext::decreaseWatchCounter() {
 	--outstandingWatches;
 	ASSERT(outstandingWatches >= 0);
 }
@@ -2388,25 +2388,6 @@ Database Database::createSimulatedExtraDatabase(std::string connectionString, Op
 	Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 	db->defaultTenant = defaultTenant;
 	return db;
-}
-
-Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
-	const auto it = watchMap.find(std::make_pair(tenantId, key));
-	if (it == watchMap.end())
-		return Reference<WatchMetadata>();
-	return it->second;
-}
-
-void DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
-	watchMap[std::make_pair(metadata->parameters->tenant.tenantId, metadata->parameters->key)] = metadata;
-}
-
-void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key) {
-	watchMap.erase(std::make_pair(tenantId, key));
-}
-
-void DatabaseContext::clearWatchMetadata() {
-	watchMap.clear();
 }
 
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
@@ -3921,6 +3902,49 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	return Void();
 }
 
+namespace {
+
+// NOTE: Since an ACTOR could receive multiple exceptions for a single catch clause, e.g. broken promise together with
+// operation cancelled, If the decreaseWatchRefCount is placed at the catch clause, it might be triggered for multiple
+// times. One could check if the SAV isSet, but seems a more intuitive way is to use RAII-style constructor/destructor
+// pair. Yet the object has to be constructed after a wait statement, so it must be trivially-constructible. This
+// requires move-assignment operator implemented.
+class WatchRefCountUpdater {
+	Database cx;
+	int64_t tenantID;
+	KeyRef key;
+	Version version;
+
+public:
+	WatchRefCountUpdater() = default;
+
+	WatchRefCountUpdater(const Database& cx_, const int64_t tenantID_, KeyRef key_, const Version& ver)
+	  : cx(cx_), tenantID(tenantID_), key(key_), version(ver) {}
+
+	WatchRefCountUpdater& operator=(WatchRefCountUpdater&& other) {
+		if (cx.getReference()) {
+			cx->decreaseWatchRefCount(tenantID, key, version);
+		}
+
+		cx = std::move(other.cx);
+		tenantID = std::move(other.tenantID);
+		key = std::move(other.key);
+		version = std::move(other.version);
+
+		cx->increaseWatchRefCount(tenantID, key, version);
+
+		return *this;
+	}
+
+	~WatchRefCountUpdater() {
+		if (cx.getReference()) {
+			cx->decreaseWatchRefCount(tenantID, key, version);
+		}
+	}
+};
+
+} // namespace
+
 ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  TenantInfo tenant,
                                  Key key,
@@ -3932,6 +3956,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<UID> debugID,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
+	state WatchRefCountUpdater watchRefCountUpdater(cx, tenant.tenantId, key, ver);
 
 	wait(getWatchFuture(cx,
 	                    makeReference<WatchParameters>(
@@ -5396,6 +5421,10 @@ ACTOR Future<Void> restartWatch(Database cx,
                                 TaskPriority taskID,
                                 Optional<UID> debugID,
                                 UseProvisionalProxies useProvisionalProxies) {
+	// Remove the reference count as the old watches should be all dropped when switching connectionFile.
+	// The tenantId should be the old one.
+	cx->deleteWatchMetadata(tenantInfo.tenantId, key, /* removeReferenceCount */ true);
+
 	// The ID of the tenant may be different on the cluster that we switched to, so obtain the new ID
 	if (tenantInfo.name.present()) {
 		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
@@ -5450,7 +5479,6 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
-							cx->clearWatchMetadata();
 							watch->watchFuture = restartWatch(cx,
 							                                  tenantInfo,
 							                                  watch->key,
@@ -5466,11 +5494,11 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 			}
 		}
 	} catch (Error& e) {
-		cx->removeWatch();
+		cx->decreaseWatchCounter();
 		throw;
 	}
 
-	cx->removeWatch();
+	cx->decreaseWatchCounter();
 	return Void();
 }
 
@@ -5481,7 +5509,7 @@ Future<Version> Transaction::getRawReadVersion() {
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
 
-	trState->cx->addWatch();
+	trState->cx->increaseWatchCounter();
 	watches.push_back(watch);
 	return ::watch(
 	    watch,
