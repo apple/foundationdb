@@ -960,7 +960,6 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("RequiredResolvers", 1)
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-
 		// The cluster's EncryptionAtRest status is now readable.
 		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
 			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest(self->configuration));
@@ -1073,8 +1072,15 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
-	bool enableEncryptionForTxnStateStore = isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION);
-	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
+	state Optional<EncryptionAtRestMode> encryptModeForTxnStateStore = Optional<EncryptionAtRestMode>();
+	if (self->controllerData && self->controllerData->encryptionAtRestMode.isValid() &&
+	    self->controllerData->encryptionAtRestMode.getFuture().isValid() &&
+	    self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
+		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
+		encryptModeForTxnStateStore = encryptMode;
+	}
+	CODE_PROBE(encryptModeForTxnStateStore.present() && encryptModeForTxnStateStore.get().isEncryptionEnabled(),
+	           "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
@@ -1085,7 +1091,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	                                             false,
 	                                             false,
 	                                             true,
-	                                             enableEncryptionForTxnStateStore);
+	                                             encryptModeForTxnStateStore);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
@@ -1100,7 +1106,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// transactions will be committed at a lower version.
 	Optional<Standalone<StringRef>> requiredCommitVersion =
 	    wait(self->txnStateStore->readValue(minRequiredCommitVersionKey));
-
 	Version minRequiredCommitVersion = -1;
 	if (requiredCommitVersion.present()) {
 		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());

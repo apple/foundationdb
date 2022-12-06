@@ -2941,14 +2941,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	// TODO: Pass the encrypt mode once supported in IKeyValueStore
-	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter,
-	                                                  commitData.db,
-	                                                  proxy.id(),
-	                                                  2e9,
-	                                                  true,
-	                                                  true,
-	                                                  true,
-	                                                  isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
+	commitData.txnStateStore =
+	    keyValueStoreLogSystem(commitData.logAdapter, commitData.db, proxy.id(), 2e9, true, true, true, encryptMode);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);

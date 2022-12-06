@@ -170,7 +170,7 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               bool disableSnapshot,
                                               bool replaceContent,
                                               bool exactRecovery,
-                                              bool enableEncryption);
+                                              Optional<EncryptionAtRestMode> encryptMode);
 
 extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          std::string const& filename,

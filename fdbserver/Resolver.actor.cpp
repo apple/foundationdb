@@ -678,14 +678,13 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter,
-		                                             db,
-		                                             resolver.id(),
-		                                             2e9,
-		                                             true,
-		                                             true,
-		                                             true,
-		                                             isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
+		EncryptionAtRestMode encryptMode = EncryptionAtRestMode::DISABLED;
+		// TODO (nwijetunga): Properly fetch the encrypt mode in the resolver
+		if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+			encryptMode = EncryptionAtRestMode::DOMAIN_AWARE;
+		}
+		self->txnStateStore =
+		    keyValueStoreLogSystem(self->logAdapter, db, resolver.id(), 2e9, true, true, true, encryptMode);
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));
