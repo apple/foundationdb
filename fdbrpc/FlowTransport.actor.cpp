@@ -1131,7 +1131,18 @@ static void scanPackets(TransportData* transport,
 
 		if (e - p < packetLen)
 			break;
-		ASSERT(packetLen >= sizeof(UID));
+
+		if (packetLen < sizeof(UID)) {
+			if (g_network->isSimulated()) {
+				// Same as ASSERT(false), but prints packet length:
+				ASSERT_GE(packetLen, sizeof(UID));
+			} else {
+				TraceEvent(SevError, "PacketTooSmall")
+				    .detail("FromPeer", peerAddress.toString())
+				    .detail("Length", packetLen);
+				throw platform_error();
+			}
+		}
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
