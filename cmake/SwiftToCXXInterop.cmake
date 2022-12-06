@@ -1,9 +1,9 @@
 include(CompilerChecks)
 include(FindSwiftLibs)
 
-# Generates a C++ compatibility header for the given target.
-# FIXME: Can we remove the headerName and match the Swift module name?
-function(generate_cxx_compat_header target headerName)
+function(add_swift_to_cxx_header_gen_target target_name header_target_name header_path)
+  cmake_parse_arguments(ARG "" "" "SOURCES;FLAGS" ${ARGN})
+
   # Verify toolchain support.
   get_filename_component(SwiftBinPath ${CMAKE_Swift_COMPILER} DIRECTORY)
   set (SwiftInteropVersionFile ${SwiftBinPath}/../lib/swift/swiftToCxx/experimental-interoperability-version.json)
@@ -17,36 +17,27 @@ function(generate_cxx_compat_header target headerName)
     message(FATAL_ERROR "Swift: reverse interop is required, but not supported. Update your toolchain.")
   endif()
 
-  set(destpath ${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules)
-  message(STATUS "Swift: C++ compatibility headers for ${target} will be generated in ${destpath}")
-
-  # Generate a directory into which the C++ headers will go.
-  file(MAKE_DIRECTORY ${destpath})
- 
-  # Generate the C++ compatibility header for the Swift module.
-  target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -emit-clang-header-path -Xfrontend ${destpath}/${headerName}>")
-  # Note: do not generate Stdlib bindings yet (C++20 only).
-  if (${headerName} STREQUAL "Flow")
-    target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -clang-header-expose-decls=has-expose-attr>")
-  endif()
-endfunction()
-
-function(add_swift_to_cxx_header_gen_target target_name header_target_name header_path source_path)
-  cmake_parse_arguments(ARG "" "" "FLAGS" ${ARGN})
-
   set(target_includes_expr "$<TARGET_PROPERTY:${target_name},INCLUDE_DIRECTORIES>")
+  if(ARG_SOURCES)
+    set(target_sources ${ARG_SOURCES})
+  else()
+    get_target_property(target_sources ${target_name} SOURCES)
+    get_target_property(target_source_dir ${target_name} SOURCE_DIR)
+    list(TRANSFORM target_sources PREPEND "${target_source_dir}/")
+  endif()
   add_custom_command(
   OUTPUT
     "${header_path}"
   COMMAND
     ${CMAKE_Swift_COMPILER} -frontend -typecheck
-    "${source_path}"
+    ${target_sources}
+    -enable-experimental-cxx-interop
     -module-name "${target_name}"
     -emit-clang-header-path "${header_path}"
     "$<$<BOOL:${target_includes_expr}>:-I$<JOIN:${target_includes_expr},;-I>>"
     ${ARG_FLAGS}
   DEPENDS
-    "${source_path}"
+    "${target_sources}"
   COMMAND_EXPAND_LISTS
   COMMENT
     "Generating '${header_path}'"
