@@ -24,11 +24,10 @@ import subprocess
 import admin_server
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
-from authz_util import private_key_gen, public_keyset_from_keys
 from typing import Union
 from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 
-fdb.api_version(730)
+fdb.api_version(720)
 
 cluster_scope = "module"
 
@@ -83,6 +82,7 @@ def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client):
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
             authorization_kty="EC",
+            authorization_keypair_id="authz-key",
             remove_at_exit=True,
             custom_config={
                 "knob-public-key-file-refresh-interval-seconds": public_key_refresh_interval,

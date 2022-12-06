@@ -244,6 +244,8 @@ public:
 	                                                 // in the TenantCache
 	int TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL; // How often the storage quota allocated to each tenant is
 	                                                 // refreshed in the TenantCache
+	int TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL; // The minimum interval between consecutive trace events logging the
+	                                               // storage bytes used by a tenant group
 	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
 	                                                  // distributor to fetch the list of tenants over storage quota
 
@@ -313,7 +315,7 @@ public:
 	// KeyValueStoreRocksDB
 	bool ROCKSDB_SET_READ_TIMEOUT;
 	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	bool ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_READER_THREAD_PRIORITY;
 	int ROCKSDB_WRITER_THREAD_PRIORITY;
@@ -708,7 +710,7 @@ public:
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
 	int64_t IOPS_UNITS_PER_SAMPLE;
-	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
+	int64_t BYTES_WRITTEN_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
@@ -924,8 +926,8 @@ public:
 	std::string REDWOOD_IO_PRIORITIES;
 
 	// Server request latency measurement
-	int LATENCY_SAMPLE_SIZE;
-	int FILE_LATENCY_SAMPLE_SIZE;
+	double LATENCY_SKETCH_ACCURACY;
+	double FILE_LATENCY_SKETCH_ACCURACY;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	// Cluster recovery
@@ -997,6 +999,7 @@ public:
 	bool BLOB_FULL_RESTORE_MODE;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
+	std::string BLOB_RESTORE_MLOGS_URL;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

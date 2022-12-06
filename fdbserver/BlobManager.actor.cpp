@@ -638,11 +638,12 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			// only split on bytes and write rate
 			state StorageMetrics splitMetrics;
 			splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-			splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+			splitMetrics.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 			if (writeHot) {
-				splitMetrics.bytesPerKSecond = std::min(splitMetrics.bytesPerKSecond, estimated.bytesPerKSecond / 2);
-				splitMetrics.bytesPerKSecond =
-				    std::max(splitMetrics.bytesPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
+				splitMetrics.bytesWrittenPerKSecond =
+				    std::min(splitMetrics.bytesWrittenPerKSecond, estimated.bytesWrittenPerKSecond / 2);
+				splitMetrics.bytesWrittenPerKSecond =
+				    std::max(splitMetrics.bytesWrittenPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
 			}
 			splitMetrics.iosPerKSecond = splitMetrics.infinity;
 			splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
@@ -2330,7 +2331,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Merge finish stopped because of force purge");
+				CODE_PROBE(true, "Merge finish stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);
@@ -2618,7 +2619,7 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 		    wait(bmData->db->getStorageMetrics(std::get<1>(candidates[i]), CLIENT_KNOBS->TOO_MANY));
 
 		if (metrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
-		    metrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
+		    metrics.bytesWrittenPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
 			// This granule cannot be merged with any neighbors.
 			// If current candidates up to here can be merged, merge them and skip over this one
 			attemptStartMerge(bmData, currentCandidates);
@@ -3546,10 +3547,16 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
+		BlobRestoreStatus initStatus(BlobRestorePhase::LOAD_MANIFEST);
+		wait(updateRestoreStatus(bmData->db, normalKeys, initStatus));
+
 		wait(loadManifest(bmData->db, bmData->bstore));
 
 		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
 		wait(updateEpoch(bmData, epoc + 1));
+
+		BlobRestoreStatus completedStatus(BlobRestorePhase::MANIFEST_DONE);
+		wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus));
 	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);

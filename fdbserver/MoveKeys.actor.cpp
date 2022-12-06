@@ -580,8 +580,8 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 
 // keyServer: map from keys to destination servers
 // serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have),
-// complete(already has), ""(). Set keyServers[keys].dest = servers Set serverKeys[servers][keys] = active for each
-// subrange of keys that the server did not already have, complete for each subrange that it already has Set
+// complete(already has), ""(). Set keyServers[keys].dest = servers. Set serverKeys[servers][keys] = active for each
+// subrange of keys that the server did not already have, = complete for each subrange that it already has. Set
 // serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member
 // of servers OR if the source list is sufficiently degraded)
 ACTOR static Future<Void> startMoveKeys(Database occ,
@@ -1241,7 +1241,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 // Set dataMoves[dataMoveId] = DataMoveMetaData.
 ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID dataMoveId,
-                                          KeyRange keys,
+                                          std::vector<KeyRange> ranges,
                                           std::vector<UID> servers,
                                           MoveKeysLock lock,
                                           FlowLock* startMoveKeysLock,
@@ -1257,8 +1257,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 	TraceEvent(SevDebug, "StartMoveShardsBegin", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("TargetRange", keys);
+	    .detail("TargetRange", describe(ranges));
 
+	// TODO: make startMoveShards work with multiple ranges.
+	ASSERT(ranges.size() == 1);
+	state KeyRangeRef keys = ranges[0];
 	try {
 		state Key begin = keys.begin;
 		state KeyRange currentKeys = keys;
@@ -1576,7 +1579,7 @@ ACTOR static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, Ke
 // Clear dataMoves[dataMoveId].
 ACTOR static Future<Void> finishMoveShards(Database occ,
                                            UID dataMoveId,
-                                           KeyRange targetKeys,
+                                           std::vector<KeyRange> targetRanges,
                                            std::vector<UID> destinationTeam,
                                            MoveKeysLock lock,
                                            FlowLock* finishMoveKeysParallelismLock,
@@ -1585,7 +1588,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
                                            std::map<UID, StorageServerInterface> tssMapping,
                                            const DDEnabledState* ddEnabledState) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	state KeyRange keys = targetKeys;
+
+	// TODO: make startMoveShards work with multiple ranges.
+	ASSERT(targetRanges.size() == 1);
+	state KeyRange keys = targetRanges[0];
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	state int retries = 0;
 	state DataMoveMetaData dataMove;
@@ -1636,7 +1642,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				} else {
 					TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeleted", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId);
-					wait(checkDataMoveComplete(occ, dataMoveId, targetKeys, relocationIntervalId));
+					wait(checkDataMoveComplete(occ, dataMoveId, keys, relocationIntervalId));
 					return Void();
 				}
 
@@ -2481,11 +2487,14 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	return Void();
 }
 
-Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+Future<Void> rawStartMovement(Database occ,
+                              const MoveKeysParams& params,
+                              std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
 		return startMoveShards(std::move(occ),
 		                       params.dataMoveId,
-		                       params.keys,
+		                       params.ranges.get(),
 		                       params.destinationTeam,
 		                       params.lock,
 		                       params.startMoveKeysParallelismLock,
@@ -2493,8 +2502,9 @@ Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID
 		                       params.ddEnabledState,
 		                       params.cancelConflictingDataMoves);
 	}
+	ASSERT(params.keys.present());
 	return startMoveKeys(std::move(occ),
-	                     params.keys,
+	                     params.keys.get(),
 	                     params.destinationTeam,
 	                     params.lock,
 	                     params.startMoveKeysParallelismLock,
@@ -2503,13 +2513,37 @@ Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID
 	                     params.ddEnabledState);
 }
 
+Future<Void> rawCheckFetchingState(const Database& cx,
+                                   const MoveKeysParams& params,
+                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
+		// TODO: make startMoveShards work with multiple ranges.
+		ASSERT(params.ranges.get().size() == 1);
+		return checkFetchingState(cx,
+		                          params.healthyDestinations,
+		                          params.ranges.get().at(0),
+		                          params.dataMovementComplete,
+		                          params.relocationIntervalId,
+		                          tssMapping);
+	}
+	ASSERT(params.keys.present());
+	return checkFetchingState(cx,
+	                          params.healthyDestinations,
+	                          params.keys.get(),
+	                          params.dataMovementComplete,
+	                          params.relocationIntervalId,
+	                          tssMapping);
+}
+
 Future<Void> rawFinishMovement(Database occ,
-                               MoveKeysParams& params,
+                               const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
 		return finishMoveShards(std::move(occ),
 		                        params.dataMoveId,
-		                        params.keys,
+		                        params.ranges.get(),
 		                        params.destinationTeam,
 		                        params.lock,
 		                        params.finishMoveKeysParallelismLock,
@@ -2518,8 +2552,9 @@ Future<Void> rawFinishMovement(Database occ,
 		                        tssMapping,
 		                        params.ddEnabledState);
 	}
+	ASSERT(params.keys.present());
 	return finishMoveKeys(std::move(occ),
-	                      params.keys,
+	                      params.keys.get(),
 	                      params.destinationTeam,
 	                      params.lock,
 	                      params.finishMoveKeysParallelismLock,
@@ -2537,12 +2572,7 @@ ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
 
 	wait(rawStartMovement(occ, params, tssMapping));
 
-	state Future<Void> completionSignaller = checkFetchingState(occ,
-	                                                            params.healthyDestinations,
-	                                                            params.keys,
-	                                                            params.dataMovementComplete,
-	                                                            params.relocationIntervalId,
-	                                                            tssMapping);
+	state Future<Void> completionSignaller = rawCheckFetchingState(occ, params, tssMapping);
 
 	wait(rawFinishMovement(occ, params, tssMapping));
 

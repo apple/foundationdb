@@ -11,7 +11,8 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader, CURRENT_VERSION, FUTURE_VERSION
+from binary_download import FdbBinaryDownloader
+from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster
 from test_util import random_alphanum_string
 

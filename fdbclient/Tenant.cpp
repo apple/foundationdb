@@ -70,6 +70,7 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 }
 
 TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
+	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
 	if (stateStr == "registering") {
 		return TenantState::REGISTERING;
 	} else if (stateStr == "ready") {
@@ -86,7 +87,7 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::ERROR;
 	}
 
-	UNREACHABLE();
+	throw invalid_option();
 }
 
 std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState) {
@@ -103,6 +104,7 @@ std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState)
 }
 
 TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
+	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
 	if (stateStr == "unlocked") {
 		return TenantLockState::UNLOCKED;
 	} else if (stateStr == "read only") {
@@ -114,16 +116,28 @@ TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
 	UNREACHABLE();
 }
 
+json_spirit::mObject binaryToJson(StringRef bytes) {
+	json_spirit::mObject obj;
+	std::string encodedBytes = base64::encoder::from_string(bytes.toString());
+	// Remove trailing newline
+	encodedBytes.resize(encodedBytes.size() - 1);
+
+	obj["base64"] = encodedBytes;
+	obj["printable"] = printable(bytes);
+
+	return obj;
+}
+
 TenantMapEntry::TenantMapEntry() {}
-TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted)
-  : tenantState(tenantState), encrypted(encrypted) {
+TenantMapEntry::TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState)
+  : tenantName(tenantName), tenantState(tenantState) {
 	setId(id);
 }
 TenantMapEntry::TenantMapEntry(int64_t id,
+                               TenantName tenantName,
                                TenantState tenantState,
-                               Optional<TenantGroupName> tenantGroup,
-                               bool encrypted)
-  : tenantState(tenantState), tenantGroup(tenantGroup), encrypted(encrypted) {
+                               Optional<TenantGroupName> tenantGroup)
+  : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
 	setId(id);
 }
 
@@ -136,37 +150,22 @@ void TenantMapEntry::setId(int64_t id) {
 std::string TenantMapEntry::toJson() const {
 	json_spirit::mObject tenantEntry;
 	tenantEntry["id"] = id;
-	tenantEntry["encrypted"] = encrypted;
-
-	json_spirit::mObject prefixObject;
-	std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
-	// Remove trailing newline
-	encodedPrefix.resize(encodedPrefix.size() - 1);
-
-	prefixObject["base64"] = encodedPrefix;
-	prefixObject["printable"] = printable(prefix);
-	tenantEntry["prefix"] = prefixObject;
+	tenantEntry["name"] = binaryToJson(tenantName);
+	tenantEntry["prefix"] = binaryToJson(prefix);
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
 	if (assignedCluster.present()) {
-		tenantEntry["assigned_cluster"] = assignedCluster.get().toString();
+		tenantEntry["assigned_cluster"] = binaryToJson(assignedCluster.get());
 	}
 	if (tenantGroup.present()) {
-		json_spirit::mObject tenantGroupObject;
-		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
-		// Remove trailing newline
-		encodedTenantGroup.resize(encodedTenantGroup.size() - 1);
-
-		tenantGroupObject["base64"] = encodedTenantGroup;
-		tenantGroupObject["printable"] = printable(tenantGroup.get());
-		tenantEntry["tenant_group"] = tenantGroupObject;
+		tenantEntry["tenant_group"] = binaryToJson(tenantGroup.get());
 	}
 
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup && encrypted == other.encrypted;
+	return tenantGroup == other.tenantGroup;
 }
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
@@ -183,7 +182,7 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 json_spirit::mObject TenantGroupEntry::toJson() const {
 	json_spirit::mObject tenantGroupEntry;
 	if (assignedCluster.present()) {
-		tenantGroupEntry["assigned_cluster"] = assignedCluster.get().toString();
+		tenantGroupEntry["assigned_cluster"] = binaryToJson(assignedCluster.get());
 	}
 
 	return tenantGroupEntry;
@@ -218,12 +217,12 @@ TEST_CASE("/fdbclient/libb64/base64decoder") {
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
-	TenantMapEntry entry1(1, TenantState::READY, false);
+	TenantMapEntry entry1(1, "name"_sr, TenantState::READY);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
 	TenantMapEntry entry2 = TenantMapEntry::decode(entry1.encode());
 	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
 
-	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), TenantState::READY, false);
+	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "name"_sr, TenantState::READY);
 	ASSERT(entry3.prefix == "\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
 	TenantMapEntry entry4 = TenantMapEntry::decode(entry3.encode());
 	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
@@ -234,7 +233,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		int64_t maxPlusOne = std::min<uint64_t>(UINT64_C(1) << bits, std::numeric_limits<int64_t>::max());
 		int64_t id = deterministicRandom()->randomInt64(min, maxPlusOne);
 
-		TenantMapEntry entry(id, TenantState::READY, false);
+		TenantMapEntry entry(id, "name"_sr, TenantState::READY);
 		int64_t bigEndianId = bigEndian64(id);
 		ASSERT(entry.id == id && entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
 

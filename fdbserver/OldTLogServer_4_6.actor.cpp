@@ -1582,7 +1582,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 							logData->queueCommittedVersion.set(qe.version);
 
 							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
-								CODE_PROBE(true, "Flush excess data during TLog queue recovery");
+								CODE_PROBE(
+								    true, "Flush excess data during TLog queue recovery", probe::decoration::rare);
 								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
 								    .detail("BytesInput", self->bytesInput)
 								    .detail("BytesDurable", self->bytesDurable)
@@ -1633,7 +1634,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId).detail("Version", "4.6");
 
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
 		wait(restorePersistentState(&self, locality));
 
 		self.sharedActors.send(cleanupPeekTrackers(&self));

@@ -56,12 +56,12 @@
 ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 	return ShardSizeBounds{
 		.max = StorageMetrics{ .bytes = -1,
-		                       .bytesPerKSecond = StorageMetrics::infinity,
+		                       .bytesWrittenPerKSecond = StorageMetrics::infinity,
 		                       .iosPerKSecond = StorageMetrics::infinity,
 		                       .bytesReadPerKSecond = StorageMetrics::infinity },
-		.min = StorageMetrics{ .bytes = -1, .bytesPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
+		.min = StorageMetrics{ .bytes = -1, .bytesWrittenPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
 		.permittedError = StorageMetrics{ .bytes = -1,
-		                                  .bytesPerKSecond = StorageMetrics::infinity,
+		                                  .bytesWrittenPerKSecond = StorageMetrics::infinity,
 		                                  .iosPerKSecond = StorageMetrics::infinity,
 		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
 	};
@@ -1558,9 +1558,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
-					CODE_PROBE(true,
-					           "Data distributor received a duplicate ongoing snapshot request",
-					           probe::decoration::rare);
+					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;

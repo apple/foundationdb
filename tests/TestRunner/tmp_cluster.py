@@ -205,7 +205,7 @@ if __name__ == "__main__":
         )
         print("command: {}".format(cmd_args))
         errcode = subprocess.run(
-            cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env, shell=True
+            cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
         ).returncode
 
         sev40s = (

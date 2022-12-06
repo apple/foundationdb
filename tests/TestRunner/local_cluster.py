@@ -294,7 +294,7 @@ logdir = {logdir}
             "--lockfile",
             str(self.etc.joinpath("fdbmonitor.lock")),
         ]
-        self.fdbmonitor_logfile = open(self.log.joinpath("fdbmonitor.log"), "w")
+        self.fdbmonitor_logfile = open(self.log.joinpath("fdbmonitor.log"), "a+")
         self.process = subprocess.Popen(
             args,
             stdout=self.fdbmonitor_logfile,
@@ -309,6 +309,7 @@ logdir = {logdir}
             self.process.terminate()
             self.process.communicate(timeout=10)
         self.running = False
+        self.fdbmonitor_logfile.close()
 
     def ensure_ports_released(self, timeout_sec=5):
         sec = 0

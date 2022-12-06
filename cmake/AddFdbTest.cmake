@@ -441,6 +441,7 @@ function(package_bindingtester)
     add_custom_command(
       TARGET copy_binding_output_files
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${bdir}/tests/go/build/bin/_stacktester
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${bdir}/tests/go/src/fdb/
       COMMAND ${CMAKE_COMMAND} -E copy
         ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
         ${bdir}/tests/go/src/fdb/ # DEST
@@ -493,7 +494,7 @@ set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_
 set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
 
 # Run the test command under Python venv as a cmd (Windows) or bash (Linux/Apple) script, which allows && or || chaining.
-function(add_venv_test)
+function(add_python_venv_test)
   set(oneValueArgs NAME WORKING_DIRECTORY TEST_TIMEOUT)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -510,18 +511,24 @@ function(add_venv_test)
     set(T_WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
   endif()
   if(NOT T_TEST_TIMEOUT)
-    set(T_TEST_TIMEOUT 300)
+    if(USE_SANITIZER)
+      set(T_TEST_TIMEOUT 1200)
+    else()
+      set(T_TEST_TIMEOUT 300)
+    endif()
   endif()
-  # expand list of command argument to space-separated string to pass to shell
+  # expand list of command arguments to space-separated string so that we can pass to shell
   string(REPLACE ";" " " T_COMMAND "${T_COMMAND}")
   add_test(
     NAME ${T_NAME}
     WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
     COMMAND ${shell_cmd} ${shell_opt} "${test_venv_activate} && ${T_COMMAND}")
   set_tests_properties(${T_NAME} PROPERTIES FIXTURES_REQUIRED test_virtual_env_setup TIMEOUT ${T_TEST_TIMEOUT})
+  set(test_env_vars "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner:${CMAKE_BINARY_DIR}/tests/TestRunner")
   if(USE_SANITIZER)
-    set_tests_properties(${T_NAME} PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
+    set(test_env_vars "${test_env_vars};${SANITIZER_OPTIONS}")
   endif()
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT ${test_env_vars})
 endfunction()
 
 # Creates a single cluster before running the specified command (usually a ctest test)
@@ -571,7 +578,7 @@ function(add_fdbclient_test)
       set(T_TEST_TIMEOUT 300)
     endif()
   endif()
-  add_venv_test(
+  add_python_venv_test(
     NAME ${T_NAME}
     WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
     COMMAND ${TMP_CLUSTER_CMD}
@@ -602,7 +609,7 @@ function(add_unavailable_fdbclient_test)
     set(T_TEST_TIMEOUT 60)
   endif()
   message(STATUS "Adding unavailable client test ${T_NAME}")
-  add_venv_test(
+  add_python_venv_test(
     NAME ${T_NAME}
     COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
             --output-dir ${CMAKE_BINARY_DIR} -- ${T_COMMAND}
@@ -630,7 +637,7 @@ function(add_multi_fdbclient_test)
     message(FATAL_ERROR "COMMAND is a required argument for add_multi_fdbclient_test")
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
-  add_venv_test(
+  add_python_venv_test(
     NAME ${T_NAME}
     COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
