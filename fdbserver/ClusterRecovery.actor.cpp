@@ -1072,15 +1072,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
-	state Optional<EncryptionAtRestMode> encryptModeForTxnStateStore = Optional<EncryptionAtRestMode>();
+	state EncryptionAtRestMode encryptModeForTxnStateStore = EncryptionAtRestMode::DISABLED;
 	if (self->controllerData && self->controllerData->encryptionAtRestMode.isValid() &&
 	    self->controllerData->encryptionAtRestMode.getFuture().isValid() &&
 	    self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
 		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
 		encryptModeForTxnStateStore = encryptMode;
 	}
-	CODE_PROBE(encryptModeForTxnStateStore.present() && encryptModeForTxnStateStore.get().isEncryptionEnabled(),
-	           "Enable encryption for txnStateStore");
+	CODE_PROBE(encryptModeForTxnStateStore.isEncryptionEnabled(), "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);

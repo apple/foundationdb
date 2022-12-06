@@ -3299,21 +3299,6 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      LocalityData locality,
                                      ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
-
-	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
-	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of
-	// encryption keys created and managed by external KeyManagementService (KMS).
-	//
-	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the
-	// new CC before recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
-
-	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		wait(recoveredDiskFiles);
-		TraceEvent("RecoveredDiskFiles").log();
-	} else {
-		TraceEvent("RecoveredDiskFiles_Deferred").log();
-	}
-
 	state bool hasConnected = false;
 	loop {
 		try {
