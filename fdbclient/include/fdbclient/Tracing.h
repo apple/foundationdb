@@ -97,10 +97,6 @@ struct flow_ref<SpanContext> : std::false_type {};
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/common/common.md#attributes
 // 7. An optional list of linked SpanContexts.
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#specifying-links
-// A span with links is considered a batch. For a batch span S with links L_1, L_2,..., FDB adds new spans
-// L_1', L_2', ..., (with suffix "-linked"), such that L_i is parent of L_i' and S and all L_i' share the same batchID
-// attribute. This allows to find S from L_i, even in systems which do not support such links, but support search by
-// attribute.
 // 8. An optional list of timestamped Events.
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#add-events
 
