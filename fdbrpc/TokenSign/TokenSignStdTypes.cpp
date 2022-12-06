@@ -36,7 +36,11 @@ void convertAndAssign(Arena& arena, Optional<T>& to, const std::optional<S>& fro
 			if (value.empty()) {
 				to = VectorRef<StringRef>();
 			} else {
+				// no need to deep copy string because we have the underlying memory for the duration of token signing.
 				auto buf = new (arena) StringRef[value.size()];
+				for (auto i = 0u; i < value.size(); i++) {
+					buf[i] = StringRef(value[i]);
+				}
 				to = VectorRef<StringRef>(buf, value.size());
 			}
 		}

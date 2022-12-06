@@ -28,7 +28,7 @@ from authz_util import private_key_gen, public_keyset_from_keys
 from typing import Union
 from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 
-fdb.api_version(720)
+fdb.api_version(730)
 
 cluster_scope = "module"
 

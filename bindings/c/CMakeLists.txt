@@ -95,6 +95,8 @@ endif()
 # The tests don't build on windows
 if(NOT WIN32)
   set(MAKO_SRCS
+    test/mako/admin_server.hpp
+    test/mako/admin_server.cpp
     test/mako/async.hpp
     test/mako/async.cpp
     test/mako/blob_granules.hpp

@@ -21,6 +21,8 @@
 #include <cassert>
 #include <map>
 #include <string>
+#include "fdb_api.hpp"
+#include "utils.hpp"
 
 namespace mako {
 
@@ -31,6 +33,12 @@ std::map<std::string, std::string> generateAuthorizationTokenMap(int tenants,
 inline std::string getTenantNameByIndex(int index) {
 	assert(index >= 0);
 	return "tenant" + std::to_string(index);
+}
+
+inline void computeTenantPrefix(fdb::ByteString& s, uint64_t id) {
+	uint64_t swapped = byteswapHelper(id);
+	fdb::BytesRef temp = reinterpret_cast<const uint8_t*>(&swapped);
+	memcpy(&s[0], temp.data(), 8);
 }
 
 } // namespace mako

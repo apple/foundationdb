@@ -139,6 +139,7 @@ logdir = {logdir}
         mkcert_binary: str = "",
         custom_config: dict = {},
         authorization_kty: str = "",
+        authorization_keypair_id: str = "",
     ):
         self.port_provider = PortProvider()
         self.basedir = Path(basedir)
@@ -185,6 +186,8 @@ logdir = {logdir}
         self.public_key_jwks_str = None
         self.public_key_json_file = None
         self.private_key = None
+        self.authorization_private_key_pem_file = None
+        self.authorization_keypair_id = authorization_keypair_id
         self.authorization_kty = authorization_kty
         self.mkcert_binary = Path(mkcert_binary)
         self.server_cert_file = self.cert.joinpath("server_cert.pem")
@@ -195,12 +198,16 @@ logdir = {logdir}
         self.client_ca_file = self.cert.joinpath("client_ca.pem")
 
         if self.authorization_kty:
+            assert self.authorization_keypair_id, "keypair ID must be set to enable authorization"
             self.public_key_json_file = self.etc.joinpath("public_keys.json")
             self.private_key = private_key_gen(
-                    kty=self.authorization_kty, kid=random_alphanum_string(10))
+                    kty=self.authorization_kty, kid=self.authorization_keypair_id)
             self.public_key_jwks_str = public_keyset_from_keys([self.private_key])
             with open(self.public_key_json_file, "w") as pubkeyfile:
                 pubkeyfile.write(self.public_key_jwks_str)
+            self.authorization_private_key_pem_file = self.etc.joinpath("authorization_private_key.pem")
+            with open(self.authorization_private_key_pem_file, "w") as privkeyfile:
+                privkeyfile.write(self.private_key.as_pem(is_private=True).decode("utf8"))
 
         if create_config:
             self.create_cluster_file()
