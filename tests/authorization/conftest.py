@@ -28,7 +28,7 @@ from tmp_cluster import TempCluster
 from typing import Union
 from util import alg_from_kty, public_keyset_from_keys, random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 
-fdb.api_version(720)
+fdb.api_version(730)
 
 cluster_scope = "module"
 
