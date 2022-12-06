@@ -1548,14 +1548,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
 							       physicalShardIDCandidate != anonymousShardId.first());
-							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
+							std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> remoteTeamWithPhysicalShard =
 							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
 							        physicalShardIDCandidate, metrics, debugID);
-							// TODO: when we know that `physicalShardIDCandidate` exists, remote team must also exists.
-							if (remoteTeamWithPhysicalShard.present()) {
+							if (!remoteTeamWithPhysicalShard.second) {
+								// Physical shard with `physicalShardIDCandidate` is not available. Retry selecting new
+								// dst physical shard.
+								self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
+								foundTeams = false;
+								break;
+							}
+							if (remoteTeamWithPhysicalShard.first.present()) {
 								// Exists a remoteTeam in the mapping that has the physicalShardIDCandidate
 								// use the remoteTeam with the physicalShard as the bestTeam
-								req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
+								req = GetTeamRequest(remoteTeamWithPhysicalShard.first.get().servers);
 							}
 						}
 
