@@ -46,31 +46,31 @@ enum ChainLength : int {
 };
 
 template <class... Args>
-void logRaw(fmt::format_string<Args...> fmt_str, Args&&... args) {
+void logRaw(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 	auto buf = fmt::memory_buffer{};
 	fmt::format_to(std::back_inserter(buf), fmt_str, std::forward<Args>(args)...);
 	fmt::print(outp, "{}", std::string_view(buf.data(), buf.size()));
 }
 
 template <class... Args>
-void logWithPrefix(const char* prefix, fmt::format_string<Args...> fmt_str, Args&&... args) {
+void logWithPrefix(const char* prefix, const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 	auto buf = fmt::memory_buffer{};
 	fmt::format_to(std::back_inserter(buf), fmt_str, std::forward<Args>(args)...);
 	fmt::print(outp, "{}{}\n", prefix, std::string_view(buf.data(), buf.size()));
 }
 
 template <class... Args>
-void logc(fmt::format_string<Args...> fmt_str, Args&&... args) {
+void logc(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 	logWithPrefix("[CLIENT] ", fmt_str, std::forward<Args>(args)...);
 }
 
 template <class... Args>
-void logs(fmt::format_string<Args...> fmt_str, Args&&... args) {
+void logs(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 	logWithPrefix("[SERVER] ", fmt_str, std::forward<Args>(args)...);
 }
 
 template <class... Args>
-void logm(fmt::format_string<Args...> fmt_str, Args&&... args) {
+void logm(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 	logWithPrefix("[ MAIN ] ", fmt_str, std::forward<Args>(args)...);
 }
 
