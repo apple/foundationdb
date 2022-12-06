@@ -74,7 +74,7 @@ void ResumableStateForPopulate::runOneTick() {
 					stats.incrOpCount(OP_COMMIT);
 					stats.incrOpCount(OP_TRANSACTION);
 					tx.reset();
-					args.setTransactionTimeoutIfEnabled(tx);
+					setTransactionTimeoutIfEnabled(args, tx);
 					watch_tx.startFromStop();
 					key_checkpoint = i + 1;
 					if (i != key_end) {
@@ -170,7 +170,7 @@ void ResumableStateForRunWorkload::updateStepStats() {
 			stats.addLatency(OP_COMMIT, step_latency);
 		}
 		tx.reset();
-		args.setTransactionTimeoutIfEnabled(tx);
+		setTransactionTimeoutIfEnabled(args, tx);
 		stats.incrOpCount(OP_COMMIT);
 		needs_commit = false;
 	}
@@ -216,7 +216,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				stats.incrOpCount(OP_COMMIT);
 				stats.incrOpCount(OP_TRANSACTION);
 				tx.reset();
-				args.setTransactionTimeoutIfEnabled(tx);
+				setTransactionTimeoutIfEnabled(args, tx);
 				watch_tx.startFromStop();
 				onIterationEnd(FutureRC::OK);
 			}
@@ -231,7 +231,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		stats.incrOpCount(OP_TRANSACTION);
 		watch_tx.startFromStop();
 		tx.reset();
-		args.setTransactionTimeoutIfEnabled(tx);
+		setTransactionTimeoutIfEnabled(args, tx);
 		onIterationEnd(FutureRC::OK);
 	}
 }

@@ -141,7 +141,6 @@ struct Arguments {
 	Arguments();
 	int validate();
 	bool isAnyTimeoutEnabled() const;
-	void setTransactionTimeoutIfEnabled(fdb::Transaction& tx) const;
 
 	int api_version;
 	int json;
@@ -199,6 +198,13 @@ struct Arguments {
 	int transaction_timeout_db;
 	int transaction_timeout_tx;
 };
+
+// helper functions
+inline void setTransactionTimeoutIfEnabled(const Arguments& args, fdb::Transaction& tx) {
+	if (args.transaction_timeout_tx > 0) {
+		tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
+	}
+}
 
 } // namespace mako
 

@@ -639,7 +639,7 @@ int runWorkload(Database db,
 
 		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
 			Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
-			args.setTransactionTimeoutIfEnabled(tx);
+			setTransactionTimeoutIfEnabled(args, tx);
 
 			/* enable transaction trace */
 			if (dotrace) {
@@ -1121,12 +1121,6 @@ Arguments::Arguments() {
 	transaction_timeout_db = 0;
 	transaction_timeout_tx = 0;
 	num_report_files = 0;
-}
-
-void Arguments::setTransactionTimeoutIfEnabled(Transaction& tx) const {
-	if (transaction_timeout_tx > 0) {
-		tx.setOption(FDB_TR_OPTION_TIMEOUT, transaction_timeout_tx);
-	}
 }
 
 bool Arguments::isAnyTimeoutEnabled() const {
