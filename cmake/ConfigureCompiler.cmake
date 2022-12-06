@@ -347,6 +347,8 @@ else()
       # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
       # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
       -Wno-unused-command-line-argument
+      # Disable C++ 20 warning for ambiguous operator.
+      -Wno-ambiguous-reversed-operator
       )
     if (USE_CCACHE)
       add_compile_options(
