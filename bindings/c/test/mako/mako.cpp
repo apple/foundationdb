@@ -496,11 +496,9 @@ transaction_begin:
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(
-				    tx, f, opTable[op].name(), args.transaction_timeout_tx > 0 || args.transaction_timeout_db > 0);
+				future_rc = waitAndHandleError(tx, f, opTable[op].name(), args.isAnyTimeoutEnabled());
 			} else {
-				future_rc = waitAndHandleForOnError(
-				    tx, f, opTable[op].name(), args.transaction_timeout_tx > 0 || args.transaction_timeout_db > 0);
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.isAnyTimeoutEnabled());
 			}
 			updateErrorStatsRunMode(stats, f.error(), op);
 		}
@@ -546,8 +544,7 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(
-		    tx, f, "COMMIT_AT_TX_END", args.transaction_timeout_tx > 0 || args.transaction_timeout_db > 0);
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
 		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
@@ -642,9 +639,7 @@ int runWorkload(Database db,
 
 		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
 			Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
-			if (args.transaction_timeout_tx > 0) {
-				tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
-			}
+			args.setTransactionTimeoutIfEnabled(tx);
 
 			/* enable transaction trace */
 			if (dotrace) {
@@ -1126,6 +1121,16 @@ Arguments::Arguments() {
 	transaction_timeout_db = 0;
 	transaction_timeout_tx = 0;
 	num_report_files = 0;
+}
+
+void Arguments::setTransactionTimeoutIfEnabled(Transaction& tx) const {
+	if (transaction_timeout_tx > 0) {
+		tx.setOption(FDB_TR_OPTION_TIMEOUT, transaction_timeout_tx);
+	}
+}
+
+bool Arguments::isAnyTimeoutEnabled() const {
+	return (transaction_timeout_tx > 0 || transaction_timeout_db > 0);
 }
 
 /* parse transaction specification */

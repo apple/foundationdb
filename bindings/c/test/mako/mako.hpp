@@ -140,6 +140,8 @@ constexpr const int MAX_REPORT_FILES = 200;
 struct Arguments {
 	Arguments();
 	int validate();
+	bool isAnyTimeoutEnabled() const;
+	void setTransactionTimeoutIfEnabled(fdb::Transaction& tx) const;
 
 	int api_version;
 	int json;
