@@ -23,8 +23,13 @@
 
 #include "swift.h"
 #include "flow.h"
-#include "pthread.h"
 #include "unsafe_swift_compat.h"
+
+#if __has_include("SwiftModules/Flow")
+#include "SwiftModules/Flow"
+#endif
+
+#include "pthread.h"
 #include <stdint.h>
 
 // ==== ----------------------------------------------------------------------------------------------------------------
@@ -32,6 +37,66 @@
 
 using PromiseStreamCInt = PromiseStream<int>;
 using FutureStreamCInt = FutureStream<int>;
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
+// TODO: Implements `FlowSingleCallbackForSwiftContinuationProtocol`
+template<class T>
+class FlowSingleCallbackForSwiftContinuation : SingleCallback<T> {
+	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
+	SwiftCC continuationInstance;
+public:
+	void set(const void * _Nonnull pointerToContinuationInstance,
+	         FutureStream<T> fs,
+	         const void * _Nonnull thisPointer) {
+		// Verify Swift did not make a copy of the `self` value for this method
+		// call.
+		assert(this == thisPointer);
+
+		// FIXME: Propagate `SwiftCC` to Swift using forward
+		// 		  interop, without relying on passing it via a `void *`
+		// 	 	  here. That will let us avoid this hack.
+		const void *_Nonnull opaqueStorage = pointerToContinuationInstance;
+		static_assert(sizeof(SwiftCC) == sizeof(const void *));
+		const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC *>(&opaqueStorage));
+		// Set the continuation instance.
+		continuationInstance.set(ccCopy);
+		// Add this callback to the future.
+		fs.addCallbackAndClear(this);
+	}
+
+	FlowSingleCallbackForSwiftContinuation(): continuationInstance(SwiftCC::init()) {
+	}
+
+	void fire(T const& value) {
+		SingleCallback<T>::remove();
+		SingleCallback<T>::next = 0;
+		continuationInstance.resume(value);
+	}
+
+	void fire(T&& value) {
+		SingleCallback<T>::remove();
+		SingleCallback<T>::next = 0;
+		auto copy = value;
+		continuationInstance.resume(copy);
+	}
+
+	void error(Error error) {
+		SingleCallback<T>::remove();
+		SingleCallback<T>::next = 0;
+		continuationInstance.resumeThrowing(error);
+	}
+
+	void unwait() {
+		// TODO(swift): implement
+	}
+};
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
+/// TODO(swift): Conform this to FlowSingleCallbackForSwiftContinuationProtocol from C++ already
+using FlowSingleCallbackForSwiftContinuation_CInt =
+    FlowSingleCallbackForSwiftContinuation<int>;
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: SingleCallback types

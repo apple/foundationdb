@@ -20,13 +20,50 @@
 
 import Flow
 
-public protocol _FlowStreamOps: AsyncSequence {
+public protocol FlowStreamOpsAsyncIterator: AsyncIteratorProtocol where Element == AssociatedFutureStream.Element {
+    associatedtype AssociatedFutureStream: FlowStreamOps
+
+    init(_: AssociatedFutureStream)
+}
+
+/// Corresponds to `FlowSingleCallbackForSwiftContinuation: Flow.SingleCallback<T>`
+public protocol FlowSingleCallbackForSwiftContinuationProtocol<AssociatedFutureStream> {
+    associatedtype AssociatedFutureStream: FlowStreamOps
+    typealias Element = AssociatedFutureStream.Element
+
+    init()
+
+    ///
+    /// ```
+    /// 	void set(
+    ///          const void * _Nonnull pointerToContinuationInstance,
+    ///	         FutureStream<T> fs,
+    ///	         const void * _Nonnull thisPointer)
+    /// ```
+    mutating func set(_ continuationPointer: UnsafeRawPointer,
+                      _ stream: Self.AssociatedFutureStream,
+                      _ thisPointer: UnsafeRawPointer)
+}
+
+public protocol FlowStreamOps: AsyncSequence
+        where AsyncIterator: FlowStreamOpsAsyncIterator,
+              AsyncIterator.Element == Self.Element,
+              AsyncIterator.AssociatedFutureStream == Self,
+              SingleCB.AssociatedFutureStream == Self {
+
     /// Element type of the stream
     associatedtype Element
-    typealias _T = Element // just convenience to share snippets between Future impl and this
 
-    /// Box type to be used to wrap the checked continuation
-    typealias CCBox = _Box<CheckedContinuation<Element?, Swift.Error>>
+    // : C++ SingleCallback<T> FlowSingleCallbackForSwiftContinuationProtocol
+    associatedtype SingleCB: FlowSingleCallbackForSwiftContinuationProtocol
+        where SingleCB.AssociatedFutureStream == Self
+
+
+    /// FIXME: can't typealias like that, we need to repeat it everywhere: rdar://103021742 ([Sema] Crash during self referential generic requirement)
+    // typealias AsyncIterator = FlowStreamOpsAsyncIteratorAsyncIterator<Self>
+
+    // === ---------------------------------------------------------------------
+    // Exposed Swift capabilities
 
     /// Suspends and awaits for the next element.
     ///
@@ -35,19 +72,27 @@ public protocol _FlowStreamOps: AsyncSequence {
     var waitNext: Element? {
         mutating get async throws
     }
+
+    /// Implements protocol requirement of `AsyncSequence`, and enables async-for looping over this type.
+    func makeAsyncIterator() -> AsyncIterator
+
+    // === ---------------------------------------------------------------------
+    // C++ API
+
+    func isReady() -> Bool
+    func isError() -> Bool
+
+    mutating func pop() -> Element
+
+    mutating func getError() -> Flow.Error
 }
 
-// ==== ---------------------------------------------------------------------------------------------------------------
-// MARK: FutureStreams
-
-extension FutureStreamCInt: _FlowStreamOps {
-    public typealias Element = CInt
-    public typealias CB = SwiftContinuationSingleCallbackCInt
+/// Default implementations that are good for all adopters of this protocol, generally no need to override.
+extension FlowStreamOps {
 
     public var waitNext: Element? {
         mutating get async throws {
-            guard !self.isReady() else {
-                pprint("[stream] stream next future was ready, return immediately.")
+            if self.isReady() {
                 if self.isError() {
                     let error = self.getError()
                     if error.isEndOfStream {
@@ -58,64 +103,35 @@ extension FutureStreamCInt: _FlowStreamOps {
                 } else {
                     return self.pop()
                 }
-            }
-
-            return try await withCheckedThrowingContinuation { cc in
-                let ccBox = Self.CCBox(cc)
-                let rawCCBox = UnsafeMutableRawPointer(Unmanaged.passRetained(ccBox).toOpaque())
-
-                let cb = CB.make(
-                    rawCCBox,
-                    /*returning:*/ { (_cc: UnsafeMutableRawPointer, value: _T) in
-                        pprint("[stream] returning !!!")
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        cc.resume(returning: value)
-                    },
-                    /*throwing:*/ { (_cc: UnsafeMutableRawPointer, error: Flow.Error) in
-                        let cc = Unmanaged<CCBox>.fromOpaque(_cc).takeRetainedValue().value
-                        pprint("[stream] throwing !!!")
-                        if error.isEndOfStream {
-                            pprint("[stream] END OF STREAM")
-                            cc.resume(returning: nil)
-                        } else {
-                            pprint("[stream] throwing error !!!")
-                            cc.resume(throwing: GeneralFlowError()) // TODO: map errors
+            } else {
+                 var s = SingleCB()
+                return try await withCheckedThrowingContinuation { (cc: CheckedContinuation<Element, Swift.Error>) in
+                    withUnsafeMutablePointer(to: &s) { ptr in
+                        let ecc = FlowCheckedContinuation<Element>(cc)
+                        withUnsafePointer(to: ecc) { ccPtr in
+                            ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                         }
                     }
-                )
-                // self.addCallbackAndClear(cb) // TODO: perhaps can workaround this? annot convert value of type 'SwiftContinuationSingleCallbackCInt' to expected argument type 'UnsafeMutablePointer<__CxxTemplateInst14SingleCallbackIiE>?'
-                cb.addCallbackAndClearTo(self)
+                }
             }
         }
     }
 
     public func makeAsyncIterator() -> AsyncIterator {
-        pprint("[stream] make iterator!")
-        return .init(self)
-    }
-
-    public struct AsyncIterator: AsyncIteratorProtocol {
-        public typealias Stream = FutureStreamCInt
-        public typealias Element = Stream.Element
-
-        var stream: Stream
-        init(_ stream: Stream) {
-            self.stream = stream
-        }
-
-        // FIXME(swift): how to implement "end of stream -> nil" -- probably emits an error in flow?
-        public mutating func next() async throws -> Element? {
-            pprint("[stream] await next!")
-            let value = try await stream.waitNext
-            pprint("[stream] await next - DONE!")
-            return value
-        }
+        AsyncIterator(self)
     }
 }
 
-public final class _Box<Value> {
-    public let value: Value
-    public init(_ value: Value) {
-        self.value = value
+public struct FlowStreamOpsAsyncIteratorAsyncIterator<AssociatedFutureStream>: AsyncIteratorProtocol, FlowStreamOpsAsyncIterator
+    where AssociatedFutureStream: FlowStreamOps {
+    public typealias Element = AssociatedFutureStream.Element
+
+    var stream: AssociatedFutureStream
+    public init(_ stream: AssociatedFutureStream) {
+        self.stream = stream
+    }
+
+    public mutating func next() async throws -> Element? {
+        try await stream.waitNext
     }
 }

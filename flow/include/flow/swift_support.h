@@ -58,6 +58,9 @@
 #define SWIFT_SENDABLE 														   \
 	__attribute__((swift_attr("@Sendable")))
 
+#define CONCAT2(id1, id2) id1##id2
+#define CONCAT3(id1, id2, id3) id1##id2##id3
+
 // ==== ----------------------------------------------------------------------------------------------------------------
 
 /// Convert a Swift JobPriority value to a numeric value of Flow/TaskPriority.

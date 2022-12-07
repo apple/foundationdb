@@ -24,6 +24,7 @@
 #include "flow/swift.h"
 #include "flow/flow.h"
 #include "flow/unsafe_swift_compat.h"
+#include "flow/swift_stream_support.h"
 #include "pthread.h"
 #include <stdint.h>
 
@@ -33,81 +34,24 @@
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: type aliases
 
-using FutureStream_UpdateRecoveryDataRequest = FutureStream<struct UpdateRecoveryDataRequest>;
-using RequestStream_UpdateRecoveryDataRequest = RequestStream<struct UpdateRecoveryDataRequest>;
+#define SWIFT_FUTURE_STREAM(TYPE)									\
+using CONCAT3(FutureStream, _, TYPE) = FutureStream<struct TYPE>;	\
+using CONCAT3(FlowSingleCallbackForSwiftContinuation, _, TYPE) =	\
+    FlowSingleCallbackForSwiftContinuation<TYPE>;
 
-using FutureStream_GetCommitVersionRequest = FutureStream<struct GetCommitVersionRequest>;
+#define SWIFT_REQUEST_STREAM(TYPE)									\
+using CONCAT3(RequestStream, _, TYPE) = RequestStream<struct TYPE>;
 
-using RequestStream_GetRawCommittedVersionRequest = RequestStream<struct GetRawCommittedVersionRequest>;
-using FutureStream_GetRawCommittedVersionRequest = FutureStream<struct GetRawCommittedVersionRequest>;
+SWIFT_FUTURE_STREAM(UpdateRecoveryDataRequest)
+SWIFT_REQUEST_STREAM(UpdateRecoveryDataRequest)
 
-using RequestStream_ReportRawCommittedVersionRequest = RequestStream<struct ReportRawCommittedVersionRequest>;
-using FutureStream_ReportRawCommittedVersionRequest = FutureStream<struct ReportRawCommittedVersionRequest>;
+SWIFT_FUTURE_STREAM(GetCommitVersionRequest)
+SWIFT_REQUEST_STREAM(GetCommitVersionRequest)
 
-// ==== ----------------------------------------------------------------------------------------------------------------
+SWIFT_FUTURE_STREAM(GetRawCommittedVersionRequest)
+SWIFT_REQUEST_STREAM(GetRawCommittedVersionRequest)
 
-template<class T>
-class FlowSingleCallbackForSwiftContinuation : SingleCallback<T> {
-	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
-	SwiftCC continuationInstance;
-public:
-	void set(const void * _Nonnull pointerToContinuationInstance,
-	         FutureStream<T> fs,
-	         const void * _Nonnull thisPointer) {
-		// Verify Swift did not make a copy of the `self` value for this method
-		// call.
-		assert(this == thisPointer);
-
-		// FIXME: Propagate `SwiftCC` to Swift using forward
-		// interop, without relying on passing it via a `void *`
-		// here. That will let us avoid this hack.
-		const void *_Nonnull opaqueStorage = pointerToContinuationInstance;
-		static_assert(sizeof(SwiftCC) == sizeof(const void *));
-		const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC *>(&opaqueStorage));
-		// Set the continuation instance.
-		continuationInstance.set(ccCopy);
-		// Add this callback to the future.
-		fs.addCallbackAndClear(this);
-	}
-
-	FlowSingleCallbackForSwiftContinuation(): continuationInstance(SwiftCC::init()) {
-	}
-
-	void fire(T const& value) {
-		SingleCallback<T>::remove();
-		SingleCallback<T>::next = 0;
-		continuationInstance.resume(value);
-	}
-
-	void fire(T&& value) {
-		SingleCallback<T>::remove();
-		SingleCallback<T>::next = 0;
-		auto copy = value;
-		continuationInstance.resume(copy);
-	}
-
-	void error(Error error) {
-		SingleCallback<T>::remove();
-		SingleCallback<T>::next = 0;
-		continuationInstance.resumeThrowing(error);
-	}
-
-	void unwait() {
-		// TODO(swift): implement
-	}
-};
-
-using FlowSingleCallbackForSwiftContinuation_UpdateRecoveryDataRequest =
-    FlowSingleCallbackForSwiftContinuation<UpdateRecoveryDataRequest>;
-
-using FlowSingleCallbackForSwiftContinuation_GetCommitVersionRequest =
-    FlowSingleCallbackForSwiftContinuation<GetCommitVersionRequest>;
-
-using FlowSingleCallbackForSwiftContinuation_GetRawCommittedVersionRequest =
-    FlowSingleCallbackForSwiftContinuation<GetRawCommittedVersionRequest>;
-
-using FlowSingleCallbackForSwiftContinuation_ReportRawCommittedVersionRequest =
-    FlowSingleCallbackForSwiftContinuation<ReportRawCommittedVersionRequest>;
-
+SWIFT_FUTURE_STREAM(ReportRawCommittedVersionRequest)
+SWIFT_REQUEST_STREAM(ReportRawCommittedVersionRequest)
 
 #endif // FOUNDATIONDB_FDBSERVER_STREAM_SUPPORT_H

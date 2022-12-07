@@ -2,18 +2,34 @@ import Flow
 
 // ==== ---------------------------------------------------------------------------------------------------------------
 
-public protocol _FlowFutureOps {
-    /// Element type of the future
-    associatedtype _T
+public protocol FlowCallbackForSwiftContinuationT {
+    associatedtype AssociatedFuture: _FlowFutureOps
+    typealias Element = AssociatedFuture.Element
 
-    var waitValue: _T { mutating get async throws }
+    init()
+
+    mutating func set(_ continuationPointer: UnsafeRawPointer,
+                      _ future: AssociatedFuture,
+                      _ thisPointer: UnsafeRawPointer)
 }
 
-extension FutureCInt: _FlowFutureOps {
-    public typealias _T = CInt
+public protocol _FlowFutureOps {
+    /// Element type of the future
+    associatedtype Element
+    associatedtype FlowCallbackForSwiftContinuation: FlowCallbackForSwiftContinuationT
+    typealias FlowCheckedContinuationSelfT = FlowCheckedContinuation<Element>
 
-    // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
-    public var waitValue: _T {
+    func isReady() -> Bool
+    func isError() -> Bool
+    func canGet() -> Bool
+
+    func __getUnsafe() -> UnsafePointer<Element>
+
+    var waitValue: Element { mutating get async throws }
+}
+
+extension _FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture {
+    public var waitValue: Element {
         mutating get async throws {
             guard !self.isReady() else {
                 // FIXME(flow): handle isError and cancellation
@@ -28,40 +44,10 @@ extension FutureCInt: _FlowFutureOps {
                     return self.__getUnsafe().pointee
                 }
             }
-            var s = FlowCallbackForSwiftContinuationCInt()
+            var s = FlowCallbackForSwiftContinuation()
             return try await withCheckedThrowingContinuation { cc in
                 withUnsafeMutablePointer(to: &s) { ptr in
-                    let ecc = FlowCheckedContinuation<CInt>(cc)
-                    withUnsafePointer(to: ecc) { ccPtr in
-                        ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
-                    }
-                }
-            }
-        }
-    }
-}
-
-extension FutureVoid: _FlowFutureOps {
-    public typealias _T = Void
-
-    // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
-    public var waitValue: _T {
-        mutating get async throws {
-            guard !self.isReady() else {
-                // FIXME(flow): handle isError and cancellation
-                if self.isError() {
-                    // let error = self.__getErrorUnsafe() // TODO: rethrow the error?
-                    throw GeneralFlowError()
-                } else {
-                    precondition(self.canGet())
-                    return self.__getUnsafe().pointee
-                }
-            }
-
-            var s = FlowCallbackForSwiftContinuationVoid()
-            return try await withCheckedThrowingContinuation { cc in
-                withUnsafeMutablePointer(to: &s) { ptr in
-                    let ecc = FlowCheckedContinuation<Void>(cc)
+                    let ecc = FlowCheckedContinuationSelfT(cc)
                     withUnsafePointer(to: ecc) { ccPtr in
                         ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                     }

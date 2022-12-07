@@ -5,8 +5,7 @@ public struct ExposeVoidConf<T> {
     let x: CInt
 }
 
-// FIXME: return Void? for conformance instead once header supports stdlib
-// types.
+// FIXME: return Void? for conformance instead once header supports stdlib types.
 @_expose(Cxx)
 // This function ensures that the value witness table for `Void` to C++ is
 // exposed in the generated C++ header.

@@ -91,7 +91,9 @@ public:
     }
 };
 
+// TODO(swift): Conform these to FlowCallbackForSwiftContinuationT automatically
 using FlowCallbackForSwiftContinuationCInt = FlowCallbackForSwiftContinuation<int>;
+// TODO(swift): Conform these to FlowCallbackForSwiftContinuationT automatically
 using FlowCallbackForSwiftContinuationVoid = FlowCallbackForSwiftContinuation<Void>;
 
 #endif

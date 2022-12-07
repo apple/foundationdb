@@ -109,12 +109,14 @@ generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
 
 add_library(flow_swift STATIC
     FlowCheckedContinuation.swift
-    stream_support.swift
+    stream_support.swift # general stream support types
+    flow_stream_support.swift # conformances for future types that we vend with this module (E.g. CInt, Void)
     error_support.swift
     task_priority_support.swift
     SwiftBridging.swift
     SwiftFileB.swift
-    future_support.swift
+    future_support.swift # general support types
+    flow_future_support.swift # conformances for future types that we vend with this module (E.g. CInt, Void)
     reply_support.swift
     clock_support.swift
 )
