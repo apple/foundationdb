@@ -54,7 +54,7 @@ namespace authz::jwt {
 // This struct is not meant to be flatbuffer-serialized
 // This is a parsed, flattened view of S and signature
 
-template <class StringType, template <class> class VectorType, template <class> class OptionalType = std::optional>
+template <class StringType, template <class...> class VectorType, template <class> class OptionalType = std::optional>
 struct BasicTokenSpec {
 	// header part ("typ": "JWT" implicitly enforced)
 	Algorithm algorithm; // alg
