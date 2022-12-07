@@ -31,7 +31,15 @@
 
 namespace authz::jwt::stdtypes {
 
-using TokenSpec = BasicTokenSpec<std::string, std::vector>;
+namespace detail {
+
+// work around the fact that std::vector takes more than one template parameter
+template <class T>
+using VectorAlias = std::vector<T>;
+
+} // namespace detail
+
+using TokenSpec = BasicTokenSpec<std::string, detail::VectorAlias>;
 
 // Generate an elliptic curve private key on a P-256 curve, and serialize it as PEM.
 std::string makeEcP256PrivateKeyPem();

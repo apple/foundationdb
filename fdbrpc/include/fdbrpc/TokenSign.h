@@ -32,7 +32,15 @@
 
 namespace authz::jwt {
 
-using TokenRef = BasicTokenSpec<StringRef, VectorRef, Optional>;
+namespace detail {
+
+// work around the fact that VectorRef takes more than one template parameter
+template <typename T>
+using VectorRefAlias = VectorRef<T>;
+
+} // namespace detail
+
+using TokenRef = BasicTokenSpec<StringRef, detail::VectorRefAlias, Optional>;
 
 // print each non-signature field in non-JSON, human-readable format e.g. for trace
 StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec);
