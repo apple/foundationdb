@@ -404,6 +404,7 @@ public:
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
 	// 7.2 cannot be downgraded to 7.1 or below after enabling encryption-at-rest.
+	// TODO: Remove this bool once the encryption knobs are removed
 	bool disableEncryption = false;
 	// By default, encryption mode is set randomly (based on the tenant mode)
 	// If provided, set using EncryptionAtRestMode::fromString
@@ -2088,8 +2089,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			}
 		} else {
 			// TODO: These cases should only trigger with probability (BUGGIFY) once the server knob is removed
-			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT ||
-			    deterministicRandom()->coinflip()) {
+			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT || BUGGIFY) {
 				// optional and disabled tenant modes currently only support cluster aware encryption
 				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
 			} else {
