@@ -107,7 +107,7 @@ struct ProxyStats {
 	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr,
-	                    std::map<TenantName, TenantMapEntry>* pTenantMap)
+	                    std::unordered_map<int64_t, TenantName>* pTenantMap)
 	  : cc("ProxyStats", id.toString()), txnCommitIn("TxnCommitIn", cc),
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
@@ -173,8 +173,8 @@ struct ExpectedIdempotencyIdCountForKey {
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
-	std::map<TenantName, TenantMapEntry> tenantMap;
-	std::unordered_map<int64_t, TenantNameUniqueSet> tenantIdIndex;
+	std::map<TenantName, int64_t> tenantNameIndex;
+	std::unordered_map<int64_t, TenantName> tenantMap;
 	std::unordered_set<TenantName> tenantsOverStorageQuota;
 	ProxyStats stats;
 	MasterInterface master;
