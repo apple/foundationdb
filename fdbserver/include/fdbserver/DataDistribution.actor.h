@@ -285,8 +285,10 @@ public:
 		              PhysicalShardCreationTime whenCreated)
 		  : id(id), metrics(metrics), teams(teams), whenCreated(whenCreated) {}
 
+		// Adds `newRange` to this physical shard and starts monitoring the shard.
 		void addRange(const KeyRange& newRange);
 
+		// Removes `outRange` from this physical shard and updates monitored shards.
 		void removeRange(const KeyRange& outRange);
 
 		std::string toString() const { return fmt::format("{}", std::to_string(id)); }
@@ -297,8 +299,9 @@ public:
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
 
 		struct RangeData {
-			Future<Void> trackMetrics;
-			Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+			Future<Void> trackMetrics; // TODO(zhewu): add shard tracking actor.
+			Reference<AsyncVar<Optional<ShardMetrics>>>
+			    stats; // TODO(zhewu): aggregate all metrics to a single physical shard metrics.
 		};
 		std::unordered_map<KeyRange, RangeData> rangeData;
 	};
@@ -405,6 +408,7 @@ private:
 	// In keyRangePhysicalShardIDMap, set the input physical shard id to the input key range
 	void updatekeyRangePhysicalShardIDMap(KeyRange keyRange, uint64_t physicalShardID, uint64_t debugID);
 
+	// Checks the consistency between the mapping of physical shards and key ranges.
 	void checkKeyRangePhysicalShardMapping();
 
 	// Return a string concating the input IDs interleaving with " "

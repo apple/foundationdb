@@ -425,6 +425,7 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	return KeyRangeRef(b, e);
 }
 
+// Calculates the complement of `lhs` from `rhs`.
 inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	if ((lhs & rhs).empty()) {
 		return { lhs };
