@@ -1544,6 +1544,34 @@ FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
+void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) {
+	if (g_network->isSimulated()) {
+		for (const auto& [range, data] : rangeData) {
+			ASSERT((range & newRange).empty());
+		}
+	}
+	RangeData data;
+	rangeData.emplace(newRange, data);
+}
+
+void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRange) {
+	std::vector<KeyRangeRef> updateRanges;
+	for (auto& [range, data] : rangeData) {
+		if (!((range & outRange).empty())) {
+			updateRanges.push_back(range);
+		}
+	}
+
+	for (auto& range : updateRanges) {
+		std::vector<KeyRangeRef> remainingRanges = range - outRange;
+		rangeData.erase(range);
+		for (auto& r : remainingRanges) {
+			RangeData data;
+			rangeData.emplace(r, data);
+		}
+	}
+}
+
 // Decide whether a physical shard is available at the moment when the func is calling
 PhysicalShardAvailable PhysicalShardCollection::checkPhysicalShardAvailable(uint64_t physicalShardID,
                                                                             StorageMetrics const& moveInMetrics) {
@@ -1596,9 +1624,46 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
 void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
                                                                uint64_t physicalShardID,
                                                                uint64_t debugID) {
-	ASSERT(physicalShardID != UID().first());
+	ASSERT(physicalShardID != UID().first());															
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
+	std::set<uint64_t> physicalShardIDSet;
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		uint64_t shardID = it->value();
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		physicalShardInstances[shardID].removeRange(keyRange);
+	}
 	keyRangePhysicalShardIDMap.insert(keyRange, physicalShardID);
-	return;
+	ASSERT(physicalShardInstances.find(physicalShardID) != physicalShardInstances.end());
+	physicalShardInstances[physicalShardID].addRange(keyRange);
+	checkKeyRangePhysicalShardMapping();
+}
+
+void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
+	if (!g_network->isSimulated()) {
+		return;
+	}
+
+	KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = keyRangePhysicalShardIDMap.ranges();
+	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
+	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
+		uint64_t shardID = it->value();
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		auto keyRangePiece = KeyRangeRef(it->range().begin, it->range().end);
+		bool exist = false;
+		for (const auto& [range, data] : physicalShardInstances[shardID].rangeData) {
+			if (range == keyRangePiece) {
+				exist = true;
+				break;
+			}
+		}
+		ASSERT(exist);
+	}
+
+	for (auto& [shardID, physicalShard] : physicalShardInstances) {
+		for (auto& [range, data] : physicalShard.rangeData) {
+			ASSERT(keyRangePhysicalShardIDMap[range.begin] == shardID);
+		}
+	}
 }
 
 // At beginning of the transition from the initial state without physical shard notion

@@ -626,7 +626,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
-			self->physicalShardCollection = makeReference<PhysicalShardCollection>();
+			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
 			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
