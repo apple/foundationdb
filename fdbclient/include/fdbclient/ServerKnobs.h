@@ -187,8 +187,9 @@ public:
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
 	double CHECK_TEAM_DELAY; // Perpetual wiggle check cluster team healthy
-	double CHECK_LOAD_BYTES_BALANCE_DELAY; // The interval the wiggler check the balance ratio of load bytes among the
-	                                       // cluster
+	double PERPETUAL_WIGGLE_SMALL_LOAD_RATIO; // If the average load of storage server is less than this ratio * average
+	                                          // shard bytes, the perpetual wiggle won't consider the available space
+	                                          // load balance in the cluster
 	double PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO; // target min : average space load balance ratio after re-include
 	                                                 // before perpetual wiggle will start the next wiggle
 	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start

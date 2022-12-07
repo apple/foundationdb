@@ -465,8 +465,9 @@ protected:
 
 	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
 
-	// calculate minLoadBytes / avgLoadBytes among all healthy servers
-	double loadBytesBalanceRatio() const;
+	// calculate minLoadBytes / avgLoadBytes among servers. An unhealthy server's load is considered as 0. If the
+	// average load of each storage server is less than smallLoadThreshold, return 1 always.
+	double loadBytesBalanceRatio(int64_t smallLoadThreshold) const;
 
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.

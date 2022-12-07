@@ -1952,33 +1952,32 @@ public:
 	}
 
 	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
-		wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
 		state bool takeRest = true;
+		state Promise<int64_t> avgShardBytes;
 		while (takeRest) {
-			bool balance = self->loadBytesBalanceRatio();
+			// avoid busy spinning
+			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
+
+			avgShardBytes.reset();
+			self->getAverageShardBytes.send(avgShardBytes);
+			int64_t avgBytes = wait(avgShardBytes.getFuture());
+			double ratio = self->loadBytesBalanceRatio(avgBytes * SERVER_KNOBS->PERPETUAL_WIGGLE_SMALL_LOAD_RATIO);
+			bool imbalance = ratio < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO;
+			CODE_PROBE(imbalance, "Perpetual Wiggle pause because cluster is imbalance.");
+
 			// there must not have other teams to place wiggled data
 			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
-			           self->machine_info.size() < self->configuration.storageTeamSize ||
-			           balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO;
+			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance;
 
-			if (takeRest) {
-				CODE_PROBE(balance < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO,
-				           "Perpetual Wiggle pause because cluster is imbalance.");
-
-				self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
-				if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-					TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
-					    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-					    .detail("BytesBalance", balance)
-					    .detail("ServerSize", self->server_info.size())
-					    .detail("MachineSize", self->machine_info.size())
-					    .detail("StorageTeamSize", self->configuration.storageTeamSize);
-				}
-			} else {
-				break;
+			self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
+			if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+				TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
+				    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+				    .detail("BytesBalanceRatio", ratio)
+				    .detail("ServerSize", self->server_info.size())
+				    .detail("MachineSize", self->machine_info.size())
+				    .detail("StorageTeamSize", self->configuration.storageTeamSize);
 			}
-
-			wait(delayJittered(SERVER_KNOBS->CHECK_LOAD_BYTES_BALANCE_DELAY)); // avoid busy spin
 		}
 		return Void();
 	}
@@ -3401,7 +3400,7 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 	return DDTeamCollectionImpl::removeBadTeams(this);
 }
 
-double DDTeamCollection::loadBytesBalanceRatio() const {
+double DDTeamCollection::loadBytesBalanceRatio(int64_t smallLoadThreshold) const {
 	double minLoadBytes = std::numeric_limits<double>::max();
 	double totalLoadBytes = 0;
 	int count = 0;
@@ -3421,16 +3420,12 @@ double DDTeamCollection::loadBytesBalanceRatio() const {
 	TraceEvent(SevDebug, "LoadBytesBalanceRatioMetrics")
 	    .detail("TotalLoad", totalLoadBytes)
 	    .detail("MinLoadBytes", minLoadBytes)
+	    .detail("SmallLoadThreshold", smallLoadThreshold)
 	    .detail("Count", count);
 
 	// avoid division-by-zero
-	if (totalLoadBytes == 0) {
-		return 1;
-	}
-
 	double avgLoad = totalLoadBytes / count;
-	double smallLoadThreshold = SERVER_KNOBS->MAX_SHARD_BYTES * 5.0;
-	if (avgLoad < smallLoadThreshold) {
+	if (totalLoadBytes == 0 || avgLoad < smallLoadThreshold) {
 		CODE_PROBE(true, "The cluster load is small enough to ignore load bytes balance.");
 		return 1;
 	}
