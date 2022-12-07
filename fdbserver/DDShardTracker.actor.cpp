@@ -1566,12 +1566,13 @@ void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRang
 
 	for (auto& range : updateRanges) {
 		std::vector<KeyRangeRef> remainingRanges = range - outRange;
-		rangeData.erase(range);
 		for (auto& r : remainingRanges) {
+			ASSERT(r != range);
 			// TODO(zhewu): add metrics tracking actor.
 			RangeData data;
 			rangeData.emplace(r, data);
 		}
+		rangeData.erase(range);
 	}
 }
 
