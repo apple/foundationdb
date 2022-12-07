@@ -5645,7 +5645,9 @@ private:
 					domainId = currentDomainId;
 					domainPrefixLength = prefixLength;
 					canUseDefaultDomain =
-					    (height > 1 && (currentDomainId == defaultDomainId || prefixLength == rec.key.size()));
+					    (height > 1 && (currentDomainId == defaultDomainId ||
+					                    (prefixLength == rec.key.size() &&
+					                     !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))));
 				} else if (splitByDomain) {
 					ASSERT(domainId.present());
 					if (domainId == currentDomainId) {
@@ -5657,11 +5659,9 @@ private:
 							ASSERT(prefixLength < rec.key.size());
 							canUseDefaultDomain = false;
 						}
-					} else if (canUseDefaultDomain &&
-					           (currentDomainId == defaultDomainId ||
-					            (prefixLength == rec.key.size() &&
-					             (nextRecord.key.empty() ||
-					              !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))))) {
+					} else if (canUseDefaultDomain && (currentDomainId == defaultDomainId ||
+					                                   (prefixLength == rec.key.size() &&
+					                                    !nextRecord.key.startsWith(rec.key.substr(0, prefixLength))))) {
 						// The new record meets one of the following conditions:
 						//   1. it falls in the default domain, or
 						//   2. its key contain only the domain prefix, and
@@ -5728,7 +5728,6 @@ private:
 		// Leaves can have just one record if it's large, but internal pages should have at least 4
 		int minRecords = height == 1 ? 1 : 4;
 		double maxSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_MAX_SLACK;
-		RedwoodRecordRef emptyRecord;
 		std::vector<PageToBuild> pages;
 
 		// Whether encryption is used and we need to set encryption domain for a page.
@@ -5772,7 +5771,7 @@ private:
 				             records[i].toString(height == 1).c_str());
 			}
 
-			if (!p.addRecord(records[i], i + 1 < records.size() ? records[i + 1] : emptyRecord, deltaSizes[i], force)) {
+			if (!p.addRecord(records[i], i + 1 < records.size() ? records[i + 1] : *upperBound, deltaSizes[i], force)) {
 				p.finish();
 				pages.push_back(p);
 				p = p.next();
@@ -5876,21 +5875,28 @@ private:
 			bool lastPage = endIndex == entries.size();
 			pageUpperBound = lastPage ? upperBound->withoutValue() : entries[endIndex].withoutValue();
 
-			if (!lastPage) {
-				PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
-				if (height == 1) {
-					// If this is a leaf page, and not the last one to be written, shorten the upper boundary)
-					int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[endIndex - 1], prefixLen);
-					pageUpperBound.truncate(commonPrefix + 1);
-				}
-				if (useEncryptionDomain) {
-					ASSERT(p->domainId.present());
+			// If this is a leaf page, and not the last one to be written, shorten the upper boundary)
+			if (!lastPage && height == 1) {
+				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[endIndex - 1], prefixLen);
+				pageUpperBound.truncate(commonPrefix + 1);
+			}
+
+			if (useEncryptionDomain && pageUpperBound.key != dbEnd.key) {
+				int64_t ubDomainId;
+				KeyRef ubDomainPrefix;
+				if (lastPage) {
+					size_t ubPrefixLength;
+					std::tie(ubDomainId, ubPrefixLength) = self->m_keyProvider->getEncryptionDomain(pageUpperBound.key);
+					ubDomainPrefix = pageUpperBound.key.substr(0, ubPrefixLength);
+				} else {
+					PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
 					ASSERT(nextPage.domainId.present());
-					if (p->domainId.get() != nextPage.domainId.get() &&
-					    nextPage.domainId.get() != self->m_keyProvider->getDefaultEncryptionDomainId()) {
-						pageUpperBound =
-						    RedwoodRecordRef(entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength));
-					}
+					ubDomainId = nextPage.domainId.get();
+					ubDomainPrefix = entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength);
+				}
+				if (ubDomainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
+				    p->domainId.get() != ubDomainId) {
+					pageUpperBound = RedwoodRecordRef(ubDomainPrefix);
 				}
 			}
 
@@ -6612,55 +6618,6 @@ private:
 		}
 	};
 
-	ACTOR static Future<Void> buildNewSubtree(VersionedBTree* self,
-	                                          Version version,
-	                                          LogicalPageID parentID,
-	                                          unsigned int height,
-	                                          MutationBuffer::const_iterator mBegin,
-	                                          MutationBuffer::const_iterator mEnd,
-	                                          InternalPageSliceUpdate* update) {
-		ASSERT(height > 1);
-		debug_printf(
-		    "buildNewSubtree start version %" PRId64 ", height %u, %s\n'", version, height, update->toString().c_str());
-		state Standalone<VectorRef<RedwoodRecordRef>> records;
-		while (mBegin != mEnd && mBegin.key() < update->subtreeLowerBound.key) {
-			++mBegin;
-		}
-		while (mBegin != mEnd) {
-			if (mBegin.mutation().boundarySet()) {
-				RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
-				records.push_back_deep(records.arena(), rec);
-				if (REDWOOD_DEBUG) {
-					debug_printf("      Added %s", rec.toString().c_str());
-				}
-			}
-			++mBegin;
-		}
-		if (records.empty()) {
-			update->cleared();
-		} else {
-			state unsigned int h = 1;
-			debug_printf("buildNewSubtree at level %u\n", h);
-			while (h < height) {
-				// Only the parentID at the root is known as we are building the subtree bottom-up.
-				// We use the parentID for all levels, since the parentID is currently used for
-				// debug use only.
-				Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(writePages(self,
-				                                                                     &update->subtreeLowerBound,
-				                                                                     &update->subtreeUpperBound,
-				                                                                     records,
-				                                                                     h,
-				                                                                     version,
-				                                                                     BTreeNodeLinkRef(),
-				                                                                     parentID));
-				records = newRecords;
-				h++;
-			}
-			update->rebuilt(records);
-		}
-		return Void();
-	}
-
 	ACTOR static Future<Void> commitSubtree(
 	    VersionedBTree* self,
 	    CommitBatch* batch,
@@ -7068,25 +7025,6 @@ private:
 			cursor.moveFirst();
 
 			bool first = true;
-
-			if (useEncryptionDomain && cursor.valid() && update->subtreeLowerBound.key < cursor.get().key) {
-				mEnd = batch->mutations->lower_bound(cursor.get().key);
-				first = false;
-				if (mBegin != mEnd) {
-					slices.emplace_back(new InternalPageSliceUpdate());
-					InternalPageSliceUpdate& u = *slices.back();
-					u.cBegin = cursor;
-					u.cEnd = cursor;
-					u.subtreeLowerBound = update->subtreeLowerBound;
-					u.decodeLowerBound = u.subtreeLowerBound;
-					u.subtreeUpperBound = cursor.get();
-					u.decodeUpperBound = u.subtreeUpperBound;
-					u.expectedUpperBound = u.subtreeUpperBound;
-					u.skipLen = 0;
-					recursions.push_back(
-					    self->buildNewSubtree(self, batch->writeVersion, parentID, height, mBegin, mEnd, &u));
-				}
-			}
 
 			while (cursor.valid()) {
 				slices.emplace_back(new InternalPageSliceUpdate());
