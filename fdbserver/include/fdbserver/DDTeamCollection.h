@@ -198,6 +198,7 @@ struct DDTeamCollectionInitParams {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	Promise<UID> removeFailedServer;
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 };
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
@@ -235,6 +236,7 @@ protected:
 	Reference<AsyncVar<bool>> pauseWiggle;
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 	PromiseStream<StorageWiggleValue> nextWiggleInfo;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;

@@ -3586,7 +3586,8 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
-    processingUnhealthy(params.processingUnhealthy), readyToStart(params.readyToStart),
+    processingUnhealthy(params.processingUnhealthy), getAverageShardBytes(params.getAverageShardBytes),
+    readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
@@ -5150,7 +5151,8 @@ public:
 		                                                     makeReference<AsyncVar<bool>>(false),
 		                                                     PromiseStream<GetMetricsRequest>(),
 		                                                     Promise<UID>(),
-		                                                     PromiseStream<Promise<int>>() }));
+		                                                     PromiseStream<Promise<int>>(),
+		                                                     PromiseStream<Promise<int64_t>>() }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -5194,7 +5196,8 @@ public:
 		                                                     makeReference<AsyncVar<bool>>(false),
 		                                                     PromiseStream<GetMetricsRequest>(),
 		                                                     Promise<UID>(),
-		                                                     PromiseStream<Promise<int>>() }));
+		                                                     PromiseStream<Promise<int>>(),
+		                                                     PromiseStream<Promise<int64_t>>() }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
