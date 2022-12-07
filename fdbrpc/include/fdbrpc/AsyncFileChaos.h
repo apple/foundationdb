@@ -18,18 +18,14 @@
  * limitations under the License.
  */
 
+#ifndef FDBRPC_ASYNCFILECHAOS_H
+#define FDBRPC_ASYNCFILECHAOS_H
+
 #pragma once
 
 #include "flow/flow.h"
-#include "flow/serialize.h"
 #include "flow/IAsyncFile.h"
-#include "flow/network.h"
-#include "flow/ActorCollection.h"
-#include "fdbrpc/simulator.h"
 
-#include "flow/DebugPrint.h"
-
-// template <class AsyncFileType>
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:
 	Reference<IAsyncFile> file;
@@ -38,139 +34,28 @@ private:
 public:
 	explicit AsyncFileChaos(Reference<IAsyncFile> file) : file(file) {
 		// We only allow chaos events on storage files
-		enabled = file->getFilename().find("storage-") != std::string::npos &&
-		          file->getFilename().find("sqlite-wal") == std::string::npos;
+		enabled = file->getFilename().find("storage-") != std ::string::npos &&
+		          file->getFilename().find("sqlite-wal") == std ::string::npos;
 	}
 
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileChaos>::delref(); }
 
-	double getDelay() const {
-		double delayFor = 0.0;
-		if (!enabled)
-			return delayFor;
+	double getDelay() const;
 
-		auto res = g_network->global(INetwork::enDiskFailureInjector);
-		if (res) {
-			DiskFailureInjector* delayInjector = static_cast<DiskFailureInjector*>(res);
-			delayFor = delayInjector->getDiskDelay();
+	Future<int> read(void* data, int length, int64_t offset) override;
 
-			// increment the metric for disk delays
-			if (delayFor > 0.0) {
-				auto res = g_network->global(INetwork::enChaosMetrics);
-				if (res) {
-					ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
-					chaosMetrics->diskDelays++;
-				}
-			}
-		}
-		return delayFor;
-	}
+	Future<Void> write(void const* data, int length, int64_t offset) override;
 
-	Future<int> read(void* data, int length, int64_t offset) override {
-		double diskDelay = getDelay();
+	Future<Void> truncate(int64_t size) override;
 
-		if (diskDelay == 0.0)
-			return file->read(data, length, offset);
+	Future<Void> sync() override;
 
-		// Wait for diskDelay before submitting the I/O
-		// Template types are being provided explicitly because they can't be automatically deduced for some reason.
-		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<int>(Void)>, int>(
-		    delay(diskDelay), [=, file = file](Void _) -> Future<int> { return file->read(data, length, offset); });
-	}
-
-	Future<Void> write(void const* data, int length, int64_t offset) override {
-		Arena arena;
-		char* pdata = nullptr;
-		Optional<uint64_t> corruptedBytePosition;
-
-		// Check if a bit flip event was injected, if so, copy the buffer contents
-		// with a random bit flipped in a new buffer and use that for the write
-		auto res = g_network->global(INetwork::enBitFlipper);
-		if (enabled && res) {
-			auto bitFlipPercentage = static_cast<BitFlipper*>(res)->getBitFlipPercentage();
-			if (bitFlipPercentage > 0.0) {
-				auto bitFlipProb = bitFlipPercentage / 100;
-				if (deterministicRandom()->random01() < bitFlipProb) {
-					pdata = (char*)arena.allocate4kAlignedBuffer(length);
-					memcpy(pdata, data, length);
-					// flip a random bit in the copied buffer
-					auto corruptedPos = deterministicRandom()->randomInt(0, length);
-					pdata[corruptedPos] ^= (1 << deterministicRandom()->randomInt(0, 8));
-					// mark the block as corrupted
-					corruptedBytePosition = offset + corruptedPos;
-					TraceEvent("CorruptedByteInjection")
-					    .detail("Filename", file->getFilename())
-					    .detail("Position", corruptedBytePosition)
-					    .log();
-
-					// increment the metric for bit flips
-					auto res = g_network->global(INetwork::enChaosMetrics);
-					if (res) {
-						ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
-						chaosMetrics->bitFlips++;
-					}
-				}
-			}
-		}
-
-		// Wait for diskDelay before submitting the write
-		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(getDelay()), [=, file = file](Void _) -> Future<Void> {
-			    if (pdata) {
-				    return map(holdWhile(arena, file->write(pdata, length, offset)),
-				               [corruptedBytePosition, file = file](auto res) {
-					               if (g_network->isSimulated() && corruptedBytePosition.present()) {
-						               g_simulator->corruptedBytes.mark(file->getFilename(),
-						                                                corruptedBytePosition.get());
-					               }
-					               return res;
-				               });
-			    }
-
-			    return file->write(data, length, offset);
-		    });
-	}
-
-	Future<Void> truncate(int64_t size) override {
-		double diskDelay = getDelay();
-		if (diskDelay == 0.0)
-			return file->truncate(size);
-
-		// Wait for diskDelay before submitting the I/O
-		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [size, file = file](Void _) -> Future<Void> {
-			    g_simulator->corruptedBytes.truncate(file->getFilename(), size);
-			    return file->truncate(size);
-		    });
-	}
-
-	Future<Void> sync() override {
-		double diskDelay = getDelay();
-		if (diskDelay == 0.0)
-			return file->sync();
-
-		// Wait for diskDelay before submitting the I/O
-		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [=, file = file](Void _) -> Future<Void> { return file->sync(); });
-	}
-
-	Future<int64_t> size() const override {
-		double diskDelay = getDelay();
-		if (diskDelay == 0.0)
-			return file->size();
-
-		// Wait for diskDelay before submitting the I/O
-		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<int64_t>(Void)>, int64_t>(
-		    delay(diskDelay), [=, file = file](Void _) -> Future<int64_t> { return file->size(); });
-	}
+	Future<int64_t> size() const override;
 
 	int64_t debugFD() const override { return file->debugFD(); }
 
-	std::string getFilename() const override { return file->getFilename(); }
+	std ::string getFilename() const override { return file->getFilename(); }
 };
+
+#endif // FDBRPC_ASYNCFILECHAOS_H
