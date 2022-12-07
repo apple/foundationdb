@@ -29,6 +29,8 @@
 #include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 
+FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
+
 namespace TenantAPI {
 Key idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
@@ -44,7 +46,7 @@ int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 }
 }; // namespace TenantAPI
 
-std::string TenantAPI::TenantStateToString(TenantState tenantState) {
+std::string TenantAPI::tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
 	case TenantState::REGISTERING:
 		return "registering";
@@ -109,7 +111,9 @@ TenantAPI::TenantLockState TenantAPI::stringToTenantLockState(std::string stateS
 }
 
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
-MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id, TenantName tenantName, TenantAPI::TenantState tenantState)
+MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
+                                                     TenantName tenantName,
+                                                     TenantAPI::TenantState tenantState)
   : tenantName(tenantName), tenantState(tenantState) {
 	setId(id);
 }
@@ -131,7 +135,7 @@ json_spirit::mObject binaryToJson(StringRef bytes) {
 	json_spirit::mObject obj;
 	std::string encodedBytes = base64::encoder::from_string(bytes.toString());
 	// Remove trailing newline
-	encodedPrefix.resize(encodedBytes.size() - 1);
+	encodedBytes.resize(encodedBytes.size() - 1);
 
 	obj["base64"] = encodedBytes;
 	obj["printable"] = printable(bytes);
@@ -146,7 +150,7 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	tenantEntry["name"] = binaryToJson(tenantName);
 	tenantEntry["prefix"] = binaryToJson(prefix);
 
-	tenantEntry["tenant_state"] = TenantAPI::TenantStateToString(tenantState);
+	tenantEntry["tenant_state"] = TenantAPI::tenantStateToString(tenantState);
 	tenantEntry["assigned_cluster"] = binaryToJson(assignedCluster);
 
 	if (tenantGroup.present()) {

@@ -1832,7 +1832,7 @@ struct RenameTenantImpl {
 			}
 		}
 
-		if (tenantEntry.tenantState != Tenant::TenantState::READY) {
+		if (tenantEntry.tenantState != TenantAPI::TenantState::READY) {
 			CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
 			throw invalid_tenant_state();
 		}
