@@ -2906,7 +2906,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
-	TraceEvent(SevDebug, "CPEncryptionAtRestMode").detail("Mode", commitData.encryptMode.toString());
+	TraceEvent("CPEncryptionAtRestMode").detail("Mode", commitData.encryptMode.toString());
 
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::COMMIT_PROXY, proxy.id()));
