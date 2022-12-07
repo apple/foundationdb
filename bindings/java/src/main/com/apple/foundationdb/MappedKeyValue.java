@@ -34,9 +34,9 @@ public class MappedKeyValue extends KeyValue {
 	private final byte[] rangeEnd;
 	private final List<KeyValue> rangeResult;
 
-	// now it has 5 field, key, value, getRange.begin, getRange.end
+	// now it has 4 fields, key, value, getRange.begin, getRange.end
 	// this needs to change if FDBMappedKeyValue definition is changed.
-	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 5;
+	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 4;
 
 	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult) {
 		super(key, value);

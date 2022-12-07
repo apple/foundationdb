@@ -1092,9 +1092,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		CHECK(!result.more);
 
 		int id = beginId;
-		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
-			boundary = i == 0 || i == expectSize - 1;
 			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
 				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
@@ -1148,9 +1146,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		CHECK(!result.more);
 
 		int id = beginId;
-		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
-			boundary = i == 0 || i == expectSize - 1;
 			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
 				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
