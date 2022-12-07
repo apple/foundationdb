@@ -173,7 +173,7 @@ void appendField(fmt::memory_buffer& b, char const (&name)[NameLen], Optional<Fi
 		for (auto i = 0; i < f.size(); i++) {
 			if (i)
 				fmt::format_to(bi, ",");
-			fmt::format_to(bi, f[i].toStringView());
+			fmt::format_to(bi, fmt::runtime(f[i].toStringView()));
 		}
 		fmt::format_to(bi, "]");
 	} else if constexpr (std::is_same_v<FieldType, StringRef>) {

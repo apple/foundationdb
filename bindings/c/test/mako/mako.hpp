@@ -88,7 +88,8 @@ enum ArgKind {
 	ARG_AUTHORIZATION_KEYPAIR_ID,
 	ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE,
 	ARG_ENABLE_TOKEN_BASED_AUTHORIZATION,
-	ARG_TRANSACTION_TIMEOUT,
+	ARG_TRANSACTION_TIMEOUT_TX,
+	ARG_TRANSACTION_TIMEOUT_DB,
 };
 
 constexpr const int OP_COUNT = 0;
@@ -144,10 +145,10 @@ struct Arguments {
 	int validate();
 	bool isAuthorizationEnabled() const noexcept;
 	void generateAuthorizationTokens();
-	bool hasTransactionTimeout() const noexcept { return transaction_timeout > 0; }
 
 	// Needs to be called once per fdb-accessing process
 	int setGlobalOptions() const;
+	bool isAnyTimeoutEnabled() const;
 
 	int api_version;
 	int json;
@@ -205,8 +206,16 @@ struct Arguments {
 	std::optional<std::string> keypair_id;
 	std::optional<std::string> private_key_pem;
 	std::map<std::string, std::string> authorization_tokens; // maps tenant name to token string
-	int transaction_timeout;
+	int transaction_timeout_db;
+	int transaction_timeout_tx;
 };
+
+// helper functions
+inline void setTransactionTimeoutIfEnabled(const Arguments& args, fdb::Transaction& tx) {
+	if (args.transaction_timeout_tx > 0) {
+		tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
+	}
+}
 
 } // namespace mako
 

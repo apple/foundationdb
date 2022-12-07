@@ -367,7 +367,7 @@ public:
 
 		for (int i = 0; i < tenantLimit; i++) {
 			Key k(format("%d", i));
-			ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantNumber + (i % tenantCount)))));
+			ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantAPI::idToPrefix(tenantNumber + (i % tenantCount)))));
 			ASSERT(!tenantCache.isTenantKey(k.withPrefix(allKeys.begin)));
 			ASSERT(!tenantCache.isTenantKey(k));
 		}
@@ -418,10 +418,10 @@ public:
 			uint16_t tenantOrdinal = tenantNumber + i;
 			Key k(format("%d", i));
 			if (tenantOrdinal % staleTenantFraction != 0) {
-				ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantOrdinal))));
+				ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantAPI::idToPrefix(tenantOrdinal))));
 				keptCount++;
 			} else {
-				ASSERT(!tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantOrdinal))));
+				ASSERT(!tenantCache.isTenantKey(k.withPrefix(TenantAPI::idToPrefix(tenantOrdinal))));
 				removedCount++;
 			}
 		}
