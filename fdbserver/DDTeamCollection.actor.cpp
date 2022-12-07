@@ -3400,29 +3400,39 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 
 double DDTeamCollection::loadBytesBalanceRatio() const {
 	double minLoadBytes = std::numeric_limits<double>::max();
-	double avgLoadBytes = 0;
+	double totalLoadBytes = 0;
 	int count = 0;
 	for (auto& [id, s] : server_info) {
 		// If a healthy SS don't have storage metrics, skip this round
-		if (server_status.get(s->getId()).isUnhealthy()) {
-			continue;
-		} else if (!s->metricsPresent()) {
+		if (server_status.get(s->getId()).isUnhealthy() || !s->metricsPresent()) {
+			TraceEvent(SevDebug, "LoadBytesBalanceRatioNoMetrics").detail("Server", id);
 			return 0;
 		}
 
 		double load = s->loadBytes();
-		avgLoadBytes += load;
+		totalLoadBytes += load;
 		++count;
 		minLoadBytes = std::min(minLoadBytes, load);
 	}
 
-	// skip to next check
-	if (count == 0 || avgLoadBytes == 0) {
-		return 0;
+	TraceEvent(SevDebug, "LoadBytesBalanceRatioMetrics")
+	    .detail("TotalLoad", totalLoadBytes)
+	    .detail("MinLoadBytes", minLoadBytes)
+	    .detail("Count", count);
+
+	// avoid division-by-zero
+	if (totalLoadBytes == 0) {
+		return 1;
 	}
 
-	avgLoadBytes /= count;
-	return minLoadBytes / avgLoadBytes;
+	double avgLoad = totalLoadBytes / count;
+	double smallLoadThreshold = SERVER_KNOBS->MAX_SHARD_BYTES * 5.0;
+	if (avgLoad < smallLoadThreshold) {
+		CODE_PROBE(true, "The cluster load is small enough to ignore load bytes balance.");
+		return 1;
+	}
+
+	return minLoadBytes / avgLoad;
 }
 
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
