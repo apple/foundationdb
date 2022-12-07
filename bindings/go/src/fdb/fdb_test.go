@@ -145,13 +145,13 @@ func ExampleTransactor() {
 	fmt.Println("Calling setOne with a database:")
 	err = setOne(db, []byte("foo"), []byte("bar"))
 	if err != nil {
-		fmt.Println(e)
+		fmt.Println(err)
 		return
 	}
 	fmt.Println("\nCalling setMany with a database:")
 	err = setMany(db, []byte("bar"), fdb.Key("foo1"), fdb.Key("foo2"), fdb.Key("foo3"))
 	if err != nil {
-		fmt.Println(e)
+		fmt.Println(err)
 		return
 	}
 

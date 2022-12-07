@@ -133,7 +133,7 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 
 func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, e error) {
 	for {
-		ret, err = wrapped()
+		_, err := wrapped()
 
 		// No error means success!
 		if err == nil {
@@ -226,7 +226,7 @@ func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (in
 	tr, err := d.CreateTransaction()
 	// Any error here is non-retryable
 	if err != nil {
-		return nil, e
+		return nil, err
 	}
 
 	wrapped := func() (ret interface{}, err error) {
