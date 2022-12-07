@@ -244,8 +244,8 @@ private:
 		std::map<typename T::Option, Optional<Standalone<StringRef>>> options;
 		std::map<std::string, typename T::Option> legalOptions;
 
-		OptionGroup<T>() {}
-		OptionGroup<T>(OptionGroup<T>& base)
+		OptionGroup() {}
+		OptionGroup(OptionGroup<T>& base)
 		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
 
 		// Enable or disable an option. Returns true if option value changed

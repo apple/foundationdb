@@ -2104,7 +2104,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 			for (; i < blobGranuleMapping.size() - 1; i++) {
 				if (!blobGranuleMapping[i].value.size()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: No valid granule data for range [{1} - {2}) \n",
+						fmt::print("ERROR: No valid granule data for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
@@ -2115,7 +2115,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 				state UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
 				if (workerId == UID()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: Invalid Blob Worker ID for range [{1} - {2}) \n",
+						fmt::print("ERROR: Invalid Blob Worker ID for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
