@@ -1546,8 +1546,9 @@ FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
 void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) {
 	if (g_network->isSimulated()) {
+		// Test that new range must not overlap with any existing range in this shard.
 		for (const auto& [range, data] : rangeData) {
-			ASSERT((range & newRange).empty());
+			ASSERT(!range.intersects(newRange));
 		}
 	}
 
@@ -1572,6 +1573,7 @@ void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRang
 			RangeData data;
 			rangeData.emplace(r, data);
 		}
+		// Must erase last since `remainingRanges` uses data in `range`.
 		rangeData.erase(range);
 	}
 }
@@ -1626,6 +1628,7 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
 }
 
 // This method maintains the consistency between keyRangePhysicalShardIDMap and the RangeData in physicalShardInstances.
+// They are all updated in this method.
 void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
                                                                uint64_t physicalShardID,
                                                                uint64_t debugID) {
@@ -1649,7 +1652,7 @@ void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange
 	ASSERT(physicalShardInstances.find(physicalShardID) != physicalShardInstances.end());
 	physicalShardInstances[physicalShardID].addRange(keyRange);
 
-	// Sanity check.
+	// KeyRange to physical shard mapping consistency sanity check.
 	checkKeyRangePhysicalShardMapping();
 }
 
