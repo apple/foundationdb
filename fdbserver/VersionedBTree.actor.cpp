@@ -8136,9 +8136,9 @@ RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
+	KeyValueStoreRedwood(std::string filename, UID logID_, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
 	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH), logID(logID_) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
@@ -8471,6 +8471,7 @@ private:
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
+	const UID logID;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
