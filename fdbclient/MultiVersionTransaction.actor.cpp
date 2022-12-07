@@ -1211,6 +1211,17 @@ void MultiVersionTransaction::updateTransaction(bool setPersistentOptions) {
 		newTr.onChange = currentDb.onChange;
 	}
 
+	// When called from the constructor or from reset(), all persistent options are database options and therefore
+	// alredy set on newTr.transaction if it got created sucessfully. If newTr.transaction could not be created (i.e.,
+	// because no database with a matching version is present), the local timeout set in setTimeout() applies, so we
+	// need to set it.
+	// TO-DO: With the introduction of this if-statement, the local timeout set in setTimeout() is not
+	// set again after a call to reset() if a database is present and a new transaction can be created. This means, for
+	// example, that if an application thread has a local copy of an unset transaction and the transaction can now be
+	// set in updateTransaction(), it is possible for the application thread to create an indefinetaly blocking
+	// operation. Can we assume that in such cases, the abort signal (onChange) is triggered, so that they do not matter
+	// much becasue they get aborted anyways? For performance reasons, it is beneficial to have the if-statement pushed
+	// out as much as possible.
 	if (setPersistentOptions || !newTr.transaction) {
 		Optional<StringRef> timeout;
 		for (auto option : persistentOptions) {
@@ -1641,6 +1652,7 @@ void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 	}
 }
 
+// stripped down version of MultiVersionTransaction::setTimeout(Optional<StringRef> value)
 void MultiVersionTransaction::resetTimeout() {
 	ThreadFuture<Void> prevTimeout;
 	{ // lock scope
