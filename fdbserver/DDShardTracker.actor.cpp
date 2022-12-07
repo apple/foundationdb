@@ -1550,6 +1550,8 @@ void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) 
 			ASSERT((range & newRange).empty());
 		}
 	}
+
+	// TODO(zhewu): add metrics tracking actor.
 	RangeData data;
 	rangeData.emplace(newRange, data);
 }
@@ -1557,7 +1559,7 @@ void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) 
 void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRange) {
 	std::vector<KeyRangeRef> updateRanges;
 	for (auto& [range, data] : rangeData) {
-		if (!((range & outRange).empty())) {
+		if (range.intersects(outRange)) {
 			updateRanges.push_back(range);
 		}
 	}
@@ -1566,6 +1568,7 @@ void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRang
 		std::vector<KeyRangeRef> remainingRanges = range - outRange;
 		rangeData.erase(range);
 		for (auto& r : remainingRanges) {
+			// TODO(zhewu): add metrics tracking actor.
 			RangeData data;
 			rangeData.emplace(r, data);
 		}
@@ -1621,12 +1624,16 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
 	return;
 }
 
+// This method maintains the consistency between keyRangePhysicalShardIDMap and the RangeData in physicalShardInstances.
 void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
                                                                uint64_t physicalShardID,
                                                                uint64_t debugID) {
-	ASSERT(physicalShardID != UID().first());															
+	ASSERT(physicalShardID != UID().first());
 	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
 	std::set<uint64_t> physicalShardIDSet;
+
+	// If there are any existing physical shards own `keyRange`, remove the overlaping ranges from existing physical
+	// shards.
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		uint64_t shardID = it->value();
 		if (shardID == UID().first()) {
@@ -1635,9 +1642,13 @@ void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange
 		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
 		physicalShardInstances[shardID].removeRange(keyRange);
 	}
+
+	// Insert `keyRange` to the new physical shard.
 	keyRangePhysicalShardIDMap.insert(keyRange, physicalShardID);
 	ASSERT(physicalShardInstances.find(physicalShardID) != physicalShardInstances.end());
 	physicalShardInstances[physicalShardID].addRange(keyRange);
+
+	// Sanity check.
 	checkKeyRangePhysicalShardMapping();
 }
 
@@ -1646,6 +1657,7 @@ void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
 		return;
 	}
 
+	// Check the invariant that keyRangePhysicalShardIDMap and physicalShardInstances should be consistent.
 	KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = keyRangePhysicalShardIDMap.ranges();
 	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
 	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
