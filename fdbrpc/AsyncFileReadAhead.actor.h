@@ -102,7 +102,7 @@ public:
 			// If not found, start the read.
 			if (i == f->m_blocks.end() || (i->second.isValid() && i->second.isError())) {
 				// printf("starting read of %s block %d\n", f->getFilename().c_str(), blockNum);
-				fblock = readBlock(f.getPtr(), f->m_block_size, f->m_block_size * blockNum);
+				fblock = readBlock(f.getPtr(), f->m_block_size, (int64_t)f->m_block_size * blockNum);
 				f->m_blocks[blockNum] = fblock;
 			} else
 				fblock = i->second;
@@ -121,7 +121,7 @@ public:
 			// Calculate the block-relative read range.  It's a given that the offset / length range touches this block
 			// so readStart will never be greater than blocksize (though it could be past the actual end of a short
 			// block).
-			int64_t blockStart = blockNum * f->m_block_size;
+			int64_t blockStart = (int64_t)blockNum * f->m_block_size;
 			int64_t readStart = std::max<int64_t>(0, offset - blockStart);
 			int64_t readEnd = std::min<int64_t>(f->m_block_size, offset + length - blockStart);
 			int rlen = readEnd - readStart;
