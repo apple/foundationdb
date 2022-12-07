@@ -413,6 +413,13 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						continue;
 					}
 
+					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
+					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() && tenantName.present() &&
+					    commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+						req.reply.sendError(storage_quota_exceeded());
+						continue;
+					}
+
 					++commitData->stats.txnCommitIn;
 
 					if (req.debugID.present()) {
@@ -823,7 +830,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		CODE_PROBE(true, "Reject transactions in the batch");
-		TraceEvent(SevWarnAlways, "ProxyReject", pProxyCommitData->dbgid)
+		TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "ProxyReject", pProxyCommitData->dbgid)
 		    .suppressFor(0.1)
 		    .detail("QDelay", queuingDelay)
 		    .detail("Transactions", trs.size())
@@ -902,10 +909,8 @@ Optional<TenantName> getTenantName(ProxyCommitData* commitData, int64_t tenantId
 	return Optional<TenantName>();
 }
 
-std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromMutationRef(ProxyCommitData* commitData,
-                                                                                           MutationRef m) {
-	std::pair<EncryptCipherDomainName, EncryptCipherDomainId> details(EncryptCipherDomainName(),
-	                                                                  INVALID_ENCRYPT_DOMAIN_ID);
+EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitData, MutationRef m) {
+	EncryptCipherDomainId domainId = INVALID_ENCRYPT_DOMAIN_ID;
 
 	// Possible scenarios:
 	// 1. Encryption domain (Tenant details) weren't explicitly provided, extract Tenant details using
@@ -914,22 +919,20 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 
 	if (isSystemKey(m.param1)) {
 		// Encryption domain == FDB SystemKeyspace encryption domain
-		details.first = EncryptCipherDomainName(FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
-		details.second = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+		domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 	} else if (commitData->tenantMap.empty()) {
 		// Cluster serves no-tenants; use 'default encryption domain'
 	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		ASSERT_NE((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
 
-		if (m.param1.size() >= TENANT_PREFIX_SIZE) {
+		if (m.param1.size() >= TenantAPI::PREFIX_SIZE) {
 			// Parse mutation key to determine mutation encryption domain
-			StringRef prefix = m.param1.substr(0, TENANT_PREFIX_SIZE);
-			int64_t tenantId = TenantMapEntry::prefixToId(prefix, EnforceValidTenantId::False);
+			StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
+			int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				Optional<TenantName> tenantName = getTenantName(commitData, tenantId);
 				if (tenantName.present()) {
-					details.first = tenantName.get();
-					details.second = tenantId;
+					domainId = tenantId;
 				}
 			} else {
 				// Leverage 'default encryption domain'
@@ -948,17 +951,13 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 	}
 
 	// Unknown tenant, fallback to fdb default encryption domain
-	if (details.second == INVALID_ENCRYPT_DOMAIN_ID) {
-		ASSERT_EQ(details.first.size(), 0);
-		details.first = EncryptCipherDomainName(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
-		details.second = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+	if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
+		domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 
 		CODE_PROBE(true, "Default domain mutation encryption");
 	}
 
-	ASSERT_GT(details.first.size(), 0);
-
-	return details;
+	return domainId;
 }
 
 } // namespace
@@ -1006,35 +1005,32 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
-		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME },
-			{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
-		};
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = defaultDomains;
+		static const std::unordered_set<EncryptCipherDomainId> defaultDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                                        ENCRYPT_HEADER_DOMAIN_ID,
+			                                                                        FDB_DEFAULT_ENCRYPT_DOMAIN_ID };
+		std::unordered_set<EncryptCipherDomainId> encryptDomainIds = defaultDomainIds;
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
 			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
-				encryptDomains[tenantId] = Standalone(tenantName.get(), tenantInfo.arena);
+				encryptDomainIds.emplace(tenantId);
 			} else {
 				// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
 				if (pProxyCommitData->tenantMap.size() > 0) {
 					for (auto m : trs[t].transaction.mutations) {
-						std::pair<EncryptCipherDomainName, int64_t> details =
-						    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
-						encryptDomains[details.second] = details.first;
+						EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, m);
+						encryptDomainIds.emplace(domainId);
 					}
 				} else {
 					// Ensure default encryption domain-ids are present.
-					ASSERT_EQ(encryptDomains.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
-					ASSERT_EQ(encryptDomains.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
+					ASSERT_EQ(encryptDomainIds.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
+					ASSERT_EQ(encryptDomainIds.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
 				}
 			}
 		}
-		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains, BlobCipherMetrics::TLOG);
+		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomainIds, BlobCipherMetrics::TLOG);
 	}
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
@@ -1296,14 +1292,12 @@ ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContex
 	ASSERT(self->pProxyCommitData->isEncryptionEnabled);
 	ASSERT_NE((MutationRef::Type)mutation->type, MutationRef::Type::ClearRange);
 
-	std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
-	    getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
-	domainId = p.second;
+	domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
 	Reference<BlobCipherKey> cipherKey =
-	    wait(getLatestEncryptCipherKey(self->pProxyCommitData->db, domainId, p.first, BlobCipherMetrics::TLOG));
+	    wait(getLatestEncryptCipherKey(self->pProxyCommitData->db, domainId, BlobCipherMetrics::TLOG));
 	self->cipherKeys[domainId] = cipherKey;
 
-	CODE_PROBE(true, "Raw access mutation encryption");
+	CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
 	ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 	encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
 	self->toCommit.writeTypedMessage(encryptedMutation);
@@ -1348,10 +1342,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			}
 		} else {
 			if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
-				std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
-				    getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
-				domainId = p.second;
-
+				domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
 				if (self->cipherKeys.find(domainId) == self->cipherKeys.end()) {
 					return writeMutationFetchEncryptKey(self, tenantId, mutation, arena);
 				}
@@ -1429,11 +1420,13 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					double prob = mul * cost / totalCosts;
 
 					if (deterministicRandom()->random01() < prob) {
-						for (const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
+						const auto& storageServers = pProxyCommitData->keyInfo[m.param1].src_info;
+						for (const auto& ssInfo : storageServers) {
 							auto id = ssInfo->interf.id();
 							// scale cost
 							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, cost);
+							pProxyCommitData->updateSSTagCost(
+							    id, trs[self->transactionNum].tagSet.get(), m, cost / storageServers.size());
 						}
 					}
 				}
@@ -1574,9 +1567,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						    encryptedMutation.present()) {
 							backupMutation = encryptedMutation.get();
 						} else {
-							std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+							EncryptCipherDomainId domainId =
 							    getEncryptDetailsFromMutationRef(self->pProxyCommitData, backupMutation);
-							EncryptCipherDomainId domainId = p.second;
 							backupMutation =
 							    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
 						}
@@ -1686,10 +1678,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                            self->toCommit.addTags(tags);
 		                            if (self->pProxyCommitData->isEncryptionEnabled) {
 			                            CODE_PROBE(true, "encrypting idempotency mutation");
-			                            std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+			                            EncryptCipherDomainId domainId =
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
 			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
-			                                self->cipherKeys, p.second, self->arena, BlobCipherMetrics::TLOG);
+			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
 			                            self->toCommit.writeTypedMessage(encryptedMutation);
 		                            } else {
 			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
@@ -2556,15 +2548,53 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 			nextRequestTimer = Never();
 			if (db->get().ratekeeper.present()) {
 				nextReply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
-				    ReportCommitCostEstimationRequest(*ssTrTagCommitCost)));
+				    ReportCommitCostEstimationRequest(std::move(*ssTrTagCommitCost))));
+				ssTrTagCommitCost->clear();
 			} else {
 				nextReply = Never();
 			}
 		}
 		when(wait(nextReply)) {
 			nextReply = Never();
-			ssTrTagCommitCost->clear();
 			nextRequestTimer = delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY);
+		}
+	}
+}
+
+// Get the list of tenants that are over the storage quota from the data distributor for quota enforcement.
+ACTOR Future<Void> monitorTenantsOverStorageQuota(UID myID,
+                                                  Reference<AsyncVar<ServerDBInfo> const> db,
+                                                  ProxyCommitData* commitData) {
+	state Future<Void> nextRequestTimer = Never();
+	state Future<TenantsOverStorageQuotaReply> nextReply = Never();
+	if (db->get().distributor.present())
+		nextRequestTimer = Void();
+	loop choose {
+		when(wait(db->onChange())) {
+			if (db->get().distributor.present()) {
+				CODE_PROBE(true, "ServerDBInfo changed during monitorTenantsOverStorageQuota");
+				TraceEvent("ServerDBInfoChanged", myID).detail("DDID", db->get().distributor.get().id());
+				nextRequestTimer = Void();
+			} else {
+				TraceEvent("DataDistributorDied", myID).log();
+				nextRequestTimer = Never();
+			}
+		}
+		when(wait(nextRequestTimer)) {
+			nextRequestTimer = Never();
+			if (db->get().distributor.present()) {
+				nextReply = brokenPromiseToNever(
+				    db->get().distributor.get().tenantsOverStorageQuota.getReply(TenantsOverStorageQuotaRequest()));
+			} else {
+				nextReply = Never();
+			}
+		}
+		when(TenantsOverStorageQuotaReply reply = wait(nextReply)) {
+			nextReply = Never();
+			commitData->tenantsOverStorageQuota = reply.tenants;
+			TraceEvent(SevDebug, "MonitorTenantsOverStorageQuota")
+			    .detail("NumTenants", commitData->tenantsOverStorageQuota.size());
+			nextRequestTimer = delay(SERVER_KNOBS->CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL);
 		}
 	}
 }
@@ -2702,12 +2732,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	if (pContext->pCommitData->isEncryptionEnabled) {
-		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
-		};
+		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-		    wait(getLatestEncryptCipherKeys(pContext->pCommitData->db, metadataDomains, BlobCipherMetrics::TLOG));
+		    wait(getLatestEncryptCipherKeys(pContext->pCommitData->db, metadataDomainIds, BlobCipherMetrics::TLOG));
 		cipherKeys = cks;
 	}
 
@@ -2882,7 +2910,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
 		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
-		    "CommitProxy"_sr, "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::microseconds));
+		    "CommitProxy"_sr, "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::milliseconds));
 	}
 
 	// Initialize keyResolvers map
@@ -2927,6 +2955,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                         proxy.expireIdempotencyId,
 	                                         commitData.expectedIdempotencyIdCountForKey,
 	                                         &commitData.idempotencyClears));
+	if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
+		addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
+	}
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

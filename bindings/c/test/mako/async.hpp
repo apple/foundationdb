@@ -109,6 +109,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 		key1.resize(args.key_length);
 		key2.resize(args.key_length);
 		val.resize(args.value_length);
+		setTransactionTimeoutIfEnabled(args, tx);
 	}
 	void signalEnd() noexcept { stopcount.fetch_add(1); }
 	bool ended() noexcept { return (max_iters != -1 && total_xacts >= max_iters) || signal.load() == SIGNAL_RED; }
@@ -118,6 +119,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	void onTransactionSuccess();
 	void onIterationEnd(FutureRC rc);
 	void updateErrorStats(fdb::Error err, int op);
+	bool isExpectedError(fdb::Error err);
 };
 
 using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;

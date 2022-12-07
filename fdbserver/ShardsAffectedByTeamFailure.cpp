@@ -107,7 +107,6 @@ void ShardsAffectedByTeamFailure::defineShard(KeyRangeRef keys) {
 	check();
 }
 
-// Move keys to destinationTeams by updating shard_teams
 void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> destinationTeams) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
 	    .detail("KeyBegin", keys.begin)
@@ -153,6 +152,25 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 			insert(t, modifiedShards[i].second);
 		}
 		shard_teams.insert(modifiedShards[i].second, modifiedShards[i].first);
+	}
+
+	check();
+}
+
+void ShardsAffectedByTeamFailure::rawMoveShard(KeyRangeRef keys,
+                                               const std::vector<Team>& srcTeams,
+                                               const std::vector<Team>& destinationTeams) {
+	auto it = shard_teams.rangeContaining(keys.begin);
+	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
+	ASSERT(it->range() == keys);
+
+	// erase the many teams that were associated with this one shard
+	for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
+		erase(*t, it->range());
+	}
+	it.value() = std::make_pair(destinationTeams, srcTeams);
+	for (auto& team : destinationTeams) {
+		insert(team, keys);
 	}
 
 	check();
@@ -245,4 +263,14 @@ void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, c
 
 auto ShardsAffectedByTeamFailure::intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges {
 	return shard_teams.intersectingRanges(keyRange);
+}
+
+std::vector<UID> ShardsAffectedByTeamFailure::getSourceServerIdsFor(KeyRef key) {
+	auto teamPair = getTeamsFor(key);
+	std::set<UID> res;
+	auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
+	for (auto& team : srcTeams) {
+		res.insert(team.servers.begin(), team.servers.end());
+	}
+	return std::vector<UID>(res.begin(), res.end());
 }

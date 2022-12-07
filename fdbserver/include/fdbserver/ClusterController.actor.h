@@ -144,6 +144,7 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		AsyncVar<bool> blobGranulesEnabled;
+		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
@@ -159,7 +160,7 @@ public:
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
 		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
-		    blobGranulesEnabled(config.blobGranulesEnabled) {
+		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
 			clientCounter = countClients(this);
 		}
 
@@ -919,7 +920,7 @@ public:
 			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				    SevDebug, id, "simple", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
@@ -1071,7 +1072,7 @@ public:
 			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				    SevDebug, id, "deprecated", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
@@ -3082,18 +3083,23 @@ public:
 			}
 		}
 
+		auto deterministicDecendingOrder = [](const std::pair<int, NetworkAddress>& a,
+		                                      const std::pair<int, NetworkAddress>& b) -> bool {
+			return a.first > b.first || (a.first == b.first && a.second < b.second);
+		};
+
 		// Sort degraded peers based on the number of workers complaining about it.
 		std::vector<std::pair<int, NetworkAddress>> count2DegradedPeer;
 		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
-		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), std::greater<>());
+		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), deterministicDecendingOrder);
 
 		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
 		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
 			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
 		}
-		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), std::greater<>());
+		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), deterministicDecendingOrder);
 
 		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
 		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded

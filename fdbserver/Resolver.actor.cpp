@@ -207,12 +207,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
-		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
-		};
+		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-		    wait(getLatestEncryptCipherKeys(db, metadataDomains, BlobCipherMetrics::TLOG));
+		    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
 		cipherKeys = cks;
 	}
 
@@ -289,11 +287,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
-		Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
-			newOldestVersion = req.version - std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND,
-			                                          SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS);
-		}
+		const Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 		for (int t = 0; t < req.transactions.size(); t++) {
 			conflictBatch.addTransaction(req.transactions[t], newOldestVersion);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
@@ -479,7 +473,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			CODE_PROBE(true, "No outstanding batches for version on proxy");
+			CODE_PROBE(true, "No outstanding batches for version on proxy", probe::decoration::rare);
 			req.reply.send(Never());
 		}
 	} else {
@@ -638,12 +632,11 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 		ASSERT(!pContext->processed);
 		state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 		if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
-			static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
-				{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
-				{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
+			static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = {
+				SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, ENCRYPT_HEADER_DOMAIN_ID
 			};
 			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-			    wait(getLatestEncryptCipherKeys(db, metadataDomains, BlobCipherMetrics::TLOG));
+			    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
 			cipherKeys = cks;
 		}
 		wait(processCompleteTransactionStateRequest(

@@ -341,7 +341,7 @@ public:
 	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
 	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
-	Future<Void> getFuture() { return p.getFuture(); }
+	Future<Void> getFuture() const { return p.getFuture(); }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {

@@ -1360,7 +1360,7 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 struct FlowMutex {
 	FlowMutex() { lastPromise.send(Void()); }
 
-	bool available() { return lastPromise.isSet(); }
+	bool available() const { return lastPromise.isSet(); }
 
 	struct Lock {
 		void release() { promise.send(Void()); }
@@ -1789,25 +1789,17 @@ Future<T> delayActionJittered(Future<T> what, double time) {
 
 class AndFuture {
 public:
-	AndFuture() {}
+	AndFuture() = default;
+	AndFuture(AndFuture const& f) = default;
+	AndFuture(AndFuture&& f) noexcept = default;
+	AndFuture& operator=(AndFuture const& f) = default;
+	AndFuture& operator=(AndFuture&& f) noexcept = default;
 
-	AndFuture(AndFuture const& f) { futures = f.futures; }
+	AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
 
-	AndFuture(AndFuture&& f) noexcept { futures = std::move(f.futures); }
-
-	AndFuture(Future<Void> const& f) { futures.push_back(f); }
-
-	AndFuture(Error const& e) { futures.push_back(e); }
+	AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
 
 	operator Future<Void>() { return getFuture(); }
-
-	void operator=(AndFuture const& f) { futures = f.futures; }
-
-	void operator=(AndFuture&& f) noexcept { futures = std::move(f.futures); }
-
-	void operator=(Future<Void> const& f) { futures.push_back(f); }
-
-	void operator=(Error const& e) { futures.push_back(e); }
 
 	Future<Void> getFuture() {
 		if (futures.empty())
@@ -1832,7 +1824,7 @@ public:
 		return true;
 	}
 
-	bool isError() {
+	bool isError() const {
 		for (int i = 0; i < futures.size(); i++)
 			if (futures[i].isError())
 				return true;
@@ -1848,13 +1840,18 @@ public:
 	}
 
 	void add(Future<Void> const& f) {
+		++futureCount;
 		if (!f.isReady() || f.isError())
 			futures.push_back(f);
 	}
 
 	void add(AndFuture f) { add(f.getFuture()); }
 
+	// The total number of futures which have ever been added to this AndFuture
+	int64_t getFutureCount() const { return futureCount; }
+
 private:
+	int64_t futureCount = 0;
 	std::vector<Future<Void>> futures;
 };
 

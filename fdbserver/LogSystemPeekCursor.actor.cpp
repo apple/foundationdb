@@ -62,6 +62,8 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
 	this->results.minKnownCommittedVersion = 0;
 	DebugLogTraceEvent(SevDebug, "SPC_Starting", randomID)
 	    .detail("Tag", tag.toString())
+	    .detail("Parallel", parallelGetMore)
+	    .detail("Interf", interf && interf->get().present() ? interf->get().id() : UID())
 	    .detail("UsePeekStream", usePeekStream)
 	    .detail("Begin", begin)
 	    .detail("End", end);
@@ -111,7 +113,9 @@ bool ILogSystem::ServerPeekCursor::hasMessage() const {
 }
 
 void ILogSystem::ServerPeekCursor::nextMessage() {
-	//TraceEvent("SPC_NextMessage", randomID).detail("MessageVersion", messageVersion.toString());
+	DebugLogTraceEvent("SPC_NextMessage", randomID)
+	    .detail("Tag", tag.toString())
+	    .detail("MessageVersion", messageVersion.toString());
 	ASSERT(hasMsg);
 	if (rd.empty()) {
 		messageVersion.reset(std::min(results.end, end.version));
@@ -143,11 +147,13 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 	rd.rewind();
 	rd.readBytes(messageAndTags.getHeaderSize());
 	hasMsg = true;
-	//TraceEvent("SPC_NextMessageB", randomID).detail("MessageVersion", messageVersion.toString());
+	DebugLogTraceEvent("SPC_NextMessageB", randomID)
+	    .detail("Tag", tag.toString())
+	    .detail("MessageVersion", messageVersion.toString());
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessage() {
-	//TraceEvent("SPC_GetMessage", randomID);
+	DebugLogTraceEvent("SPC_GetMessage", randomID).detail("Tag", tag.toString());
 	StringRef message = messageAndTags.getMessageWithoutTags();
 	rd.readBytes(message.size()); // Consumes the message.
 	return message;
@@ -260,6 +266,14 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 	}
 
 	loop {
+		DebugLogTraceEvent("SPC_GetMoreP", self->randomID)
+		    .detail("Tag", self->tag.toString())
+		    .detail("Has", self->hasMessage())
+		    .detail("Begin", self->messageVersion.version)
+		    .detail("Parallel", self->parallelGetMore)
+		    .detail("Seq", self->sequence)
+		    .detail("Sizes", self->futureResults.size())
+		    .detail("Interf", self->interf->get().present() ? self->interf->get().id() : UID());
 		state Version expectedBegin = self->messageVersion.version;
 		try {
 			if (self->parallelGetMore || self->onlySpilled) {
@@ -294,7 +308,12 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 					expectedBegin = res.end;
 					self->futureResults.pop_front();
 					updateCursorWithReply(self, res);
-					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
+					DebugLogTraceEvent("SPC_GetMoreReply", self->randomID)
+					    .detail("Has", self->hasMessage())
+					    .detail("Tag", self->tag.toString())
+					    .detail("End", res.end)
+					    .detail("Size", self->futureResults.size())
+					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
 				when(wait(self->interfaceChanged)) {
@@ -306,11 +325,17 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				}
 			}
 		} catch (Error& e) {
+			DebugLogTraceEvent("PeekCursorError", self->randomID)
+			    .error(e)
+			    .detail("Tag", self->tag.toString())
+			    .detail("Begin", self->messageVersion.version)
+			    .detail("Interf", self->interf->get().present() ? self->interf->get().id() : UID());
+
 			if (e.code() == error_code_end_of_stream) {
 				self->end.reset(self->messageVersion.version);
 				return Void();
 			} else if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
-				TraceEvent("PeekCursorTimedOut", self->randomID).error(e);
+				TraceEvent ev("PeekCursorTimedOut", self->randomID);
 				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
 				// and thus we've likely just wasted 10min.
 				// timed_out() is sent by cleanupPeekTrackers as value PEEK_TRACKER_EXPIRATION_TIME
@@ -326,6 +351,11 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
 				self->futureResults.clear();
+				ev.error(e)
+				    .detail("Tag", self->tag.toString())
+				    .detail("Begin", self->messageVersion.version)
+				    .detail("NewID", self->randomID)
+				    .detail("Interf", self->interf->get().present() ? self->interf->get().id() : UID());
 			} else {
 				throw e;
 			}
@@ -415,7 +445,11 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 				                        taskID))
 				                  : Never())) {
 					updateCursorWithReply(self, res);
-					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
+					DebugLogTraceEvent("SPC_GetMoreB", self->randomID)
+					    .detail("Tag", self->tag.toString())
+					    .detail("Has", self->hasMessage())
+					    .detail("End", res.end)
+					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
 				when(wait(self->interf->onChange())) { self->onlySpilled = false; }
@@ -431,11 +465,13 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 }
 
 Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
-	// TraceEvent("SPC_GetMore", randomID)
-	//     .detail("HasMessage", hasMessage())
-	//     .detail("More", !more.isValid() || more.isReady())
-	//     .detail("MessageVersion", messageVersion.toString())
-	//     .detail("End", end.toString());
+	DebugLogTraceEvent("SPC_GetMore", randomID)
+	    .detail("Tag", tag.toString())
+	    .detail("HasMessage", hasMessage())
+	    .detail("More", !more.isValid() || more.isReady())
+	    .detail("Parallel", parallelGetMore)
+	    .detail("MessageVersion", messageVersion.toString())
+	    .detail("End", end.toString());
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
@@ -451,7 +487,7 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor* self) {
+ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor const* self) {
 	loop {
 		choose {
 			when(wait(self->interf->get().present()
@@ -471,7 +507,7 @@ ACTOR Future<Void> serverPeekOnFailed(ILogSystem::ServerPeekCursor* self) {
 	}
 }
 
-Future<Void> ILogSystem::ServerPeekCursor::onFailed() {
+Future<Void> ILogSystem::ServerPeekCursor::onFailed() const {
 	return serverPeekOnFailed(this);
 }
 
@@ -654,7 +690,7 @@ void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 			c->advanceTo(messageVersion);
 			if (start <= messageVersion && messageVersion < c->version()) {
 				advancedPast = true;
-				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence");
+				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence", probe::decoration::rare);
 			}
 		}
 
@@ -757,7 +793,7 @@ Future<Void> ILogSystem::MergedPeekCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> ILogSystem::MergedPeekCursor::onFailed() {
+Future<Void> ILogSystem::MergedPeekCursor::onFailed() const {
 	ASSERT(false);
 	return Never();
 }
@@ -1114,7 +1150,7 @@ Future<Void> ILogSystem::SetPeekCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> ILogSystem::SetPeekCursor::onFailed() {
+Future<Void> ILogSystem::SetPeekCursor::onFailed() const {
 	ASSERT(false);
 	return Never();
 }
@@ -1226,7 +1262,7 @@ Future<Void> ILogSystem::MultiCursor::getMore(TaskPriority taskID) {
 	return cursors.back()->getMore(taskID);
 }
 
-Future<Void> ILogSystem::MultiCursor::onFailed() {
+Future<Void> ILogSystem::MultiCursor::onFailed() const {
 	return cursors.back()->onFailed();
 }
 
@@ -1503,7 +1539,7 @@ Future<Void> ILogSystem::BufferedCursor::getMore(TaskPriority taskID) {
 	return more;
 }
 
-Future<Void> ILogSystem::BufferedCursor::onFailed() {
+Future<Void> ILogSystem::BufferedCursor::onFailed() const {
 	ASSERT(false);
 	return Never();
 }

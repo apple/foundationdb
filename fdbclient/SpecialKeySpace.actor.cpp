@@ -1233,6 +1233,12 @@ ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, K
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS
@@ -1350,6 +1356,12 @@ ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* 
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS

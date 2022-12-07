@@ -79,36 +79,39 @@ public:
 	}
 
 	template <typename... Args>
-	void printWithLogLevel(int log_level, std::string_view header, Args&&... args) {
+	void printWithLogLevel(int log_level,
+	                       std::string_view header,
+	                       const fmt::format_string<Args...>& fmt_str,
+	                       Args&&... args) {
 		assert(log_level >= VERBOSE_NONE && log_level <= VERBOSE_DEBUG);
 		if (log_level <= verbosity) {
 			const auto fp = log_level == VERBOSE_NONE ? stderr : stdout;
 			// 500B inline buffer
 			auto buf = fmt::memory_buffer{};
 			putHeader(buf, header);
-			fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
+			fmt::format_to(std::back_inserter(buf), fmt_str, std::forward<Args>(args)...);
 			fmt::print(fp, "{}\n", std::string_view(buf.data(), buf.size()));
 		}
 	}
 
 	template <typename... Args>
-	void error(Args&&... args) {
-		printWithLogLevel(VERBOSE_NONE, "ERROR", std::forward<Args>(args)...);
+	void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		printWithLogLevel(VERBOSE_NONE, "ERROR", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void info(Args&&... args) {
-		printWithLogLevel(VERBOSE_DEFAULT, "INFO", std::forward<Args>(args)...);
+	void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		printWithLogLevel(VERBOSE_DEFAULT, "INFO", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void warn(Args&&... args) {
-		printWithLogLevel(VERBOSE_WARN, "WARNING", std::forward<Args>(args)...);
+	void warn(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		printWithLogLevel(VERBOSE_WARN, "WARNING", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void debug(Args&&... args) {
-		printWithLogLevel(VERBOSE_DEBUG, "DEBUG", std::forward<Args>(args)...);
+	void debug(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		printWithLogLevel(VERBOSE_DEBUG, "DEBUG", fmt_str, std::forward<Args>(args)...);
 	}
 };
 
