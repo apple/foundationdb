@@ -1629,6 +1629,9 @@ void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange
 	std::set<uint64_t> physicalShardIDSet;
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		uint64_t shardID = it->value();
+		if (shardID == UID().first()) {
+			continue;
+		}
 		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
 		physicalShardInstances[shardID].removeRange(keyRange);
 	}
@@ -1647,8 +1650,11 @@ void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
 	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
 	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
 		uint64_t shardID = it->value();
-		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		if (shardID == UID().first()) {
+			continue;
+		}
 		auto keyRangePiece = KeyRangeRef(it->range().begin, it->range().end);
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
 		bool exist = false;
 		for (const auto& [range, data] : physicalShardInstances[shardID].rangeData) {
 			if (range == keyRangePiece) {
