@@ -66,7 +66,6 @@ public:
 
 	// Check if any bytes in the range [begin, end) is corrupted
 	bool isByteCorruptedInRange(const std::string& fileName, const uint64_t begin, const uint64_t end) const;
-
 };
 
 class ISimulator : public INetwork {
