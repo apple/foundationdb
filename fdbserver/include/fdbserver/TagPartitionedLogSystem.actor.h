@@ -353,7 +353,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                         LogEpoch recoveryCount,
 	                                         Version recoveryTransactionVersion,
 	                                         int8_t remoteLocality,
-	                                         std::vector<Tag> allTags);
+	                                         std::vector<Tag> allTags,
+	                                         std::vector<Version> oldGenerationStartVersions);
 
 	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
 	                                                    RecruitFromConfigurationReply recr,
