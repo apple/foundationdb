@@ -868,8 +868,32 @@ const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
-const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary or /remote
+// The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
+// format "\xff/storageWiggle/[primary | remote]/[fieldName]"
+const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary/ or /remote/
 const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); // withSuffix /primary or /remote
+// "\xff/storageWiggle/[primary | remote]/[fieldName]"
+const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
+
+// the final char is "/"
+const Key perpetualStorageWigglePrefixFor(bool primaryDc, PerpetualWigglePrefixType type) {
+	if (type == PerpetualWigglePrefixType::STORAGE_ID)
+		return perpetualStorageWiggleIDPrefix.withSuffix(primaryDc ? "primary/"_sr : "remote/"_sr);
+	ASSERT(false);
+	return ""_sr;
+}
+
+const Key perpetualStorageWiggleKeyFor(bool primaryDc, PerpetualWiggleKeyType type) {
+	if (type == PerpetualWiggleKeyType::WIGGLE_STATS)
+		return perpetualStorageWiggleStatsPrefix.withSuffix(primaryDc ? "primary"_sr : "remote"_sr);
+
+	Key result = perpetualStorageWigglePrefix.withSuffix(primaryDc ? "primary/"_sr : "remote/"_sr);
+	if (type == PerpetualWiggleKeyType::WIGGLE_DELAY)
+		return result.withSuffix("wiggleDelay"_sr);
+
+	ASSERT(false);
+	return ""_sr;
+}
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 

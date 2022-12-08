@@ -1925,7 +1925,7 @@ public:
 	}
 
 	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
-		state Key writeKey = perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
+		state Key writeKey = perpetualStorageWigglePrefixFor(self->primary, PerpetualWigglePrefixType::STORAGE_ID);
 		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(writeKey,
 		                                                                                          IncludeVersion());
 		state UID nextId = wait(self->getNextWigglingServerID());
@@ -1950,6 +1950,9 @@ public:
 
 		return Void();
 	}
+
+	// Persistent the total delay time to the database.
+	ACTOR static Future<Void> perpetualStorageWiggleDelay(DDTeamCollection* self) { return Void(); }
 
 	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
 		state bool takeRest = true;
@@ -2035,7 +2038,7 @@ public:
 	                                                  AsyncVar<bool>* stopSignal,
 	                                                  PromiseStream<Void> finishStorageWiggleSignal) {
 		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(
-		    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr), IncludeVersion());
+		    perpetualStorageWigglePrefixFor(self->primary, PerpetualWigglePrefixType::STORAGE_ID), IncludeVersion());
 
 		state Future<StorageWiggleValue> nextFuture = Never();
 		state Future<Void> moveFinishFuture = Never();

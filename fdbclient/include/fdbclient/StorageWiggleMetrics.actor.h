@@ -108,7 +108,7 @@ ACTOR template <typename TxnType>
 Future<Optional<StorageWiggleMetrics>> loadStorageWiggleMetrics(TxnType tr, PrimaryRegion primary) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-	auto f = tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
+	auto f = tr->get(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_STATS));
 	Optional<Value> value = wait(safeThreadFutureToFuture(f));
 	if (!value.present()) {
 		return Optional<StorageWiggleMetrics>();
@@ -124,7 +124,7 @@ Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics
 	auto f = tr->get(perpetualStorageWiggleKey);
 	Optional<Value> v = wait(safeThreadFutureToFuture(f));
 	if (v.present() && v == "1"_sr) {
-		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+		tr->set(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_STATS),
 		        ObjectWriter::toValue(metrics, IncludeVersion()));
 	} else {
 		CODE_PROBE(true, "Intend to update StorageWiggleMetrics after PW disabled");
@@ -147,7 +147,7 @@ Future<Void> resetStorageWiggleMetrics(TrType tr,
 
 	if (metrics.present()) {
 		metrics.get().reset();
-		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+		tr->set(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_STATS),
 		        ObjectWriter::toValue(metrics.get(), IncludeVersion()));
 	}
 	return Void();
