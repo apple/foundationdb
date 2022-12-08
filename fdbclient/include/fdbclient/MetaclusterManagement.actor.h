@@ -1372,19 +1372,26 @@ struct DeleteTenantImpl {
 	MetaclusterOperationContext<DB> ctx;
 
 	// Initialization parameters
+	// Either one can be specified, and the other will be looked up
+	// and filled in by reading the metacluster metadata
 	TenantName tenantName;
-
-	// Parameters set in getAssignedLocation
-	int64_t tenantId;
+	int64_t tenantId = -1;
 
 	// Parameters set in markTenantInRemovingState
 	Optional<TenantName> pairName;
 
 	DeleteTenantImpl(Reference<DB> managementDb, TenantName tenantName) : ctx(managementDb), tenantName(tenantName) {}
+	DeleteTenantImpl(Reference<DB> managementDb, int64_t tenantId) : ctx(managementDb), tenantId(tenantId) {}
 
 	// Loads the cluster details for the cluster where the tenant is assigned.
 	// Returns true if the deletion is already in progress
 	ACTOR static Future<bool> getAssignedLocation(DeleteTenantImpl* self, Reference<typename DB::TransactionT> tr) {
+		// Look at tenantIdIndex if given ID, then fill out the corresponding name
+		if (self->tenantId != -1) {
+			TenantName indexName =
+			    wait(ManagementClusterMetadata::tenantMetadata().tenantIdIndex.getD(tr, self->tenantId));
+			self->tenantName = indexName;
+		}
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
 		if (!tenantEntry.present()) {
@@ -1401,7 +1408,7 @@ struct DeleteTenantImpl {
 				self->pairName = tenantEntry.get().renamePair.get();
 			}
 		}
-
+		ASSERT(self->tenantId == -1 || self->tenantId == tenantEntry.get().id);
 		self->tenantId = tenantEntry.get().id;
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster.get()));
 		return tenantEntry.get().tenantState == TenantState::REMOVING;
@@ -1550,6 +1557,13 @@ struct DeleteTenantImpl {
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state DeleteTenantImpl<DB> impl(db, name);
+	wait(impl.run());
+	return Void();
+}
+
+ACTOR template <class DB>
+Future<Void> deleteTenant(Reference<DB> db, int64_t id) {
+	state DeleteTenantImpl<DB> impl(db, id);
 	wait(impl.run());
 	return Void();
 }

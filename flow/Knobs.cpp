@@ -71,7 +71,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SATURATION_PROFILING_MAX_LOG_INTERVAL,               5.0 );
 	init( SATURATION_PROFILING_LOG_BACKOFF,                    2.0 );
 
-	init( RANDOMSEED_RETRY_LIMIT,                                4 );
 	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
 	init( FAST_ALLOC_ALLOW_GUARD_PAGES,                      false );
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
@@ -85,7 +84,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
-	init( TRACING_SPAN_ATTRIBUTES_ENABLED,                   false ); // Additional K/V and tenant data added to Span Attributes
 	init( TRACING_SAMPLE_RATE,                                 0.0 ); if (randomize && BUGGIFY) TRACING_SAMPLE_RATE = 0.01; // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
 	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1" ); // Only applicable if TracerType is set to a network option
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option

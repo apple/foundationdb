@@ -690,7 +690,7 @@ void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 			c->advanceTo(messageVersion);
 			if (start <= messageVersion && messageVersion < c->version()) {
 				advancedPast = true;
-				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence");
+				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence", probe::decoration::rare);
 			}
 		}
 

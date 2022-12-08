@@ -481,17 +481,18 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		}
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
-			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %lld]\n",
-			       conn->getDebugID().toString().c_str(),
-			       (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
-			       r->code,
-			       earlyResponse,
-			       elapsed,
-			       verb.c_str(),
-			       resource.c_str(),
-			       contentLen,
-			       total_sent,
-			       r->contentLen);
+			fmt::print("[{0}] HTTP {1}code={2} early={3}, time={4} {5} {6} contentLen={7} [{8} out, response content "
+			           "len {9}]\n",
+			           conn->getDebugID().toString(),
+			           (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
+			           r->code,
+			           earlyResponse,
+			           elapsed,
+			           verb,
+			           resource,
+			           contentLen,
+			           total_sent,
+			           r->contentLen);
 		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			printf("[%s] HTTP RESPONSE:  %s %s\n%s\n",

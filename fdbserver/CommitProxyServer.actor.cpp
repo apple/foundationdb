@@ -925,10 +925,10 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		ASSERT_NE((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
 
-		if (m.param1.size() >= TENANT_PREFIX_SIZE) {
+		if (m.param1.size() >= TenantAPI::PREFIX_SIZE) {
 			// Parse mutation key to determine mutation encryption domain
-			StringRef prefix = m.param1.substr(0, TENANT_PREFIX_SIZE);
-			int64_t tenantId = TenantMapEntry::prefixToId(prefix, EnforceValidTenantId::False);
+			StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
+			int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				Optional<TenantName> tenantName = getTenantName(commitData, tenantId);
 				if (tenantName.present()) {

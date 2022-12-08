@@ -2744,6 +2744,23 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
+	// Checks and waits for few seconds if rocskdb is overloaded.
+	ACTOR Future<Void> checkRocksdbState(rocksdb::DB* db) {
+		state uint64_t estPendCompactBytes;
+		state int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+		db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
+		while (count && estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT) {
+			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
+			count--;
+			db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
+			                             &estPendCompactBytes);
+		}
+
+		return Void();
+	}
+
+	Future<Void> canCommit() override { return checkRocksdbState(shardManager.getDb()); }
+
 	Future<Void> commit(bool) override {
 		auto a = new Writer::CommitAction(shardManager.getDb(),
 		                                  shardManager.getWriteBatch(),
@@ -3257,11 +3274,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	int count = std::unique(shardIds.begin(), shardIds.end()) - shardIds.begin();
 	ASSERT_EQ(count, 1);
 	ASSERT(shardIds[0] == "shard-2");
-	shardsToCleanUp.insert(shardsToCleanUp.end(), shardIds.begin(), shardIds.end());
-
-	// Clean up empty shards. shard-2 is empty now.
-	Future<Void> cleanUpFuture = kvStore->cleanUpShardsIfNeeded(shardsToCleanUp);
-	wait(cleanUpFuture);
 
 	// Add more ranges.
 	std::vector<Future<Void>> addRangeFutures;
@@ -3315,9 +3327,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 
 		// Add another range to shard-2.
 		wait(kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2"));
-
-		// Clean up shards. Shard-2 should not be removed.
-		wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
 	}
 	{
 		auto dataMap = rocksdbStore->getDataMapping();
