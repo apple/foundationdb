@@ -2631,6 +2631,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 
 	state std::vector<Future<TLogInterface>> remoteTLogInitializationReplies;
 	std::vector<InitializeTLogRequest> remoteTLogReqs(remoteWorkers.remoteTLogs.size());
+	state std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> allRemoteTLogServers;
 
 	bool nonShardedTxs = self->getTLogVersion() < TLogVersion::V4;
 	if (oldLogSystem->logRouterTags == 0) {
@@ -2721,15 +2722,19 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 
 	std::vector<Future<Void>> recoveryComplete;
 	recoveryComplete.reserve(logSet->logServers.size());
-	for (int i = 0; i < logSet->logServers.size(); i++)
+	for (int i = 0; i < logSet->logServers.size(); i++) {
 		recoveryComplete.push_back(
 		    transformErrors(throwErrorOr(logSet->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor(
 		                        TLogRecoveryFinishedRequest(),
 		                        SERVER_KNOBS->TLOG_TIMEOUT,
 		                        SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 		                    cluster_recovery_failed()));
+		allRemoteTLogServers.push_back(logSet->logServers[i]);
+	}
 
 	self->remoteRecoveryComplete = waitForAll(recoveryComplete);
+	self->remoteTrackTLogRecovery =
+	    TagPartitionedLogSystem::trackTLogRecoveryActor(allRemoteTLogServers, self->remoteRecoveredVersion);
 	self->tLogs.push_back(logSet);
 	TraceEvent("RemoteLogRecruitment_CompletingRecovery").log();
 	return Void();
@@ -3096,6 +3101,8 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		    cluster_recovery_failed()));
 		allTLogServers.push_back(logSystem->tLogs[0]->logServers[i]);
 	}
+	logSystem->trackTLogRecovery =
+	    TagPartitionedLogSystem::trackTLogRecoveryActor(allTLogServers, logSystem->recoveredVersion);
 	logSystem->recoveryComplete = waitForAll(recoveryComplete);
 
 	if (configuration.usableRegions > 1) {
@@ -3201,5 +3208,31 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 			}
 			when(wait(tlog->onChange())) {}
 		}
+	}
+}
+
+ACTOR Future<Void> TagPartitionedLogSystem::trackTLogRecoveryActor(
+    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> tlogs,
+    Reference<AsyncVar<Version>> recoveredVersion) {
+	state std::vector<Future<TrackTLogRecoveryReply>> individualTLogRecovery;
+	loop {
+		individualTLogRecovery.clear();
+		individualTLogRecovery.resize(tlogs.size());
+		TrackTLogRecoveryRequest req(recoveredVersion->get());
+		for (int i = 0; i < tlogs.size(); ++i) {
+			individualTLogRecovery.push_back(transformErrors(
+			    throwErrorOr(tlogs[i]->get().interf().trackRecovery.getReplyUnlessFailedFor(
+			        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+			    cluster_recovery_failed()));
+		}
+
+		wait(waitForAll(individualTLogRecovery));
+
+		Version currentRecoveredVersion = MAX_VERSION;
+		for (int i = 0; i < individualTLogRecovery.size(); ++i) {
+			currentRecoveredVersion =
+			    std::min(individualTLogRecovery[i].get().oldestUnrecoveredStartVersion, currentRecoveredVersion);
+		}
+		recoveredVersion->set(currentRecoveredVersion);
 	}
 }

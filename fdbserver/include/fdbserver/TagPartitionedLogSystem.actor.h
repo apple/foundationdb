@@ -93,6 +93,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	Future<Void> recoveryComplete;
 	Future<Void> remoteRecovery;
 	Future<Void> remoteRecoveryComplete;
+	Future<Void> trackTLogRecovery;
+	Future<Void> remoteTrackTLogRecovery;
+	Reference<AsyncVar<Version>> recoveredVersion;
+	Reference<AsyncVar<Version>> remoteRecoveredVersion;
 	std::vector<LogLockInfo> lockResults;
 	AsyncVar<bool> recoveryCompleteWrittenToCoreState;
 	bool remoteLogsWrittenToCoreState;
@@ -129,8 +133,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
 	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
-	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
-	    locality(locality), addActor(addActor), popActors(false) {}
+	    recoveredVersion(makeReference<AsyncVar<Version>>(0)),
+	    remoteRecoveredVersion(makeReference<AsyncVar<Version>>(0)), recoveryCompleteWrittenToCoreState(false),
+	    remoteLogsWrittenToCoreState(false), hasRemoteServers(false), locality(locality), addActor(addActor),
+	    popActors(false) {}
 
 	void stopRejoins() final;
 
@@ -372,6 +378,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>, Reference<IReplicationPolicy>>>
 	        logServers,
 	    FutureStream<struct TLogRejoinRequest> rejoinRequests);
+
+	ACTOR static Future<Void> trackTLogRecoveryActor(
+	    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> tlogs,
+	    Reference<AsyncVar<Version>> recoveredVersion);
 
 	ACTOR static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
 
