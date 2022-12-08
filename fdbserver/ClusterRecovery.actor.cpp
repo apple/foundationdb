@@ -67,7 +67,9 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 			}
 			return Void();
 		}
-		when(wait(switchedState)) { return Void(); }
+		when(wait(switchedState)) {
+			return Void();
+		}
 	}
 }
 
@@ -921,8 +923,12 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
-		when(wait(waitCommitProxyFailure)) { throw worker_removed(); }
-		when(wait(waitGrvProxyFailure)) { throw worker_removed(); }
+		when(wait(waitCommitProxyFailure)) {
+			throw worker_removed();
+		}
+		when(wait(waitGrvProxyFailure)) {
+			throw worker_removed();
+		}
 	}
 }
 
@@ -1127,10 +1133,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
 			self->recoveryTransactionVersion = minRequiredCommitVersion;
-	}
 
-	if (BUGGIFY) {
-		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
+		// Test randomly increasing the recovery version by a large number.
+		// When the version epoch is enabled, versions stay in sync with time.
+		// An offline cluster could see a large version jump when it comes back
+		// online, so test this behavior in simulation.
+		if (BUGGIFY) {
+			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
+		}
 	}
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERING_EVENT_NAME).c_str(),
@@ -1577,8 +1587,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 				break;
 			}
 			when(wait(oldLogSystems->onChange())) {}
-			when(wait(reg)) { throw internal_error(); }
-			when(wait(recoverAndEndEpoch)) { throw internal_error(); }
+			when(wait(reg)) {
+				throw internal_error();
+			}
+			when(wait(recoverAndEndEpoch)) {
+				throw internal_error();
+			}
 		}
 	}
 
