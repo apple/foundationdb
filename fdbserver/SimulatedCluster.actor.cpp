@@ -2047,7 +2047,9 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setConfigDB(testConfig);
 }
 
-bool validEncryptAndTenantMode(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
+bool validateEncryptAndTenantModePair(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
+	// Domain aware encryption is only allowed when the tenant mode is required. Other encryption modes (disabled or
+	// cluster aware) are allowed regardless of the tenant mode
 	if (encryptMode.mode == EncryptionAtRestMode::DISABLED || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
 		return true;
 	}
@@ -2080,7 +2082,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			// Get the subset of valid encrypt modes given the tenant mode
 			for (int i = 0; i < testConfig.encryptModes.size(); i++) {
 				EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromString(testConfig.encryptModes.at(i));
-				if (validEncryptAndTenantMode(encryptMode, tenantMode)) {
+				if (validateEncryptAndTenantModePair(encryptMode, tenantMode)) {
 					validEncryptModes.push_back(encryptMode);
 				}
 			}
