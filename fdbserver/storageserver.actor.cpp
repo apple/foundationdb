@@ -4874,13 +4874,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		// keep index for boundary index entries, so that caller can use it as a continuation.
 		result.data[0].key = input.data[0].key;
 		result.data[0].value = input.data[0].value;
-		result.data[0].boundaryAndExist = getMappedKeyValueSize(kvms[0]) > 0;
 
 		result.data.back().key = input.data[resultSize - 1].key;
 		result.data.back().value = input.data[resultSize - 1].value;
-		// index needs to be -1
-		int index = (resultSize - 1) % SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
-		result.data.back().boundaryAndExist = getMappedKeyValueSize(kvms[index]) > 0;
 	}
 	result.more = input.more || resultSize < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
