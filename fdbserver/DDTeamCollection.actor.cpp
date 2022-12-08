@@ -1943,14 +1943,13 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* teamCollection) {
-		state Key writeKey =
-		    perpetualStorageWiggleIDPrefix.withSuffix(teamCollection->primary ? "primary/"_sr : "remote/"_sr);
+	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
+		state Key writeKey = perpetualStorageWigglePrefixFor(self->primary, PerpetualWigglePrefixType::STORAGE_ID);
 		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(writeKey,
 		                                                                                          IncludeVersion());
-		state UID nextId = wait(teamCollection->getNextWigglingServerID());
+		state UID nextId = wait(self->getNextWigglingServerID());
 		state StorageWiggleValue value(nextId);
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(teamCollection->cx));
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 		loop {
 			// write the next server id
 			try {
@@ -1963,13 +1962,16 @@ public:
 			}
 		}
 
-		teamCollection->nextWiggleInfo.send(value);
-		TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", teamCollection->distributorId)
-		    .detail("Primary", teamCollection->primary)
+		self->nextWiggleInfo.send(value);
+		TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", self->distributorId)
+		    .detail("Primary", self->primary)
 		    .detail("WriteID", nextId);
 
 		return Void();
 	}
+
+	// Persistent the total delay time to the database.
+	ACTOR static Future<Void> perpetualStorageWiggleDelay(DDTeamCollection* self) { return Void(); }
 
 	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
 		state bool takeRest = true;
@@ -2058,7 +2060,7 @@ public:
 	                                                  AsyncVar<bool>* stopSignal,
 	                                                  PromiseStream<Void> finishStorageWiggleSignal) {
 		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(
-		    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr), IncludeVersion());
+		    perpetualStorageWigglePrefixFor(self->primary, PerpetualWigglePrefixType::STORAGE_ID), IncludeVersion());
 
 		state Future<StorageWiggleValue> nextFuture = Never();
 		state Future<Void> moveFinishFuture = Never();
