@@ -518,7 +518,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, 
 		return 0;
 	}
 
-	int accumulatedRows = 0;
 	int accumulatedBytes = 0;
 	// TODO: Pass read timeout.
 	const int readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
@@ -537,7 +536,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, 
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
 			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			++accumulatedRows;
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
@@ -557,7 +555,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, 
 		}
 		while (cursor->Valid() && toStringRef(cursor->key()) >= range.begin) {
 			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			++accumulatedRows;
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
