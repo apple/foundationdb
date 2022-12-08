@@ -102,7 +102,9 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 			// If we didn't return then the entire list wasn't destroyed so erase/destroy i
 			runners.erase_and_dispose(i, [](Runner* r) { delete r; });
 		}
-		when(Error e = waitNext(errors.getFuture())) { throw e; }
+		when(Error e = waitNext(errors.getFuture())) {
+			throw e;
+		}
 	}
 }
 
@@ -130,7 +132,9 @@ void forceLinkActorCollectionTests() {}
 TEST_CASE("/flow/actorCollection/chooseWhen") {
 	state Promise<Void> promise;
 	choose {
-		when(wait(delay(0))) { promise.send(Void()); }
+		when(wait(delay(0))) {
+			promise.send(Void());
+		}
 		when(wait(promise.getFuture())) {
 			// Should be cancelled, since another when clause in this choose block has executed
 			ASSERT(false);
