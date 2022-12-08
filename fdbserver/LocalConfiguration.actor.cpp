@@ -327,8 +327,12 @@ class LocalConfigurationImpl {
 	ACTOR static Future<Void> consume(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
 		loop {
 			choose {
-				when(wait(consumeInternal(self, broadcaster))) { ASSERT(false); }
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(consumeInternal(self, broadcaster))) {
+					ASSERT(false);
+				}
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}

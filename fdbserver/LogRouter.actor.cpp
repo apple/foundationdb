@@ -788,7 +788,9 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
 		    .detail("Locality", req.locality);
 		state Future<Void> core = logRouterCore(interf, req, db);
 		loop choose {
-			when(wait(core)) { return Void(); }
+			when(wait(core)) {
+				return Void();
+			}
 			when(wait(checkRemoved(db, req.recoveryCount, interf))) {}
 		}
 	} catch (Error& e) {
