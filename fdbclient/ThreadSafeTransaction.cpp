@@ -223,6 +223,11 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid([db]() { db->delref(); });
 }
 
+ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) {
+	Tenant* tenant = this->tenant = Tenant::allocateOnForeignThread();
+	onMainThreadVoid([tenant, db, name]() { new (tenant) Tenant(db->db, name); });
+}
+
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));

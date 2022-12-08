@@ -306,7 +306,12 @@ private:
 	bool tenantSet;
 };
 
-class Tenant {
+class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, NonCopyable {
+public:
+	Tenant(DatabaseContext* cx, TenantName name);
+	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
+
+private:
 	Future<int64_t> id;
 	TenantName name;
 };

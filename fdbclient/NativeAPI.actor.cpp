@@ -2381,6 +2381,28 @@ Database Database::createSimulatedExtraDatabase(std::string connectionString, Op
 	return db;
 }
 
+ACTOR Future<int64_t> fetchTenantId(DatabaseContext* cx) {
+	int64_t tenantId;
+	loop {
+		choose {
+			when(wait(cx->onProxiesChanged())) {}
+			when(GetKeyServerLocationsReply rep =
+			         wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                               &CommitProxyInterface::getKeyServersLocations,
+			                               GetKeyServerLocationsRequest(),
+			                               TaskPriority::DefaultPromiseEndpoint))) {
+				tenantId = rep.tenantEntry.id;
+				break;
+			}
+		}
+	}
+	return tenantId;
+}
+
+Tenant::Tenant(DatabaseContext* cx, TenantName name) : name(name) {
+	id = fetchTenantId(cx);
+}
+
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
 	ASSERT(db);
 	return db->transactionDefaults;

@@ -88,7 +88,7 @@ public: // Internal use only
 
 class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
 public:
-	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {}
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name);
 	~ThreadSafeTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
@@ -109,6 +109,7 @@ public:
 private:
 	Reference<ThreadSafeDatabase> db;
 	Standalone<StringRef> name;
+	Tenant* tenant;
 };
 
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
