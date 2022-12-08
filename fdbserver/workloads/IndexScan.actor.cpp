@@ -92,7 +92,9 @@ struct IndexScanWorkload : KVWorkload {
 	ACTOR static Future<Void> serialScans(Database cx, IndexScanWorkload* self) {
 		state double start = now();
 		try {
-			loop { wait(scanDatabase(cx, self)); }
+			loop {
+				wait(scanDatabase(cx, self));
+			}
 		} catch (...) {
 			self->totalTimeFetching = now() - start;
 			throw;
