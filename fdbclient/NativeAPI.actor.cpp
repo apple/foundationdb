@@ -8891,15 +8891,11 @@ Version ChangeFeedData::getVersion() {
 // native api has consumed and processed, them, and then the fdb client has consumed all of the mutations.
 ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version version) {
 	// wait on SS to have sent up through version
-	int desired = 0;
-	int waiting = 0;
 	std::vector<Future<Void>> allAtLeast;
 	for (auto& it : self->storageData) {
 		if (it->version.get() < version) {
-			waiting++;
 			if (version > it->desired.get()) {
 				it->desired.set(version);
-				desired++;
 			}
 			allAtLeast.push_back(it->version.whenAtLeast(version));
 		}
