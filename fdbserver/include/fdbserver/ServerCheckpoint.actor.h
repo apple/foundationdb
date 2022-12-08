@@ -33,6 +33,13 @@
 
 FDB_DECLARE_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
+class ICheckpointIterator {
+public:
+	virtual Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) = 0;
+
+	virtual ~ICheckpointIterator() {}
+};
+
 // An ICheckpointReader can read the contents of a checkpoint created from a KV store,
 // i.e., by IKeyValueStore::checkpoint().
 class ICheckpointReader {
@@ -42,12 +49,14 @@ public:
 	virtual Future<Void> init(StringRef token) = 0;
 
 	// Scans the checkpoint, and returns the key-value pairs.
-	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
+	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit, const UID& token) = 0;
 
 	// Returns the next chunk of the serialized checkpoint.
 	virtual Future<Standalone<StringRef>> nextChunk(const int ByteLimit) = 0;
 
 	virtual Future<Void> close() = 0;
+
+	virtual std::unique_ptr<ICheckpointIterator> getIterator(KeyRange range) { throw not_implemented(); }
 
 protected:
 	virtual ~ICheckpointReader() {}

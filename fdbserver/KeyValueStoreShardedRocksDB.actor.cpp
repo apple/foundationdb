@@ -3543,6 +3543,7 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 
 	CheckpointRequest request(latestVersion,
 	                          { KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("h"_sr, "k"_sr) },
+
 	                          DataMoveRocksCF,
 	                          deterministicRandom()->randomUniqueID(),
 	                          checkpointDir);
@@ -3553,10 +3554,11 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	    newCheckpointReader(metaData, CheckpointAsKeyValues::True, deterministicRandom()->randomUniqueID());
 	ASSERT(cpReader != nullptr);
 	wait(cpReader->init(token));
+	state std::unique_ptr<ICheckpointIterator> iter = cpReader->getIterator(KeyRangeRef("a"_sr, "k"_sr));
 	loop {
 		try {
 			state RangeResult res =
-			    wait(cpReader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			    wait(iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			ASSERT(res.size() == 2);
 			ASSERT(res[0].key == "a1"_sr);
 			ASSERT(res[0].value == "foo"_sr);
@@ -3571,7 +3573,9 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 		}
 	}
 
+	TraceEvent(SevDebug, "ShardedRocksCheckpointReaaderTested");
 	std::vector<Future<Void>> closes;
+	iter.reset();
 	closes.push_back(cpReader->close());
 	closes.push_back(kvStore->onClosed());
 	kvStore->dispose();

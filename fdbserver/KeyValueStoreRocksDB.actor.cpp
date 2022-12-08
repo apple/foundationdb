@@ -2588,7 +2588,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	loop {
 		try {
 			state RangeResult res =
-			    wait(cpReader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			    wait(cpReader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT, UID()));
 			state int i = 0;
 			for (; i < res.size(); ++i) {
 				Optional<Value> val = wait(kvStore->readValue(res[i].key));

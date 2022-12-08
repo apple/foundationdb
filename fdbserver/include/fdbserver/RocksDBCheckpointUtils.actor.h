@@ -40,6 +40,8 @@ struct CheckpointFile {
 	CheckpointFile() = default;
 	CheckpointFile(std::string path, KeyRange range, int64_t size) : path(path), range(range), size(size) {}
 
+	bool isValid() const { return !path.empty(); }
+
 	std::string toString() const {
 		return "CheckpointFile:\nFile Name: " + this->path + "\nRange: " + range.toString() +
 		       "\nSize: " + std::to_string(size) + "\n";

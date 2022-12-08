@@ -2496,7 +2496,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 		loop {
 			state RangeResult res =
-			    wait(reader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			    wait(reader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT, UID()));
 			if (!res.empty()) {
 				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
