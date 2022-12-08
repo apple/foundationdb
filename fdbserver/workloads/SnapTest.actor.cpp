@@ -31,69 +31,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
-void getVersionAndnumTags(TraceEventFields md, Version& version, int& numTags) {
-	version = -1;
-	numTags = -1;
-
-	version = boost::lexical_cast<int64_t>(md.getValue("Version"));
-	numTags = boost::lexical_cast<int>(md.getValue("NumTags"));
-}
-
-void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Version& durableVersion) {
-	durableVersion = -1;
-
-	// verify version:
-	boost::lexical_cast<int64_t>(md.getValue("Version"));
-	std::string tagString = md.getValue("Tag");
-	int colon = tagString.find_first_of(':');
-	std::string localityString = tagString.substr(0, colon);
-	std::string idString = tagString.substr(colon + 1);
-	tag.locality = boost::lexical_cast<int>(localityString);
-	tag.id = boost::lexical_cast<int>(idString);
-
-	durableVersion = boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
-}
-
-void getMinAndMaxTLogVersions(TraceEventFields md,
-                              Version version,
-                              Tag tag,
-                              Version& minTLogVersion,
-                              Version& maxTLogVersion) {
-	Tag verifyTag;
-	minTLogVersion = maxTLogVersion = -1;
-
-	// verify version:
-	boost::lexical_cast<int64_t>(md.getValue("Version"));
-	std::string tagString = md.getValue("Tag");
-	int colon = tagString.find_first_of(':');
-	std::string localityString = tagString.substr(0, colon);
-	std::string idString = tagString.substr(colon + 1);
-	verifyTag.locality = boost::lexical_cast<int>(localityString);
-	verifyTag.id = boost::lexical_cast<int>(idString);
-	if (tag != verifyTag) {
-		return;
-	}
-	minTLogVersion = boost::lexical_cast<int64_t>(md.getValue("PoppedTagVersion"));
-	maxTLogVersion = boost::lexical_cast<int64_t>(md.getValue("QueueCommittedVersion"));
-}
-
-void filterEmptyMessages(std::vector<Future<TraceEventFields>>& messages) {
-	messages.erase(std::remove_if(messages.begin(),
-	                              messages.end(),
-	                              [](Future<TraceEventFields> const& msgFuture) {
-		                              return !msgFuture.isReady() || msgFuture.get().size() == 0;
-	                              }),
-	               messages.end());
-	return;
-}
-
-void printMessages(std::vector<Future<TraceEventFields>>& messages) {
-	for (int i = 0; i < messages.size(); i++) {
-		TraceEvent("SnapTestMessages").detail("I", i).detail("Value", messages[i].get().toString());
-	}
-	return;
-}
-
 struct SnapTestWorkload : TestWorkload {
 	static constexpr auto NAME = "SnapTest";
 
@@ -108,6 +45,7 @@ public: // variables
 	bool skipCheck = false; // disable check if the exec fails
 	int retryLimit; // -1 if no limit
 	bool snapSucceeded = false; // When taking snapshot, tracks snapshot success
+	bool attemptDuplicateSnapshot = false;
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
@@ -122,6 +60,12 @@ public: // ctor & dtor
 		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		retryLimit = getOption(options, "retryLimit"_sr, 5);
 		g_simulator->allowLogSetKills = false;
+		{
+			double duplicateSnapshotProbability = getOption(options, "duplicateSnapshotProbability"_sr, 0.1);
+			if (deterministicRandom()->random01() < duplicateSnapshotProbability) {
+				attemptDuplicateSnapshot = true;
+			}
+		}
 	}
 
 public: // workload functions
@@ -190,6 +134,7 @@ public: // workload functions
 	ACTOR Future<Void> _start(Database cx, SnapTestWorkload* self) {
 		state Transaction tr(cx);
 		state bool snapFailed = false;
+		state Future<Void> duplicateSnapStatus;
 
 		if (self->testID == 0) {
 			// create even keys before the snapshot
@@ -205,15 +150,16 @@ public: // workload functions
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
-					StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
-					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					state StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
+
+					state Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					if (self->attemptDuplicateSnapshot) {
+						wait(delay(deterministicRandom()->random01()));
+						duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
+					}
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_snap_log_anti_quorum_unsupported) {
-						snapFailed = true;
-						break;
-					}
 					TraceEvent("SnapCreateError").error(e);
 					++retry;
 					// snap v2 can fail for many reasons, so retry for 5 times and then fail it
@@ -301,8 +247,7 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_snap_not_fully_recovered_unsupported ||
-					    e.code() == error_code_snap_log_anti_quorum_unsupported) {
+					if (e.code() == error_code_snap_not_fully_recovered_unsupported) {
 						snapFailed = true;
 						break;
 					}

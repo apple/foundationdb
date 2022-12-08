@@ -2623,14 +2623,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
-	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
-	// possibly due to running the rocksdb in single thread in simulation.
-	// Re-enable the backup and restore related simulation tests when the tests are passing again.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
-	}
-
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
 	// in the build.
 	if (!rocksDBEnabled) {

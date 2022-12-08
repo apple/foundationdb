@@ -25,6 +25,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbclient/VersionedMap.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -262,9 +263,20 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	}
 
 	void verifyServerKeyDest(MoveKeysParams& params) const {
+		KeyRangeRef keys;
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			ASSERT(params.ranges.present());
+			// TODO: make startMoveShards work with multiple ranges.
+			ASSERT(params.ranges.get().size() == 1);
+			keys = params.ranges.get().at(0);
+		} else {
+			ASSERT(params.keys.present());
+			keys = params.keys.get();
+		}
+
 		// check destination servers
 		for (auto& id : params.destinationTeam) {
-			ASSERT(mgs->serverIsDestForShard(id, params.keys));
+			ASSERT(mgs->serverIsDestForShard(id, keys));
 		}
 	}
 	ACTOR static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {
@@ -292,7 +304,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				self->verifyServerKeyDest(params);
 				// test finish or started but cancelled movement
 				if (self->testStartOnly || deterministicRandom()->coinflip()) {
-					CODE_PROBE(true, "RawMovementApi partial started", probe::decoration::rare);
+					CODE_PROBE(true, "RawMovementApi partial started");
 					break;
 				}
 
@@ -332,18 +344,33 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		KeyRange keys = self->getRandomKeys();
 		std::vector<UID> destTeam = self->getRandomTeam();
 		std::sort(destTeam.begin(), destTeam.end());
-		return MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-			                   keys,
-			                   destTeam,
-			                   destTeam,
-			                   lock,
-			                   Promise<Void>(),
-			                   nullptr,
-			                   nullptr,
-			                   false,
-			                   UID(),
-			                   self->ddContext.ddEnabledState.get(),
-			                   CancelConflictingDataMoves::True };
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			                      std::vector<KeyRange>{ keys },
+			                      destTeam,
+			                      destTeam,
+			                      lock,
+			                      Promise<Void>(),
+			                      nullptr,
+			                      nullptr,
+			                      false,
+			                      UID(),
+			                      self->ddContext.ddEnabledState.get(),
+			                      CancelConflictingDataMoves::True);
+		} else {
+			return MoveKeysParams(deterministicRandom()->randomUniqueID(),
+			                      keys,
+			                      destTeam,
+			                      destTeam,
+			                      lock,
+			                      Promise<Void>(),
+			                      nullptr,
+			                      nullptr,
+			                      false,
+			                      UID(),
+			                      self->ddContext.ddEnabledState.get(),
+			                      CancelConflictingDataMoves::True);
+		}
 	}
 
 	ACTOR static Future<Void> testMoveKeys(IDDTxnProcessorApiWorkload* self) {

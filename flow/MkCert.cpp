@@ -301,11 +301,10 @@ StringRef concatCertChain(Arena& arena, CertChainRef chain) {
 	return StringRef(buf, len);
 }
 
-CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, CertAndKeyRef rootAuthority) {
+CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, Optional<CertAndKeyRef> rootAuthority) {
 	ASSERT_GT(specs.size(), 0);
 	// if rootAuthority is empty, use last element in specs to make root CA
-	auto const needRootCA = rootAuthority.empty();
-	if (needRootCA) {
+	if (!rootAuthority.present()) {
 		int const chainLength = specs.size();
 		auto chain = new (arena) CertAndKeyRef[chainLength];
 		auto caNative = makeCertNative(specs.back(), CertAndKeyNative{} /* empty issuer == self-signed */);
@@ -319,8 +318,8 @@ CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, CertAndKe
 	} else {
 		int const chainLength = specs.size() + 1; /* account for deep-copied rootAuthority */
 		auto chain = new (arena) CertAndKeyRef[chainLength];
-		auto caNative = CertAndKeyNative::fromPem(rootAuthority);
-		chain[chainLength - 1] = rootAuthority.deepCopy(arena);
+		auto caNative = CertAndKeyNative::fromPem(rootAuthority.get());
+		chain[chainLength - 1] = rootAuthority.get().deepCopy(arena);
 		for (auto i = chainLength - 2; i >= 0; i--) {
 			auto cnkNative = makeCertNative(specs[i], caNative);
 			chain[i] = cnkNative.toPem(arena);

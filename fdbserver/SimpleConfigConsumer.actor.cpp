@@ -111,6 +111,8 @@ class SimpleConfigConsumerImpl {
 				if (e.code() == error_code_version_already_compacted) {
 					CODE_PROBE(true, "SimpleConfigConsumer get version_already_compacted error");
 					wait(getSnapshotAndChanges(self, broadcaster));
+				} else if (e.code() == error_code_broken_promise) {
+					CODE_PROBE(true, "SimpleConfigConsumer::fetchChanges retrying on broken promise");
 				} else {
 					throw e;
 				}
