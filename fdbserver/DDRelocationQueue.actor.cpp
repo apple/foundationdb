@@ -947,7 +947,10 @@ struct DDQueue : public IDDRelocationQueue {
 
 	// This function cannot handle relocation requests which split a shard into three pieces
 	void queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFrom) {
-		//TraceEvent("QueueRelocationBegin").detail("Begin", rd.keys.begin).detail("End", rd.keys.end);
+		DebugRelocationTraceEvent("QueueRelocationBegin", distributorId)
+		    .detail("Begin", rs.keys.begin)
+		    .detail("End", rs.keys.end)
+		    .detail("TraceId", rs.traceId);
 
 		// remove all items from both queues that are fully contained in the new relocation (i.e. will be overwritten)
 		RelocateData rd(rs);
@@ -1002,7 +1005,12 @@ struct DDQueue : public IDDRelocationQueue {
 				    .detail("Event", "QueuedRelocationCancelled")
 				    .detail("DataMoveID", rrs.dataMoveId)
 				    .detail("RandomID", rrs.randomId)
-				    .detail("Total", queuedRelocations);
+				    .detail("Total", queuedRelocations)
+				    .detail("ActiveFetching", foundActiveFetching)
+				    .detail("ActiveRelocation", foundActiveRelocation)
+				    .detail("FetchingQueue", fetchingSourcesQueue.size())
+				    .detail("FirstQueue", firstQueue->size());
+
 				finishRelocation(rrs.priority, rrs.healthPriority);
 			}
 		}
@@ -1049,6 +1057,11 @@ struct DDQueue : public IDDRelocationQueue {
 				getSourceActors.insert(
 				    rrs.keys, getSourceServersForRange(this, rrs, fetchSourceServersComplete, fetchSourceLock));
 			} else {
+				DebugRelocationTraceEvent("ReplaceInterval", distributorId)
+				    .detail("RandomId", rrs.randomId)
+				    .detail("Begin", rrs.keys.begin)
+				    .detail("End", rrs.keys.end);
+
 				RelocateData newData(rrs);
 				newData.keys = affectedQueuedItems[r];
 				// NOTE: why startTime could be -1? Answer: It's coming from the very first range ["", \xff)
@@ -1091,12 +1104,6 @@ struct DDQueue : public IDDRelocationQueue {
 				// We update the keys of a relocation even if it is "dead" since it helps validate()
 				rrs.keys = affectedQueuedItems[r];
 				rrs.interval = newData.interval;
-
-				DebugRelocationTraceEvent("ReplaceInterval", distributorId)
-				    .detail("RandomId", rrs.randomId)
-				    .detail("Begin", rrs.keys.begin)
-				    .detail("End", rrs.keys.end);
-
 			}
 		}
 
@@ -1105,6 +1112,7 @@ struct DDQueue : public IDDRelocationQueue {
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
+		    .detail("FetchingSourceQueue", fetchingSourcesQueue.size())
 		    .detail("AffectedRanges", affectedQueuedItems.size());
 	}
 
