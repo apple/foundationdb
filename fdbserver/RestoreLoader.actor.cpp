@@ -296,7 +296,9 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
-				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
+				when(wait(error)) {
+					TraceEvent("FastRestoreLoaderActorCollectionError", self->id());
+				}
 			}
 		} catch (Error& e) {
 			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise

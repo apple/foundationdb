@@ -26,7 +26,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//#define SevAtomicOpDebug SevInfo
+// #define SevAtomicOpDebug SevInfo
 #define SevAtomicOpDebug SevVerbose
 
 struct AtomicOpsWorkload : TestWorkload {

@@ -675,7 +675,9 @@ Future<Void> testIgnore(UnitTestParameters params) {
 	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 1 }));
 	choose {
 		when(wait(delay(5))) {}
-		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) { ASSERT(false); }
+		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) {
+			ASSERT(false);
+		}
 	}
 	return Void();
 }

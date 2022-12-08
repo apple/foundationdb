@@ -39,7 +39,7 @@ typedef long long int64_t;
 
 #if defined(WIN32) || defined(__WINS__) || defined(__MINGW32__) || defined(_MSC_VER)
 #define inline __inline
-//#define snprintf _snprintf
+// #define snprintf _snprintf
 #define usleep(x) Sleep(((x) + 999) / 1000)
 
 #define HAS_FIBERS 1
@@ -145,7 +145,7 @@ as errors in my dev settings */
 extern "C" {
 #endif
 
-//#define IO_CHECK_ALLOC ENABLED(NOT_IN_CLEAN)
+// #define IO_CHECK_ALLOC ENABLED(NOT_IN_CLEAN)
 
 #ifdef IO_CHECK_ALLOC
 BASEKIT_API size_t io_memsize(void* ptr);

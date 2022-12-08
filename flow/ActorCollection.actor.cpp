@@ -61,7 +61,9 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 			}
 			tag_streamHelper.erase(t);
 		}
-		when(Error e = waitNext(errors.getFuture())) { throw e; }
+		when(Error e = waitNext(errors.getFuture())) {
+			throw e;
+		}
 	}
 }
 

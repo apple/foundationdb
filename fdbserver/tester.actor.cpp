@@ -1792,7 +1792,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) { return Void(); }
+		when(wait(tests)) {
+			return Void();
+		}
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();

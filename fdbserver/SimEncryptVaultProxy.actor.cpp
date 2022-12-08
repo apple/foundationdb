@@ -146,8 +146,12 @@ TEST_CASE("fdbserver/SimEncryptVaultProxy") {
 	state uint32_t maxEncryptKeys = 64;
 
 	loop choose {
-		when(wait(simEncryptVaultProxyCore(inf, maxEncryptKeys))) { throw internal_error(); }
-		when(wait(testRunWorkload(inf, maxEncryptKeys))) { break; }
+		when(wait(simEncryptVaultProxyCore(inf, maxEncryptKeys))) {
+			throw internal_error();
+		}
+		when(wait(testRunWorkload(inf, maxEncryptKeys))) {
+			break;
+		}
 	}
 	return Void();
 }

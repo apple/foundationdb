@@ -47,7 +47,7 @@ FDB_DEFINE_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_DEFINE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 
 #define SevFRTestInfo SevVerbose
-//#define SevFRTestInfo SevInfo
+// #define SevFRTestInfo SevInfo
 
 static std::string boolToYesOrNo(bool val) {
 	return val ? std::string("Yes") : std::string("No");

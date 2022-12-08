@@ -58,7 +58,9 @@ ACTOR Future<Void> timeoutWarningCollector(FutureStream<Void> input, double logD
 	state uint64_t counter = 0;
 	state Future<Void> end = delay(logDelay);
 	loop choose {
-		when(waitNext(input)) { counter++; }
+		when(waitNext(input)) {
+			counter++;
+		}
 		when(wait(end)) {
 			if (counter)
 				TraceEvent(SevWarn, context, id).detail("LateProcessCount", counter).detail("LoggingDelay", logDelay);
@@ -79,8 +81,12 @@ ACTOR Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int requi
 	}
 
 	choose {
-		when(wait(quorum(true_futures, required))) { return true; }
-		when(wait(quorum(false_futures, futures.size() - required + 1))) { return false; }
+		when(wait(quorum(true_futures, required))) {
+			return true;
+		}
+		when(wait(quorum(false_futures, futures.size() - required + 1))) {
+			return false;
+		}
 	}
 }
 
@@ -103,7 +109,9 @@ ACTOR Future<bool> shortCircuitAny(std::vector<Future<bool>> f) {
 			}
 			return false;
 		}
-		when(wait(waitForAny(sc))) { return true; }
+		when(wait(waitForAny(sc))) {
+			return true;
+		}
 	}
 }
 

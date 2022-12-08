@@ -210,8 +210,12 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
 					break;
 				}
-				when(wait(candidacies)) { ASSERT(false); }
-				when(wait(asyncPriorityInfo->onChange())) { break; }
+				when(wait(candidacies)) {
+					ASSERT(false);
+				}
+				when(wait(asyncPriorityInfo->onChange())) {
+					break;
+				}
 			}
 		}
 
