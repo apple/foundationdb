@@ -74,7 +74,9 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 			}
 			return Void();
 		}
-		when(wait(switchedState)) { return Void(); }
+		when(wait(switchedState)) {
+			return Void();
+		}
 	}
 }
 
@@ -919,8 +921,12 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
-		when(wait(waitCommitProxyFailure)) { throw worker_removed(); }
-		when(wait(waitGrvProxyFailure)) { throw worker_removed(); }
+		when(wait(waitCommitProxyFailure)) {
+			throw worker_removed();
+		}
+		when(wait(waitGrvProxyFailure)) {
+			throw worker_removed();
+		}
 	}
 }
 
@@ -1579,8 +1585,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 				break;
 			}
 			when(wait(oldLogSystems->onChange())) {}
-			when(wait(reg)) { throw internal_error(); }
-			when(wait(recoverAndEndEpoch)) { throw internal_error(); }
+			when(wait(reg)) {
+				throw internal_error();
+			}
+			when(wait(recoverAndEndEpoch)) {
+				throw internal_error();
+			}
 		}
 	}
 
