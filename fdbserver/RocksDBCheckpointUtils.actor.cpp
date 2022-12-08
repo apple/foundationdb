@@ -156,12 +156,29 @@ public:
 			this->iterator = std::unique_ptr<rocksdb::Iterator>(reader->db->NewIterator(getReadOptions(), reader->cf));
 		}
 
+		RocksDBCheckpointIterator(RocksDBCheckpointReader* reader, const KeyRange& range)
+		  : reader(reader), range(range) {
+			ASSERT(reader != nullptr);
+			ASSERT(reader->db != nullptr);
+			ASSERT(reader->cf != nullptr);
+			beginSlice = toSlice(this->range.begin);
+			endSlice = toSlice(this->range.end);
+			rocksdb::ReadOptions options = getReadOptions();
+			options.iterate_lower_bound = &beginSlice;
+			options.iterate_upper_bound = &endSlice;
+			this->iterator = std::unique_ptr<rocksdb::Iterator>(reader->db->NewIterator(options, reader->cf));
+		}
+
 		Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) override;
 
 		rocksdb::Iterator* getIterator() { return iterator.get(); }
 
+		const rocksdb::Slice& end() const { return this->endSlice; }
+
 	private:
 		RocksDBCheckpointReader* const reader;
+		const KeyRange range;
+		rocksdb::Slice beginSlice, endSlice;
 		std::unique_ptr<rocksdb::Iterator> iterator;
 	};
 
@@ -200,13 +217,13 @@ private:
 		};
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
-			ReadRangeAction(int rowLimit, int byteLimit, rocksdb::Iterator* iterator)
+			ReadRangeAction(int rowLimit, int byteLimit, RocksDBCheckpointIterator* iterator)
 			  : rowLimit(rowLimit), byteLimit(byteLimit), iterator(iterator), startTime(timer_monotonic()) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 
 			const int rowLimit, byteLimit;
-			rocksdb::Iterator* const iterator;
+			RocksDBCheckpointIterator* const iterator;
 			const double startTime;
 			ThreadReturnPromise<RangeResult> result;
 		};
@@ -230,13 +247,11 @@ private:
 
 		DB& db;
 		CF& cf;
-		Key begin;
-		Key end;
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
 		double readRangeTimeout;
 	};
 
-	Future<RangeResult> nextBatch(const int rowLimit, const int byteLimit, rocksdb::Iterator* iterator);
+	Future<RangeResult> nextBatch(const int rowLimit, const int byteLimit, RocksDBCheckpointIterator* iterator);
 
 	ACTOR static Future<Void> doClose(RocksDBCheckpointReader* self);
 
@@ -252,7 +267,7 @@ private:
 
 Future<RangeResult> RocksDBCheckpointReader::RocksDBCheckpointIterator::nextBatch(const int rowLimit,
                                                                                   const int ByteLimit) {
-	return this->reader->nextBatch(rowLimit, ByteLimit, this->iterator.get());
+	return this->reader->nextBatch(rowLimit, ByteLimit, this);
 }
 
 RocksDBCheckpointReader::RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID)
@@ -289,7 +304,7 @@ Future<Void> RocksDBCheckpointReader::init(StringRef token) {
 
 Future<RangeResult> RocksDBCheckpointReader::nextBatch(const int rowLimit,
                                                        const int byteLimit,
-                                                       rocksdb::Iterator* iterator) {
+                                                       RocksDBCheckpointIterator* iterator) {
 	auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit, iterator);
 	auto res = a->result.getFuture();
 	threads->post(a.release());
@@ -372,13 +387,14 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Re
 	// For now, only forward scan is supported.
 	ASSERT(a.rowLimit > 0);
 
+	rocksdb::Iterator* iter = a.iterator->getIterator();
 	int accumulatedBytes = 0;
 	rocksdb::Status s;
-	while (a.iterator->Valid() && toStringRef(a.iterator->key()) < end) {
-		KeyValueRef kv(toStringRef(a.iterator->key()), toStringRef(a.iterator->value()));
+	while (iter->Valid() && iter->key().compare(a.iterator->end()) < 0) {
+		KeyValueRef kv(toStringRef(iter->key()), toStringRef(iter->value()));
 		accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 		result.push_back_deep(result.arena(), kv);
-		a.iterator->Next();
+		iter->Next();
 		if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 			break;
 		}
@@ -392,7 +408,7 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Re
 		}
 	}
 
-	s = a.iterator->status();
+	s = iter->status();
 
 	if (!s.ok()) {
 		logRocksDBError(s, "ReadRange");
