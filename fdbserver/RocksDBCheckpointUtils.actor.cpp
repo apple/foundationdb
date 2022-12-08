@@ -147,15 +147,6 @@ class RocksDBCheckpointReader : public ICheckpointReader {
 public:
 	class RocksDBCheckpointIterator : public ICheckpointIterator {
 	public:
-		RocksDBCheckpointIterator(RocksDBCheckpointReader* reader)
-		  //   : reader(reader), iterator(reader->db->NewIterator(getReadOptions(), reader->cf)) {}
-		  : reader(reader) {
-			ASSERT(reader != nullptr);
-			ASSERT(reader->db != nullptr);
-			ASSERT(reader->cf != nullptr);
-			this->iterator = std::unique_ptr<rocksdb::Iterator>(reader->db->NewIterator(getReadOptions(), reader->cf));
-		}
-
 		RocksDBCheckpointIterator(RocksDBCheckpointReader* reader, const KeyRange& range)
 		  : reader(reader), range(range) {
 			ASSERT(reader != nullptr);
@@ -166,6 +157,11 @@ public:
 			rocksdb::ReadOptions options = getReadOptions();
 			options.iterate_lower_bound = &beginSlice;
 			options.iterate_upper_bound = &endSlice;
+			options.fill_cache = false; // Optimized for bulk scan.
+			options.readahead_size = SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_READ_AHEAD_SIZE;
+			const uint64_t deadlineMicros =
+			    reader->db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_TIMEOUT * 1000000;
+			options.deadline = std::chrono::microseconds(deadlineMicros);
 			this->iterator = std::unique_ptr<rocksdb::Iterator>(reader->db->NewIterator(options, reader->cf));
 		}
 
@@ -178,7 +174,8 @@ public:
 	private:
 		RocksDBCheckpointReader* const reader;
 		const KeyRange range;
-		rocksdb::Slice beginSlice, endSlice;
+		rocksdb::Slice beginSlice;
+		rocksdb::Slice endSlice;
 		std::unique_ptr<rocksdb::Iterator> iterator;
 	};
 
@@ -272,15 +269,6 @@ Future<RangeResult> RocksDBCheckpointReader::RocksDBCheckpointIterator::nextBatc
 
 RocksDBCheckpointReader::RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID)
   : id(logID), checkpoint(checkpoint) {
-	// CheckpointFormat format = checkpoint.getFormat();
-	// if (format == RocksDB) {
-	// 	RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
-	// 	this->path = rocksCheckpoint.checkpointDir;
-	// } else if (format == DataMoveRocksCF) {
-	// 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-	// 	ASSERT(!rocksCF.sstFiles.empty());
-	// 	this->path = rocksCF.sstFiles.front().db_path + "reader";
-	// }
 	if (g_network->isSimulated()) {
 		threads = CoroThreadPool::createThreadPool();
 	} else {
@@ -312,18 +300,10 @@ Future<RangeResult> RocksDBCheckpointReader::nextBatch(const int rowLimit,
 }
 
 std::unique_ptr<ICheckpointIterator> RocksDBCheckpointReader::getIterator(KeyRange range) {
-	return std::unique_ptr<ICheckpointIterator>(new RocksDBCheckpointIterator(this));
+	return std::unique_ptr<ICheckpointIterator>(new RocksDBCheckpointIterator(this, range));
 }
 
-RocksDBCheckpointReader::Reader::Reader(DB& db, CF& cf) : db(db), cf(cf) {
-	if (g_network->isSimulated()) {
-		// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
-		// very high load and single read thread cannot process all the load within the timeouts.
-		readRangeTimeout = 5 * 60;
-	} else {
-		readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
-	}
-}
+RocksDBCheckpointReader::Reader::Reader(DB& db, CF& cf) : db(db), cf(cf) {}
 
 void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::OpenAction& a) {
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderInitBegin").detail("Checkpoint", a.checkpoint.toString());
@@ -365,18 +345,8 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Cl
 }
 
 void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::ReadRangeAction& a) {
-	TraceEvent(SevDebug, "RocksDBCheckpointReaderReadRange");
+	TraceEvent(SevDebug, "RocksDBCheckpointReaderReadRangeBegin");
 	ASSERT(a.iterator != nullptr);
-	const double readBeginTime = timer_monotonic();
-
-	if (readBeginTime - a.startTime > readRangeTimeout) {
-		TraceEvent(SevWarn, "RocksDBCheckpointReaderError")
-		    .detail("Error", "Read range request timedout")
-		    .detail("Method", "ReadRangeAction")
-		    .detail("Timeout value", readRangeTimeout);
-		a.result.sendError(timed_out());
-		return;
-	}
 
 	RangeResult result;
 	if (a.rowLimit == 0 || a.byteLimit == 0) {
@@ -397,14 +367,6 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Re
 		iter->Next();
 		if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 			break;
-		}
-		if (timer_monotonic() - a.startTime > readRangeTimeout) {
-			TraceEvent(SevWarn, "RocksDBCheckpointReaderError")
-			    .detail("Error", "Read range request timedout")
-			    .detail("Method", "ReadRangeAction")
-			    .detail("Timeout value", readRangeTimeout);
-			a.result.sendError(transaction_too_old());
-			return;
 		}
 	}
 

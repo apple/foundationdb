@@ -3518,7 +3518,6 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 }
 
 TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
-	// state std::string cwd = platform::getWorkingDirectory() + "/";
 	state std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 	state IKeyValueStore* kvStore =
@@ -3543,7 +3542,6 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 
 	CheckpointRequest request(latestVersion,
 	                          { KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("h"_sr, "k"_sr) },
-
 	                          DataMoveRocksCF,
 	                          deterministicRandom()->randomUniqueID(),
 	                          checkpointDir);
