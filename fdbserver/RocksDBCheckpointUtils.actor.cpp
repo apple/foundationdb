@@ -822,6 +822,10 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			loop {
 				FetchCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
 				for (int i = 0; i < rep.data.size(); ++i) {
+					TraceEvent(SevDebug, "FetchCheckpointRangeKeyValue")
+					    .detail("LocalFile", localFile)
+					    .detail("Key", rep.data[i].key)
+					    .detail("Value", rep.data[i].value);
 					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
 					if (!status.ok()) {
 						Error e = statusToError(status);

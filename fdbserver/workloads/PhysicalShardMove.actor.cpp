@@ -272,6 +272,27 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			}
 		}
 
+		state std::string kvPath = pwd + "/checkpointsKv";
+		platform::eraseDirectoryRecursive(kvPath);
+		ASSERT(platform::createDirectory(kvPath));
+		state std::vector<CheckpointMetaData> fetchedKvCheckpoints;
+		for (i = 0; i < records.size(); ++i) {
+			loop {
+				TraceEvent(SevDebug, "TestFetchingKvCheckpoint").detail("Checkpoint", records[i].toString());
+				try {
+					CheckpointMetaData record = wait(fetchCheckpointRanges(cx, records[i], folder, records[i].ranges));
+					fetchedKvCheckpoints.push_back(record);
+					TraceEvent(SevDebug, "TestKvCheckpointFetched").detail("Checkpoint", record.toString());
+					break;
+				} catch (Error& e) {
+					TraceEvent(SevWarn, "TestFetchKvCheckpointError")
+					    .errorUnsuppressed(e)
+					    .detail("Checkpoint", records[i].toString());
+					wait(delay(1));
+				}
+			}
+		}
+
 		// Restore KVS.
 		state std::string rocksDBTestDir = "rocksdb-kvstore-test-restored-db";
 		platform::eraseDirectoryRecursive(rocksDBTestDir);

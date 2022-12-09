@@ -9073,6 +9073,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
                                                                     double timeout) {
 	state std::vector<Future<std::vector<CheckpointMetaData>>> futures;
 
+	// TODO(heliu): Avoid send requests to the same shard.
 	for (const auto& range : ranges) {
 		futures.push_back(getCheckpointMetaDataForRange(cx, range, version, format, actionId, timeout));
 	}
