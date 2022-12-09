@@ -1674,7 +1674,7 @@ int Arguments::validate() {
 }
 
 bool Arguments::isAuthorizationEnabled() const noexcept {
-	return enable_token_based_authorization && active_tenants > 0 && tls_ca_file.has_value() &&
+	return mode != MODE_CLEAN && enable_token_based_authorization && active_tenants > 0 && tls_ca_file.has_value() &&
 	       private_key_pem.has_value();
 }
 
