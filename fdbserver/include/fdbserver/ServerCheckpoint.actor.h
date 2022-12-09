@@ -58,6 +58,8 @@ public:
 
 	virtual std::unique_ptr<ICheckpointIterator> getIterator(KeyRange range) { throw not_implemented(); }
 
+	virtual bool inUse() const { return false; }
+
 protected:
 	virtual ~ICheckpointReader() {}
 };

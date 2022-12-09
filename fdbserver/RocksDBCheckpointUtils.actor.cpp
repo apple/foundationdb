@@ -165,6 +165,8 @@ public:
 			this->iterator = std::unique_ptr<rocksdb::Iterator>(reader->db->NewIterator(options, reader->cf));
 		}
 
+		~RocksDBCheckpointIterator() { this->reader->numIter--; }
+
 		Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) override;
 
 		rocksdb::Iterator* getIterator() { return iterator.get(); }
@@ -192,6 +194,8 @@ public:
 	Future<Void> close() override { return doClose(this); }
 
 	std::unique_ptr<ICheckpointIterator> getIterator(KeyRange range) override;
+
+	bool inUse() const override { return this->numIter > 0; }
 
 private:
 	struct Reader : IThreadPoolReceiver {
@@ -260,6 +264,7 @@ private:
 	CheckpointMetaData checkpoint;
 	Reference<IThreadPool> threads;
 	Future<Void> openFuture;
+	int numIter;
 };
 
 Future<RangeResult> RocksDBCheckpointReader::RocksDBCheckpointIterator::nextBatch(const int rowLimit,
@@ -268,7 +273,7 @@ Future<RangeResult> RocksDBCheckpointReader::RocksDBCheckpointIterator::nextBatc
 }
 
 RocksDBCheckpointReader::RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID)
-  : id(logID), checkpoint(checkpoint) {
+  : id(logID), checkpoint(checkpoint), numIter(0) {
 	if (g_network->isSimulated()) {
 		threads = CoroThreadPool::createThreadPool();
 	} else {
@@ -300,6 +305,7 @@ Future<RangeResult> RocksDBCheckpointReader::nextBatch(const int rowLimit,
 }
 
 std::unique_ptr<ICheckpointIterator> RocksDBCheckpointReader::getIterator(KeyRange range) {
+	++this->numIter;
 	return std::unique_ptr<ICheckpointIterator>(new RocksDBCheckpointIterator(this, range));
 }
 
@@ -742,13 +748,15 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
                                         std::shared_ptr<rocksdb::SstFileWriter> writer,
                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                         int maxRetries = 3) {
-	state std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
-	RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
+	state std::string localFile =
+	    dir + "/" + UID(metaData->checkpointID.first(), deterministicRandom()->randomUInt64()).toString() + ".sst";
+	RocksDBCheckpointKeyValues rkv = getRocksKeyValuesCheckpoint(*metaData);
 	TraceEvent("FetchCheckpointRange")
 	    .detail("InitialState", metaData->toString())
-	    .detail("RocksCheckpoint", rcp.toString());
+	    .detail("RocksCheckpointKeyValues", rkv.toString())
+	    .detail("FilePath", localFile);
 
-	for (const auto& file : rcp.fetchedFiles) {
+	for (const auto& file : rkv.fetchedFiles) {
 		ASSERT(!file.range.intersects(range));
 	}
 
@@ -933,7 +941,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
 
-	if (metaData->format == DataMoveRocksCF) {
+	if (metaData->getFormat() == DataMoveRocksCF) {
 		state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
 		TraceEvent(SevDebug, "RocksDBCheckpointMetaData").detail("RocksCF", rocksCF.toString());
 
@@ -946,11 +954,10 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 			    .detail("Server", describe(metaData->src));
 		}
 		wait(waitForAll(fs));
-	} else if (metaData->format == RocksDB) {
-		std::shared_ptr<rocksdb::SstFileWriter> writer =
-		    std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options());
-		wait(fetchCheckpointRange(cx, metaData, metaData->ranges.front(), dir, writer, cFun));
-	} else if (metaData->format == RocksDB) {
+	} else if (metaData->getFormat() == RocksDBKeyValues) {
+		wait(fetchCheckpointRanges(cx, metaData, dir, cFun));
+	} else if (metaData->getFormat() == RocksDB) {
+		throw not_implemented();
 	}
 
 	return *metaData;
