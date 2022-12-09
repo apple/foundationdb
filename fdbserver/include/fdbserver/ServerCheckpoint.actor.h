@@ -49,7 +49,7 @@ public:
 	virtual Future<Void> init(StringRef token) = 0;
 
 	// Scans the checkpoint, and returns the key-value pairs.
-	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit, const UID& token) = 0;
+	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
 
 	// Returns the next chunk of the serialized checkpoint.
 	virtual Future<Standalone<StringRef>> nextChunk(const int ByteLimit) = 0;
@@ -79,7 +79,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  std::string dir,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
-// Same as above, except that the checkpoint is fetched as key-value pairs. 
+// Same as above, except that the checkpoint is fetched as key-value pairs.
 ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
     Database cx,
     CheckpointMetaData initialState,

@@ -58,6 +58,7 @@ const KeyRef persistVersion = "\xff\xffVersion"_sr;
 const KeyRef readerInitialized = "\xff\xff/ReaderInitialized"_sr;
 const std::string checkpointCf = "RocksDBCheckpoint";
 const std::string checkpointReaderSubDir = "/reader";
+const std::string rocksDefaultCf = "default";
 
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
@@ -186,9 +187,7 @@ public:
 
 	Future<Void> init(StringRef token) override;
 
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit, const UID& token) override {
-		throw not_implemented();
-	}
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
 
 	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override { throw not_implemented(); }
 
@@ -396,7 +395,7 @@ rocksdb::Status RocksDBCheckpointReader::Reader::tryOpenForRead(const std::strin
 	std::vector<std::string> columnFamilies;
 	const rocksdb::Options options = getOptions();
 	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
-	if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end() ||
+	if (std::find(columnFamilies.begin(), columnFamilies.end(), rocksDefaultCf) == columnFamilies.end() ||
 	    std::find(columnFamilies.begin(), columnFamilies.end(), checkpointCf) == columnFamilies.end()) {
 		return rocksdb::Status::Aborted();
 	}
@@ -450,8 +449,8 @@ rocksdb::Status RocksDBCheckpointReader::Reader::importCheckpoint(const std::str
 	std::vector<std::string> columnFamilies;
 	const rocksdb::Options options = getOptions();
 	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
-	if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
-		columnFamilies.push_back("default");
+	if (std::find(columnFamilies.begin(), columnFamilies.end(), rocksDefaultCf) == columnFamilies.end()) {
+		columnFamilies.push_back(rocksDefaultCf);
 	}
 
 	const rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
@@ -510,7 +509,7 @@ rocksdb::Status RocksDBCheckpointReader::Reader::closeInternal(const std::string
 	if (deleteOnClose) {
 		rocksdb::ColumnFamilyOptions options;
 		std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-		descriptors.emplace_back("default", options);
+		descriptors.emplace_back(rocksDefaultCf, options);
 		descriptors.emplace_back(checkpointCf, options);
 		s = rocksdb::DestroyDB(path, getOptions(), descriptors);
 		if (!s.ok()) {
@@ -556,9 +555,7 @@ public:
 
 	Future<Void> init(StringRef token) override;
 
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit, const UID& token) override {
-		throw not_implemented();
-	}
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
 
 	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override;
 
