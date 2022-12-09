@@ -158,7 +158,7 @@ public:
 			options.iterate_lower_bound = &beginSlice;
 			options.iterate_upper_bound = &endSlice;
 			options.fill_cache = false; // Optimized for bulk scan.
-			options.readahead_size = SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_READ_AHEAD_SIZE;
+			options.readahead_size = SERVER_KNOBS->ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE;
 			const uint64_t deadlineMicros =
 			    reader->db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_TIMEOUT * 1000000;
 			options.deadline = std::chrono::microseconds(deadlineMicros);

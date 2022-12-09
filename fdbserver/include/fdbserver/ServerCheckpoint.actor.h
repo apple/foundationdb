@@ -79,6 +79,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  std::string dir,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
+// Same as above, except that the checkpoint is fetched as key-value pairs. 
 ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
     Database cx,
     CheckpointMetaData initialState,

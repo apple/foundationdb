@@ -560,39 +560,6 @@ struct PhysicalShard {
 		return status;
 	}
 
-	// rocksdb::Status restoreKvs(const std::vector<CheckpointMetaData>& checkpoints) {
-	// 	std::vector<std::string> sstFiles;
-	// 	for (const auto& checkpoint : a.checkpoints) {
-	// 		const RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
-	// 		for (const auto& file : rocksCheckpoint.fetchedFiles) {
-	// 			TraceEvent("RocksDBRestoreFile", id)
-	// 			    .detail("Checkpoint", rocksCheckpoint.toString())
-	// 			    .detail("File", file.toString());
-	// 			sstFiles.push_back(file.path);
-	// 		}
-	// 	}
-
-	// 	if (!sstFiles.empty()) {
-	// 		rocksdb::IngestExternalFileOptions ingestOptions;
-	// 		ingestOptions.move_files = true;
-	// 		ingestOptions.write_global_seqno = false;
-	// 		ingestOptions.verify_checksums_before_ingest = true;
-	// 		status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
-	// 		if (!status.ok()) {
-	// 			logRocksDBError(id, status, "IngestExternalFile", SevWarnAlways);
-	// 			a.done.sendError(statusToError(status));
-	// 			return;
-	// 		}
-	// 	} else {
-	// 		TraceEvent(SevDebug, "RocksDBServeRestoreEmptyRange", id)
-	// 		    .detail("Path", a.path)
-	// 		    .detail("Checkpoint", describe(a.checkpoints));
-	// 	}
-	// 	TraceEvent("RocksDBServeRestoreEnd", id).detail("Path", a.path).detail("Checkpoint", describe(a.checkpoints));
-	// 	a.done.send(Void());
-	// 	return status;
-	// }
-
 	bool initialized() { return this->isInitialized.load(); }
 
 	void refreshReadIteratorPool() {
@@ -2240,16 +2207,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			              const std::string& path,
 			              const std::string& shardId,
 			              const std::vector<KeyRange>& ranges,
-			              const std::vector<CheckpointMetaData>& checkpoints,
-			              CheckpointAsKeyValues checkpointAsKeyValues)
-			  : shardManager(shardManager), path(path), shardId(shardId), ranges(ranges), checkpoints(checkpoints),
-			    checkpointAsKeyValues(checkpointAsKeyValues) {}
-			RestoreAction(ShardManager* shardManager,
-			              const std::string& path,
-			              const std::string& shardId,
-			              const std::vector<KeyRange>& ranges,
 			              const std::vector<CheckpointMetaData>& checkpoints)
-			  : RestoreAction(shardManager, path, shardId, ranges, checkpoints, CheckpointAsKeyValues::False) {}
+			  : shardManager(shardManager), path(path), shardId(shardId), ranges(ranges), checkpoints(checkpoints) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
@@ -2258,7 +2217,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			const std::string shardId;
 			std::vector<KeyRange> ranges;
 			std::vector<CheckpointMetaData> checkpoints;
-			const CheckpointAsKeyValues checkpointAsKeyValues;
 			ThreadReturnPromise<Void> done;
 		};
 
@@ -2281,7 +2239,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::Status status;
 			rocksdb::WriteBatch writeBatch;
-			if (format == DataMoveRocksCF && !a.checkpointAsKeyValues) {
+			if (format == DataMoveRocksCF) {
 				CheckpointMetaData& checkpoint = a.checkpoints.front();
 				std::sort(a.ranges.begin(), a.ranges.end(), KeyRangeRef::ArbitraryOrder());
 				std::sort(checkpoint.ranges.begin(), checkpoint.ranges.end(), KeyRangeRef::ArbitraryOrder());
@@ -2337,7 +2295,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
 					}
 				}
-			} else if (format == DataMoveRocksCF && a.checkpointAsKeyValues) {
+			} else if (format == RocksDBKeyValues) {
+				a.done.sendError(not_implemented());
+				return;
 			} else if (format == RocksDB) {
 				a.done.sendError(not_implemented());
 				return;

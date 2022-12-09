@@ -80,6 +80,9 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 	state CheckpointMetaData result;
 	const CheckpointFormat format = initialState.getFormat();
 	if (format != RocksDBKeyValues) {
+		if (format != DataMoveRocksCF) {
+			throw not_implemented();
+		}
 		initialState.setFormat(RocksDBKeyValues);
 		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion());
 	}

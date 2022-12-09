@@ -2578,17 +2578,19 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	TraceEvent(SevDebug, "RocksDBCreatedCheckpoint");
-	state Standalone<StringRef> token = BinaryWriter::toValue(KeyRangeRef("foo"_sr, "foobar"_sr), IncludeVersion());
+	state KeyRange testRange = KeyRangeRef("foo"_sr, "foobar"_sr);
+	state Standalone<StringRef> token = BinaryWriter::toValue(testRange, IncludeVersion());
 	state ICheckpointReader* cpReader =
 	    newCheckpointReader(metaData, CheckpointAsKeyValues::True, deterministicRandom()->randomUniqueID());
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderCreated");
 	ASSERT(cpReader != nullptr);
 	wait(cpReader->init(token));
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderInited");
+	state std::unique_ptr<ICheckpointIterator> iter = cpReader->getIterator(testRange);
 	loop {
 		try {
 			state RangeResult res =
-			    wait(cpReader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT, UID()));
+			    wait(iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			state int i = 0;
 			for (; i < res.size(); ++i) {
 				Optional<Value> val = wait(kvStore->readValue(res[i].key));
@@ -2603,6 +2605,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 		}
 	}
 
+	iter.reset();
 	std::vector<Future<Void>> closes;
 	closes.push_back(cpReader->close());
 	closes.push_back(kvStore->onClosed());
