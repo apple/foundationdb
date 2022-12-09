@@ -170,6 +170,63 @@ public:
 		return present() ? ErrorOr<R>(f(std::move(*this).get())) : ErrorOr<R>(getError());
 	}
 
+	// Converts an ErrorOr<T> to an ErrorOr<R> of one of its value's members
+	//
+	// v.map(&T::member) is equivalent to v.map<R>([](T t) { return t.member; })
+	template <class R, class Rp = std::remove_const_t<R>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
+		return present() ? ErrorOr<Rp>(get().*member) : ErrorOr<Rp>(getError());
+	}
+
+	// Converts an ErrorOr<T> to an ErrorOr<R> of a value returned by a member function of T
+	//
+	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
+	// v.map<R>([](T t) { return t.memberFunc(arg1, arg2, ...); })
+	template <class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	    Args&&... args) const& {
+		return present() ? ErrorOr<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : ErrorOr<Rp>(getError());
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an ErrorOr<T>
+	// to an ErrorOr<R> of one its value's members. If the value is present and false-like (null), then
+	// returns a default constructed ErrorOr<R>.
+	//
+	// v.mapRef(&P::member) is equivalent to ErrorOr<R>(v.get()->member) if v is present and non-null
+	template <class P, class R, class Rp = std::remove_const_t<R>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R P::*member) const& {
+
+		if (!present()) {
+			return ErrorOr<Rp>(getError());
+		} else if (!get()) {
+			return ErrorOr<Rp>();
+		}
+
+		P& p = *get();
+		return p.*member;
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an ErrorOr<T>
+	// to an ErrorOr<R> of a value returned by a member function of P. If the optional value is present and false-like
+	// (null), then returns a default constructed ErrorOr<R>.
+	//
+	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to ErrorOr<R>(v.get()->memberFunc(arg1, arg2, ...)) if v is
+	// present and non-null
+	template <class P, class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
+	                                                                                 Args&&... args) const& {
+		if (!present()) {
+			return ErrorOr<Rp>(getError());
+		} else if (!get()) {
+			return ErrorOr<Rp>();
+		}
+
+		P& p = *get();
+		return (p.*memberFunc)(std::forward<Args>(args)...);
+	}
+
 	bool present() const { return std::holds_alternative<T>(value); }
 	T& get() & {
 		UNSTOPPABLE_ASSERT(present());

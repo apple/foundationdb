@@ -542,3 +542,83 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 TEST_CASE("noSim/noopTest") {
 	return Void();
 }
+
+struct TestErrorOrMapClass : ReferenceCounted<TestErrorOrMapClass> {
+	StringRef value;
+	const StringRef constValue;
+	StringRef getValue() const { return value; }
+	StringRef const& getValueRef() const { return value; }
+	StringRef sub(int x) const { return value.substr(x); }
+
+	TestErrorOrMapClass(StringRef value) : value(value), constValue(value) {}
+};
+
+template <bool IsRef, class T>
+void checkErrorOr(ErrorOr<T> val) {
+	StringRef value;
+	bool isError = !val.present();
+	Error expectedError = isError ? val.getError() : success();
+	ErrorOr<StringRef> v1, v2, v3, v4, v5;
+
+	if constexpr (IsRef) {
+		if (!isError && !val.get()) {
+			isError = true;
+			expectedError = default_error_or();
+		}
+		if (!isError) {
+			value = val.get()->value;
+		}
+		v1 = val.mapRef(&TestErrorOrMapClass::value);
+		v2 = val.mapRef(&TestErrorOrMapClass::constValue);
+		v3 = val.mapRef(&TestErrorOrMapClass::getValue);
+		v4 = val.mapRef(&TestErrorOrMapClass::getValueRef);
+		v5 = val.mapRef(&TestErrorOrMapClass::sub, 5);
+	} else {
+		if (!isError) {
+			value = val.get().value;
+		}
+		v1 = val.map(&TestErrorOrMapClass::value);
+		v2 = val.map(&TestErrorOrMapClass::constValue);
+		v3 = val.map(&TestErrorOrMapClass::getValue);
+		v4 = val.map(&TestErrorOrMapClass::getValueRef);
+		v5 = val.map(&TestErrorOrMapClass::sub, 5);
+	}
+
+	if (isError) {
+		ASSERT(!v1.present() && v1.getError().code() == expectedError.code());
+		ASSERT(!v2.present() && v2.getError().code() == expectedError.code());
+		ASSERT(!v3.present() && v3.getError().code() == expectedError.code());
+		ASSERT(!v4.present() && v4.getError().code() == expectedError.code());
+		ASSERT(!v5.present() && v5.getError().code() == expectedError.code());
+	} else {
+		ASSERT(v1.present() && v1.get() == value);
+		ASSERT(v2.present() && v2.get() == value);
+		ASSERT(v3.present() && v3.get() == value);
+		ASSERT(v4.present() && v4.get() == value);
+		ASSERT(v5.present() && v5.get() == value.substr(5));
+	}
+}
+
+TEST_CASE("/flow/ErrorOr/Map") {
+	// ErrorOr<T>
+	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>());
+	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>(transaction_too_old()));
+	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>("test_string"_sr));
+
+	// ErrorOr<Reference<T>>
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>());
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(Reference<TestErrorOrMapClass>()));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(transaction_too_old()));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(makeReference<TestErrorOrMapClass>("test_string"_sr)));
+
+	// ErrorOr<T*>
+	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>());
+	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>(nullptr));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(transaction_too_old()));
+
+	auto ptr = new TestErrorOrMapClass("test_string"_sr);
+	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>(ptr));
+	delete ptr;
+
+	return Void();
+}

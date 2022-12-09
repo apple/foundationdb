@@ -262,6 +262,58 @@ public:
 		return present() ? Optional<R>(f(std::move(*this).get())) : Optional<R>();
 	}
 
+	// Converts an Optional<T> to an Optional<R> of one of its value's members
+	//
+	// v.map(&T::member) is equivalent to v.map<R>([](T v) { return v.member; })
+	template <class R, class Rp = std::remove_const_t<R>>
+	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
+		return present() ? Optional<Rp>(get().*member) : Optional<Rp>();
+	}
+
+	// Converts an Optional<T> to an Optional<R> of a value returned by a member function of T
+	//
+	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
+	// v.map<R>([](T v) { return v.memberFunc(arg1, arg2, ...); })
+	template <class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
+	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	    Args&&... args) const& {
+		return present() ? Optional<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : Optional<Rp>();
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an Optional<T>
+	// to an Optional<R> of one its value's members. If the optional value is present and false-like (null), then
+	// returns an empty Optional<R>.
+	//
+	// v.mapRef(&P::member) is equivalent to Optional<R>(v.get()->member) if v is present and non-null
+	template <class P, class R, class Rp = std::remove_const_t<R>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::*member) const& {
+
+		if (!present() || !get()) {
+			return Optional<Rp>();
+		}
+
+		P& p = *get();
+		return p.*member;
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an Optional<T>
+	// to an Optional<R> of a value returned by a member function of P. If the optional value is present and false-like
+	// (null), then returns an empty Optional<R>.
+	//
+	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to Optional<R>(v.get()->memberFunc(arg1, arg2, ...)) if v is
+	// present and non-null
+	template <class P, class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
+	                                                                                  Args&&... args) const& {
+		if (!present() || !get()) {
+			return Optional<Rp>();
+		}
+		P& p = *get();
+		return (p.*memberFunc)(std::forward<Args>(args)...);
+	}
+
 	bool present() const { return impl.has_value(); }
 	T& get() & {
 		UNSTOPPABLE_ASSERT(impl.has_value());
