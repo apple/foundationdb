@@ -230,6 +230,27 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_set_callback(FDBFuture* f,
                                                                  FDBCallback callback,
                                                                  void* callback_parameter);
 
+#if FDB_API_VERSION >= 720
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         fdb_bool_t begin_or_equal,
+                                                                         int begin_offset,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         fdb_bool_t end_or_equal,
+                                                                         int end_offset,
+                                                                         uint8_t const* mapper_name,
+                                                                         int mapper_name_length,
+                                                                         int limit,
+                                                                         int target_bytes,
+                                                                         FDBStreamingMode mode,
+                                                                         int iteration,
+                                                                         int matchIndex,
+                                                                         fdb_bool_t snapshot,
+                                                                         fdb_bool_t reverse);
+#endif
+
 #if FDB_API_VERSION >= 23
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_error(FDBFuture* f);
 #endif
@@ -466,25 +487,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range(FDBTransaction
                                                                   fdb_bool_t reverse);
 #endif
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
-                                                                         uint8_t const* begin_key_name,
-                                                                         int begin_key_name_length,
-                                                                         fdb_bool_t begin_or_equal,
-                                                                         int begin_offset,
-                                                                         uint8_t const* end_key_name,
-                                                                         int end_key_name_length,
-                                                                         fdb_bool_t end_or_equal,
-                                                                         int end_offset,
-                                                                         uint8_t const* mapper_name,
-                                                                         int mapper_name_length,
-                                                                         int limit,
-                                                                         int target_bytes,
-                                                                         FDBStreamingMode mode,
-                                                                         int iteration,
-                                                                         int matchIndex,
-                                                                         fdb_bool_t snapshot,
-                                                                         fdb_bool_t reverse);
-
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
                                    int key_name_length,
@@ -589,6 +591,26 @@ DLLEXPORT int fdb_get_max_api_version(void);
 DLLEXPORT const char* fdb_get_client_version(void);
 
 /* LEGACY API VERSIONS */
+
+#if FDB_API_VERSION < 720
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         fdb_bool_t begin_or_equal,
+                                                                         int begin_offset,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         fdb_bool_t end_or_equal,
+                                                                         int end_offset,
+                                                                         uint8_t const* mapper_name,
+                                                                         int mapper_name_length,
+                                                                         int limit,
+                                                                         int target_bytes,
+                                                                         FDBStreamingMode mode,
+                                                                         int iteration,
+                                                                         fdb_bool_t snapshot,
+                                                                         fdb_bool_t reverse);
+#endif
 
 #if FDB_API_VERSION < 620
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_version(FDBFuture* f, int64_t* out_version);
