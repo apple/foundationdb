@@ -1810,6 +1810,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
 			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
+	} else {
+		metricsLogger = runMetrics();
 	}
 
 	errorForwarders.add(resetAfter(degraded,

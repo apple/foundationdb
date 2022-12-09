@@ -3048,7 +3048,7 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 
 static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRef>>& keyRanges) {
 	bool err = false, partial = false;
-	int tokenArray = 0;
+	[[maybe_unused]] int tokenArray = 0;
 
 	auto parsed = parseLine(optionValue, err, partial);
 
