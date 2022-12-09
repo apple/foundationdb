@@ -1182,7 +1182,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	choose {
 		when(wait(waitForAll(leaderServers))) {}
-		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+		when(wait(delay(5.0))) {
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+		}
 	}
 	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
 	    .detail("CurrentCoordinators", old.toString())
@@ -1284,7 +1286,9 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				                                           TaskPriority::CoordinationReply));
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
-				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+				when(wait(delay(5.0))) {
+					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+				}
 			}
 
 			tr.set(coordinatorsKey, newClusterConnectionString.toString());

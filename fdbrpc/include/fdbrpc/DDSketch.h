@@ -170,6 +170,7 @@ public:
 
 	T min() const { return minValue; }
 	T max() const { return maxValue; }
+	T getSum() const { return sum; }
 
 	void clear() {
 		std::fill(buckets.begin(), buckets.end(), 0);
@@ -184,6 +185,8 @@ public:
 	double getErrorGuarantee() const { return errorGuarantee; }
 
 	size_t getBucketSize() const { return buckets.size(); }
+
+	std::vector<uint32_t> getSamples() const { return buckets; }
 
 	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
 		// Must have the same guarantee
@@ -205,7 +208,7 @@ protected:
 	double errorGuarantee; // As defined in the paper
 
 	uint64_t populationSize, zeroPopulationSize; // we need to separately count 0s
-	std::vector<uint64_t> buckets;
+	std::vector<uint32_t> buckets;
 	T minValue, maxValue, sum;
 	void setBucketSize(size_t capacity) { buckets.resize(capacity, 0); }
 };
@@ -214,7 +217,7 @@ protected:
 template <class T>
 class DDSketch : public DDSketchBase<DDSketch<T>, T> {
 public:
-	explicit DDSketch(double errorGuarantee = 0.01)
+	explicit DDSketch(double errorGuarantee = 0.005)
 	  : DDSketchBase<DDSketch<T>, T>(errorGuarantee), gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)),
 	    multiplier(fastLogger::correctingFactor * log(2) / log(gamma)) {
 		ASSERT(errorGuarantee > 0);
@@ -228,7 +231,10 @@ public:
 		return ceil(fastLogger::fastlog(sample) * multiplier) + offset;
 	}
 
-	T getValue(size_t index) { return fastLogger::reverseLog((index - offset) / multiplier) * 2.0 / (1 + gamma); }
+	T getValue(size_t index) {
+		return fastLogger::reverseLog((static_cast<double>(index) - static_cast<double>(offset)) / multiplier) * 2.0 /
+		       (1 + gamma);
+	}
 
 private:
 	double gamma, multiplier;
@@ -248,7 +254,9 @@ public:
 
 	size_t getIndex(T sample) { return ceil(log(sample) / logGamma) + offset; }
 
-	T getValue(size_t index) { return (T)(2.0 * pow(gamma, (index - offset)) / (1 + gamma)); }
+	T getValue(size_t index) {
+		return (T)(2.0 * pow(gamma, (static_cast<double>(index) - static_cast<double>(offset))) / (1 + gamma));
+	}
 
 private:
 	double gamma, logGamma;
@@ -292,35 +300,3 @@ private:
 };
 
 #endif
-
-TEST_CASE("/fdbrpc/ddsketch/accuracy") {
-
-	int TRY = 100, SIZE = 1e6;
-	const int totalPercentiles = 7;
-	double targetPercentiles[totalPercentiles] = { .0001, .01, .1, .50, .90, .99, .9999 };
-	double stat[totalPercentiles] = { 0 };
-	for (int t = 0; t < TRY; t++) {
-		DDSketch<double> dd;
-		std::vector<double> nums;
-		for (int i = 0; i < SIZE; i++) {
-			static double a = 1, b = 1; // a skewed distribution
-			auto y = deterministicRandom()->random01();
-			auto num = b / pow(1 - y, 1 / a);
-			nums.push_back(num);
-			dd.addSample(num);
-		}
-		std::sort(nums.begin(), nums.end());
-		for (int percentID = 0; percentID < totalPercentiles; percentID++) {
-			double percentile = targetPercentiles[percentID];
-			double ground = nums[percentile * (SIZE - 1)], ddvalue = dd.percentile(percentile);
-			double relativeError = fabs(ground - ddvalue) / ground;
-			stat[percentID] += relativeError;
-		}
-	}
-
-	for (int percentID = 0; percentID < totalPercentiles; percentID++) {
-		printf("%.4lf per, relative error %.4lf\n", targetPercentiles[percentID], stat[percentID] / TRY);
-	}
-
-	return Void();
-}
