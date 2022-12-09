@@ -368,7 +368,7 @@ struct ConnectPacket {
 	uint16_t flags;
 	uint8_t canonicalRemoteIp6[16];
 
-	ConnectPacket() { memset(this, 0, sizeof(*this)); }
+	ConnectPacket() { memset((void*)this, 0, sizeof(*this)); }
 
 	IPAddress canonicalRemoteIp() const {
 		if (isIPv6()) {
