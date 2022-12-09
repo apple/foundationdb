@@ -152,8 +152,8 @@ public:
 			ASSERT(reader != nullptr);
 			ASSERT(reader->db != nullptr);
 			ASSERT(reader->cf != nullptr);
-			beginSlice = toSlice(this->range.begin);
-			endSlice = toSlice(this->range.end);
+			this->beginSlice = toSlice(this->range.begin);
+			this->endSlice = toSlice(this->range.end);
 			rocksdb::ReadOptions options = getReadOptions();
 			options.iterate_lower_bound = &beginSlice;
 			options.iterate_upper_bound = &endSlice;
@@ -163,6 +163,7 @@ public:
 			    reader->db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_TIMEOUT * 1000000;
 			options.deadline = std::chrono::microseconds(deadlineMicros);
 			this->iterator = std::unique_ptr<rocksdb::Iterator>(reader->db->NewIterator(options, reader->cf));
+			iterator->Seek(this->beginSlice);
 		}
 
 		~RocksDBCheckpointIterator() { this->reader->numIter--; }

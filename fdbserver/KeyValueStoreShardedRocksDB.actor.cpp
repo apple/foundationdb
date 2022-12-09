@@ -3519,6 +3519,16 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 
 TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	state std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
+	state std::map<Key, Value> kvs({ { "a"_sr, "TestValueA"_sr },
+	                                 { "ab"_sr, "TestValueAB"_sr },
+	                                 { "ad"_sr, "TestValueAD"_sr },
+	                                 { "b"_sr, "TestValueB"_sr },
+	                                 { "ba"_sr, "TestValueBA"_sr },
+	                                 { "c"_sr, "TestValueC"_sr },
+	                                 { "d"_sr, "TestValueD"_sr },
+	                                 { "e"_sr, "TestValueE"_sr },
+	                                 { "h"_sr, "TestValueH"_sr },
+	                                 { "ha"_sr, "TestValueHA"_sr } });
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 	state IKeyValueStore* kvStore =
 	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
@@ -3532,9 +3542,9 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), true);
 	wait(waitForAll(addRangeFutures) && kvStore->commit(false));
 
-	kvStore->set(KeyValueRef("a1"_sr, "foo"_sr));
-	kvStore->set(KeyValueRef("d1"_sr, "bar"_sr));
-	kvStore->set(KeyValueRef("h1"_sr, "2000"_sr));
+	for (const auto& [k, v] : kvs) {
+		kvStore->set(KeyValueRef(k, v));
+	}
 	wait(kvStore->commit(false));
 
 	state std::string checkpointDir = "checkpoint";
@@ -3552,28 +3562,45 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	    newCheckpointReader(metaData, CheckpointAsKeyValues::True, deterministicRandom()->randomUniqueID());
 	ASSERT(cpReader != nullptr);
 	wait(cpReader->init(token));
-	state std::unique_ptr<ICheckpointIterator> iter = cpReader->getIterator(KeyRangeRef("a"_sr, "k"_sr));
-	loop {
-		try {
-			state RangeResult res =
-			    wait(iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
-			ASSERT(res.size() == 2);
-			ASSERT(res[0].key == "a1"_sr);
-			ASSERT(res[0].value == "foo"_sr);
-			ASSERT(res[1].key == "h1"_sr);
-			ASSERT(res[1].value == "2000"_sr);
-		} catch (Error& e) {
-			if (e.code() == error_code_end_of_stream) {
-				break;
-			} else {
-				TraceEvent(SevError, "TestFailed").error(e);
+	state KeyRange testRange(KeyRangeRef("ab"_sr, "b"_sr));
+	state std::unique_ptr<ICheckpointIterator> iter0 = cpReader->getIterator(testRange);
+	state int numKeys = 0;
+	try {
+		loop {
+			RangeResult res = wait(iter0->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			for (const auto& kv : res) {
+				ASSERT(testRange.contains(kv.key));
+				ASSERT(kvs[kv.key] == kv.value);
+				++numKeys;
 			}
 		}
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_end_of_stream);
+		ASSERT(numKeys == 2);
 	}
 
+	testRange = KeyRangeRef("a"_sr, "k"_sr);
+	state std::unique_ptr<ICheckpointIterator> iter1 = cpReader->getIterator(testRange);
+	try {
+		numKeys = 0;
+		loop {
+			RangeResult res = wait(iter1->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			for (const auto& kv : res) {
+				ASSERT(testRange.contains(kv.key));
+				ASSERT(kvs[kv.key] == kv.value);
+				++numKeys;
+			}
+		}
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_end_of_stream);
+		ASSERT(numKeys == 7);
+	}
+
+	iter0.reset();
+	iter1.reset();
+	ASSERT(!cpReader->inUse());
 	TraceEvent(SevDebug, "ShardedRocksCheckpointReaaderTested");
 	std::vector<Future<Void>> closes;
-	iter.reset();
 	closes.push_back(cpReader->close());
 	closes.push_back(kvStore->onClosed());
 	kvStore->dispose();
