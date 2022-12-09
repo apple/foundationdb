@@ -169,7 +169,6 @@ typedef struct mappedkeyvalue {
 	 * take the shortcut. */
 	FDBGetRangeReqAndResult getRange;
 	unsigned char buffer[32];
-	fdb_bool_t boundaryAndExist;
 } FDBMappedKeyValue;
 
 #pragma pack(push, 4)
@@ -287,6 +286,9 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_keyvalue_array(FDBResult
 /* TODO: add other return types as we need them */
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
+                                                                                    FDBDatabase** out_database);
 
 DLLEXPORT void fdb_database_destroy(FDBDatabase* d);
 

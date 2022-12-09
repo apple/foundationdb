@@ -452,7 +452,9 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when(wait(self->interf->onChange())) { self->onlySpilled = false; }
+				when(wait(self->interf->onChange())) {
+					self->onlySpilled = false;
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -690,7 +692,7 @@ void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 			c->advanceTo(messageVersion);
 			if (start <= messageVersion && messageVersion < c->version()) {
 				advancedPast = true;
-				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence");
+				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence", probe::decoration::rare);
 			}
 		}
 

@@ -87,7 +87,7 @@ endif()
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -347,6 +347,8 @@ else()
       # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
       # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
       -Wno-unused-command-line-argument
+      # Disable C++ 20 warning for ambiguous operator.
+      -Wno-ambiguous-reversed-operator
       )
     if (USE_CCACHE)
       add_compile_options(

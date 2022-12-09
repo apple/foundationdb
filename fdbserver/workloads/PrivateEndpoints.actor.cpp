@@ -126,7 +126,9 @@ struct PrivateEndpoints : TestWorkload {
 						TraceEvent("PrivateEndpointTestDone").log();
 						return Void();
 					}
-					when(wait(testFuture)) { ++self->numSuccesses; }
+					when(wait(testFuture)) {
+						++self->numSuccesses;
+					}
 				}
 				wait(delay(0.2));
 			}

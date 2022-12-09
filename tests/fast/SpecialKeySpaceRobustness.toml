@@ -1,0 +1,8 @@
+[configuration]
+tenantModes = ['optional', 'required']
+
+[[test]]
+testTitle = 'SpecialKeySpaceRobustnessTest'
+
+    [[test.workload]]
+    testName = 'SpecialKeySpaceRobustness'

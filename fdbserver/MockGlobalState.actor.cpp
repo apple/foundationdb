@@ -97,7 +97,7 @@ public:
 class MockStorageServerImpl {
 public:
 	ACTOR static Future<Void> waitMetricsTenantAware(MockStorageServer* self, WaitMetricsRequest req) {
-		if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
+		if (req.tenantInfo.hasTenant()) {
 			// TODO(xwang) add support for tenant test, search for tenant entry
 			Optional<TenantMapEntry> entry;
 			Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
@@ -193,7 +193,7 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 	auto ranges = serverKeys.intersectingRanges(range);
 
 	if (ranges.empty()) {
-		CODE_PROBE(true, "new shard is adding to server");
+		CODE_PROBE(true, "new shard is adding to server", probe::decoration::rare);
 		serverKeys.insert(range, ShardInfo{ status, 0 });
 		return;
 	}
