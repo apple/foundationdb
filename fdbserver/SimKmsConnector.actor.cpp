@@ -123,6 +123,7 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	for (const auto& item : req.encryptKeyInfos) {
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
+			// TODO: Relax assert if EKP APIs are updated to make 'domain_id' optional for encryption keys point lookups
 			ASSERT(item.domainId.present());
 			rep.cipherKeyDetails.emplace_back_deep(
 			    rep.arena, item.domainId.get(), itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
