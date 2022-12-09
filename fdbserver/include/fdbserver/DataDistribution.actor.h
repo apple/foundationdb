@@ -272,7 +272,7 @@ class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection>
 public:
 	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
 	PhysicalShardCollection(Reference<IDDTxnProcessor> db)
-	  : db(db), lastTransitionStartTime(now()), requireTransition(false) {}
+	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
@@ -440,7 +440,7 @@ private:
 
 	inline bool requireTransitionCheck() { return requireTransition; }
 
-	Reference<IDDTxnProcessor> db;
+	Reference<IDDTxnProcessor> txnProcessor;
 
 	// Core data structures
 	// Physical shard instances indexed by physical shard id
