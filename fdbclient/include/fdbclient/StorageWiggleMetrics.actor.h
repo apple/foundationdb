@@ -153,5 +153,69 @@ Future<Void> resetStorageWiggleMetrics(TrType tr,
 	return Void();
 }
 
+struct StorageWiggleDelay {
+	constexpr static FileIdentifier file_identifier = 102937;
+	double delaySeconds = 0;
+	explicit StorageWiggleDelay(double sec = 0) : delaySeconds(sec) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, delaySeconds);
+	}
+};
+
+ACTOR template <class TrType>
+Future<StorageWiggleDelay> readPerpetualWiggleDelay(TrType tr, PrimaryRegion primary) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	auto f = tr->get(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_DELAY));
+	Optional<Value> v = wait(safeThreadFutureToFuture(f));
+	StorageWiggleDelay delayObj;
+	if (v.present()) {
+		delayObj = BinaryReader::fromStringRef<StorageWiggleDelay>(v.get(), IncludeVersion());
+	}
+	return delayObj;
+}
+
+// Persistent the total delay time to the database, and return accumulated delay time.
+ACTOR template <class TrType>
+Future<double> addPerpetualWiggleDelay(TrType tr, PrimaryRegion primary, double secDelta) {
+	state double totalDelay = 0;
+	loop {
+		tr->reset();
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state StorageWiggleDelay delayObj = wait(readPerpetualWiggleDelay(tr, primary));
+			delayObj.delaySeconds += secDelta;
+			totalDelay = delayObj.delaySeconds;
+			tr->set(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_DELAY),
+			        BinaryWriter::toValue(delayObj, IncludeVersion()));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return totalDelay;
+}
+
+// Persistent the total delay time to the database, and return accumulated delay time.
+ACTOR template <class TrType>
+Future<Void> clearPerpetualWiggleDelay(TrType tr, PrimaryRegion primary) {
+	loop {
+		tr->reset();
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_DELAY));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return Void();
+}
+
 #include "flow/unactorcompiler.h"
 #endif

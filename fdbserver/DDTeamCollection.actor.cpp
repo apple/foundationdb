@@ -1970,8 +1970,24 @@ public:
 		return Void();
 	}
 
-	// Persistent the total delay time to the database.
-	ACTOR static Future<Void> perpetualStorageWiggleDelay(DDTeamCollection* self) { return Void(); }
+	ACTOR static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
+		if (SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY <= 60.0) {
+			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
+			return Void();
+		}
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
+		state double nextDelay = 60.0;
+		while (true) {
+			wait(delay(nextDelay));
+			double totalDelay = wait(addPerpetualWiggleDelay(tr, PrimaryRegion(self->primary), nextDelay));
+			nextDelay = std::min(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY - totalDelay, 60.0);
+
+			if (totalDelay >= SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY) {
+				wait(clearPerpetualWiggleDelay(tr, PrimaryRegion(self->primary)));
+				return Void();
+			}
+		}
+	}
 
 	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
 		state bool takeRest = true;
