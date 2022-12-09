@@ -74,7 +74,7 @@ public:
 
 	// Moves all timers that are scheduled to be executed at or before now to the ready queue.
 	void processReadyTimers(double now) {
-		int numTimers = 0;
+		[[maybe_unused]] int numTimers = 0;
 		while (!timers.empty() && timers.top().at <= now + INetwork::TIME_EPS) {
 			++numTimers;
 			++countTimers;
@@ -86,7 +86,7 @@ public:
 
 	// Moves all tasks scheduled from a different thread to the ready queue.
 	void processThreadReady() {
-		int numReady = 0;
+		[[maybe_unused]] int numReady = 0;
 		while (true) {
 			Optional<std::pair<TaskPriority, Task*>> t = threadReady.pop();
 			if (!t.present())
