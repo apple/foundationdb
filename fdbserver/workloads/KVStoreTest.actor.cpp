@@ -404,7 +404,9 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	try {
 		choose {
 			when(wait(main)) {}
-			when(wait(test.store->getError())) { ASSERT(false); }
+			when(wait(test.store->getError())) {
+				ASSERT(false);
+			}
 		}
 	} catch (Error& e) {
 		err = e;

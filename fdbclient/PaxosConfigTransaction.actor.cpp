@@ -209,8 +209,12 @@ class GetGenerationQuorum {
 			}
 			try {
 				choose {
-					when(ConfigGeneration generation = wait(self->result.getFuture())) { return generation; }
-					when(wait(self->actors.getResult())) { ASSERT(false); }
+					when(ConfigGeneration generation = wait(self->result.getFuture())) {
+						return generation;
+					}
+					when(wait(self->actors.getResult())) {
+						ASSERT(false);
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {

@@ -120,7 +120,9 @@ struct KillRegionWorkload : TestWorkload {
 				wait(success(ManagementAPI::changeConfig(
 				    cx.getReference(), g_simulator->disablePrimary + " repopulate_anti_quorum=1", true)));
 				choose {
-					when(wait(waitForStorageRecovered(self))) { break; }
+					when(wait(waitForStorageRecovered(self))) {
+						break;
+					}
 					when(wait(delay(300.0))) {}
 				}
 			}
