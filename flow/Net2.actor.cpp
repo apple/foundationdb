@@ -1717,7 +1717,7 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 }
 
 void Net2::processThreadReady() {
-	int numReady = 0;
+	[[maybe_unused]] int numReady = 0;
 	while (true) {
 		Optional<OrderedTask> t = threadReady.pop();
 		if (!t.present())

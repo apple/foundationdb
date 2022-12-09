@@ -66,11 +66,8 @@ struct LogRouterData {
 		                                       TaskPriority taskID) {
 			while (!self->version_messages.empty() && self->version_messages.front().first < before) {
 				Version version = self->version_messages.front().first;
-				int64_t messagesErased = 0;
 
 				while (!self->version_messages.empty() && self->version_messages.front().first == version) {
-					++messagesErased;
-
 					self->version_messages.pop_front();
 				}
 
