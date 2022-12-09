@@ -1477,6 +1477,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
+			break;
 		case ARG_EXPORT_PATH:
 			SET_OPT_ARG_IF_PRESENT();
 			if (!optarg) {

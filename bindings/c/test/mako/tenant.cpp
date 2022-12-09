@@ -49,10 +49,6 @@ std::map<std::string, std::string> generateAuthorizationTokenMap(int num_tenants
 		t.tokenId = tokenId;
 		t.tenants = std::vector<std::string>{ tenant_name };
 		m[tenant_name] = authz::jwt::stdtypes::signToken(t, private_key_pem);
-		// FIXME remove below debug code
-		if (i == 0) {
-			fprintf(stderr, "tenant: %s, token: %s\n", tenant_name.c_str(), m[tenant_name].c_str());
-		}
 	}
 	return m;
 }
