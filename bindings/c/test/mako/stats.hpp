@@ -101,7 +101,6 @@ public:
 	ThreadStatistics() noexcept {
 		std::fill(ops.begin(), ops.end(), 0);
 		std::fill(errors.begin(), errors.end(), 0);
-		std::fill(timeouts.begin(), timeouts.end(), 0);
 		std::fill(latency_samples.begin(), latency_samples.end(), 0);
 		std::fill(latency_us_total.begin(), latency_us_total.end(), 0);
 		sketches.resize(MAX_OP);
