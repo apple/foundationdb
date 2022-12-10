@@ -280,7 +280,7 @@ ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageSer
 
 	try {
 		// Check the size of the shard on each storage server
-		for (int i = 0; i < storageServers.size(); i++) {
+		for (size_t i = 0; i < storageServers.size(); i++) {
 			resetReply(req);
 			metricFutures.push_back(storageServers[i].waitMetrics.getReplyUnlessFailedFor(req, 2, 0));
 		}
@@ -291,7 +291,7 @@ ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageSer
 		int firstValidStorageServer = -1;
 
 		// Retrieve the size from the storage server responses
-		for (int i = 0; i < storageServers.size(); i++) {
+		for (size_t i = 0; i < storageServers.size(); i++) {
 			ErrorOr<StorageMetrics> reply = metricFutures[i].get();
 
 			// If the storage server doesn't reply, then return -1
@@ -404,7 +404,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 
 	state std::vector<KeyRangeRef> ranges;
 
-	for (int k = 0; k < keyLocations.size() - 1; k++) {
+	for (size_t k = 0; k < keyLocations.size() - 1; k++) {
 		// TODO: check if this is sufficient
 		if (resume && keyLocations[k].key < progressKey) {
 			TraceEvent("ConsistencyCheck_SkippingRange")
@@ -469,10 +469,10 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 			try {
 				std::vector<Future<Optional<Value>>> serverListEntries;
 				serverListEntries.reserve(storageServers.size());
-				for (int s = 0; s < storageServers.size(); s++)
+				for (size_t s = 0; s < storageServers.size(); s++)
 					serverListEntries.push_back(tr.get(serverListKeyFor(storageServers[s])));
 				state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
-				for (int s = 0; s < serverListValues.size(); s++) {
+				for (size_t s = 0; s < serverListValues.size(); s++) {
 					if (serverListValues[s].present())
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
 					else if (performQuiescentChecks)
@@ -488,8 +488,8 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 
 		// add TSS to end of list, if configured and if not relocating
 		if (!isRelocating && performTSSCheck) {
-			int initialSize = storageServers.size();
-			for (int i = 0; i < initialSize; i++) {
+			size_t initialSize = storageServers.size();
+			for (size_t i = 0; i < initialSize; i++) {
 				auto tssPair = tssMapping.find(storageServers[i]);
 				if (tssPair != tssMapping.end()) {
 					CODE_PROBE(true, "TSS checked in consistency check");
@@ -511,8 +511,8 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 				testFailure("Error fetching storage metrics", performQuiescentChecks, failureIsError);
 
 			// If running a distributed test, storage server size is an accumulation of shard estimates
-			else if (distributed && firstClient)
-				for (int j = 0; j < storageServers.size(); j++)
+			else if (distributed)
+				for (size_t j = 0; j < storageServers.size(); j++)
 					storageServerSizes[storageServers[j]] += std::max(estimatedBytes[j], (int64_t)0);
 		}
 
@@ -857,12 +857,12 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 			// This is only done in a non-distributed consistency check; the distributed check uses shard size
 			// estimates
 			if (!distributed)
-				for (int j = 0; j < storageServers.size(); j++)
+				for (size_t j = 0; j < storageServers.size(); j++)
 					storageServerSizes[storageServers[j]] += shardBytes;
 
 			// If the storage servers' sampled estimate of shard size is different from ours
 			if (performQuiescentChecks) {
-				for (int j = 0; j < estimatedBytes.size(); j++) {
+				for (size_t j = 0; j < estimatedBytes.size(); j++) {
 					if (estimatedBytes[j] >= 0 && estimatedBytes[j] != sampledBytes) {
 						TraceEvent("ConsistencyCheck_IncorrectEstimate")
 						    .detail("EstimatedBytes", estimatedBytes[j])

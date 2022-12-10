@@ -274,7 +274,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 			return;
 		}
 		if (ch != '\n') {
-			line += ch;
+			line += std::to_string(ch);
 			continue;
 		}
 		if (line.empty()) {

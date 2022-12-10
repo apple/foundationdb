@@ -60,7 +60,7 @@ struct VersionedMapHarness {
 TEST_CASE("performance/map/int/VersionedMap") {
 	VersionedMapHarness<int> tree;
 
-	treeBenchmark(tree, *randomInt);
+	treeBenchmark(tree, randomInt);
 
 	return Void();
 }

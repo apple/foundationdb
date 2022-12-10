@@ -414,10 +414,10 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 
 		clearFrequency = deterministicRandom()->random01();
 
-		for (int i = 0; i < Op::OP_COUNT; i++) {
+		for (int& opWeight : opWeights) {
 			int randWeight = deterministicRandom()->randomExp(0, 5);
 			ASSERT(randWeight > 0);
-			opWeights[i] = randWeight;
+			opWeight = randWeight;
 		}
 
 		if (!doStops) {
@@ -432,9 +432,9 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 
 		std::string weightString = "|";
 		totalOpWeight = 0;
-		for (int i = 0; i < Op::OP_COUNT; i++) {
-			totalOpWeight += opWeights[i];
-			weightString += std::to_string(opWeights[i]) + "|";
+		for (int& opWeight : opWeights) {
+			totalOpWeight += opWeight;
+			weightString += std::to_string(opWeight) + "|";
 		}
 
 		TraceEvent("ChangeFeedOperationsInit")
@@ -575,14 +575,14 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 		TraceEvent("ChangeFeedOperationsCheck").detail("FeedCount", self->data.size()).log();
 		fmt::print("Checking {0} feeds\n", self->data.size()); // TODO REMOVE
 		state std::vector<Future<Void>> feedChecks;
-		for (int i = 0; i < self->data.size(); i++) {
-			if (self->data[i]->destroying) {
+		for (const auto& i : self->data) {
+			if (i->destroying) {
 				continue;
 			}
-			if (DEBUG_CF(self->data[i]->key)) {
-				fmt::print("Final check {0}\n", self->data[i]->key.printable());
+			if (DEBUG_CF(i->key)) {
+				fmt::print("Final check {0}\n", i->key.printable());
 			}
-			feedChecks.push_back(self->checkFeed(cx, self, self->data[i]));
+			feedChecks.push_back(self->checkFeed(cx, self, i));
 		}
 		wait(waitForAll(feedChecks));
 		// FIXME: check that all destroyed feeds are actually destroyed?

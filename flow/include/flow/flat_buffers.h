@@ -374,7 +374,7 @@ T interpret_as(const uint8_t* current) {
 struct RelativeOffset {
 	int value;
 };
-static_assert(sizeof(RelativeOffset) == 4, "");
+static_assert(sizeof(RelativeOffset) == 4);
 
 template <class T>
 constexpr bool is_scalar = scalar_traits<T>::value;

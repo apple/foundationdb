@@ -30,17 +30,18 @@
 #include <cstring>
 #include <stdexcept>
 
-static int hexValue(char c) {
-	static char const digits[] = "0123456789ABCDEF";
+static int hexValue(int c) {
+	static const char* digits = "0123456789ABCDEF";
 
 	if (c >= 'a' && c <= 'f')
 		c -= ('a' - 'A');
 
-	int value = std::find(digits, digits + 16, c) - digits;
-	if (value >= 16) {
+	const char* value = strchr(digits, c);
+	if (value == nullptr) {
 		throw std::runtime_error("hexValue");
 	}
-	return value;
+
+	return (int)(value - digits);
 }
 
 // Does not handle "raw" form (e.g. #28C4D1), only escaped text
@@ -131,7 +132,7 @@ FIN:
 }
 
 static std::pair<std::string, std::string> splitPair(std::string const& input, char c) {
-	int p = input.find_first_of(c);
+	size_t p = input.find_first_of(c);
 	if (p == input.npos) {
 		throw std::runtime_error("splitPair");
 	}
@@ -170,10 +171,10 @@ FDBLibTLSVerify::FDBLibTLSVerify(std::string verify_config) : verify_cert(true),
 FDBLibTLSVerify::~FDBLibTLSVerify() {}
 
 void FDBLibTLSVerify::parse_verify(std::string input) {
-	int s = 0;
+	size_t s = 0;
 
 	while (s < input.size()) {
-		int eq = input.find('=', s);
+		size_t eq = input.find('=', s);
 
 		if (eq == input.npos)
 			throw std::runtime_error("parse_verify");
