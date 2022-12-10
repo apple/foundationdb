@@ -31,7 +31,7 @@ template <class T, class S>
 void convertAndAssign(Arena& arena, Optional<T>& to, const std::optional<S>& from) {
 	if constexpr (std::is_same_v<S, std::vector<std::string>>) {
 		static_assert(std::is_same_v<T, VectorRef<StringRef>>,
-					  "Source type std::vector<std::string> must convert to VectorRef<StringRef>");
+		              "Source type std::vector<std::string> must convert to VectorRef<StringRef>");
 		if (from.has_value()) {
 			const auto& value = from.value();
 			if (value.empty()) {
@@ -53,10 +53,11 @@ void convertAndAssign(Arena& arena, Optional<T>& to, const std::optional<S>& fro
 			to = StringRef(value);
 		}
 	} else {
-		static_assert(std::is_same_v<S, T>,
-					  "Source types that aren't std::vector<std::string> or std::string must have the same destination type");
+		static_assert(
+		    std::is_same_v<S, T>,
+		    "Source types that aren't std::vector<std::string> or std::string must have the same destination type");
 		static_assert(std::is_trivially_copy_assignable_v<S>,
-					  "Source types that aren't std::vector<std::string> or std::string must not use heap memory");
+		              "Source types that aren't std::vector<std::string> or std::string must not use heap memory");
 		if (from.has_value()) {
 			to = from.value();
 		}
