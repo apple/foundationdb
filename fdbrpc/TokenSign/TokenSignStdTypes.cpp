@@ -26,11 +26,12 @@
 
 namespace {
 
-// converts std::optional<STANDARD_TYPE> to Optional<FLOW_TYPE>
+// converts std::optional<STANDARD_TYPE(S)> to Optional<FLOW_TYPE(T)>
 template <class T, class S>
 void convertAndAssign(Arena& arena, Optional<T>& to, const std::optional<S>& from) {
 	if constexpr (std::is_same_v<S, std::vector<std::string>>) {
-		static_assert(std::is_same_v<T, VectorRef<StringRef>>);
+		static_assert(std::is_same_v<T, VectorRef<StringRef>>,
+					  "Source type std::vector<std::string> must convert to VectorRef<StringRef>");
 		if (from.has_value()) {
 			const auto& value = from.value();
 			if (value.empty()) {
@@ -45,15 +46,17 @@ void convertAndAssign(Arena& arena, Optional<T>& to, const std::optional<S>& fro
 			}
 		}
 	} else if constexpr (std::is_same_v<S, std::string>) {
-		static_assert(std::is_same_v<T, StringRef>);
+		static_assert(std::is_same_v<T, StringRef>, "Source type std::string must convert to StringRef");
 		if (from.has_value()) {
 			const auto& value = from.value();
 			// no need to deep copy string because we have the underlying memory for the duration of token signing.
 			to = StringRef(value);
 		}
 	} else {
-		static_assert(std::is_same_v<S, T>);
-		static_assert(std::is_trivially_copy_assignable_v<S>);
+		static_assert(std::is_same_v<S, T>,
+					  "Source types that aren't std::vector<std::string> or std::string must have the same destination type");
+		static_assert(std::is_trivially_copy_assignable_v<S>,
+					  "Source types that aren't std::vector<std::string> or std::string must not use heap memory");
 		if (from.has_value()) {
 			to = from.value();
 		}
