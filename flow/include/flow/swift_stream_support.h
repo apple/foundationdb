@@ -24,11 +24,7 @@
 #include "swift.h"
 #include "flow.h"
 #include "unsafe_swift_compat.h"
-
-#if __has_include("SwiftModules/Flow")
-#include "SwiftModules/Flow"
-#endif
-
+#include "SwiftModules/Flow_CheckedContinuation.h"
 #include "pthread.h"
 #include <stdint.h>
 
