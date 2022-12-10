@@ -149,15 +149,11 @@ void vlog_process_msg(Severity severity, const char* process, const char* format
 	if (daemonize) {
 		char buf[4096];
 		int len = vsnprintf(buf, 4096, format, args);
-		syslog(severity_to_priority(severity),
-		       "LogGroup=\"%s\" Process=\"%s\": %.*s",
-		       logGroup.c_str(),
-		       process,
-		       len,
-		       buf);
+		syslog(
+		    severity_to_priority(severity), R"(LogGroup="%s" Process="%s": %.*s)", logGroup.c_str(), process, len, buf);
 	} else {
 		fprintf(stderr,
-		        "Time=\"%.6f\" Severity=\"%d\" LogGroup=\"%s\" Process=\"%s\": ",
+		        R"(Time="%.6f" Severity="%d" LogGroup="%s" Process="%s": )",
 		        get_cur_timestamp(),
 		        (int)severity,
 		        logGroup.c_str(),
@@ -200,11 +196,14 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	const char* ret = nullptr;
 	const char* section = nullptr;
 
-	std::string keyWithUnderscores(key);
-	for (int i = keyWithUnderscores.size() - 1; i >= 0; --i) {
-		if (keyWithUnderscores[i] == '-') {
-			keyWithUnderscores.at(i) = '_';
-		}
+	size_t keylen = strlen(key) + 1;
+	char* keybak = static_cast<char*>(malloc(keylen));
+	for (size_t i = 0; i < keylen; i++) {
+		char keyb = key[i];
+		if (keyb == '-')
+			keybak[i] = '_';
+		else
+			keybak[i] = keyb;
 	}
 
 	va_list ap;
@@ -212,7 +211,7 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	while (!ret && (section = va_arg(ap, const char*))) {
 		ret = ini.GetValue(section, key, nullptr);
 		if (!ret) {
-			ret = ini.GetValue(section, keyWithUnderscores.c_str(), nullptr);
+			ret = ini.GetValue(section, const_cast<const char*>(keybak), nullptr);
 		}
 	}
 	va_end(ap);
@@ -276,9 +275,9 @@ std::string cleanPath(std::string const& path) {
 	std::vector<std::string> finalParts;
 	bool absolute = !path.empty() && path[0] == CANONICAL_PATH_SEPARATOR;
 
-	int i = 0;
+	size_t i = 0;
 	while (i < path.size()) {
-		int sep = path.find((char)CANONICAL_PATH_SEPARATOR, i);
+		size_t sep = path.find((char)CANONICAL_PATH_SEPARATOR, i);
 		if (sep == path.npos) {
 			sep = path.size();
 		}
@@ -304,7 +303,7 @@ std::string cleanPath(std::string const& path) {
 		result.append(1, CANONICAL_PATH_SEPARATOR);
 	}
 
-	for (int i = 0; i < finalParts.size(); ++i) {
+	for (size_t i = 0; i < finalParts.size(); ++i) {
 		if (i != 0) {
 			result.append(1, CANONICAL_PATH_SEPARATOR);
 		}
@@ -316,19 +315,22 @@ std::string cleanPath(std::string const& path) {
 
 // Removes the last component from a path string (if possible) and returns the result with one trailing separator.
 std::string popPath(const std::string& path) {
-	int i = path.size() - 1;
+	size_t i = path.size();
 	// Skip over any trailing separators
-	while (i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
-		--i;
+	while (i > 0) {
+		if (path[--i] != CANONICAL_PATH_SEPARATOR)
+			break;
 	}
 	// Skip over non separators
-	while (i >= 0 && path[i] != CANONICAL_PATH_SEPARATOR) {
-		--i;
+	while (i > 0) {
+		if (path[--i] == CANONICAL_PATH_SEPARATOR)
+			break;
 	}
 	// Skip over trailing separators again
 	bool foundSeparator = false;
-	while (i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
-		--i;
+	while (i > 0) {
+		if (path[--i] != CANONICAL_PATH_SEPARATOR)
+			break;
 		foundSeparator = true;
 	}
 
@@ -565,7 +567,7 @@ public:
 
 		const char* kocc =
 		    get_value_multi(ini, "kill-on-configuration-change", ssection.c_str(), section.c_str(), "general", nullptr);
-		if (kocc && strcmp(kocc, "true")) {
+		if (kocc && strcmp(kocc, "true") != 0) {
 			kill_on_configuration_change = false;
 		}
 
@@ -597,7 +599,7 @@ public:
 
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
-		for (auto i : keys) {
+		for (const auto& i : keys) {
 			// For "memory" option, despite they are handled by fdbmonitor, we still pass it to fdbserver.
 			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
 			    isParameterNameEqual(i.pItem, "initial-restart-delay") ||
@@ -632,14 +634,14 @@ public:
 		}
 
 		argv = new char*[commands.size() + 1];
-		int i = 0;
-		for (auto itr : commands) {
+		size_t i = 0;
+		for (const auto& itr : commands) {
 			argv[i++] = strdup(itr.c_str());
 		}
 		argv[i] = nullptr;
 	}
 	~Command() {
-		for (int i = 0; i < commands.size(); ++i) {
+		for (size_t i = 0; i < commands.size(); ++i) {
 			free(argv[i]);
 		}
 		delete[] argv;
@@ -669,7 +671,7 @@ public:
 			return true;
 
 		for (size_t i = 0; i < commands.size(); i++) {
-			if (commands[i].compare(rhs.commands[i]) != 0)
+			if (commands[i] != rhs.commands[i])
 				return true;
 		}
 
@@ -761,7 +763,7 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 			std::string vars(cmd->delete_envvars);
 			size_t start = 0;
 			do {
-				size_t bound = vars.find(" ", start);
+				size_t bound = vars.find(' ', start);
 				std::string var = vars.substr(start, bound - start);
 				fprintf(stdout, "Deleting parent environment variable: \'%s\'\n", var.c_str());
 				fflush(stdout);
@@ -871,10 +873,10 @@ void print_usage(const char* name) {
 }
 
 bool argv_equal(const char** a1, const char** a2) {
-	int i = 0;
+	size_t i = 0;
 
 	while (a1[i] && a2[i]) {
-		if (strcmp(a1[i], a2[i]))
+		if (strcmp(a1[i], a2[i]) != 0)
 			return false;
 		i++;
 	}
@@ -944,12 +946,12 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		/* Any change to uid or gid requires the process to be restarted to take effect */
 		if (uid != _uid || gid != _gid) {
 			std::vector<ProcessID> kill_ids;
-			for (auto i : id_pid) {
+			for (const auto& i : id_pid) {
 				if (id_command[i.first]->kill_on_configuration_change) {
 					kill_ids.push_back(i.first);
 				}
 			}
-			for (auto i : kill_ids) {
+			for (const auto& i : kill_ids) {
 				kill_process(i);
 				id_command.erase(i);
 			}
@@ -962,7 +964,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 	std::list<ProcessID> kill_ids;
 	std::list<std::pair<ProcessID, Command*>> start_ids;
 
-	for (auto i : id_pid) {
+	for (const auto& i : id_pid) {
 		if (!loadedConf || ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
 			/* Process no longer configured; deconfigure it and kill it if required */
 			log_msg(SevInfo, "Deconfigured %s\n", id_command[i.first]->ssection.c_str());
@@ -995,10 +997,10 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		}
 	}
 
-	for (auto i : kill_ids)
+	for (const auto& i : kill_ids)
 		kill_process(i);
 
-	for (auto i : start_ids) {
+	for (const auto& i : start_ids) {
 		start_process(i.second, i.first, uid, gid, 0, mask);
 	}
 
@@ -1007,10 +1009,10 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 	if (loadedConf) {
 		CSimpleIniA::TNamesDepend sections;
 		ini.GetAllSections(sections);
-		for (auto i : sections) {
+		for (const auto& i : sections) {
 			if (auto dot = strrchr(i.pItem, '.')) {
 				ProcessID id = i.pItem;
-				if (!id_pid.count(id)) {
+				if (!id_pid.contains(id)) {
 					/* Found something we haven't yet started */
 					Command* cmd;
 
@@ -1038,7 +1040,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 void read_child_output(Command* cmd, int pipe_idx, fdb_fd_set fds) {
 	char buf[4096];
 
-	int len = read(cmd->pipes[pipe_idx][0], buf, 4096);
+	ssize_t len = read(cmd->pipes[pipe_idx][0], buf, 4096);
 	if (len == -1) {
 		if (errno != EINTR) {
 			/* We shouldn't get EAGAIN or EWOULDBLOCK
@@ -1053,10 +1055,10 @@ void read_child_output(Command* cmd, int pipe_idx, fdb_fd_set fds) {
 	// pipe_idx == 0 is stdout, pipe_idx == 1 is stderr
 	Severity priority = (pipe_idx == 0) ? SevInfo : SevError;
 
-	int start = 0;
-	for (int i = 0; i < len; i++) {
+	ssize_t start = 0;
+	for (ssize_t i = 0; i < len; i++) {
 		if (buf[i] == '\n') {
-			log_process_msg(priority, cmd->ssection.c_str(), "%.*s", i - start + 1, buf + start);
+			log_process_msg(priority, cmd->ssection.c_str(), "%.*s", (int)(i - start + 1), buf + start);
 			start = i + 1;
 		}
 	}
@@ -1141,7 +1143,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 	if (path.size() < 2)
 		return additional_watch_wds;
 
-	int idx = 1;
+	size_t idx = 1;
 	bool exists = true;
 
 	/* Check each level of the path, setting a watch on any symlinks.
@@ -1151,7 +1153,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 		idx = path.find_first_of('/', idx + 1);
 		std::string subpath = path.substr(0, idx);
 
-		int level = 0;
+		unsigned int level = 0;
 		while (true) {
 			/* Check path existence */
 			int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
@@ -1634,7 +1636,7 @@ int main(int argc, char** argv) {
 				end_time = std::min(i.second->fork_retry_time, end_time);
 			}
 			// If process has a resident memory limit and is currently running
-			if (i.second->memory_rss > 0 && id_pid.count(i.first) > 0) {
+			if (i.second->memory_rss > 0 && id_pid.contains(i.first)) {
 				need_rss_check = true;
 			}
 		}
@@ -1737,7 +1739,7 @@ int main(int argc, char** argv) {
 			last_rss_check = timer();
 			std::vector<ProcessID> oom_ids;
 			for (auto& i : id_command) {
-				if (id_pid.count(i.first) == 0) {
+				if (!id_pid.contains(i.first)) {
 					// process is not running
 					continue;
 				}

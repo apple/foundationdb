@@ -384,19 +384,20 @@ void testSerializationSpeed() {
 	double build = 0, serialize = 0, deserialize = 0, copy = 0, deallocate = 0;
 	double bytes = 0;
 	double testBegin = timer();
-	for (int a = 0; a < 10000; a++) {
+	for (unsigned int a = 0; a < 10000; a++) {
 		{
 			tstart = timer();
 
 			Arena batchArena;
 			VectorRef<CommitTransactionRef> batch;
 			batch.resize(batchArena, 1000);
-			for (int t = 0; t < batch.size(); t++) {
-				CommitTransactionRef& tr = batch[t];
+			for (CommitTransactionRef& tr : batch) {
 				tr.read_snapshot = 0;
-				for (int i = 0; i < 2; i++)
-					tr.mutations.push_back_deep(batchArena,
-					                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
+				// We must do this twice
+				tr.mutations.push_back_deep(batchArena,
+				                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
+				tr.mutations.push_back_deep(batchArena,
+				                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
 				tr.mutations.push_back_deep(batchArena,
 				                            MutationRef(MutationRef::ClearRange, "BeginKey"_sr, "EndKeyAB"_sr));
 			}
@@ -412,19 +413,17 @@ void testSerializationSpeed() {
 
 			serialize += timer() - tstart;
 
-			for (int i = 0; i < 1; i++) {
-				tstart = timer();
-				Arena arena;
-				StringRef data(arena, StringRef((const uint8_t*)wr.getData(), wr.getLength()));
-				copy += timer() - tstart;
+			tstart = timer();
+			Arena arena;
+			StringRef data(arena, StringRef((const uint8_t*)wr.getData(), wr.getLength()));
+			copy += timer() - tstart;
 
-				tstart = timer();
-				ArenaReader rd(arena, data, IncludeVersion());
-				VectorRef<CommitTransactionRef> batch2;
-				rd >> arena >> batch2;
+			tstart = timer();
+			ArenaReader rd(arena, data, IncludeVersion());
+			VectorRef<CommitTransactionRef> batch2;
+			rd >> arena >> batch2;
 
-				deserialize += timer() - tstart;
-			}
+			deserialize += timer() - tstart;
 
 			tstart = timer();
 		}
@@ -444,8 +443,7 @@ void testSerializationSpeed() {
 std::string toHTML(const StringRef& binaryString) {
 	std::string s;
 
-	for (int i = 0; i < binaryString.size(); i++) {
-		uint8_t c = binaryString[i];
+	for (unsigned char c : binaryString) {
 		if (c == '<')
 			s += "&lt;";
 		else if (c == '>')
@@ -479,8 +477,8 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 
 				loop {
 					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
-					for (int r = 0; r < results.size(); r++) {
-						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
+					for (const auto& r : results) {
+						std::string key = toHTML(r.key), value = toHTML(r.value);
 						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
 					}
 					if (results.size() < 1000)
@@ -530,7 +528,7 @@ void parentWatcher(void* parentHandle) {
 #else
 void* parentWatcher(void* arg) {
 	int* parent_pid = (int*)arg;
-	while (1) {
+	while (true) {
 		sleep(1);
 		if (getppid() != *parent_pid)
 			criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
@@ -555,7 +553,7 @@ static void printHelpTeaser(const char* name) {
 static void printOptionUsage(std::string option, std::string description) {
 	static const std::string OPTION_INDENT("  ");
 	static const std::string DESCRIPTION_INDENT("                ");
-	static const int WIDTH = 80;
+	constexpr size_t WIDTH = 80;
 
 	boost::algorithm::trim(option);
 	boost::algorithm::trim(description);
@@ -572,12 +570,12 @@ static void printOptionUsage(std::string option, std::string description) {
 	sstream >> currWord;
 
 	std::string currLine(DESCRIPTION_INDENT + ' ' + currWord);
-	int currLength = currLine.size();
+	size_t currLength = currLine.size();
 
 	while (!sstream.eof()) {
 		sstream >> currWord;
 
-		if (currLength + static_cast<int>(currWord.size()) + 1 > WIDTH) {
+		if (currLength + currWord.size() >= WIDTH) {
 			result += currLine + '\n';
 			currLine = DESCRIPTION_INDENT + ' ' + currWord;
 		} else {
@@ -886,7 +884,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coords;
 	ASSERT(hostnames.size() + coords.size() > 0);
 
-	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
+	for (size_t ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
 		bool autoPublicAddress = StringRef(publicAddressStr).startsWith("auto:"_sr);
 		NetworkAddress currentPublicAddress;
@@ -2057,7 +2055,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			if (expectsPublicAddress) {
-				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
+				for (unsigned int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
 					const NetworkAddress& publicAddress =
 					    ii == 0 ? opts.publicAddresses.address : opts.publicAddresses.secondaryAddress.get();
 					const NetworkAddress& listenAddress =
@@ -2524,15 +2522,15 @@ int main(int argc, char* argv[]) {
 				typeNames.emplace_back(s, i->first);
 			}
 			std::sort(typeNames.begin(), typeNames.end());
-			for (int i = 0; i < typeNames.size(); i++) {
-				const char* n = typeNames[i].second;
+			for (const auto& i : typeNames) {
+				const char* n = i.second;
 				auto& f = allocInstr[n];
 				printf("%+d\t%+d\t%d\t%d\t%s\n",
 				       f.allocCount,
 				       -f.deallocCount,
 				       f.allocCount - f.deallocCount,
 				       f.maxAllocated,
-				       typeNames[i].first.c_str());
+				       i.first.c_str());
 			}
 
 			// We're about to exit and clean up data structures, this will wreak havoc on allocation recording

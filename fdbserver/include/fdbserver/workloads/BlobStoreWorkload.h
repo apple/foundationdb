@@ -34,11 +34,11 @@ inline void updateBackupURL(std::string& backupURL,
 	ASSERT(platform::getEnvironmentVar(accessKeyEnvVar.c_str(), accessKey));
 	ASSERT(platform::getEnvironmentVar(secretKeyEnvVar.c_str(), secretKey));
 	{
-		auto pos = backupURL.find(accessKeyPlaceholder.c_str());
+		auto pos = backupURL.find(accessKeyPlaceholder);
 		backupURL.replace(pos, accessKeyPlaceholder.size(), accessKey);
 	}
 	{
-		auto pos = backupURL.find(secretKeyPlaceholder.c_str());
+		auto pos = backupURL.find(secretKeyPlaceholder);
 		backupURL.replace(pos, secretKeyPlaceholder.size(), secretKey);
 	}
 }

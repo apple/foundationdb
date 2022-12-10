@@ -1487,7 +1487,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		TaskPriority minTaskID = TaskPriority::Max;
-		[[maybe_unused]] int queueSize = taskQueue.getNumReadyTasks();
+		[[maybe_unused]] size_t queueSize = taskQueue.getNumReadyTasks();
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
 		while (taskQueue.hasReadyTask()) {
@@ -2072,7 +2072,7 @@ THREAD_HANDLE startThreadF(F&& func) {
 			THREAD_RETURN;
 		}
 	};
-	Thing* t = new Thing(std::move(func));
+	Thing* t = new Thing(std::forward<F>(func));
 	return g_network->startThread(Thing::start, t);
 }
 

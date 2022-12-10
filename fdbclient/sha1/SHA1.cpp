@@ -71,8 +71,8 @@ std::string SHA1::final() {
 	uint64 total_bits = (transforms * BLOCK_BYTES + buffer.size()) * 8;
 
 	/* Padding */
-	buffer += 0x80;
-	std::string::size_type orig_size = (unsigned int)buffer.size();
+	buffer += (char)0x80;
+	auto orig_size = buffer.size();
 	while (buffer.size() < BLOCK_BYTES) {
 		buffer += (char)0x00;
 	}
@@ -96,8 +96,7 @@ std::string SHA1::final() {
 	std::string result;
 	result.reserve(16);
 
-	for (unsigned int i = 0; i < DIGEST_INTS; i++) {
-		uint32 v = digest[i];
+	for (unsigned int v : digest) {
 		result.append(1, (char)(v >> 24));
 		result.append(1, (char)(v >> 16));
 		result.append(1, (char)(v >> 8));

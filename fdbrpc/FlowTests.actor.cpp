@@ -108,7 +108,8 @@ void onReady(Future<T>&& f, Func&& func, ErrFunc&& errFunc) {
 		else
 			func(f.get());
 	} else
-		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::move(func), std::move(errFunc)));
+		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::forward<Func>(func),
+		                                                                        std::forward<ErrFunc>(errFunc)));
 }
 
 template <class T, class Func, class ErrFunc>
@@ -119,8 +120,8 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 		else
 			func(f.pop());
 	} else
-		f.addCallbackAndClear(
-		    new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::move(func), std::move(errFunc)));
+		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::forward<Func>(func),
+		                                                                              std::forward<ErrFunc>(errFunc)));
 }
 
 ACTOR static void emptyVoidActor() {}
@@ -451,10 +452,10 @@ TEST_CASE("/flow/flow/quorum") {
 	for (auto& p : ps)
 		fs.push_back(p.getFuture());
 
-	for (int i = 0; i <= ps.size(); i++)
+	for (size_t i = 0; i <= ps.size(); i++)
 		qs.push_back(quorum(fs, i));
 
-	for (int i = 0; i < ps.size(); i++) {
+	for (size_t i = 0; i < ps.size(); i++) {
 		ASSERT(qs[i].isReady());
 		ASSERT(!qs[i + 1].isReady());
 		ps[i].send(i);
@@ -705,7 +706,7 @@ TEST_CASE("/flow/flow/yieldedFuture/progress") {
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
-	for (int i = 0; i < 5; i++)
+	for (unsigned int i = 0; i < 5; i++)
 		v.push_back(yieldedFuture(u));
 	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
 
@@ -713,12 +714,12 @@ TEST_CASE("/flow/flow/yieldedFuture/progress") {
 	p.send(Void());
 	ASSERT(u.isReady() && i.isReady() && numReady() == 0);
 
-	for (int i = 0; i < 5; i++) {
+	for (unsigned int i = 0; i < 5; i++) {
 		yn->tick();
 		ASSERT(numReady() == i + 1);
 	}
 
-	for (int i = 0; i < 5; i++) {
+	for (unsigned int i = 0; i < 5; i++) {
 		ASSERT(v[i].getPromiseReferenceCount() == 0 && v[i].getFutureReferenceCount() == 1);
 	}
 
@@ -730,13 +731,13 @@ TEST_CASE("/flow/flow/yieldedFuture/random") {
 
 	auto yn = makeReference<YieldMockNetwork>();
 
-	for (int r = 0; r < 100; r++) {
+	for (unsigned int r = 0; r < 100; r++) {
 		Promise<Void> p;
 		Future<Void> u = p.getFuture();
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
-		for (int i = 0; i < 25; i++)
+		for (unsigned int i = 0; i < 25; i++)
 			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
 			return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); });
@@ -763,8 +764,8 @@ TEST_CASE("/flow/flow/yieldedFuture/random") {
 			ASSERT(numReady() == std::min<int>(expectReady, v.size()));
 		}
 
-		for (int i = 0; i < v.size(); i++) {
-			ASSERT(v[i].getPromiseReferenceCount() == 0 && v[i].getFutureReferenceCount() == 1);
+		for (const auto& i : v) {
+			ASSERT(i.getPromiseReferenceCount() == 0 && i.getFutureReferenceCount() == 1);
 		}
 	}
 
@@ -1114,7 +1115,7 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 		for (int i = 0; i < N; i++) {
 			ps.clear();
 			ps.resize(3);
-			for (int j = 0; j < ps.size(); j++)
+			for (size_t j = 0; j < ps.size(); j++)
 				fs[j] = ps[j].getFuture();
 
 			Future<Void> q = quorum(fs, 2);
