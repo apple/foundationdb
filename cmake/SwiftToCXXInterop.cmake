@@ -10,7 +10,7 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
   if (EXISTS ${SwiftInteropVersionFile})
     file(READ ${SwiftInteropVersionFile} SwiftInteropVersion)
     message(STATUS "Swift: Experimental C++ interop version is ${SwiftInteropVersion}")
-    if (${SwiftInteropVersion} VERSION_LESS 6)
+    if (${SwiftInteropVersion} VERSION_LESS 8)
       message(FATAL_ERROR "Swift: reverse interop support is too old. Update your toolchain.")
     endif()
   else()
