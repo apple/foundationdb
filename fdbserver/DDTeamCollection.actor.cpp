@@ -4034,7 +4034,6 @@ void DDTeamCollection::traceAllInfo(bool shouldPrint) const {
 
 void DDTeamCollection::rebuildMachineLocalityMap() {
 	machineLocalityMap.clear();
-	int numHealthyMachine = 0;
 	for (auto machine = machine_info.begin(); machine != machine_info.end(); ++machine) {
 		if (machine->second->serversOnMachine.empty()) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
@@ -4055,7 +4054,6 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 		}
 		const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->getId());
 		machine->second->localityEntry = localityEntry;
-		++numHealthyMachine;
 	}
 }
 

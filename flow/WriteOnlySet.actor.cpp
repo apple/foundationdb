@@ -25,6 +25,8 @@
 
 #include <chrono>
 #include <random>
+#include <thread>
+
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef ENABLE_SAMPLING
