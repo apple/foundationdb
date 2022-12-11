@@ -921,6 +921,16 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	// free snapshot to reduce memory
 	snapshot = Standalone<GranuleSnapshot>();
 
+	if (serializedSize >= 5 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+		// TODO REMOVE key range from log
+		TraceEvent(SevWarn, "BGSnapshotTooBig", bwData->id)
+		    .suppressFor(60)
+		    .detail("GranuleID", granuleID)
+		    .detail("Granule", keyRange)
+		    .detail("Version", version)
+		    .detail("Size", serializedSize);
+	}
+
 	// write to blob using multi part upload
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
@@ -1405,6 +1415,7 @@ ACTOR Future<BlobFileIndex> reSnapshotNoCheck(Reference<BlobWorkerData> bwData,
 	TraceEvent(SevDebug, "BlobGranuleReSnapshotOldFeed", bwData->id)
 	    .detail("Granule", metadata->keyRange)
 	    .detail("Version", reSnapshotVersion);
+	++bwData->stats.oldFeedSnapshots;
 
 	// wait for file updater to make sure that last delta file is in the metadata before
 	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {

@@ -45,10 +45,12 @@ struct BlobWorkerStats {
 	Counter compressionBytesFinal;
 	Counter fullRejections;
 	Counter forceFlushCleanups;
+	Counter oldFeedSnapshots;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
 	int activeReadRequests;
+	// TODO: add gauge for granules blocking on old snapshots, once this guage is fixed
 	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
 	Version cfVersionLag;
@@ -83,9 +85,9 @@ struct BlobWorkerStats {
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
 	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
 	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc),
-	    forceFlushCleanups("ForceFlushCleanups", cc), numRangesAssigned(0), mutationBytesBuffered(0),
-	    activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0), cfVersionLag(0),
-	    notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
+	    forceFlushCleanups("ForceFlushCleanups", cc), oldFeedSnapshots("OldFeedSnapshots", cc), numRangesAssigned(0),
+	    mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0),
+	    cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
 	    initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
 	    deltaWritesBudget(deltaWritesBudget) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
