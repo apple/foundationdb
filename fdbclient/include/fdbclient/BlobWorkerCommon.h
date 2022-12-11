@@ -63,8 +63,8 @@ struct BlobWorkerStats {
 	LatencySample readLatencySample;
 
 	Reference<FlowLock> initialSnapshotLock;
-	Reference<FlowLock> resnapshotLock;
-	Reference<FlowLock> deltaWritesLock;
+	Reference<FlowLock> resnapshotBudget;
+	Reference<FlowLock> deltaWritesBudget;
 
 	Future<Void> logger;
 
@@ -72,8 +72,8 @@ struct BlobWorkerStats {
 	explicit BlobWorkerStats(UID id,
 	                         double interval,
 	                         Reference<FlowLock> initialSnapshotLock,
-	                         Reference<FlowLock> resnapshotLock,
-	                         Reference<FlowLock> deltaWritesLock,
+	                         Reference<FlowLock> resnapshotBudget,
+	                         Reference<FlowLock> deltaWritesBudget,
 	                         double sampleLoggingInterval,
 	                         double fileOpLatencySketchAccuracy,
 	                         double requestLatencySketchAccuracy)
@@ -102,8 +102,8 @@ struct BlobWorkerStats {
 	    deltaBlobWriteLatencySample("DeltaBlobWriteMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    reSnapshotLatencySample("GranuleResnapshotMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    readLatencySample("GranuleReadLatencyMetrics", id, sampleLoggingInterval, requestLatencySketchAccuracy),
-	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock),
-	    deltaWritesLock(deltaWritesLock) {
+	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
+	    deltaWritesBudget(deltaWritesBudget) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
@@ -115,10 +115,10 @@ struct BlobWorkerStats {
 		specialCounter(cc, "EstimatedMaxResidentMemory", [this]() { return this->estimatedMaxResidentMemory; });
 		specialCounter(cc, "InitialSnapshotsActive", [this]() { return this->initialSnapshotLock->activePermits(); });
 		specialCounter(cc, "InitialSnapshotsWaiting", [this]() { return this->initialSnapshotLock->waiters(); });
-		specialCounter(cc, "ReSnapshotsActive", [this]() { return this->resnapshotLock->activePermits(); });
-		specialCounter(cc, "ReSnapshotsWaiting", [this]() { return this->resnapshotLock->waiters(); });
-		specialCounter(cc, "DeltaFileWritesActive", [this]() { return this->deltaWritesLock->activePermits(); });
-		specialCounter(cc, "DeltaFileWritesWaiting", [this]() { return this->deltaWritesLock->waiters(); });
+		specialCounter(cc, "ReSnapshotBytesActive", [this]() { return this->resnapshotBudget->activePermits(); });
+		specialCounter(cc, "ReSnapshotBytesWaiting", [this]() { return this->resnapshotBudget->waiters(); });
+		specialCounter(cc, "DeltaFileWriteBytesActive", [this]() { return this->deltaWritesBudget->activePermits(); });
+		specialCounter(cc, "DeltaFileWriteBytesWaiting", [this]() { return this->deltaWritesBudget->waiters(); });
 
 		logger = cc.traceCounters("BlobWorkerMetrics", id, interval, "BlobWorkerMetrics");
 	}
