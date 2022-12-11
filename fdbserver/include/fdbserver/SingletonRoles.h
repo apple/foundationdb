@@ -199,3 +199,17 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 		cc.recruitEncryptKeyProxy.set(true);
 	}
 };
+
+struct SingletonRecruitThrottler {
+	double lastRecruitStart;
+
+	SingletonRecruitThrottler() : lastRecruitStart(-1) {}
+
+	double newRecruitment() {
+		double n = now();
+		double waitTime =
+		    std::max(0.0, (lastRecruitStart + SERVER_KNOBS->CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL - n));
+		lastRecruitStart = n;
+		return waitTime;
+	}
+};
