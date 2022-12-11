@@ -3337,6 +3337,20 @@ public:
 
 	Future<Optional<Value>> getPreviousCoordinators();
 	Future<Void> clusterWatchDatabase(DBInfo* db, ServerCoordinators coordinators, Future<Void> recoveredDiskFiles);
+	void checkOutstandingRecruitmentRequests();
+	void checkOutstandingRemoteRecruitmentRequests();
+	void checkOutstandingStorageRequests();
+	void checkOutstandingBlobWorkerRequests();
+
+	// Finds and returns a new process for role
+	WorkerDetails findNewProcessForSingleton(ProcessClass::ClusterRole,
+	                                         std::map<Optional<Standalone<StringRef>>, int>& id_used);
+	// Return best possible fitness for singleton. Note that lower fitness is better.
+	ProcessClass::Fitness findBestFitnessForSingleton(const WorkerDetails&, const ProcessClass::ClusterRole&);
+	void checkBetterSingletons();
+	Future<Void> doCheckOutstandingRequests();
+	Future<Void> doCheckOutstandingRemoteRequests();
+	void checkOutstandingRequests();
 
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>

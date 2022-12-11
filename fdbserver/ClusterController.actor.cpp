@@ -249,6 +249,57 @@ public:
 			}
 		}
 	}
+
+	ACTOR static Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
+		try {
+			wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
+			while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY ||
+			       !self->goodRecruitmentTime.isReady()) {
+				if (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY) {
+					wait(delay(SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY + 0.001 - (now() - self->lastRecruitTime)));
+				}
+				if (!self->goodRecruitmentTime.isReady()) {
+					wait(self->goodRecruitmentTime);
+				}
+			}
+
+			self->checkOutstandingRecruitmentRequests();
+			self->checkOutstandingStorageRequests();
+
+			if (self->db.blobGranulesEnabled.get()) {
+				self->checkOutstandingBlobWorkerRequests();
+			}
+			self->checkBetterSingletons();
+
+			self->checkRecoveryStalled();
+			if (self->betterMasterExists()) {
+				self->db.forceMasterFailure.trigger();
+				TraceEvent("MasterRegistrationKill", self->id)
+				    .detail("MasterId", self->db.serverInfo->get().master.id());
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_no_more_servers) {
+				TraceEvent(SevError, "CheckOutstandingError").error(e);
+			}
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self) {
+		try {
+			wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
+			while (!self->goodRemoteRecruitmentTime.isReady()) {
+				wait(self->goodRemoteRecruitmentTime);
+			}
+
+			self->checkOutstandingRemoteRecruitmentRequests();
+		} catch (Error& e) {
+			if (e.code() != error_code_no_more_servers) {
+				TraceEvent(SevError, "CheckOutstandingError").error(e);
+			}
+		}
+		return Void();
+	}
 };
 
 Future<Optional<Value>> ClusterControllerData::getPreviousCoordinators() {
@@ -261,9 +312,9 @@ Future<Void> ClusterControllerData::clusterWatchDatabase(ClusterControllerData::
 	return ClusterControllerDataImpl::clusterWatchDatabase(this, db, coordinators, recoveredDiskFiles);
 }
 
-ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
-                                        UID knownServerInfoID,
-                                        ReplyPromise<ServerDBInfo> reply) {
+ACTOR static Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
+                                               UID knownServerInfoID,
+                                               ReplyPromise<ServerDBInfo> reply) {
 	while (db->serverInfo->get().id == knownServerInfoID) {
 		choose {
 			when(wait(yieldedFuture(db->serverInfo->onChange()))) {}
@@ -276,7 +327,7 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
 	return Void();
 }
 
-ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
+ACTOR static Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
 	db->clientStatus[req.reply.getEndpoint().getPrimaryAddress()] = std::make_pair(now(), req);
 	if (db->clientStatus.size() > 10000) {
 		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
@@ -295,77 +346,77 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDa
 	return Void();
 }
 
-void checkOutstandingRecruitmentRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingRecruitmentRequests.size(); i++) {
-		Reference<RecruitWorkersInfo> info = self->outstandingRecruitmentRequests[i];
+void ClusterControllerData::checkOutstandingRecruitmentRequests() {
+	for (int i = 0; i < outstandingRecruitmentRequests.size(); i++) {
+		Reference<RecruitWorkersInfo> info = outstandingRecruitmentRequests[i];
 		try {
-			info->rep = self->findWorkersForConfiguration(info->req);
+			info->rep = findWorkersForConfiguration(info->req);
 			if (info->dbgId.present()) {
 				TraceEvent("CheckOutstandingRecruitment", info->dbgId.get())
 				    .detail("Request", info->req.configuration.toString());
 			}
 			info->waitForCompletion.trigger();
-			swapAndPop(&self->outstandingRecruitmentRequests, i--);
+			swapAndPop(&outstandingRecruitmentRequests, i--);
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitTLogMatchingSetNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitTLogMatchingSetNotAvailable", id).error(e);
 			} else {
-				TraceEvent(SevError, "RecruitTLogsRequestError", self->id).error(e);
+				TraceEvent(SevError, "RecruitTLogsRequestError", id).error(e);
 				throw;
 			}
 		}
 	}
 }
 
-void checkOutstandingRemoteRecruitmentRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingRemoteRecruitmentRequests.size(); i++) {
-		Reference<RecruitRemoteWorkersInfo> info = self->outstandingRemoteRecruitmentRequests[i];
+void ClusterControllerData::checkOutstandingRemoteRecruitmentRequests() {
+	for (int i = 0; i < outstandingRemoteRecruitmentRequests.size(); i++) {
+		Reference<RecruitRemoteWorkersInfo> info = outstandingRemoteRecruitmentRequests[i];
 		try {
-			info->rep = self->findRemoteWorkersForConfiguration(info->req);
+			info->rep = findRemoteWorkersForConfiguration(info->req);
 			if (info->dbgId.present()) {
 				TraceEvent("CheckOutstandingRemoteRecruitment", info->dbgId.get())
 				    .detail("Request", info->req.configuration.toString());
 			}
 			info->waitForCompletion.trigger();
-			swapAndPop(&self->outstandingRemoteRecruitmentRequests, i--);
+			swapAndPop(&outstandingRemoteRecruitmentRequests, i--);
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitRemoteTLogMatchingSetNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitRemoteTLogMatchingSetNotAvailable", id).error(e);
 			} else {
-				TraceEvent(SevError, "RecruitRemoteTLogsRequestError", self->id).error(e);
+				TraceEvent(SevError, "RecruitRemoteTLogsRequestError", id).error(e);
 				throw;
 			}
 		}
 	}
 }
 
-void checkOutstandingStorageRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingStorageRequests.size(); i++) {
-		auto& req = self->outstandingStorageRequests[i];
+void ClusterControllerData::checkOutstandingStorageRequests() {
+	for (int i = 0; i < outstandingStorageRequests.size(); i++) {
+		auto& req = outstandingStorageRequests[i];
 		try {
 			if (req.second < now()) {
 				req.first.reply.sendError(timed_out());
-				swapAndPop(&self->outstandingStorageRequests, i--);
+				swapAndPop(&outstandingStorageRequests, i--);
 			} else {
-				if (!self->gotProcessClasses && !req.first.criticalRecruitment)
+				if (!gotProcessClasses && !req.first.criticalRecruitment)
 					throw no_more_servers();
 
-				auto worker = self->getStorageWorker(req.first);
+				auto worker = getStorageWorker(req.first);
 				RecruitStorageReply rep;
 				rep.worker = worker.interf;
 				rep.processClass = worker.processClass;
 				req.first.reply.send(rep);
-				swapAndPop(&self->outstandingStorageRequests, i--);
+				swapAndPop(&outstandingStorageRequests, i--);
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", id)
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("OutstandingReq", i)
 				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment);
 			} else {
-				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
+				TraceEvent(SevError, "RecruitStorageError", id).error(e);
 				throw;
 			}
 		}
@@ -375,33 +426,33 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 // When workers aren't available at the time of request, the request
 // gets added to a list of outstanding reqs. Here, we try to resolve these
 // outstanding requests.
-void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingBlobWorkerRequests.size(); i++) {
-		auto& req = self->outstandingBlobWorkerRequests[i];
+void ClusterControllerData::checkOutstandingBlobWorkerRequests() {
+	for (int i = 0; i < outstandingBlobWorkerRequests.size(); i++) {
+		auto& req = outstandingBlobWorkerRequests[i];
 		try {
 			if (req.second < now()) {
 				req.first.reply.sendError(timed_out());
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
+				swapAndPop(&outstandingBlobWorkerRequests, i--);
 			} else {
-				if (!self->gotProcessClasses)
+				if (!gotProcessClasses)
 					throw no_more_servers();
 
-				auto worker = self->getBlobWorker(req.first);
+				auto worker = getBlobWorker(req.first);
 				RecruitBlobWorkerReply rep;
 				rep.worker = worker.interf;
 				rep.processClass = worker.processClass;
 				req.first.reply.send(rep);
 				// can remove it once we know the worker was found
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
+				swapAndPop(&outstandingBlobWorkerRequests, i--);
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id)
+				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", id)
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("OutstandingReq", i);
 			} else {
-				TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
+				TraceEvent(SevError, "RecruitBlobWorkerError", id).error(e);
 				throw;
 			}
 		}
@@ -409,18 +460,17 @@ void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
 }
 
 // Finds and returns a new process for role
-WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
-                                         const ProcessClass::ClusterRole role,
-                                         std::map<Optional<Standalone<StringRef>>, int>& id_used) {
+WorkerDetails ClusterControllerData::findNewProcessForSingleton(
+    ProcessClass::ClusterRole role,
+    std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 	// find new process in cluster for role
-	WorkerDetails newWorker =
-	    self->getWorkerForRoleInDatacenter(
-	            self->clusterControllerDcId, role, ProcessClass::NeverAssign, self->db.config, id_used, {}, true)
-	        .worker;
+	WorkerDetails newWorker = getWorkerForRoleInDatacenter(
+	                              clusterControllerDcId, role, ProcessClass::NeverAssign, db.config, id_used, {}, true)
+	                              .worker;
 
 	// check if master's process is actually better suited for role
-	if (self->onMasterIsBetter(newWorker, role)) {
-		newWorker = self->id_worker[self->masterProcessId.get()].details;
+	if (onMasterIsBetter(newWorker, role)) {
+		newWorker = id_worker[masterProcessId.get()].details;
 	}
 
 	// acknowledge that the pid is now potentially used by this role as well
@@ -430,14 +480,13 @@ WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
 }
 
 // Return best possible fitness for singleton. Note that lower fitness is better.
-ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* self,
-                                                  const WorkerDetails& worker,
-                                                  const ProcessClass::ClusterRole& role) {
+ProcessClass::Fitness ClusterControllerData::findBestFitnessForSingleton(const WorkerDetails& worker,
+                                                                         const ProcessClass::ClusterRole& role) {
 	auto bestFitness = worker.processClass.machineClassFitness(role);
 	// If the process has been marked as excluded, we take the max with ExcludeFit to ensure its fit
 	// is at least as bad as ExcludeFit. This assists with successfully offboarding such processes
 	// and removing them from the cluster.
-	if (self->db.config.isExcludedServer(worker.interf.addresses())) {
+	if (db.config.isExcludedServer(worker.interf.addresses())) {
 		bestFitness = std::max(bestFitness, ProcessClass::ExcludeFit);
 	}
 	return bestFitness;
@@ -504,14 +553,13 @@ std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
 // to the process it is currently on.
 // Note: there is a lot of extra logic here to only recruit the blob manager when gate is open.
 // When adding new singletons, just follow the ratekeeper/data distributor examples.
-void checkBetterSingletons(ClusterControllerData* self) {
-	if (!self->masterProcessId.present() ||
-	    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+void ClusterControllerData::checkBetterSingletons() {
+	if (!masterProcessId.present() || db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		return;
 	}
 
 	// note: this map doesn't consider pids used by existing singletons
-	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+	std::map<Optional<Standalone<StringRef>>, int> id_used = getUsedIds();
 
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
@@ -522,77 +570,77 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// Try to find a new process for each singleton.
-	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
-	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
-	WorkerDetails newCSWorker = findNewProcessForSingleton(self, ProcessClass::ConsistencyScan, id_used);
+	WorkerDetails newRKWorker = findNewProcessForSingleton(ProcessClass::Ratekeeper, id_used);
+	WorkerDetails newDDWorker = findNewProcessForSingleton(ProcessClass::DataDistributor, id_used);
+	WorkerDetails newCSWorker = findNewProcessForSingleton(ProcessClass::ConsistencyScan, id_used);
 
 	WorkerDetails newBMWorker;
 	WorkerDetails newMGWorker;
-	if (self->db.blobGranulesEnabled.get()) {
-		newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
-		if (self->db.blobRestoreEnabled.get()) {
-			newMGWorker = findNewProcessForSingleton(self, ProcessClass::BlobMigrator, id_used);
+	if (db.blobGranulesEnabled.get()) {
+		newBMWorker = findNewProcessForSingleton(ProcessClass::BlobManager, id_used);
+		if (db.blobRestoreEnabled.get()) {
+			newMGWorker = findNewProcessForSingleton(ProcessClass::BlobMigrator, id_used);
 		}
 	}
 
 	WorkerDetails newEKPWorker;
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
+		newEKPWorker = findNewProcessForSingleton(ProcessClass::EncryptKeyProxy, id_used);
 	}
 
 	// Find best possible fitnesses for each singleton.
-	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
-	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
-	auto bestFitnessForCS = findBestFitnessForSingleton(self, newCSWorker, ProcessClass::ConsistencyScan);
+	auto bestFitnessForRK = findBestFitnessForSingleton(newRKWorker, ProcessClass::Ratekeeper);
+	auto bestFitnessForDD = findBestFitnessForSingleton(newDDWorker, ProcessClass::DataDistributor);
+	auto bestFitnessForCS = findBestFitnessForSingleton(newCSWorker, ProcessClass::ConsistencyScan);
 
 	ProcessClass::Fitness bestFitnessForBM;
 	ProcessClass::Fitness bestFitnessForMG;
-	if (self->db.blobGranulesEnabled.get()) {
-		bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
-		if (self->db.blobRestoreEnabled.get()) {
-			bestFitnessForMG = findBestFitnessForSingleton(self, newMGWorker, ProcessClass::BlobManager);
+	if (db.blobGranulesEnabled.get()) {
+		bestFitnessForBM = findBestFitnessForSingleton(newBMWorker, ProcessClass::BlobManager);
+		if (db.blobRestoreEnabled.get()) {
+			bestFitnessForMG = findBestFitnessForSingleton(newMGWorker, ProcessClass::BlobManager);
 		}
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
+		bestFitnessForEKP = findBestFitnessForSingleton(newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
-	auto& db = self->db.serverInfo->get();
-	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
-	auto ddSingleton = DataDistributorSingleton(db.distributor);
-	ConsistencyScanSingleton csSingleton(db.consistencyScan);
-	BlobManagerSingleton bmSingleton(db.blobManager);
-	BlobMigratorSingleton mgSingleton(db.blobMigrator);
-	EncryptKeyProxySingleton ekpSingleton(db.encryptKeyProxy);
+	auto& serverInfoDb = db.serverInfo->get();
+	auto rkSingleton = RatekeeperSingleton(serverInfoDb.ratekeeper);
+	auto ddSingleton = DataDistributorSingleton(serverInfoDb.distributor);
+	ConsistencyScanSingleton csSingleton(serverInfoDb.consistencyScan);
+	BlobManagerSingleton bmSingleton(serverInfoDb.blobManager);
+	BlobMigratorSingleton mgSingleton(serverInfoDb.blobMigrator);
+	EncryptKeyProxySingleton ekpSingleton(serverInfoDb.encryptKeyProxy);
 
 	// Check if the singletons are healthy.
 	// side effect: try to rerecruit the singletons to more optimal processes
 	bool rkHealthy = isHealthySingleton<RatekeeperSingleton>(
-	    self, newRKWorker, rkSingleton, bestFitnessForRK, self->recruitingRatekeeperID);
+	    this, newRKWorker, rkSingleton, bestFitnessForRK, recruitingRatekeeperID);
 
 	bool ddHealthy = isHealthySingleton<DataDistributorSingleton>(
-	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
+	    this, newDDWorker, ddSingleton, bestFitnessForDD, recruitingDistributorID);
 
 	bool csHealthy = isHealthySingleton<ConsistencyScanSingleton>(
-	    self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
+	    this, newCSWorker, csSingleton, bestFitnessForCS, recruitingConsistencyScanID);
 
 	bool bmHealthy = true;
 	bool mgHealthy = true;
-	if (self->db.blobGranulesEnabled.get()) {
+	if (db.blobGranulesEnabled.get()) {
 		bmHealthy = isHealthySingleton<BlobManagerSingleton>(
-		    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
-		if (self->db.blobRestoreEnabled.get()) {
+		    this, newBMWorker, bmSingleton, bestFitnessForBM, recruitingBlobManagerID);
+		if (db.blobRestoreEnabled.get()) {
 			mgHealthy = isHealthySingleton<BlobMigratorSingleton>(
-			    self, newMGWorker, mgSingleton, bestFitnessForMG, self->recruitingBlobMigratorID);
+			    this, newMGWorker, mgSingleton, bestFitnessForMG, recruitingBlobMigratorID);
 		}
 	}
 
 	bool ekpHealthy = true;
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxySingleton>(
-		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
+		    this, newEKPWorker, ekpSingleton, bestFitnessForEKP, recruitingEncryptKeyProxyID);
 	}
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
@@ -611,10 +659,10 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
 	Optional<Standalone<StringRef>> currMGProcessId, newMGProcessId;
-	if (self->db.blobGranulesEnabled.get()) {
+	if (db.blobGranulesEnabled.get()) {
 		currBMProcessId = bmSingleton.getInterface().locality.processId();
 		newBMProcessId = newBMWorker.interf.locality.processId();
-		if (self->db.blobRestoreEnabled.get()) {
+		if (db.blobRestoreEnabled.get()) {
 			currMGProcessId = mgSingleton.getInterface().locality.processId();
 			newMGProcessId = newMGWorker.interf.locality.processId();
 		}
@@ -628,10 +676,10 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId, currCSProcessId };
 	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId, newCSProcessId };
-	if (self->db.blobGranulesEnabled.get()) {
+	if (db.blobGranulesEnabled.get()) {
 		currPids.emplace_back(currBMProcessId);
 		newPids.emplace_back(newBMProcessId);
-		if (self->db.blobRestoreEnabled.get()) {
+		if (db.blobRestoreEnabled.get()) {
 			currPids.emplace_back(currMGProcessId);
 			newPids.emplace_back(newMGProcessId);
 		}
@@ -646,10 +694,10 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto newColocMap = getColocCounts(newPids);
 
 	// if the knob is disabled, the BM coloc counts should have no affect on the coloc counts check below
-	if (!self->db.blobGranulesEnabled.get()) {
+	if (!db.blobGranulesEnabled.get()) {
 		ASSERT(currColocMap[currBMProcessId] == 0);
 		ASSERT(newColocMap[newBMProcessId] == 0);
-		if (self->db.blobRestoreEnabled.get()) {
+		if (db.blobRestoreEnabled.get()) {
 			ASSERT(currColocMap[currMGProcessId] == 0);
 			ASSERT(newColocMap[newMGProcessId] == 0);
 		}
@@ -670,79 +718,37 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	    newColocMap[newCSProcessId] <= currColocMap[currCSProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
-			rkSingleton.recruit(*self);
+			rkSingleton.recruit(*this);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
-			ddSingleton.recruit(*self);
-		} else if (self->db.blobGranulesEnabled.get() && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
-			bmSingleton.recruit(*self);
-		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get() &&
+			ddSingleton.recruit(*this);
+		} else if (db.blobGranulesEnabled.get() && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
+			bmSingleton.recruit(*this);
+		} else if (db.blobGranulesEnabled.get() && db.blobRestoreEnabled.get() &&
 		           newColocMap[newMGProcessId] < currColocMap[currMGProcessId]) {
-			mgSingleton.recruit(*self);
+			mgSingleton.recruit(*this);
 		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
-			ekpSingleton.recruit(*self);
+			ekpSingleton.recruit(*this);
 		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
-			csSingleton.recruit(*self);
+			csSingleton.recruit(*this);
 		}
 	}
 }
 
-ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
-	try {
-		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
-		while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY ||
-		       !self->goodRecruitmentTime.isReady()) {
-			if (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY) {
-				wait(delay(SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY + 0.001 - (now() - self->lastRecruitTime)));
-			}
-			if (!self->goodRecruitmentTime.isReady()) {
-				wait(self->goodRecruitmentTime);
-			}
-		}
-
-		checkOutstandingRecruitmentRequests(self);
-		checkOutstandingStorageRequests(self);
-
-		if (self->db.blobGranulesEnabled.get()) {
-			checkOutstandingBlobWorkerRequests(self);
-		}
-		checkBetterSingletons(self);
-
-		self->checkRecoveryStalled();
-		if (self->betterMasterExists()) {
-			self->db.forceMasterFailure.trigger();
-			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
-		}
-	} catch (Error& e) {
-		if (e.code() != error_code_no_more_servers) {
-			TraceEvent(SevError, "CheckOutstandingError").error(e);
-		}
-	}
-	return Void();
+Future<Void> ClusterControllerData::doCheckOutstandingRequests() {
+	return ClusterControllerDataImpl::doCheckOutstandingRequests(this);
 }
 
-ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self) {
-	try {
-		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
-		while (!self->goodRemoteRecruitmentTime.isReady()) {
-			wait(self->goodRemoteRecruitmentTime);
-		}
-
-		checkOutstandingRemoteRecruitmentRequests(self);
-	} catch (Error& e) {
-		if (e.code() != error_code_no_more_servers) {
-			TraceEvent(SevError, "CheckOutstandingError").error(e);
-		}
-	}
-	return Void();
+Future<Void> ClusterControllerData::doCheckOutstandingRemoteRequests() {
+	return ClusterControllerDataImpl::doCheckOutstandingRemoteRequests(this);
 }
 
-void checkOutstandingRequests(ClusterControllerData* self) {
-	if (self->outstandingRemoteRequestChecker.isReady()) {
-		self->outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests(self);
+void ClusterControllerData::checkOutstandingRequests() {
+	if (outstandingRemoteRequestChecker.isReady()) {
+		outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests();
 	}
 
-	if (self->outstandingRequestChecker.isReady()) {
-		self->outstandingRequestChecker = doCheckOutstandingRequests(self);
+	if (outstandingRequestChecker.isReady()) {
+		outstandingRequestChecker = doCheckOutstandingRequests();
 	}
 }
 
@@ -761,7 +767,7 @@ ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Stand
 		if (watcher != cluster->id_worker.end()) {
 			watcher->second.reboots--;
 			if (watcher->second.reboots < 2)
-				checkOutstandingRequests(cluster);
+				cluster->checkOutstandingRequests();
 		}
 	}
 
@@ -789,7 +795,7 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 			        IFailureMonitor::failureMonitor().getState(worker.storage.getEndpoint()).isAvailable())))) {
 				if (IFailureMonitor::failureMonitor().getState(worker.storage.getEndpoint()).isAvailable()) {
 					cluster->ac.add(rebootAndCheck(cluster, worker.locality.processId()));
-					checkOutstandingRequests(cluster);
+					cluster->checkOutstandingRequests();
 				}
 			}
 			when(wait(failed)) { // remove workers that have failed
@@ -1019,7 +1025,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		self->db.serverInfo->set(dbInfo);
 	}
 
-	checkOutstandingRequests(self);
+	self->checkOutstandingRequests();
 }
 
 // Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
@@ -1187,7 +1193,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		}
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
-		checkOutstandingRequests(self);
+		self->checkOutstandingRequests();
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
 			info->second.reply.send(Never());
@@ -1221,7 +1227,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 			                                                    info->second.watcher,
 			                                                    isCoordinator));
 		}
-		checkOutstandingRequests(self);
+		self->checkOutstandingRequests();
 	} else {
 		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
 	}
@@ -1521,7 +1527,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 
 					self->lastProcessClasses = processClasses;
 					self->gotProcessClasses = true;
-					checkOutstandingRequests(self);
+					self->checkOutstandingRequests();
 				}
 
 				state Future<Void> watchFuture = tr.watch(processClassChangeKey);
@@ -1793,7 +1799,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 			self->datacenterVersionDifference = 0;
 
 			if (oldDifferenceTooLarge) {
-				checkOutstandingRequests(self);
+				self->checkOutstandingRequests();
 			}
 
 			wait(self->db.serverInfo->onChange());
@@ -1847,7 +1853,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 				self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
 
 				if (oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
-					checkOutstandingRequests(self);
+					self->checkOutstandingRequests();
 				}
 
 				if (now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
@@ -1877,7 +1883,7 @@ ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
 	// When the remote DC health just start, we may just recover from a health degradation. Check if we can failback
 	// if we are currently in the remote DC in the database configuration.
 	if (!self->remoteTransactionSystemDegraded) {
-		checkOutstandingRequests(self);
+		self->checkOutstandingRequests();
 	}
 
 	loop {
@@ -1885,7 +1891,7 @@ ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
 		self->remoteTransactionSystemDegraded = self->remoteTransactionSystemContainsDegradedServers();
 
 		if (oldRemoteTransactionSystemDegraded && !self->remoteTransactionSystemDegraded) {
-			checkOutstandingRequests(self);
+			self->checkOutstandingRequests();
 		}
 		wait(delay(SERVER_KNOBS->CHECK_REMOTE_HEALTH_INTERVAL));
 	}
@@ -2051,7 +2057,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 				if (!distributor.present() || distributor.get().id() != ddInterf.get().id()) {
 					self->db.setDistributor(ddInterf.get());
 				}
-				checkOutstandingRequests(self);
+				self->checkOutstandingRequests();
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2143,7 +2149,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
 				}
-				checkOutstandingRequests(self);
+				self->checkOutstandingRequests();
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2233,7 +2239,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 				if (!consistencyScan.present() || consistencyScan.get().id() != interf.get().id()) {
 					self->db.setConsistencyScan(interf.get());
 				}
-				checkOutstandingRequests(self);
+				self->checkOutstandingRequests();
 				return Void();
 			} else {
 				TraceEvent("CCConsistencyScanRecruitEmpty", self->id).log();
@@ -2338,7 +2344,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 					TraceEvent("CCEKP_UpdateInf", self->id)
 					    .detail("Id", self->db.serverInfo->get().encryptKeyProxy.get().id());
 				}
-				checkOutstandingRequests(self);
+				self->checkOutstandingRequests();
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2485,7 +2491,7 @@ ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTim
 				if (!blobMigrator.present() || blobMigrator.get().id() != interf.get().id()) {
 					self->db.setBlobMigrator(interf.get());
 				}
-				checkOutstandingRequests(self);
+				self->checkOutstandingRequests();
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2590,7 +2596,7 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self, double waitTime
 				if (!blobManager.present() || blobManager.get().id() != interf.get().id()) {
 					self->db.setBlobManager(interf.get());
 				}
-				checkOutstandingRequests(self);
+				self->checkOutstandingRequests();
 				return Void();
 			}
 		} catch (Error& e) {
