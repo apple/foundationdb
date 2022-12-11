@@ -1966,20 +1966,6 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 	}
 }
 
-struct SingletonRecruitThrottler {
-	double lastRecruitStart;
-
-	SingletonRecruitThrottler() : lastRecruitStart(-1) {}
-
-	double newRecruitment() {
-		double n = now();
-		double waitTime =
-		    std::max(0.0, (lastRecruitStart + SERVER_KNOBS->CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL - n));
-		lastRecruitStart = n;
-		return waitTime;
-	}
-};
-
 ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	// Also wait to avoid too many consecutive recruits in a small time window.
