@@ -76,176 +76,189 @@
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
-	state ReadYourWritesTransaction tr(self->db.db);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> previousCoordinators = wait(tr.get(previousCoordinatorsKey));
-			return previousCoordinators;
-		} catch (Error& e) {
-			wait(tr.onError(e));
+class ClusterControllerDataImpl {
+public:
+	ACTOR static Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
+		state ReadYourWritesTransaction tr(self->db.db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<Value> previousCoordinators = wait(tr.get(previousCoordinatorsKey));
+				return previousCoordinators;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 	}
+
+	ACTOR static Future<Void> clusterWatchDatabase(ClusterControllerData* self,
+	                                               ClusterControllerData::DBInfo* db,
+	                                               ServerCoordinators coordinators,
+	                                               Future<Void> recoveredDiskFiles) {
+		state MasterInterface iMaster;
+		state Reference<ClusterRecoveryData> recoveryData;
+		state PromiseStream<Future<Void>> addActor;
+		state Future<Void> recoveryCore;
+
+		// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
+		// When this someday is implemented, make sure forced failures still cause the master to be recruited again
+
+		loop {
+			TraceEvent("CCWDB", self->id).log();
+			try {
+				state double recoveryStart = now();
+				state MasterInterface newMaster;
+				state Future<Void> collection;
+
+				TraceEvent("CCWDB", self->id).detail("Recruiting", "Master");
+				wait(recruitNewMaster(self, db, std::addressof(newMaster)));
+
+				iMaster = newMaster;
+
+				db->masterRegistrationCount = 0;
+				db->recoveryStalled = false;
+
+				auto dbInfo = ServerDBInfo();
+				dbInfo.master = iMaster;
+				dbInfo.id = deterministicRandom()->randomUniqueID();
+				dbInfo.infoGeneration = ++db->dbInfoCount;
+				dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
+				++dbInfo.masterLifetime;
+				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
+				dbInfo.distributor = db->serverInfo->get().distributor;
+				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
+				dbInfo.blobManager = db->serverInfo->get().blobManager;
+				dbInfo.blobMigrator = db->serverInfo->get().blobMigrator;
+				dbInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
+				dbInfo.consistencyScan = db->serverInfo->get().consistencyScan;
+				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
+				dbInfo.myLocality = db->serverInfo->get().myLocality;
+				dbInfo.client = ClientDBInfo();
+				dbInfo.client.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
+				dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
+				dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
+				dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
+				dbInfo.client.clusterType = db->clusterType;
+				dbInfo.client.metaclusterName = db->metaclusterName;
+
+				TraceEvent("CCWDB", self->id)
+				    .detail("NewMaster", dbInfo.master.id().toString())
+				    .detail("Lifetime", dbInfo.masterLifetime.toString())
+				    .detail("ChangeID", dbInfo.id);
+				db->serverInfo->set(dbInfo);
+
+				state Future<Void> spinDelay = delay(
+				    SERVER_KNOBS
+				        ->MASTER_SPIN_DELAY); // Don't retry cluster recovery more than once per second, but don't delay
+				                              // the "first" recovery after more than a second of normal operation
+
+				TraceEvent("CCWDB", self->id).detail("Watching", iMaster.id());
+				recoveryData = makeReference<ClusterRecoveryData>(self,
+				                                                  db->serverInfo,
+				                                                  db->serverInfo->get().master,
+				                                                  db->serverInfo->get().masterLifetime,
+				                                                  coordinators,
+				                                                  db->serverInfo->get().clusterInterface,
+				                                                  ""_sr,
+				                                                  addActor,
+				                                                  db->forceRecovery);
+
+				collection = actorCollection(recoveryData->addActor.getFuture());
+				recoveryCore = clusterRecoveryCore(recoveryData);
+
+				// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
+				// really don't want to have to start over
+				loop choose {
+					when(wait(recoveryCore)) {}
+					when(wait(waitFailureClient(
+					              iMaster.waitFailure,
+					              db->masterRegistrationCount
+					                  ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
+					                  : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
+					              db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
+					                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
+					                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
+					          db->forceMasterFailure.onTrigger())) {
+						break;
+					}
+					when(wait(db->serverInfo->onChange())) {}
+					when(BackupWorkerDoneRequest req =
+					         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
+						if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
+							recoveryData->registrationTrigger.trigger();
+						}
+						++recoveryData->backupWorkerDoneRequests;
+						req.reply.send(Void());
+						TraceEvent(SevDebug, "BackupWorkerDoneRequest", self->id).log();
+					}
+					when(wait(collection)) {
+						throw internal_error();
+					}
+				}
+				// failed master (better master exists) could happen while change-coordinators request processing is
+				// in-progress
+				if (self->shouldCommitSuicide) {
+					throw restart_cluster_controller();
+				}
+
+				recoveryCore.cancel();
+				wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/false));
+				ASSERT(addActor.isEmpty());
+
+				wait(spinDelay);
+
+				CODE_PROBE(true, "clusterWatchDatabase() master failed");
+				TraceEvent(SevWarn, "DetectedFailedRecovery", self->id).detail("OldMaster", iMaster.id());
+			} catch (Error& e) {
+				state Error err = e;
+				TraceEvent("CCWDB", self->id).errorUnsuppressed(e).detail("Master", iMaster.id());
+				if (e.code() != error_code_actor_cancelled)
+					wait(delay(0.0));
+
+				recoveryCore.cancel();
+				wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/true));
+				ASSERT(addActor.isEmpty());
+
+				CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
+				CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Terminated due to commit proxy failure");
+				CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Terminated due to GRV proxy failure");
+				CODE_PROBE(err.code() == error_code_resolver_failed, "Terminated due to resolver failure");
+				CODE_PROBE(err.code() == error_code_backup_worker_failed, "Terminated due to backup worker failure");
+				CODE_PROBE(err.code() == error_code_operation_failed,
+				           "Terminated due to failed operation",
+				           probe::decoration::rare);
+				CODE_PROBE(err.code() == error_code_restart_cluster_controller,
+				           "Terminated due to cluster-controller restart.");
+
+				if (self->shouldCommitSuicide || err.code() == error_code_coordinators_changed) {
+					TraceEvent("ClusterControllerTerminate", self->id).errorUnsuppressed(err);
+					throw restart_cluster_controller();
+				}
+
+				if (isNormalClusterRecoveryError(err)) {
+					TraceEvent(SevWarn, "ClusterRecoveryRetrying", self->id).error(err);
+				} else {
+					bool ok = err.code() == error_code_no_more_servers;
+					TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", self->id).error(err);
+					if (!ok)
+						throw err;
+				}
+				wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+			}
+		}
+	}
+};
+
+Future<Optional<Value>> ClusterControllerData::getPreviousCoordinators() {
+	return ClusterControllerDataImpl::getPreviousCoordinators(this);
 }
 
-ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
-                                        ClusterControllerData::DBInfo* db,
-                                        ServerCoordinators coordinators,
-                                        Future<Void> recoveredDiskFiles) {
-	state MasterInterface iMaster;
-	state Reference<ClusterRecoveryData> recoveryData;
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> recoveryCore;
-
-	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
-	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
-
-	loop {
-		TraceEvent("CCWDB", cluster->id).log();
-		try {
-			state double recoveryStart = now();
-			state MasterInterface newMaster;
-			state Future<Void> collection;
-
-			TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
-			wait(recruitNewMaster(cluster, db, std::addressof(newMaster)));
-
-			iMaster = newMaster;
-
-			db->masterRegistrationCount = 0;
-			db->recoveryStalled = false;
-
-			auto dbInfo = ServerDBInfo();
-			dbInfo.master = iMaster;
-			dbInfo.id = deterministicRandom()->randomUniqueID();
-			dbInfo.infoGeneration = ++db->dbInfoCount;
-			dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
-			++dbInfo.masterLifetime;
-			dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
-			dbInfo.distributor = db->serverInfo->get().distributor;
-			dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
-			dbInfo.blobManager = db->serverInfo->get().blobManager;
-			dbInfo.blobMigrator = db->serverInfo->get().blobMigrator;
-			dbInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
-			dbInfo.consistencyScan = db->serverInfo->get().consistencyScan;
-			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
-			dbInfo.myLocality = db->serverInfo->get().myLocality;
-			dbInfo.client = ClientDBInfo();
-			dbInfo.client.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
-			dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
-			dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
-			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
-			dbInfo.client.clusterType = db->clusterType;
-			dbInfo.client.metaclusterName = db->metaclusterName;
-
-			TraceEvent("CCWDB", cluster->id)
-			    .detail("NewMaster", dbInfo.master.id().toString())
-			    .detail("Lifetime", dbInfo.masterLifetime.toString())
-			    .detail("ChangeID", dbInfo.id);
-			db->serverInfo->set(dbInfo);
-
-			state Future<Void> spinDelay = delay(
-			    SERVER_KNOBS
-			        ->MASTER_SPIN_DELAY); // Don't retry cluster recovery more than once per second, but don't delay
-			                              // the "first" recovery after more than a second of normal operation
-
-			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
-			recoveryData = makeReference<ClusterRecoveryData>(cluster,
-			                                                  db->serverInfo,
-			                                                  db->serverInfo->get().master,
-			                                                  db->serverInfo->get().masterLifetime,
-			                                                  coordinators,
-			                                                  db->serverInfo->get().clusterInterface,
-			                                                  ""_sr,
-			                                                  addActor,
-			                                                  db->forceRecovery);
-
-			collection = actorCollection(recoveryData->addActor.getFuture());
-			recoveryCore = clusterRecoveryCore(recoveryData);
-
-			// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
-			// really don't want to have to start over
-			loop choose {
-				when(wait(recoveryCore)) {}
-				when(wait(waitFailureClient(
-				              iMaster.waitFailure,
-				              db->masterRegistrationCount
-				                  ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
-				                  : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
-				              db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
-				                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
-				                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
-				          db->forceMasterFailure.onTrigger())) {
-					break;
-				}
-				when(wait(db->serverInfo->onChange())) {}
-				when(BackupWorkerDoneRequest req =
-				         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
-					if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
-						recoveryData->registrationTrigger.trigger();
-					}
-					++recoveryData->backupWorkerDoneRequests;
-					req.reply.send(Void());
-					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
-				}
-				when(wait(collection)) {
-					throw internal_error();
-				}
-			}
-			// failed master (better master exists) could happen while change-coordinators request processing is
-			// in-progress
-			if (cluster->shouldCommitSuicide) {
-				throw restart_cluster_controller();
-			}
-
-			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/false));
-			ASSERT(addActor.isEmpty());
-
-			wait(spinDelay);
-
-			CODE_PROBE(true, "clusterWatchDatabase() master failed");
-			TraceEvent(SevWarn, "DetectedFailedRecovery", cluster->id).detail("OldMaster", iMaster.id());
-		} catch (Error& e) {
-			state Error err = e;
-			TraceEvent("CCWDB", cluster->id).errorUnsuppressed(e).detail("Master", iMaster.id());
-			if (e.code() != error_code_actor_cancelled)
-				wait(delay(0.0));
-
-			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/true));
-			ASSERT(addActor.isEmpty());
-
-			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
-			CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Terminated due to commit proxy failure");
-			CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Terminated due to GRV proxy failure");
-			CODE_PROBE(err.code() == error_code_resolver_failed, "Terminated due to resolver failure");
-			CODE_PROBE(err.code() == error_code_backup_worker_failed, "Terminated due to backup worker failure");
-			CODE_PROBE(err.code() == error_code_operation_failed,
-			           "Terminated due to failed operation",
-			           probe::decoration::rare);
-			CODE_PROBE(err.code() == error_code_restart_cluster_controller,
-			           "Terminated due to cluster-controller restart.");
-
-			if (cluster->shouldCommitSuicide || err.code() == error_code_coordinators_changed) {
-				TraceEvent("ClusterControllerTerminate", cluster->id).errorUnsuppressed(err);
-				throw restart_cluster_controller();
-			}
-
-			if (isNormalClusterRecoveryError(err)) {
-				TraceEvent(SevWarn, "ClusterRecoveryRetrying", cluster->id).error(err);
-			} else {
-				bool ok = err.code() == error_code_no_more_servers;
-				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
-				if (!ok)
-					throw err;
-			}
-			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-		}
-	}
+Future<Void> ClusterControllerData::clusterWatchDatabase(ClusterControllerData::DBInfo* db,
+                                                         ServerCoordinators coordinators,
+                                                         Future<Void> recoveredDiskFiles) {
+	return ClusterControllerDataImpl::clusterWatchDatabase(this, db, coordinators, recoveredDiskFiles);
 }
 
 ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
@@ -2920,15 +2933,16 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 	state ConfigBroadcaster configBroadcaster;
 	if (configDBType != ConfigDBType::DISABLED) {
-		configBroadcaster = ConfigBroadcaster(coordinators, configDBType, getPreviousCoordinators(&self));
+		configBroadcaster = ConfigBroadcaster(coordinators, configDBType, self.getPreviousCoordinators());
 	}
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
+	// TODO: Extract db within function?
 	self.addActor.send(
-	    clusterWatchDatabase(&self, &self.db, coordinators, recoveredDiskFiles)); // Start the master database
+	    self.clusterWatchDatabase(&self.db, coordinators, recoveredDiskFiles)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,

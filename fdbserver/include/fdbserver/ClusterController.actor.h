@@ -124,6 +124,8 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 };
 
 class ClusterControllerData {
+	friend class ClusterControllerDataImpl;
+
 public:
 	struct DBInfo {
 		Reference<AsyncVar<ClientDBInfo>> clientInfo;
@@ -3332,6 +3334,9 @@ public:
 		}
 		return false;
 	}
+
+	Future<Optional<Value>> getPreviousCoordinators();
+	Future<Void> clusterWatchDatabase(DBInfo* db, ServerCoordinators coordinators, Future<Void> recoveredDiskFiles);
 
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
