@@ -358,7 +358,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
 		// change post-assignment
 
-		// estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+		// FIXME: change these to be byte counts
+		// FIXME: buggify an extra multiplication factor for short periods of time to hopefully trigger this logic more
+		// often? estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
 		int64_t expectedExtraBytesBuffered = std::max(
 		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
 		// estimate slack in potential pending delta file writes
@@ -2053,6 +2055,43 @@ ACTOR Future<Void> forceFlushCleanup(Reference<BlobWorkerData> bwData, Reference
 	return Void();
 }
 
+// We have a normal target snapshot/delta ratio, but in write-heavy cases where are behind and need to catch up,
+// we want to change this target to get more efficient. To maintain a consistent write amp if the snapshot size is
+// growing without the ability to split, we scale the bytes before recompact to reach the target write amp. We also
+// decrease the target write amp the further behind we are to be more efficient.
+struct WriteAmpTarget {
+	double targetWriteAmp;
+	int bytesBeforeCompact;
+
+	WriteAmpTarget() { reset(); }
+
+	void reset() {
+		bytesBeforeCompact = SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+		int targetSnapshotBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+		targetWriteAmp = 1.0 * (bytesBeforeCompact + targetSnapshotBytes) / bytesBeforeCompact;
+	}
+
+	void decrease() {
+		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+			double minWriteAmp =
+			    0.5 * (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
+			    SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+			targetWriteAmp = std::max(targetWriteAmp * 0.8, minWriteAmp);
+		}
+	}
+
+	void newSnapshotSize(int snapshotSize) {
+		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+			snapshotSize = std::max(snapshotSize, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			bytesBeforeCompact = snapshotSize / (targetWriteAmp - 1.0);
+		}
+	}
+
+	int getDeltaFileBytes() { return getBytesBeforeCompact() / 10; }
+
+	int getBytesBeforeCompact() { return bytesBeforeCompact; }
+};
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
@@ -2078,6 +2117,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
 	state Future<Void> startDeltaFileWrite = Future<Void>(Void());
+	state WriteAmpTarget writeAmpTarget;
 
 	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
 	state bool justDidRollback = false;
@@ -2128,6 +2168,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						metadata->bytesInNewDeltaFiles += files.deltaFiles[i].length;
 					}
 				}
+			}
+
+			if (!files.snapshotFiles.empty()) {
+				writeAmpTarget.newSnapshotSize(files.snapshotFiles.back().length);
 			}
 
 			metadata->files = startState.existingFiles.get();
@@ -2248,6 +2292,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 						metadata->files.snapshotFiles.push_back(completedFile);
 						metadata->durableSnapshotVersion.set(completedFile.version);
+						writeAmpTarget.newSnapshotSize(completedFile.length);
 						pendingSnapshots--;
 					} else {
 						handleCompletedDeltaFile(bwData,
@@ -2371,6 +2416,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
 				// initialized by the client
 				metadata->activeCFData.set(cfData);
+
+				// no longer catching up on old feed, resume desired write amp target
+				writeAmpTarget.reset();
 			}
 
 			// process mutations
@@ -2576,8 +2624,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
 			bool doReadDrivenFlush = !metadata->currentDeltas.empty() && metadata->doReadDrivenCompaction();
 			CODE_PROBE(forceFlush, "Force flushing granule");
-			if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES || forceFlush ||
-			    doReadDrivenFlush) {
+			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
+			    forceFlus || doReadDrivenFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
 				    .detail("Version", lastDeltaVersion);
@@ -2687,17 +2735,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// yet
 
 			// If we have enough delta files, try to re-snapshot
-			if (snapshotEligible && (metadata->doReadDrivenCompaction() ||
-			                         metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT)) {
+			// FIXME: have max file count in addition to bytes count
+			if (snapshotEligible && (metadata->doReadDrivenCompaction() || metadata->bytesInNewDeltaFiles >= writeAmpTarget.getBytesBeforeCompact())) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
-					           "waiting for "
-					           "outstanding {5} files to finish\n",
+					           "waiting for outstanding {5} files to finish\n",
 					           metadata->keyRange.begin.printable(),
 					           metadata->keyRange.end.printable(),
 					           metadata->pendingDeltaVersion,
 					           metadata->bytesInNewDeltaFiles,
-					           SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT,
+					           writeAmpTarget.getBytesBeforeCompact(),
 					           inFlightFiles.size());
 				}
 
@@ -2728,6 +2775,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					inFlightBlobSnapshot =
 					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
+					writeAmpTarget.decrease();
 				}
 				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
 				pendingSnapshots++;
@@ -2740,7 +2788,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				// If we have more than one snapshot file and that file is unblocked (committedVersion >=
 				// snapshotVersion), wait for it to finish
-
+				// FIXME: if catching up on old feed, allow more parallel snapshots?
 				if (pendingSnapshots > 1) {
 					state int waitIdx = 0;
 					int idx = 0;
@@ -2795,25 +2843,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				    metadata,
 				    startState.granuleID,
 				    inFlightFiles.empty() ? Future<Void>(Void()) : success(inFlightFiles.back().future));
-
-			} else if (snapshotEligible &&
-			           metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
-				// if we're in the old change feed case and can't snapshot but we have enough data to, don't
-				// queue too many files in parallel, and slow down change feed consuming to let file writing
-				// catch up
-
-				CODE_PROBE(true, "Granule processing long tail of old change feed", probe::decoration::rare);
-				if (inFlightFiles.size() > 10 && inFlightFiles.front().version <= metadata->knownCommittedVersion) {
-					if (BW_DEBUG) {
-						fmt::print("[{0} - {1}) Waiting on delta file b/c old change feed\n",
-						           metadata->keyRange.begin.printable(),
-						           metadata->keyRange.end.printable());
-					}
-					choose {
-						when(BlobFileIndex completedDeltaFile = wait(inFlightFiles.front().future)) {}
-						when(wait(delay(0.1))) {}
-					}
-				}
 			}
 			snapshotEligible = false;
 		}
