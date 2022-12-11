@@ -3357,6 +3357,24 @@ public:
 	void clusterRecruitBlobWorker(RecruitBlobWorkerRequest);
 	void clusterRegisterMaster(RegisterMasterRequest const&);
 	Future<Void> registerWorker(RegisterWorkerRequest, ClusterConnectionString, class ConfigBroadcaster*);
+	Future<Void> timeKeeperSetVersion();
+
+	// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid
+	// running out of space, it limits the max number of entries and clears old entries on each update. This mapping is
+	// used from backup and restore to get the version information for a timestamp.
+	Future<Void> timeKeeper();
+
+	Future<Void> statusServer(FutureStream<StatusRequest> requests,
+	                          ServerCoordinators coordinators,
+	                          ConfigBroadcaster const* configBroadcaster);
+	Future<Void> monitorProcessClasses();
+	Future<Void> updatedChangingDatacenters();
+	Future<Void> updatedChangedDatacenters();
+	Future<Void> updateDatacenterVersionDifference();
+
+	// A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC
+	// recovers.
+	Future<Void> updateRemoteDCHealth();
 
 	// Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
 	// or, halts the existing singleton in favour of the requesting one

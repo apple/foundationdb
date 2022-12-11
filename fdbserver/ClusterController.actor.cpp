@@ -588,6 +588,491 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		return Void();
+	}
+
+	// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid
+	// running out of space, it limits the max number of entries and clears old entries on each update. This mapping is
+	// used from backup and restore to get the version information for a timestamp.
+	ACTOR static Future<Void> timeKeeper(ClusterControllerData* self) {
+		state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+		TraceEvent("TimeKeeperStarted").log();
+
+		wait(timeKeeperSetVersion(self));
+
+		loop {
+			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+			loop {
+				try {
+					state UID debugID = deterministicRandom()->randomUniqueID();
+					if (!g_network->isSimulated()) {
+						// This is done to provide an arbitrary logged transaction every ~10s.
+						// FIXME: replace or augment this with logging on the proxy which tracks
+						// how long it is taking to hear responses from each other component.
+						tr->debugTransaction(debugID);
+					}
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+					Optional<Value> disableValue = wait(tr->get(timeKeeperDisableKey));
+					if (disableValue.present()) {
+						break;
+					}
+
+					Version v = tr->getReadVersion().get();
+					int64_t currentTime = (int64_t)now();
+					versionMap.set(tr, currentTime, v);
+					if (!g_network->isSimulated()) {
+						TraceEvent("TimeKeeperCommit", debugID).detail("Version", v);
+					}
+					int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
+					if (ttl > 0) {
+						versionMap.erase(tr, 0, ttl);
+					}
+
+					wait(tr->commit());
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+			}
+
+			wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
+		}
+	}
+
+	ACTOR static Future<Void> statusServer(ClusterControllerData* self,
+	                                       FutureStream<StatusRequest> requests,
+	                                       ServerCoordinators coordinators,
+	                                       ConfigBroadcaster const* configBroadcaster) {
+		// Seconds since the END of the last GetStatus executed
+		state double last_request_time = 0.0;
+
+		// Place to accumulate a batch of requests to respond to
+		state std::vector<StatusRequest> requests_batch;
+
+		loop {
+			try {
+				// Wait til first request is ready
+				StatusRequest req = waitNext(requests);
+				++self->statusRequests;
+				requests_batch.push_back(req);
+
+				// Earliest time at which we may begin a new request
+				double next_allowed_request_time = last_request_time + SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS;
+
+				// Wait if needed to satisfy min_time knob, also allows more requets to queue up.
+				double minwait = std::max(next_allowed_request_time - now(), 0.0);
+				wait(delay(minwait));
+
+				// Get all requests that are ready right *now*, before GetStatus() begins.
+				// All of these requests will be responded to with the next GetStatus() result.
+				// If requests are batched, do not respond to more than MAX_STATUS_REQUESTS_PER_SECOND
+				// requests per second
+				while (requests.isReady()) {
+					auto req = requests.pop();
+					if (SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS > 0.0 &&
+					    requests_batch.size() + 1 > SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS *
+					                                    SERVER_KNOBS->MAX_STATUS_REQUESTS_PER_SECOND) {
+						TraceEvent(SevWarnAlways, "TooManyStatusRequests")
+						    .suppressFor(1.0)
+						    .detail("BatchSize", requests_batch.size());
+						req.reply.sendError(server_overloaded());
+					} else {
+						requests_batch.push_back(req);
+					}
+				}
+
+				// Get status but trap errors to send back to client.
+				std::vector<WorkerDetails> workers;
+				std::vector<ProcessIssues> workerIssues;
+
+				for (auto& it : self->id_worker) {
+					workers.push_back(it.second.details);
+					if (it.second.issues.size()) {
+						workerIssues.emplace_back(it.second.details.interf.address(), it.second.issues);
+					}
+				}
+
+				std::vector<NetworkAddress> incompatibleConnections;
+				for (auto it = self->db.incompatibleConnections.begin();
+				     it != self->db.incompatibleConnections.end();) {
+					if (it->second < now()) {
+						it = self->db.incompatibleConnections.erase(it);
+					} else {
+						incompatibleConnections.push_back(it->first);
+						it++;
+					}
+				}
+
+				state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo,
+				                                                                  self->cx,
+				                                                                  workers,
+				                                                                  workerIssues,
+				                                                                  &self->db.clientStatus,
+				                                                                  coordinators,
+				                                                                  incompatibleConnections,
+				                                                                  self->datacenterVersionDifference,
+				                                                                  configBroadcaster,
+				                                                                  self->db.metaclusterRegistration,
+				                                                                  self->db.metaclusterMetrics)));
+
+				if (result.isError() && result.getError().code() == error_code_actor_cancelled)
+					throw result.getError();
+
+				// Update last_request_time now because GetStatus is finished and the delay is to be measured between
+				// requests
+				last_request_time = now();
+
+				while (!requests_batch.empty()) {
+					if (result.isError())
+						requests_batch.back().reply.sendError(result.getError());
+					else
+						requests_batch.back().reply.send(result.get());
+					requests_batch.pop_back();
+					wait(yield());
+				}
+			} catch (Error& e) {
+				TraceEvent(SevError, "StatusServerError").error(e);
+				throw e;
+			}
+		}
+	}
+
+	ACTOR static Future<Void> monitorProcessClasses(ClusterControllerData* self) {
+
+		state ReadYourWritesTransaction trVer(self->db.db);
+		loop {
+			try {
+				trVer.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				trVer.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				Optional<Value> val = wait(trVer.get(processClassVersionKey));
+
+				if (val.present())
+					break;
+
+				RangeResult processClasses = wait(trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
+
+				trVer.clear(processClassKeys);
+				trVer.set(processClassVersionKey, processClassVersionValue);
+				for (auto it : processClasses) {
+					UID processUid = decodeProcessClassKeyOld(it.key);
+					trVer.set(processClassKeyFor(processUid.toString()), it.value);
+				}
+
+				wait(trVer.commit());
+				TraceEvent("ProcessClassUpgrade").log();
+				break;
+			} catch (Error& e) {
+				wait(trVer.onError(e));
+			}
+		}
+
+		loop {
+			state ReadYourWritesTransaction tr(self->db.db);
+
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					RangeResult processClasses = wait(tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+					ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
+
+					if (processClasses != self->lastProcessClasses || !self->gotProcessClasses) {
+						self->id_class.clear();
+						for (int i = 0; i < processClasses.size(); i++) {
+							auto c = decodeProcessClassValue(processClasses[i].value);
+							ASSERT(c.classSource() != ProcessClass::CommandLineSource);
+							self->id_class[decodeProcessClassKey(processClasses[i].key)] = c;
+						}
+
+						for (auto& w : self->id_worker) {
+							auto classIter = self->id_class.find(w.first);
+							ProcessClass newProcessClass;
+
+							if (classIter != self->id_class.end() &&
+							    (classIter->second.classSource() == ProcessClass::DBSource ||
+							     w.second.initialClass.classType() == ProcessClass::UnsetClass)) {
+								newProcessClass = classIter->second;
+							} else {
+								newProcessClass = w.second.initialClass;
+							}
+
+							if (newProcessClass != w.second.details.processClass) {
+								w.second.details.processClass = newProcessClass;
+								w.second.priorityInfo.processClassFitness =
+								    newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+								if (!w.second.reply.isSet()) {
+									w.second.reply.send(
+									    RegisterWorkerReply(w.second.details.processClass, w.second.priorityInfo));
+								}
+							}
+						}
+
+						self->lastProcessClasses = processClasses;
+						self->gotProcessClasses = true;
+						self->checkOutstandingRequests();
+					}
+
+					state Future<Void> watchFuture = tr.watch(processClassChangeKey);
+					wait(tr.commit());
+					wait(watchFuture);
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
+		// do not change the cluster controller until all the processes have had a chance to register
+		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+		loop {
+			state Future<Void> onChange = self->desiredDcIds.onChange();
+			if (!self->desiredDcIds.get().present()) {
+				self->changingDcIds.set(std::make_pair(false, self->desiredDcIds.get()));
+			} else {
+				auto& worker = self->id_worker[self->clusterControllerProcessId];
+				uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness(
+				    worker.details.interf.locality.dcId(), self->desiredDcIds.get().get());
+				self->changingDcIds.set(
+				    std::make_pair(worker.priorityInfo.dcFitness > newFitness, self->desiredDcIds.get()));
+
+				TraceEvent("UpdateChangingDatacenter", self->id)
+				    .detail("OldFitness", worker.priorityInfo.dcFitness)
+				    .detail("NewFitness", newFitness);
+				if (worker.priorityInfo.dcFitness > newFitness) {
+					worker.priorityInfo.dcFitness = newFitness;
+					if (!worker.reply.isSet()) {
+						worker.reply.send(RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
+					}
+				} else {
+					state int currentFit = ProcessClass::BestFit;
+					while (currentFit <= ProcessClass::NeverAssign) {
+						bool updated = false;
+						for (auto& it : self->id_worker) {
+							if ((!it.second.priorityInfo.isExcluded &&
+							     it.second.priorityInfo.processClassFitness == currentFit) ||
+							    currentFit == ProcessClass::NeverAssign) {
+								uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
+								    it.second.details.interf.locality.dcId(), self->changingDcIds.get().second.get());
+								if (it.first != self->clusterControllerProcessId &&
+								    it.second.priorityInfo.dcFitness != fitness) {
+									updated = true;
+									it.second.priorityInfo.dcFitness = fitness;
+									if (!it.second.reply.isSet()) {
+										it.second.reply.send(RegisterWorkerReply(it.second.details.processClass,
+										                                         it.second.priorityInfo));
+									}
+								}
+							}
+						}
+						if (updated && currentFit < ProcessClass::NeverAssign) {
+							wait(delay(SERVER_KNOBS->CC_CLASS_DELAY));
+						}
+						currentFit++;
+					}
+				}
+			}
+
+			wait(onChange);
+		}
+	}
+
+	ACTOR static Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
+		state Future<Void> changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
+		state Future<Void> onChange = self->changingDcIds.onChange();
+		loop {
+			choose {
+				when(wait(onChange)) {
+					changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
+					onChange = self->changingDcIds.onChange();
+				}
+				when(wait(changeDelay)) {
+					changeDelay = Never();
+					onChange = self->changingDcIds.onChange();
+
+					self->changedDcIds.set(self->changingDcIds.get());
+					if (self->changedDcIds.get().second.present()) {
+						TraceEvent("UpdateChangedDatacenter", self->id)
+						    .detail("CCFirst", self->changedDcIds.get().first);
+						if (!self->changedDcIds.get().first) {
+							auto& worker = self->id_worker[self->clusterControllerProcessId];
+							uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness(
+							    worker.details.interf.locality.dcId(), self->changedDcIds.get().second.get());
+							if (worker.priorityInfo.dcFitness != newFitness) {
+								worker.priorityInfo.dcFitness = newFitness;
+								if (!worker.reply.isSet()) {
+									worker.reply.send(
+									    RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
+								}
+							}
+						} else {
+							state int currentFit = ProcessClass::BestFit;
+							while (currentFit <= ProcessClass::NeverAssign) {
+								bool updated = false;
+								for (auto& it : self->id_worker) {
+									if ((!it.second.priorityInfo.isExcluded &&
+									     it.second.priorityInfo.processClassFitness == currentFit) ||
+									    currentFit == ProcessClass::NeverAssign) {
+										uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
+										    it.second.details.interf.locality.dcId(),
+										    self->changedDcIds.get().second.get());
+										if (it.first != self->clusterControllerProcessId &&
+										    it.second.priorityInfo.dcFitness != fitness) {
+											updated = true;
+											it.second.priorityInfo.dcFitness = fitness;
+											if (!it.second.reply.isSet()) {
+												it.second.reply.send(RegisterWorkerReply(it.second.details.processClass,
+												                                         it.second.priorityInfo));
+											}
+										}
+									}
+								}
+								if (updated && currentFit < ProcessClass::NeverAssign) {
+									wait(delay(SERVER_KNOBS->CC_CLASS_DELAY));
+								}
+								currentFit++;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self) {
+		state double lastLogTime = 0;
+		loop {
+			self->versionDifferenceUpdated = false;
+			if (self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
+			    self->db.config.usableRegions == 1) {
+				bool oldDifferenceTooLarge = !self->versionDifferenceUpdated ||
+				                             self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
+				self->versionDifferenceUpdated = true;
+				self->datacenterVersionDifference = 0;
+
+				if (oldDifferenceTooLarge) {
+					self->checkOutstandingRequests();
+				}
+
+				wait(self->db.serverInfo->onChange());
+				continue;
+			}
+
+			state Optional<TLogInterface> primaryLog;
+			state Optional<TLogInterface> remoteLog;
+			if (self->db.serverInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
+				for (auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
+					if (logSet.isLocal && logSet.locality != tagLocalitySatellite) {
+						for (auto& tLog : logSet.tLogs) {
+							if (tLog.present()) {
+								primaryLog = tLog.interf();
+								break;
+							}
+						}
+					}
+					if (!logSet.isLocal) {
+						for (auto& tLog : logSet.tLogs) {
+							if (tLog.present()) {
+								remoteLog = tLog.interf();
+								break;
+							}
+						}
+					}
+				}
+			}
+
+			if (!primaryLog.present() || !remoteLog.present()) {
+				wait(self->db.serverInfo->onChange());
+				continue;
+			}
+
+			state Future<Void> onChange = self->db.serverInfo->onChange();
+			loop {
+				state Future<TLogQueuingMetricsReply> primaryMetrics =
+				    brokenPromiseToNever(primaryLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
+				state Future<TLogQueuingMetricsReply> remoteMetrics =
+				    brokenPromiseToNever(remoteLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
+
+				wait((success(primaryMetrics) && success(remoteMetrics)) || onChange);
+				if (onChange.isReady()) {
+					break;
+				}
+
+				if (primaryMetrics.get().v > 0 && remoteMetrics.get().v > 0) {
+					bool oldDifferenceTooLarge =
+					    !self->versionDifferenceUpdated ||
+					    self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
+					self->versionDifferenceUpdated = true;
+					self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+
+					if (oldDifferenceTooLarge &&
+					    self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+						self->checkOutstandingRequests();
+					}
+
+					if (now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
+						lastLogTime = now();
+						TraceEvent("DatacenterVersionDifference", self->id)
+						    .detail("Difference", self->datacenterVersionDifference);
+					}
+				}
+
+				wait(delay(SERVER_KNOBS->VERSION_LAG_METRIC_INTERVAL) || onChange);
+				if (onChange.isReady()) {
+					break;
+				}
+			}
+		}
+	}
+
+	// A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC
+	// recovers.
+	ACTOR static Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
+		// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote
+		// DC health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
+		wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
+
+		self->remoteDCMonitorStarted = true;
+
+		// When the remote DC health just start, we may just recover from a health degradation. Check if we can failback
+		// if we are currently in the remote DC in the database configuration.
+		if (!self->remoteTransactionSystemDegraded) {
+			self->checkOutstandingRequests();
+		}
+
+		loop {
+			bool oldRemoteTransactionSystemDegraded = self->remoteTransactionSystemDegraded;
+			self->remoteTransactionSystemDegraded = self->remoteTransactionSystemContainsDegradedServers();
+
+			if (oldRemoteTransactionSystemDegraded && !self->remoteTransactionSystemDegraded) {
+				self->checkOutstandingRequests();
+			}
+			wait(delay(SERVER_KNOBS->CHECK_REMOTE_HEALTH_INTERVAL));
+		}
+	}
+
 }; // class ClusterControllerDataImpl
 
 Future<Optional<Value>> ClusterControllerData::getPreviousCoordinators() {
@@ -1255,259 +1740,25 @@ Future<Void> ClusterControllerData::registerWorker(RegisterWorkerRequest req,
 	return ClusterControllerDataImpl::registerWorker(this, req, cs, configBroadcaster);
 }
 
-ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-
-	return Void();
+Future<Void> ClusterControllerData::timeKeeperSetVersion() {
+	return ClusterControllerDataImpl::timeKeeperSetVersion(this);
 }
 
 // This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid
 // running out of space, it limits the max number of entries and clears old entries on each update. This mapping is
 // used from backup and restore to get the version information for a timestamp.
-ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-
-	TraceEvent("TimeKeeperStarted").log();
-
-	wait(timeKeeperSetVersion(self));
-
-	loop {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-		loop {
-			try {
-				state UID debugID = deterministicRandom()->randomUniqueID();
-				if (!g_network->isSimulated()) {
-					// This is done to provide an arbitrary logged transaction every ~10s.
-					// FIXME: replace or augment this with logging on the proxy which tracks
-					// how long it is taking to hear responses from each other component.
-					tr->debugTransaction(debugID);
-				}
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-				Optional<Value> disableValue = wait(tr->get(timeKeeperDisableKey));
-				if (disableValue.present()) {
-					break;
-				}
-
-				Version v = tr->getReadVersion().get();
-				int64_t currentTime = (int64_t)now();
-				versionMap.set(tr, currentTime, v);
-				if (!g_network->isSimulated()) {
-					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v);
-				}
-				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
-				if (ttl > 0) {
-					versionMap.erase(tr, 0, ttl);
-				}
-
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-
-		wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
-	}
+Future<Void> ClusterControllerData::timeKeeper() {
+	return ClusterControllerDataImpl::timeKeeper(this);
 }
 
-ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
-                                ClusterControllerData* self,
-                                ServerCoordinators coordinators,
-                                ConfigBroadcaster const* configBroadcaster) {
-	// Seconds since the END of the last GetStatus executed
-	state double last_request_time = 0.0;
-
-	// Place to accumulate a batch of requests to respond to
-	state std::vector<StatusRequest> requests_batch;
-
-	loop {
-		try {
-			// Wait til first request is ready
-			StatusRequest req = waitNext(requests);
-			++self->statusRequests;
-			requests_batch.push_back(req);
-
-			// Earliest time at which we may begin a new request
-			double next_allowed_request_time = last_request_time + SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS;
-
-			// Wait if needed to satisfy min_time knob, also allows more requets to queue up.
-			double minwait = std::max(next_allowed_request_time - now(), 0.0);
-			wait(delay(minwait));
-
-			// Get all requests that are ready right *now*, before GetStatus() begins.
-			// All of these requests will be responded to with the next GetStatus() result.
-			// If requests are batched, do not respond to more than MAX_STATUS_REQUESTS_PER_SECOND
-			// requests per second
-			while (requests.isReady()) {
-				auto req = requests.pop();
-				if (SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS > 0.0 &&
-				    requests_batch.size() + 1 >
-				        SERVER_KNOBS->STATUS_MIN_TIME_BETWEEN_REQUESTS * SERVER_KNOBS->MAX_STATUS_REQUESTS_PER_SECOND) {
-					TraceEvent(SevWarnAlways, "TooManyStatusRequests")
-					    .suppressFor(1.0)
-					    .detail("BatchSize", requests_batch.size());
-					req.reply.sendError(server_overloaded());
-				} else {
-					requests_batch.push_back(req);
-				}
-			}
-
-			// Get status but trap errors to send back to client.
-			std::vector<WorkerDetails> workers;
-			std::vector<ProcessIssues> workerIssues;
-
-			for (auto& it : self->id_worker) {
-				workers.push_back(it.second.details);
-				if (it.second.issues.size()) {
-					workerIssues.emplace_back(it.second.details.interf.address(), it.second.issues);
-				}
-			}
-
-			std::vector<NetworkAddress> incompatibleConnections;
-			for (auto it = self->db.incompatibleConnections.begin(); it != self->db.incompatibleConnections.end();) {
-				if (it->second < now()) {
-					it = self->db.incompatibleConnections.erase(it);
-				} else {
-					incompatibleConnections.push_back(it->first);
-					it++;
-				}
-			}
-
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo,
-			                                                                  self->cx,
-			                                                                  workers,
-			                                                                  workerIssues,
-			                                                                  &self->db.clientStatus,
-			                                                                  coordinators,
-			                                                                  incompatibleConnections,
-			                                                                  self->datacenterVersionDifference,
-			                                                                  configBroadcaster,
-			                                                                  self->db.metaclusterRegistration,
-			                                                                  self->db.metaclusterMetrics)));
-
-			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
-				throw result.getError();
-
-			// Update last_request_time now because GetStatus is finished and the delay is to be measured between
-			// requests
-			last_request_time = now();
-
-			while (!requests_batch.empty()) {
-				if (result.isError())
-					requests_batch.back().reply.sendError(result.getError());
-				else
-					requests_batch.back().reply.send(result.get());
-				requests_batch.pop_back();
-				wait(yield());
-			}
-		} catch (Error& e) {
-			TraceEvent(SevError, "StatusServerError").error(e);
-			throw e;
-		}
-	}
+Future<Void> ClusterControllerData::statusServer(FutureStream<StatusRequest> requests,
+                                                 ServerCoordinators coordinators,
+                                                 ConfigBroadcaster const* configBroadcaster) {
+	return ClusterControllerDataImpl::statusServer(this, requests, coordinators, configBroadcaster);
 }
 
-ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
-
-	state ReadYourWritesTransaction trVer(self->db.db);
-	loop {
-		try {
-			trVer.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			trVer.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			Optional<Value> val = wait(trVer.get(processClassVersionKey));
-
-			if (val.present())
-				break;
-
-			RangeResult processClasses = wait(trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
-
-			trVer.clear(processClassKeys);
-			trVer.set(processClassVersionKey, processClassVersionValue);
-			for (auto it : processClasses) {
-				UID processUid = decodeProcessClassKeyOld(it.key);
-				trVer.set(processClassKeyFor(processUid.toString()), it.value);
-			}
-
-			wait(trVer.commit());
-			TraceEvent("ProcessClassUpgrade").log();
-			break;
-		} catch (Error& e) {
-			wait(trVer.onError(e));
-		}
-	}
-
-	loop {
-		state ReadYourWritesTransaction tr(self->db.db);
-
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				RangeResult processClasses = wait(tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
-
-				if (processClasses != self->lastProcessClasses || !self->gotProcessClasses) {
-					self->id_class.clear();
-					for (int i = 0; i < processClasses.size(); i++) {
-						auto c = decodeProcessClassValue(processClasses[i].value);
-						ASSERT(c.classSource() != ProcessClass::CommandLineSource);
-						self->id_class[decodeProcessClassKey(processClasses[i].key)] = c;
-					}
-
-					for (auto& w : self->id_worker) {
-						auto classIter = self->id_class.find(w.first);
-						ProcessClass newProcessClass;
-
-						if (classIter != self->id_class.end() &&
-						    (classIter->second.classSource() == ProcessClass::DBSource ||
-						     w.second.initialClass.classType() == ProcessClass::UnsetClass)) {
-							newProcessClass = classIter->second;
-						} else {
-							newProcessClass = w.second.initialClass;
-						}
-
-						if (newProcessClass != w.second.details.processClass) {
-							w.second.details.processClass = newProcessClass;
-							w.second.priorityInfo.processClassFitness =
-							    newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-							if (!w.second.reply.isSet()) {
-								w.second.reply.send(
-								    RegisterWorkerReply(w.second.details.processClass, w.second.priorityInfo));
-							}
-						}
-					}
-
-					self->lastProcessClasses = processClasses;
-					self->gotProcessClasses = true;
-					self->checkOutstandingRequests();
-				}
-
-				state Future<Void> watchFuture = tr.watch(processClassChangeKey);
-				wait(tr.commit());
-				wait(watchFuture);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
+Future<Void> ClusterControllerData::monitorProcessClasses() {
+	return ClusterControllerDataImpl::monitorProcessClasses(this);
 }
 
 ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
@@ -1640,230 +1891,20 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	}
 }
 
-ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
-	// do not change the cluster controller until all the processes have had a chance to register
-	wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-	loop {
-		state Future<Void> onChange = self->desiredDcIds.onChange();
-		if (!self->desiredDcIds.get().present()) {
-			self->changingDcIds.set(std::make_pair(false, self->desiredDcIds.get()));
-		} else {
-			auto& worker = self->id_worker[self->clusterControllerProcessId];
-			uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness(
-			    worker.details.interf.locality.dcId(), self->desiredDcIds.get().get());
-			self->changingDcIds.set(
-			    std::make_pair(worker.priorityInfo.dcFitness > newFitness, self->desiredDcIds.get()));
-
-			TraceEvent("UpdateChangingDatacenter", self->id)
-			    .detail("OldFitness", worker.priorityInfo.dcFitness)
-			    .detail("NewFitness", newFitness);
-			if (worker.priorityInfo.dcFitness > newFitness) {
-				worker.priorityInfo.dcFitness = newFitness;
-				if (!worker.reply.isSet()) {
-					worker.reply.send(RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
-				}
-			} else {
-				state int currentFit = ProcessClass::BestFit;
-				while (currentFit <= ProcessClass::NeverAssign) {
-					bool updated = false;
-					for (auto& it : self->id_worker) {
-						if ((!it.second.priorityInfo.isExcluded &&
-						     it.second.priorityInfo.processClassFitness == currentFit) ||
-						    currentFit == ProcessClass::NeverAssign) {
-							uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
-							    it.second.details.interf.locality.dcId(), self->changingDcIds.get().second.get());
-							if (it.first != self->clusterControllerProcessId &&
-							    it.second.priorityInfo.dcFitness != fitness) {
-								updated = true;
-								it.second.priorityInfo.dcFitness = fitness;
-								if (!it.second.reply.isSet()) {
-									it.second.reply.send(
-									    RegisterWorkerReply(it.second.details.processClass, it.second.priorityInfo));
-								}
-							}
-						}
-					}
-					if (updated && currentFit < ProcessClass::NeverAssign) {
-						wait(delay(SERVER_KNOBS->CC_CLASS_DELAY));
-					}
-					currentFit++;
-				}
-			}
-		}
-
-		wait(onChange);
-	}
+Future<Void> ClusterControllerData::updatedChangingDatacenters() {
+	return ClusterControllerDataImpl::updatedChangingDatacenters(this);
 }
 
-ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
-	state Future<Void> changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
-	state Future<Void> onChange = self->changingDcIds.onChange();
-	loop {
-		choose {
-			when(wait(onChange)) {
-				changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
-				onChange = self->changingDcIds.onChange();
-			}
-			when(wait(changeDelay)) {
-				changeDelay = Never();
-				onChange = self->changingDcIds.onChange();
-
-				self->changedDcIds.set(self->changingDcIds.get());
-				if (self->changedDcIds.get().second.present()) {
-					TraceEvent("UpdateChangedDatacenter", self->id).detail("CCFirst", self->changedDcIds.get().first);
-					if (!self->changedDcIds.get().first) {
-						auto& worker = self->id_worker[self->clusterControllerProcessId];
-						uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness(
-						    worker.details.interf.locality.dcId(), self->changedDcIds.get().second.get());
-						if (worker.priorityInfo.dcFitness != newFitness) {
-							worker.priorityInfo.dcFitness = newFitness;
-							if (!worker.reply.isSet()) {
-								worker.reply.send(
-								    RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
-							}
-						}
-					} else {
-						state int currentFit = ProcessClass::BestFit;
-						while (currentFit <= ProcessClass::NeverAssign) {
-							bool updated = false;
-							for (auto& it : self->id_worker) {
-								if ((!it.second.priorityInfo.isExcluded &&
-								     it.second.priorityInfo.processClassFitness == currentFit) ||
-								    currentFit == ProcessClass::NeverAssign) {
-									uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
-									    it.second.details.interf.locality.dcId(),
-									    self->changedDcIds.get().second.get());
-									if (it.first != self->clusterControllerProcessId &&
-									    it.second.priorityInfo.dcFitness != fitness) {
-										updated = true;
-										it.second.priorityInfo.dcFitness = fitness;
-										if (!it.second.reply.isSet()) {
-											it.second.reply.send(RegisterWorkerReply(it.second.details.processClass,
-											                                         it.second.priorityInfo));
-										}
-									}
-								}
-							}
-							if (updated && currentFit < ProcessClass::NeverAssign) {
-								wait(delay(SERVER_KNOBS->CC_CLASS_DELAY));
-							}
-							currentFit++;
-						}
-					}
-				}
-			}
-		}
-	}
+Future<Void> ClusterControllerData::updatedChangedDatacenters() {
+	return ClusterControllerDataImpl::updatedChangedDatacenters(this);
 }
 
-ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self) {
-	state double lastLogTime = 0;
-	loop {
-		self->versionDifferenceUpdated = false;
-		if (self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-		    self->db.config.usableRegions == 1) {
-			bool oldDifferenceTooLarge = !self->versionDifferenceUpdated ||
-			                             self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
-			self->versionDifferenceUpdated = true;
-			self->datacenterVersionDifference = 0;
-
-			if (oldDifferenceTooLarge) {
-				self->checkOutstandingRequests();
-			}
-
-			wait(self->db.serverInfo->onChange());
-			continue;
-		}
-
-		state Optional<TLogInterface> primaryLog;
-		state Optional<TLogInterface> remoteLog;
-		if (self->db.serverInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
-			for (auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
-				if (logSet.isLocal && logSet.locality != tagLocalitySatellite) {
-					for (auto& tLog : logSet.tLogs) {
-						if (tLog.present()) {
-							primaryLog = tLog.interf();
-							break;
-						}
-					}
-				}
-				if (!logSet.isLocal) {
-					for (auto& tLog : logSet.tLogs) {
-						if (tLog.present()) {
-							remoteLog = tLog.interf();
-							break;
-						}
-					}
-				}
-			}
-		}
-
-		if (!primaryLog.present() || !remoteLog.present()) {
-			wait(self->db.serverInfo->onChange());
-			continue;
-		}
-
-		state Future<Void> onChange = self->db.serverInfo->onChange();
-		loop {
-			state Future<TLogQueuingMetricsReply> primaryMetrics =
-			    brokenPromiseToNever(primaryLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
-			state Future<TLogQueuingMetricsReply> remoteMetrics =
-			    brokenPromiseToNever(remoteLog.get().getQueuingMetrics.getReply(TLogQueuingMetricsRequest()));
-
-			wait((success(primaryMetrics) && success(remoteMetrics)) || onChange);
-			if (onChange.isReady()) {
-				break;
-			}
-
-			if (primaryMetrics.get().v > 0 && remoteMetrics.get().v > 0) {
-				bool oldDifferenceTooLarge = !self->versionDifferenceUpdated ||
-				                             self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
-				self->versionDifferenceUpdated = true;
-				self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
-
-				if (oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
-					self->checkOutstandingRequests();
-				}
-
-				if (now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
-					lastLogTime = now();
-					TraceEvent("DatacenterVersionDifference", self->id)
-					    .detail("Difference", self->datacenterVersionDifference);
-				}
-			}
-
-			wait(delay(SERVER_KNOBS->VERSION_LAG_METRIC_INTERVAL) || onChange);
-			if (onChange.isReady()) {
-				break;
-			}
-		}
-	}
+Future<Void> ClusterControllerData::updateDatacenterVersionDifference() {
+	return ClusterControllerDataImpl::updateDatacenterVersionDifference(this);
 }
 
-// A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC
-// recovers.
-ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
-	// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote
-	// DC health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
-	wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
-
-	self->remoteDCMonitorStarted = true;
-
-	// When the remote DC health just start, we may just recover from a health degradation. Check if we can failback
-	// if we are currently in the remote DC in the database configuration.
-	if (!self->remoteTransactionSystemDegraded) {
-		self->checkOutstandingRequests();
-	}
-
-	loop {
-		bool oldRemoteTransactionSystemDegraded = self->remoteTransactionSystemDegraded;
-		self->remoteTransactionSystemDegraded = self->remoteTransactionSystemContainsDegradedServers();
-
-		if (oldRemoteTransactionSystemDegraded && !self->remoteTransactionSystemDegraded) {
-			self->checkOutstandingRequests();
-		}
-		wait(delay(SERVER_KNOBS->CHECK_REMOTE_HEALTH_INTERVAL));
-	}
+Future<Void> ClusterControllerData::updateRemoteDCHealth() {
+	return ClusterControllerDataImpl::updateRemoteDCHealth(this);
 }
 
 ACTOR Future<Void> doEmptyCommit(Database cx) {
@@ -2919,17 +2960,16 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(
 	    self.clusterWatchDatabase(&self.db, coordinators, recoveredDiskFiles)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
-	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
-	                                &self,
-	                                coordinators,
-	                                (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
-	self.addActor.send(timeKeeper(&self));
-	self.addActor.send(monitorProcessClasses(&self));
+	self.addActor.send(self.statusServer(interf.clientInterface.databaseStatus.getFuture(),
+	                                     coordinators,
+	                                     (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
+	self.addActor.send(self.timeKeeper());
+	self.addActor.send(self.monitorProcessClasses());
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorGlobalConfig(&self.db));
-	self.addActor.send(updatedChangingDatacenters(&self));
-	self.addActor.send(updatedChangedDatacenters(&self));
-	self.addActor.send(updateDatacenterVersionDifference(&self));
+	self.addActor.send(self.updatedChangingDatacenters());
+	self.addActor.send(self.updatedChangedDatacenters());
+	self.addActor.send(self.updateDatacenterVersionDifference());
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(handleTriggerAuditStorage(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
@@ -2952,7 +2992,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 		self.addActor.send(workerHealthMonitor(&self));
-		self.addActor.send(updateRemoteDCHealth(&self));
+		self.addActor.send(self.updateRemoteDCHealth());
 	}
 
 	loop choose {
