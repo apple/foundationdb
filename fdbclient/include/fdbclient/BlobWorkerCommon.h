@@ -46,10 +46,12 @@ struct BlobWorkerStats {
 	Counter fullRejections;
 	Counter forceFlushCleanups;
 	Counter readDrivenCompactions;
+	Counter oldFeedSnapshots;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
 	int activeReadRequests;
+	// TODO: add gauge for granules blocking on old snapshots, once this guage is fixed
 	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
 	Version cfVersionLag;
@@ -93,12 +95,12 @@ struct BlobWorkerStats {
 	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
 	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc),
 	    forceFlushCleanups("ForceFlushCleanups", cc), readDrivenCompactions("ReadDrivenCompactions", cc),
-	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0),
-	    minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0),
-	    snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
-	                                   id,
-	                                   sampleLoggingInterval,
-	                                   fileOpLatencySketchAccuracy),
+	    oldFeedSnapshots("OldFeedSnapshots", cc), numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0),
+	    granulesPendingSplitCheck(0), minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0),
+	    lastResidentMemory(0), snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
+	                                                          id,
+	                                                          sampleLoggingInterval,
+	                                                          fileOpLatencySketchAccuracy),
 	    deltaBlobWriteLatencySample("DeltaBlobWriteMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    reSnapshotLatencySample("GranuleResnapshotMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    readLatencySample("GranuleReadLatencyMetrics", id, sampleLoggingInterval, requestLatencySketchAccuracy),

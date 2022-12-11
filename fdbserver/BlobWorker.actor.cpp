@@ -302,7 +302,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	    stats(id,
 	          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
 	          initialSnapshotLock,
-	          resnapshotBudget, deltaWritesBudget,
+	          resnapshotBudget,
+	          deltaWritesBudget,
 	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	          SERVER_KNOBS->FILE_LATENCY_SKETCH_ACCURACY,
 	          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
@@ -1052,6 +1053,16 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	// free snapshot to reduce memory
 	snapshot = Standalone<GranuleSnapshot>();
 
+	if (serializedSize >= 5 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+		// TODO REMOVE key range from log
+		TraceEvent(SevWarn, "BGSnapshotTooBig", bwData->id)
+		    .suppressFor(60)
+		    .detail("GranuleID", granuleID)
+		    .detail("Granule", keyRange)
+		    .detail("Version", version)
+		    .detail("Size", serializedSize);
+	}
+
 	// write to blob using multi part upload
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
@@ -1567,6 +1578,7 @@ ACTOR Future<BlobFileIndex> reSnapshotNoCheck(Reference<BlobWorkerData> bwData,
 	TraceEvent(SevDebug, "BlobGranuleReSnapshotOldFeed", bwData->id)
 	    .detail("Granule", metadata->keyRange)
 	    .detail("Version", reSnapshotVersion);
+	++bwData->stats.oldFeedSnapshots;
 
 	// wait for file updater to make sure that last delta file is in the metadata before
 	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {
@@ -2748,7 +2760,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 			// If we have enough delta files, try to re-snapshot
 			// FIXME: have max file count in addition to bytes count
-			if (snapshotEligible && (metadata->doReadDrivenCompaction() || metadata->bytesInNewDeltaFiles >= writeAmpTarget.getBytesBeforeCompact())) {
+			if (snapshotEligible && (metadata->doReadDrivenCompaction() ||
+			                         metadata->bytesInNewDeltaFiles >= writeAmpTarget.getBytesBeforeCompact())) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
 					           "waiting for outstanding {5} files to finish\n",
