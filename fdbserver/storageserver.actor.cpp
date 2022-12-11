@@ -1993,7 +1993,9 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -2034,7 +2036,6 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, req.spanContext);
-	span.addAttribute("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
@@ -4875,13 +4876,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		// keep index for boundary index entries, so that caller can use it as a continuation.
 		result.data[0].key = input.data[0].key;
 		result.data[0].value = input.data[0].value;
-		result.data[0].boundaryAndExist = getMappedKeyValueSize(kvms[0]) > 0;
 
 		result.data.back().key = input.data[resultSize - 1].key;
 		result.data.back().value = input.data[resultSize - 1].value;
-		// index needs to be -1
-		int index = (resultSize - 1) % SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
-		result.data.back().boundaryAndExist = getMappedKeyValueSize(kvms[index]) > 0;
 	}
 	result.more = input.more || resultSize < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -6367,7 +6364,9 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		when(wait(changeFeedInfo->fetchLock.take())) {
 			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
 		}
-		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) {
+			return invalidVersion;
+		}
 	}
 
 	state Version startVersion = beginVersion;
@@ -8391,6 +8390,8 @@ private:
 			// Because of data moves, we can get mutations operating on a change feed we don't yet know about, because
 			// the metadata fetch hasn't started yet
 			bool createdFeed = false;
+			bool popMutationLog = false;
+			bool addMutationToLog = false;
 			if (feed == data->uidChangeFeed.end() && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 				createdFeed = true;
 
@@ -8440,6 +8441,7 @@ private:
 				CODE_PROBE(true, "private mutation for feed scheduled for deletion! Un-mark it as removing");
 
 				feed->second->removing = false;
+				addMutationToLog = true;
 				// reset fetch versions because everything previously fetched was cleaned up
 				feed->second->fetchVersion = invalidVersion;
 				feed->second->durableFetchVersion = NotifiedVersion();
@@ -8448,8 +8450,6 @@ private:
 				feed->second->updateMetadataVersion(currentVersion);
 			}
 
-			bool popMutationLog = false;
-			bool addMutationToLog = false;
 			if (popVersion != invalidVersion && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 				// pop the change feed at pop version, no matter what state it is in
 				if (popVersion - 1 > feed->second->emptyVersion) {
@@ -9020,7 +9020,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				}
 
 				Span span("SS:update"_loc, spanContext);
-				span.addAttribute("key"_sr, msg.param1);
 
 				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
 				// quarantine.
@@ -10355,7 +10354,9 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						  }*/
 					}
-					when(wait(timeout)) { timedout = true; }
+					when(wait(timeout)) {
+						timedout = true;
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)

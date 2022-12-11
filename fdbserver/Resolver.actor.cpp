@@ -251,7 +251,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		}
 
 		choose {
-			when(wait(self->version.whenAtLeast(req.prevVersion))) { break; }
+			when(wait(self->version.whenAtLeast(req.prevVersion))) {
+				break;
+			}
 			when(wait(self->checkNeededVersion.onTrigger())) {}
 		}
 	}
@@ -750,7 +752,9 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 	try {
 		state Future<Void> core = resolverCore(resolver, initReq, db);
 		loop choose {
-			when(wait(core)) { return Void(); }
+			when(wait(core)) {
+				return Void();
+			}
 			when(wait(checkRemoved(db, initReq.recoveryCount, resolver))) {}
 		}
 	} catch (Error& e) {
