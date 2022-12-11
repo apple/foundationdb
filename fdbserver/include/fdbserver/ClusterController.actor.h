@@ -3347,10 +3347,56 @@ public:
 	                                         std::map<Optional<Standalone<StringRef>>, int>& id_used);
 	// Return best possible fitness for singleton. Note that lower fitness is better.
 	ProcessClass::Fitness findBestFitnessForSingleton(const WorkerDetails&, const ProcessClass::ClusterRole&);
+
 	void checkBetterSingletons();
 	Future<Void> doCheckOutstandingRequests();
 	Future<Void> doCheckOutstandingRemoteRequests();
 	void checkOutstandingRequests();
+	Future<Void> workerAvailabilityWatch(WorkerInterface worker, ProcessClass startingClass);
+	void clusterRecruitStorage(RecruitStorageRequest);
+	void clusterRecruitBlobWorker(RecruitBlobWorkerRequest);
+	void clusterRegisterMaster(RegisterMasterRequest const&);
+	Future<Void> registerWorker(RegisterWorkerRequest, ClusterConnectionString, class ConfigBroadcaster*);
+
+	// Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
+	// or, halts the existing singleton in favour of the requesting one
+	template <class SingletonClass>
+	void haltRegisteringOrCurrentSingleton(const WorkerInterface& worker,
+	                                       const SingletonClass& currSingleton,
+	                                       const SingletonClass& registeringSingleton,
+	                                       const Optional<UID> recruitingID) {
+		ASSERT(currSingleton.getRole() == registeringSingleton.getRole());
+		const UID registeringID = registeringSingleton.getInterface().id();
+		const std::string roleName = currSingleton.getRole().roleName;
+		const std::string roleAbbr = currSingleton.getRole().abbreviation;
+
+		// halt the requesting singleton if it isn't the one currently being recruited
+		if ((recruitingID.present() && recruitingID.get() != registeringID) ||
+		    clusterControllerDcId != worker.locality.dcId()) {
+			TraceEvent(("CCHaltRegistering" + roleName).c_str(), id)
+			    .detail(roleAbbr + "ID", registeringID)
+			    .detail("DcID", printable(clusterControllerDcId))
+			    .detail("ReqDcID", printable(worker.locality.dcId()))
+			    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
+			registeringSingleton.halt(*this, worker.locality.processId());
+		} else if (!recruitingID.present()) {
+			// if not currently recruiting, then halt previous one in favour of requesting one
+			TraceEvent(("CCRegister" + roleName).c_str(), id).detail(roleAbbr + "ID", registeringID);
+			if (currSingleton.isPresent() && currSingleton.getInterface().id() != registeringID &&
+			    id_worker.count(currSingleton.getInterface().locality.processId())) {
+				TraceEvent(("CCHaltPrevious" + roleName).c_str(), id)
+				    .detail(roleAbbr + "ID", currSingleton.getInterface().id())
+				    .detail("DcID", printable(clusterControllerDcId))
+				    .detail("ReqDcID", printable(worker.locality.dcId()))
+				    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
+				currSingleton.halt(*this, currSingleton.getInterface().locality.processId());
+			}
+			// set the curr singleton if it doesn't exist or its different from the requesting one
+			if (!currSingleton.isPresent() || currSingleton.getInterface().id() != registeringID) {
+				registeringSingleton.setInterfaceToDbInfo(*this);
+			}
+		}
+	}
 
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>

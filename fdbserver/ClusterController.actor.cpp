@@ -76,6 +76,8 @@
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define TIME_KEEPER_VERSION "1"_sr
+
 class ClusterControllerDataImpl {
 public:
 	ACTOR static Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
@@ -300,7 +302,293 @@ public:
 		}
 		return Void();
 	}
-};
+
+	ACTOR static Future<Void> rebootAndCheck(ClusterControllerData* self, Optional<Standalone<StringRef>> processID) {
+		{
+			ASSERT(processID.present());
+			auto watcher = self->id_worker.find(processID);
+			ASSERT(watcher != self->id_worker.end());
+
+			watcher->second.reboots++;
+			wait(delay(g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT));
+		}
+
+		{
+			auto watcher = self->id_worker.find(processID);
+			if (watcher != self->id_worker.end()) {
+				watcher->second.reboots--;
+				if (watcher->second.reboots < 2)
+					self->checkOutstandingRequests();
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> workerAvailabilityWatch(ClusterControllerData* self,
+	                                                  WorkerInterface worker,
+	                                                  ProcessClass startingClass) {
+		state Future<Void> failed =
+		    (worker.address() == g_network->getLocalAddress() || startingClass.classType() == ProcessClass::TesterClass)
+		        ? Never()
+		        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
+		self->updateWorkerList.set(worker.locality.processId(),
+		                           ProcessData(worker.locality, startingClass, worker.stableAddress()));
+		// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
+		// fails for the worker.
+		wait(delay(0));
+
+		loop {
+			choose {
+				when(wait(IFailureMonitor::failureMonitor().onStateEqual(
+				    worker.storage.getEndpoint(),
+				    FailureStatus(
+				        IFailureMonitor::failureMonitor().getState(worker.storage.getEndpoint()).isAvailable())))) {
+					if (IFailureMonitor::failureMonitor().getState(worker.storage.getEndpoint()).isAvailable()) {
+						self->ac.add(rebootAndCheck(self, worker.locality.processId()));
+						self->checkOutstandingRequests();
+					}
+				}
+				when(wait(failed)) { // remove workers that have failed
+					WorkerInfo& failedWorkerInfo = self->id_worker[worker.locality.processId()];
+
+					if (!failedWorkerInfo.reply.isSet()) {
+						failedWorkerInfo.reply.send(
+						    RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo));
+					}
+					if (worker.locality.processId() == self->masterProcessId) {
+						self->masterProcessId = Optional<Key>();
+					}
+					TraceEvent("ClusterControllerWorkerFailed", self->id)
+					    .detail("ProcessId", worker.locality.processId())
+					    .detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
+					    .detail("Address", worker.address());
+					self->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
+					self->id_worker.erase(worker.locality.processId());
+					self->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
+					return Void();
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> registerWorker(ClusterControllerData* self,
+	                                         RegisterWorkerRequest req,
+	                                         ClusterConnectionString cs,
+	                                         ConfigBroadcaster* configBroadcaster) {
+		std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
+
+		const WorkerInterface& w = req.wi;
+		if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
+		    req.processClass != ProcessClass::TesterClass) {
+			TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "WorkerBelongsToExistingCluster", self->id)
+			    .detail("WorkerClusterId", req.clusterId)
+			    .detail("ClusterControllerClusterId", self->clusterId->get())
+			    .detail("WorkerId", w.id())
+			    .detail("ProcessId", w.locality.processId());
+			req.reply.sendError(invalid_cluster_id());
+			return Void();
+		}
+
+		ProcessClass newProcessClass = req.processClass;
+		auto info = self->id_worker.find(w.locality.processId());
+		ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
+		newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+
+		bool isCoordinator =
+		    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.address()) !=
+		     coordinatorAddresses.end()) ||
+		    (w.secondaryAddress().present() &&
+		     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.secondaryAddress().get()) !=
+		         coordinatorAddresses.end());
+
+		for (auto it : req.incompatiblePeers) {
+			self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+		}
+		self->removedDBInfoEndpoints.erase(w.updateServerDBInfo.getEndpoint());
+
+		if (info == self->id_worker.end()) {
+			TraceEvent("ClusterControllerActualWorkers", self->id)
+			    .detail("WorkerId", w.id())
+			    .detail("ProcessId", w.locality.processId())
+			    .detail("ZoneId", w.locality.zoneId())
+			    .detail("DataHall", w.locality.dataHallId())
+			    .detail("PClass", req.processClass.toString())
+			    .detail("Workers", self->id_worker.size())
+			    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
+			self->goodRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
+			self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
+		} else {
+			TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id)
+			    .suppressFor(1.0)
+			    .detail("WorkerId", w.id())
+			    .detail("ProcessId", w.locality.processId())
+			    .detail("ZoneId", w.locality.zoneId())
+			    .detail("DataHall", w.locality.dataHallId())
+			    .detail("PClass", req.processClass.toString())
+			    .detail("Workers", self->id_worker.size())
+			    .detail("Degraded", req.degraded)
+			    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
+		}
+		if (w.address() == g_network->getLocalAddress()) {
+			if (self->changingDcIds.get().first) {
+				if (self->changingDcIds.get().second.present()) {
+					newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
+					    w.locality.dcId(), self->changingDcIds.get().second.get());
+				}
+			} else if (self->changedDcIds.get().second.present()) {
+				newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
+				    w.locality.dcId(), self->changedDcIds.get().second.get());
+			}
+		} else {
+			if (!self->changingDcIds.get().first) {
+				if (self->changingDcIds.get().second.present()) {
+					newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
+					    w.locality.dcId(), self->changingDcIds.get().second.get());
+				}
+			} else if (self->changedDcIds.get().second.present()) {
+				newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
+				    w.locality.dcId(), self->changedDcIds.get().second.get());
+			}
+		}
+
+		// Check process class and exclusive property
+		if (info == self->id_worker.end() || info->second.details.interf.id() != w.id() ||
+		    req.generation >= info->second.gen) {
+			if (self->gotProcessClasses) {
+				auto classIter = self->id_class.find(w.locality.processId());
+
+				if (classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource ||
+				                                          req.initialClass.classType() == ProcessClass::UnsetClass)) {
+					newProcessClass = classIter->second;
+				} else {
+					newProcessClass = req.initialClass;
+				}
+				newPriorityInfo.processClassFitness =
+				    newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+			}
+
+			if (self->gotFullyRecoveredConfig) {
+				newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.addresses());
+			}
+		}
+
+		if (info == self->id_worker.end()) {
+			self->id_worker[w.locality.processId()] = WorkerInfo(self->workerAvailabilityWatch(w, newProcessClass),
+			                                                     req.reply,
+			                                                     req.generation,
+			                                                     w,
+			                                                     req.initialClass,
+			                                                     newProcessClass,
+			                                                     newPriorityInfo,
+			                                                     req.degraded,
+			                                                     req.recoveredDiskFiles,
+			                                                     req.issues);
+			if (!self->masterProcessId.present() &&
+			    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
+				self->masterProcessId = w.locality.processId();
+			}
+			if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
+				self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
+				                                                    req.lastSeenKnobVersion.get(),
+				                                                    req.knobConfigClassSet.get(),
+				                                                    self->id_worker[w.locality.processId()].watcher,
+				                                                    isCoordinator));
+			}
+			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+			self->updateDBInfo.trigger();
+			self->checkOutstandingRequests();
+		} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
+			if (!info->second.reply.isSet()) {
+				info->second.reply.send(Never());
+			}
+			info->second.reply = req.reply;
+			info->second.details.processClass = newProcessClass;
+			info->second.priorityInfo = newPriorityInfo;
+			info->second.initialClass = req.initialClass;
+			info->second.details.degraded = req.degraded;
+			info->second.details.recoveredDiskFiles = req.recoveredDiskFiles;
+			info->second.gen = req.generation;
+			info->second.issues = req.issues;
+
+			if (info->second.details.interf.id() != w.id()) {
+				self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
+				info->second.details.interf = w;
+				// Cancel the existing watcher actor; possible race condition could be, the older registered watcher
+				// detects failures and removes the worker from id_worker even before the new watcher starts monitoring
+				// the new interface
+				info->second.watcher.cancel();
+				info->second.watcher = self->workerAvailabilityWatch(w, newProcessClass);
+			}
+			if (req.requestDbInfo) {
+				self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+				self->updateDBInfo.trigger();
+			}
+			if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
+				self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
+				                                                    req.lastSeenKnobVersion.get(),
+				                                                    req.knobConfigClassSet.get(),
+				                                                    info->second.watcher,
+				                                                    isCoordinator));
+			}
+			self->checkOutstandingRequests();
+		} else {
+			CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
+		}
+
+		// For each singleton
+		// - if the registering singleton conflicts with the singleton being recruited, kill the registering one
+		// - if the singleton is not being recruited, kill the existing one in favour of the registering one
+		if (req.distributorInterf.present()) {
+			auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
+			auto registeringSingleton = DataDistributorSingleton(req.distributorInterf);
+			self->haltRegisteringOrCurrentSingleton<DataDistributorSingleton>(
+			    w, currSingleton, registeringSingleton, self->recruitingDistributorID);
+		}
+
+		if (req.ratekeeperInterf.present()) {
+			auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
+			auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
+			self->haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
+			    w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
+		}
+
+		if (self->db.blobGranulesEnabled.get() && req.blobManagerInterf.present()) {
+			auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
+			auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
+			self->haltRegisteringOrCurrentSingleton<BlobManagerSingleton>(
+			    w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
+		}
+		if (req.blobMigratorInterf.present() && self->db.blobRestoreEnabled.get()) {
+			auto currSingleton = BlobMigratorSingleton(self->db.serverInfo->get().blobMigrator);
+			auto registeringSingleton = BlobMigratorSingleton(req.blobMigratorInterf);
+			self->haltRegisteringOrCurrentSingleton<BlobMigratorSingleton>(
+			    w, currSingleton, registeringSingleton, self->recruitingBlobMigratorID);
+		}
+
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION && req.encryptKeyProxyInterf.present()) {
+			auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().encryptKeyProxy);
+			auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
+			self->haltRegisteringOrCurrentSingleton<EncryptKeyProxySingleton>(
+			    w, currSingleton, registeringSingleton, self->recruitingEncryptKeyProxyID);
+		}
+
+		if (req.consistencyScanInterf.present()) {
+			auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
+			auto registeringSingleton = ConsistencyScanSingleton(req.consistencyScanInterf);
+			self->haltRegisteringOrCurrentSingleton<ConsistencyScanSingleton>(
+			    w, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
+		}
+
+		// Notify the worker to register again with new process class/exclusive property
+		if (!req.reply.isSet() && newPriorityInfo != req.priorityInfo) {
+			req.reply.send(RegisterWorkerReply(newProcessClass, newPriorityInfo));
+		}
+
+		return Void();
+	}
+
+}; // class ClusterControllerDataImpl
 
 Future<Optional<Value>> ClusterControllerData::getPreviousCoordinators() {
 	return ClusterControllerDataImpl::getPreviousCoordinators(this);
@@ -752,73 +1040,8 @@ void ClusterControllerData::checkOutstandingRequests() {
 	}
 }
 
-ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID) {
-	{
-		ASSERT(processID.present());
-		auto watcher = cluster->id_worker.find(processID);
-		ASSERT(watcher != cluster->id_worker.end());
-
-		watcher->second.reboots++;
-		wait(delay(g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT));
-	}
-
-	{
-		auto watcher = cluster->id_worker.find(processID);
-		if (watcher != cluster->id_worker.end()) {
-			watcher->second.reboots--;
-			if (watcher->second.reboots < 2)
-				cluster->checkOutstandingRequests();
-		}
-	}
-
-	return Void();
-}
-
-ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
-                                           ProcessClass startingClass,
-                                           ClusterControllerData* cluster) {
-	state Future<Void> failed =
-	    (worker.address() == g_network->getLocalAddress() || startingClass.classType() == ProcessClass::TesterClass)
-	        ? Never()
-	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
-	cluster->updateWorkerList.set(worker.locality.processId(),
-	                              ProcessData(worker.locality, startingClass, worker.stableAddress()));
-	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
-	// fails for the worker.
-	wait(delay(0));
-
-	loop {
-		choose {
-			when(wait(IFailureMonitor::failureMonitor().onStateEqual(
-			    worker.storage.getEndpoint(),
-			    FailureStatus(
-			        IFailureMonitor::failureMonitor().getState(worker.storage.getEndpoint()).isAvailable())))) {
-				if (IFailureMonitor::failureMonitor().getState(worker.storage.getEndpoint()).isAvailable()) {
-					cluster->ac.add(rebootAndCheck(cluster, worker.locality.processId()));
-					cluster->checkOutstandingRequests();
-				}
-			}
-			when(wait(failed)) { // remove workers that have failed
-				WorkerInfo& failedWorkerInfo = cluster->id_worker[worker.locality.processId()];
-
-				if (!failedWorkerInfo.reply.isSet()) {
-					failedWorkerInfo.reply.send(
-					    RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo));
-				}
-				if (worker.locality.processId() == cluster->masterProcessId) {
-					cluster->masterProcessId = Optional<Key>();
-				}
-				TraceEvent("ClusterControllerWorkerFailed", cluster->id)
-				    .detail("ProcessId", worker.locality.processId())
-				    .detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
-				    .detail("Address", worker.address());
-				cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
-				cluster->id_worker.erase(worker.locality.processId());
-				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
-				return Void();
-			}
-		}
-	}
+Future<Void> ClusterControllerData::workerAvailabilityWatch(WorkerInterface worker, ProcessClass startingClass) {
+	return ClusterControllerDataImpl::workerAvailabilityWatch(this, worker, startingClass);
 }
 
 struct FailureStatusInfo {
@@ -850,23 +1073,23 @@ ACTOR Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<
 	return out;
 }
 
-void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest req) {
+void ClusterControllerData::clusterRecruitStorage(RecruitStorageRequest req) {
 	try {
-		if (!self->gotProcessClasses && !req.criticalRecruitment)
+		if (!gotProcessClasses && !req.criticalRecruitment)
 			throw no_more_servers();
-		auto worker = self->getStorageWorker(req);
+		auto worker = getStorageWorker(req);
 		RecruitStorageReply rep;
 		rep.worker = worker.interf;
 		rep.processClass = worker.processClass;
 		req.reply.send(rep);
 	} catch (Error& e) {
 		if (e.code() == error_code_no_more_servers) {
-			self->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
-			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+			outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
+			TraceEvent(SevWarn, "RecruitStorageNotAvailable", id)
 			    .error(e)
 			    .detail("IsCriticalRecruitment", req.criticalRecruitment);
 		} else {
-			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
+			TraceEvent(SevError, "RecruitStorageError", id).error(e);
 			throw; // Any other error will bring down the cluster controller
 		}
 	}
@@ -874,30 +1097,30 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 
 // Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
 // Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
-void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequest req) {
+void ClusterControllerData::clusterRecruitBlobWorker(RecruitBlobWorkerRequest req) {
 	try {
-		if (!self->gotProcessClasses)
+		if (!gotProcessClasses)
 			throw no_more_servers();
-		auto worker = self->getBlobWorker(req);
+		auto worker = getBlobWorker(req);
 		RecruitBlobWorkerReply rep;
 		rep.worker = worker.interf;
 		rep.processClass = worker.processClass;
 		req.reply.send(rep);
 	} catch (Error& e) {
 		if (e.code() == error_code_no_more_servers) {
-			self->outstandingBlobWorkerRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
-			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id).error(e);
+			outstandingBlobWorkerRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
+			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", id).error(e);
 		} else {
-			TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
+			TraceEvent(SevError, "RecruitBlobWorkerError", id).error(e);
 			throw; // Any other error will bring down the cluster controller
 		}
 	}
 }
 
-void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req) {
+void ClusterControllerData::clusterRegisterMaster(RegisterMasterRequest const& req) {
 	req.reply.send(Void());
 
-	TraceEvent("MasterRegistrationReceived", self->id)
+	TraceEvent("MasterRegistrationReceived", id)
 	    .detail("MasterId", req.id)
 	    .detail("Master", req.mi.toString())
 	    .detail("Tlogs", describe(req.logSystemConfig.tLogs))
@@ -911,35 +1134,34 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
 
 	// make sure the request comes from an active database
-	auto db = &self->db;
-	if (db->serverInfo->get().master.id() != req.id || req.registrationCount <= db->masterRegistrationCount) {
-		TraceEvent("MasterRegistrationNotFound", self->id)
+	if (db.serverInfo->get().master.id() != req.id || req.registrationCount <= db.masterRegistrationCount) {
+		TraceEvent("MasterRegistrationNotFound", id)
 		    .detail("MasterId", req.id)
-		    .detail("ExistingId", db->serverInfo->get().master.id())
+		    .detail("ExistingId", db.serverInfo->get().master.id())
 		    .detail("RegCount", req.registrationCount)
-		    .detail("ExistingRegCount", db->masterRegistrationCount);
+		    .detail("ExistingRegCount", db.masterRegistrationCount);
 		return;
 	}
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
-		self->db.unfinishedRecoveries = 0;
-		self->db.logGenerations = 0;
+		db.unfinishedRecoveries = 0;
+		db.logGenerations = 0;
 		ASSERT(!req.logSystemConfig.oldTLogs.size());
 	} else {
-		self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
+		db.logGenerations = std::max<int>(db.logGenerations, req.logSystemConfig.oldTLogs.size());
 	}
 
-	db->masterRegistrationCount = req.registrationCount;
-	db->recoveryStalled = req.recoveryStalled;
+	db.masterRegistrationCount = req.registrationCount;
+	db.recoveryStalled = req.recoveryStalled;
 	if (req.configuration.present()) {
-		db->config = req.configuration.get();
+		db.config = req.configuration.get();
 
 		if (req.recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-			self->gotFullyRecoveredConfig = true;
-			db->fullyRecoveredConfig = req.configuration.get();
-			for (auto& it : self->id_worker) {
+			gotFullyRecoveredConfig = true;
+			db.fullyRecoveredConfig = req.configuration.get();
+			for (auto& it : id_worker) {
 				bool isExcludedFromConfig =
-				    db->fullyRecoveredConfig.isExcludedServer(it.second.details.interf.addresses());
+				    db.fullyRecoveredConfig.isExcludedServer(it.second.details.interf.addresses());
 				if (it.second.priorityInfo.isExcluded != isExcludedFromConfig) {
 					it.second.priorityInfo.isExcluded = isExcludedFromConfig;
 					if (!it.second.reply.isSet()) {
@@ -952,7 +1174,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	}
 
 	bool isChanged = false;
-	auto dbInfo = self->db.serverInfo->get();
+	auto dbInfo = db.serverInfo->get();
 
 	if (dbInfo.recoveryState != req.recoveryState) {
 		dbInfo.recoveryState = req.recoveryState;
@@ -965,43 +1187,42 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	}
 
 	// Construct the client information
-	if (db->clientInfo->get().commitProxies != req.commitProxies ||
-	    db->clientInfo->get().grvProxies != req.grvProxies ||
-	    db->clientInfo->get().tenantMode != db->config.tenantMode ||
-	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
-	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
-	    db->clientInfo->get().clusterType != db->clusterType ||
-	    db->clientInfo->get().metaclusterName != db->metaclusterName ||
-	    db->clientInfo->get().encryptKeyProxy != db->serverInfo->get().encryptKeyProxy) {
-		TraceEvent("PublishNewClientInfo", self->id)
+	if (db.clientInfo->get().commitProxies != req.commitProxies || db.clientInfo->get().grvProxies != req.grvProxies ||
+	    db.clientInfo->get().tenantMode != db.config.tenantMode ||
+	    db.clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
+	    db.clientInfo->get().clusterId != db.serverInfo->get().client.clusterId ||
+	    db.clientInfo->get().clusterType != db.clusterType ||
+	    db.clientInfo->get().metaclusterName != db.metaclusterName ||
+	    db.clientInfo->get().encryptKeyProxy != db.serverInfo->get().encryptKeyProxy) {
+		TraceEvent("PublishNewClientInfo", id)
 		    .detail("Master", dbInfo.master.id())
-		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
+		    .detail("GrvProxies", db.clientInfo->get().grvProxies)
 		    .detail("ReqGrvProxies", req.grvProxies)
-		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
+		    .detail("CommitProxies", db.clientInfo->get().commitProxies)
 		    .detail("ReqCPs", req.commitProxies)
-		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
-		    .detail("ReqTenantMode", db->config.tenantMode.toString())
+		    .detail("TenantMode", db.clientInfo->get().tenantMode.toString())
+		    .detail("ReqTenantMode", db.config.tenantMode.toString())
 		    .detail("EncryptionEnabled", SERVER_KNOBS->ENABLE_ENCRYPTION)
-		    .detail("ClusterId", db->serverInfo->get().client.clusterId)
-		    .detail("ClientClusterId", db->clientInfo->get().clusterId)
-		    .detail("ClusterType", db->clientInfo->get().clusterType)
-		    .detail("ReqClusterType", db->clusterType)
-		    .detail("MetaclusterName", db->clientInfo->get().metaclusterName)
-		    .detail("ReqMetaclusterName", db->metaclusterName);
+		    .detail("ClusterId", db.serverInfo->get().client.clusterId)
+		    .detail("ClientClusterId", db.clientInfo->get().clusterId)
+		    .detail("ClusterType", db.clientInfo->get().clusterType)
+		    .detail("ReqClusterType", db.clusterType)
+		    .detail("MetaclusterName", db.clientInfo->get().metaclusterName)
+		    .detail("ReqMetaclusterName", db.metaclusterName);
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
-		clientInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
+		clientInfo.encryptKeyProxy = db.serverInfo->get().encryptKeyProxy;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
-		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
-		clientInfo.clusterId = db->serverInfo->get().client.clusterId;
-		clientInfo.clusterType = db->clusterType;
-		clientInfo.metaclusterName = db->metaclusterName;
-		db->clientInfo->set(clientInfo);
-		dbInfo.client = db->clientInfo->get();
+		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db.clusterType, db.config.tenantMode);
+		clientInfo.clusterId = db.serverInfo->get().client.clusterId;
+		clientInfo.clusterType = db.clusterType;
+		clientInfo.metaclusterName = db.metaclusterName;
+		db.clientInfo->set(clientInfo);
+		dbInfo.client = db.clientInfo->get();
 	}
 
 	if (!dbInfo.logSystemConfig.isEqual(req.logSystemConfig)) {
@@ -1021,270 +1242,18 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	if (isChanged) {
 		dbInfo.id = deterministicRandom()->randomUniqueID();
-		dbInfo.infoGeneration = ++self->db.dbInfoCount;
-		self->db.serverInfo->set(dbInfo);
+		dbInfo.infoGeneration = ++db.dbInfoCount;
+		db.serverInfo->set(dbInfo);
 	}
 
-	self->checkOutstandingRequests();
+	checkOutstandingRequests();
 }
 
-// Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
-// or, halts the existing singleton in favour of the requesting one
-template <class SingletonClass>
-void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
-                                       const WorkerInterface& worker,
-                                       const SingletonClass& currSingleton,
-                                       const SingletonClass& registeringSingleton,
-                                       const Optional<UID> recruitingID) {
-	ASSERT(currSingleton.getRole() == registeringSingleton.getRole());
-	const UID registeringID = registeringSingleton.getInterface().id();
-	const std::string roleName = currSingleton.getRole().roleName;
-	const std::string roleAbbr = currSingleton.getRole().abbreviation;
-
-	// halt the requesting singleton if it isn't the one currently being recruited
-	if ((recruitingID.present() && recruitingID.get() != registeringID) ||
-	    self->clusterControllerDcId != worker.locality.dcId()) {
-		TraceEvent(("CCHaltRegistering" + roleName).c_str(), self->id)
-		    .detail(roleAbbr + "ID", registeringID)
-		    .detail("DcID", printable(self->clusterControllerDcId))
-		    .detail("ReqDcID", printable(worker.locality.dcId()))
-		    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
-		registeringSingleton.halt(*self, worker.locality.processId());
-	} else if (!recruitingID.present()) {
-		// if not currently recruiting, then halt previous one in favour of requesting one
-		TraceEvent(("CCRegister" + roleName).c_str(), self->id).detail(roleAbbr + "ID", registeringID);
-		if (currSingleton.isPresent() && currSingleton.getInterface().id() != registeringID &&
-		    self->id_worker.count(currSingleton.getInterface().locality.processId())) {
-			TraceEvent(("CCHaltPrevious" + roleName).c_str(), self->id)
-			    .detail(roleAbbr + "ID", currSingleton.getInterface().id())
-			    .detail("DcID", printable(self->clusterControllerDcId))
-			    .detail("ReqDcID", printable(worker.locality.dcId()))
-			    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
-			currSingleton.halt(*self, currSingleton.getInterface().locality.processId());
-		}
-		// set the curr singleton if it doesn't exist or its different from the requesting one
-		if (!currSingleton.isPresent() || currSingleton.getInterface().id() != registeringID) {
-			registeringSingleton.setInterfaceToDbInfo(*self);
-		}
-	}
+Future<Void> ClusterControllerData::registerWorker(RegisterWorkerRequest req,
+                                                   ClusterConnectionString cs,
+                                                   ConfigBroadcaster* configBroadcaster) {
+	return ClusterControllerDataImpl::registerWorker(this, req, cs, configBroadcaster);
 }
-
-ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
-                                  ClusterControllerData* self,
-                                  ClusterConnectionString cs,
-                                  ConfigBroadcaster* configBroadcaster) {
-	std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
-
-	const WorkerInterface& w = req.wi;
-	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
-	    req.processClass != ProcessClass::TesterClass) {
-		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "WorkerBelongsToExistingCluster", self->id)
-		    .detail("WorkerClusterId", req.clusterId)
-		    .detail("ClusterControllerClusterId", self->clusterId->get())
-		    .detail("WorkerId", w.id())
-		    .detail("ProcessId", w.locality.processId());
-		req.reply.sendError(invalid_cluster_id());
-		return Void();
-	}
-
-	ProcessClass newProcessClass = req.processClass;
-	auto info = self->id_worker.find(w.locality.processId());
-	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
-	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-
-	bool isCoordinator =
-	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.address()) !=
-	     coordinatorAddresses.end()) ||
-	    (w.secondaryAddress().present() &&
-	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.secondaryAddress().get()) !=
-	         coordinatorAddresses.end());
-
-	for (auto it : req.incompatiblePeers) {
-		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
-	}
-	self->removedDBInfoEndpoints.erase(w.updateServerDBInfo.getEndpoint());
-
-	if (info == self->id_worker.end()) {
-		TraceEvent("ClusterControllerActualWorkers", self->id)
-		    .detail("WorkerId", w.id())
-		    .detail("ProcessId", w.locality.processId())
-		    .detail("ZoneId", w.locality.zoneId())
-		    .detail("DataHall", w.locality.dataHallId())
-		    .detail("PClass", req.processClass.toString())
-		    .detail("Workers", self->id_worker.size())
-		    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
-		self->goodRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
-		self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
-	} else {
-		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id)
-		    .suppressFor(1.0)
-		    .detail("WorkerId", w.id())
-		    .detail("ProcessId", w.locality.processId())
-		    .detail("ZoneId", w.locality.zoneId())
-		    .detail("DataHall", w.locality.dataHallId())
-		    .detail("PClass", req.processClass.toString())
-		    .detail("Workers", self->id_worker.size())
-		    .detail("Degraded", req.degraded)
-		    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
-	}
-	if (w.address() == g_network->getLocalAddress()) {
-		if (self->changingDcIds.get().first) {
-			if (self->changingDcIds.get().second.present()) {
-				newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
-				    w.locality.dcId(), self->changingDcIds.get().second.get());
-			}
-		} else if (self->changedDcIds.get().second.present()) {
-			newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
-			    w.locality.dcId(), self->changedDcIds.get().second.get());
-		}
-	} else {
-		if (!self->changingDcIds.get().first) {
-			if (self->changingDcIds.get().second.present()) {
-				newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
-				    w.locality.dcId(), self->changingDcIds.get().second.get());
-			}
-		} else if (self->changedDcIds.get().second.present()) {
-			newPriorityInfo.dcFitness = ClusterControllerPriorityInfo::calculateDCFitness(
-			    w.locality.dcId(), self->changedDcIds.get().second.get());
-		}
-	}
-
-	// Check process class and exclusive property
-	if (info == self->id_worker.end() || info->second.details.interf.id() != w.id() ||
-	    req.generation >= info->second.gen) {
-		if (self->gotProcessClasses) {
-			auto classIter = self->id_class.find(w.locality.processId());
-
-			if (classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource ||
-			                                          req.initialClass.classType() == ProcessClass::UnsetClass)) {
-				newProcessClass = classIter->second;
-			} else {
-				newProcessClass = req.initialClass;
-			}
-			newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-		}
-
-		if (self->gotFullyRecoveredConfig) {
-			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.addresses());
-		}
-	}
-
-	if (info == self->id_worker.end()) {
-		self->id_worker[w.locality.processId()] = WorkerInfo(workerAvailabilityWatch(w, newProcessClass, self),
-		                                                     req.reply,
-		                                                     req.generation,
-		                                                     w,
-		                                                     req.initialClass,
-		                                                     newProcessClass,
-		                                                     newPriorityInfo,
-		                                                     req.degraded,
-		                                                     req.recoveredDiskFiles,
-		                                                     req.issues);
-		if (!self->masterProcessId.present() &&
-		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
-			self->masterProcessId = w.locality.processId();
-		}
-		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
-			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
-			                                                    req.lastSeenKnobVersion.get(),
-			                                                    req.knobConfigClassSet.get(),
-			                                                    self->id_worker[w.locality.processId()].watcher,
-			                                                    isCoordinator));
-		}
-		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
-		self->updateDBInfo.trigger();
-		self->checkOutstandingRequests();
-	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
-		if (!info->second.reply.isSet()) {
-			info->second.reply.send(Never());
-		}
-		info->second.reply = req.reply;
-		info->second.details.processClass = newProcessClass;
-		info->second.priorityInfo = newPriorityInfo;
-		info->second.initialClass = req.initialClass;
-		info->second.details.degraded = req.degraded;
-		info->second.details.recoveredDiskFiles = req.recoveredDiskFiles;
-		info->second.gen = req.generation;
-		info->second.issues = req.issues;
-
-		if (info->second.details.interf.id() != w.id()) {
-			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
-			info->second.details.interf = w;
-			// Cancel the existing watcher actor; possible race condition could be, the older registered watcher
-			// detects failures and removes the worker from id_worker even before the new watcher starts monitoring the
-			// new interface
-			info->second.watcher.cancel();
-			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
-		}
-		if (req.requestDbInfo) {
-			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
-			self->updateDBInfo.trigger();
-		}
-		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
-			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
-			                                                    req.lastSeenKnobVersion.get(),
-			                                                    req.knobConfigClassSet.get(),
-			                                                    info->second.watcher,
-			                                                    isCoordinator));
-		}
-		self->checkOutstandingRequests();
-	} else {
-		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
-	}
-
-	// For each singleton
-	// - if the registering singleton conflicts with the singleton being recruited, kill the registering one
-	// - if the singleton is not being recruited, kill the existing one in favour of the registering one
-	if (req.distributorInterf.present()) {
-		auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
-		auto registeringSingleton = DataDistributorSingleton(req.distributorInterf);
-		haltRegisteringOrCurrentSingleton<DataDistributorSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingDistributorID);
-	}
-
-	if (req.ratekeeperInterf.present()) {
-		auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
-		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
-		haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
-	}
-
-	if (self->db.blobGranulesEnabled.get() && req.blobManagerInterf.present()) {
-		auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
-		auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
-		haltRegisteringOrCurrentSingleton<BlobManagerSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
-	}
-	if (req.blobMigratorInterf.present() && self->db.blobRestoreEnabled.get()) {
-		auto currSingleton = BlobMigratorSingleton(self->db.serverInfo->get().blobMigrator);
-		auto registeringSingleton = BlobMigratorSingleton(req.blobMigratorInterf);
-		haltRegisteringOrCurrentSingleton<BlobMigratorSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingBlobMigratorID);
-	}
-
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && req.encryptKeyProxyInterf.present()) {
-		auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().encryptKeyProxy);
-		auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
-		haltRegisteringOrCurrentSingleton<EncryptKeyProxySingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingEncryptKeyProxyID);
-	}
-
-	if (req.consistencyScanInterf.present()) {
-		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
-		auto registeringSingleton = ConsistencyScanSingleton(req.consistencyScanInterf);
-		haltRegisteringOrCurrentSingleton<ConsistencyScanSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
-	}
-
-	// Notify the worker to register again with new process class/exclusive property
-	if (!req.reply.isSet() && newPriorityInfo != req.priorityInfo) {
-		req.reply.send(RegisterWorkerReply(newProcessClass, newPriorityInfo));
-	}
-
-	return Void();
-}
-
-#define TIME_KEEPER_VERSION "1"_sr
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
@@ -3003,17 +2972,17 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			self.addActor.send(clusterOpenDatabase(&self.db, req));
 		}
 		when(RecruitStorageRequest req = waitNext(interf.recruitStorage.getFuture())) {
-			clusterRecruitStorage(&self, req);
+			self.clusterRecruitStorage(req);
 		}
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
-			clusterRecruitBlobWorker(&self, req);
+			self.clusterRecruitBlobWorker(req);
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			self.addActor.send(registerWorker(req,
-			                                  &self,
-			                                  coordinators.ccr->getConnectionString(),
-			                                  (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
+			self.addActor.send(
+			    self.registerWorker(req,
+			                        coordinators.ccr->getConnectionString(),
+			                        (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
@@ -3054,7 +3023,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterMasterRequest req = waitNext(interf.registerMaster.getFuture())) {
 			++self.registerMasterRequests;
-			clusterRegisterMaster(&self, req);
+			self.clusterRegisterMaster(req);
 		}
 		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
 			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
