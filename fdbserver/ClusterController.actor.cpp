@@ -76,8 +76,6 @@
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-void failAfter(Future<Void> trigger, Endpoint e);
-
 ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
 	state ReadYourWritesTransaction tr(self->db.db);
 	loop {
