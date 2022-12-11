@@ -2611,9 +2611,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->bytesInNewDeltaFiles = 0;
 
 				// If we have more than one snapshot file and that file is unblocked (committedVersion >=
-				// snapshotVersion), wait for it to finish
-				// FIXME: if catching up on old feed, allow more parallel snapshots?
-				if (pendingSnapshots > 1) {
+				// snapshotVersion), wait for it to finish. Otherwise, we might write way too many delta files that then
+				// get discarded if one of the snapshots splits If catching up on old feed, allow more parallel
+				// snapshots because none of them can split
+				int maxAllowedPendingSnapshots =
+				    (metadata->pendingSnapshotVersion >= startState.changeFeedStartVersion) ? 1 : 3;
+				if (pendingSnapshots > maxAllowedPendingSnapshots) {
 					state int waitIdx = 0;
 					int idx = 0;
 					Version safeVersion =
