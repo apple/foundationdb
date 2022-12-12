@@ -1014,7 +1014,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(TLogData* self,
@@ -2071,7 +2073,9 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+					break;
+				}
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -2503,13 +2507,17 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -2831,7 +2839,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 						forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 					}
 				}
-				when(wait(error)) { throw internal_error(); }
+				when(wait(error)) {
+					throw internal_error();
+				}
 				when(wait(activeSharedChange)) {
 					if (activeSharedTLog->get() == tlogId) {
 						self.targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
@@ -2885,11 +2895,11 @@ struct DequeAllocator : std::allocator<T> {
 	template <typename U>
 	DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}
 
-	T* allocate(std::size_t n, std::allocator<void>::const_pointer hint = 0) {
+	T* allocate(std::size_t n) {
 		DequeAllocatorStats::allocatedBytes += n * sizeof(T);
 		// fprintf(stderr, "Allocating %lld objects for %lld bytes (total allocated: %lld)\n", n, n * sizeof(T),
 		// DequeAllocatorStats::allocatedBytes);
-		return std::allocator<T>::allocate(n, hint);
+		return std::allocator<T>::allocate(n);
 	}
 	void deallocate(T* p, std::size_t n) {
 		DequeAllocatorStats::allocatedBytes -= n * sizeof(T);

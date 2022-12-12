@@ -639,7 +639,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 		return 0;
 	}
 
-	int accumulatedRows = 0;
 	int accumulatedBytes = 0;
 	rocksdb::Status s;
 
@@ -651,7 +650,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
 			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			++accumulatedRows;
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
@@ -671,7 +669,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 		}
 		while (cursor->Valid() && toStringRef(cursor->key()) >= range.begin) {
 			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			++accumulatedRows;
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
@@ -3274,11 +3271,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	int count = std::unique(shardIds.begin(), shardIds.end()) - shardIds.begin();
 	ASSERT_EQ(count, 1);
 	ASSERT(shardIds[0] == "shard-2");
-	shardsToCleanUp.insert(shardsToCleanUp.end(), shardIds.begin(), shardIds.end());
-
-	// Clean up empty shards. shard-2 is empty now.
-	Future<Void> cleanUpFuture = kvStore->cleanUpShardsIfNeeded(shardsToCleanUp);
-	wait(cleanUpFuture);
 
 	// Add more ranges.
 	std::vector<Future<Void>> addRangeFutures;
@@ -3332,9 +3324,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 
 		// Add another range to shard-2.
 		wait(kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2"));
-
-		// Clean up shards. Shard-2 should not be removed.
-		wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
 	}
 	{
 		auto dataMap = rocksdbStore->getDataMapping();
