@@ -180,7 +180,7 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 }
 
 void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
-	std::vector<std::string_view> types;
+	std::vector<std::string> types;
 	types.reserve(u.types.size());
 	std::transform(
 	    u.types.begin(), u.types.end(), std::back_inserter(types), [](auto const& t) { return convertType(t); });
