@@ -64,6 +64,26 @@ struct TenantManagementWorkload : TestWorkload {
 		int64_t tenantCount = 0;
 	};
 
+	enum class TenantOperation : int {
+		CREATE_TENANT = 0,
+		DELETE_TENANT,
+		GET_TENANT,
+		LIST_TENANTS,
+		RENAME_TENANT,
+		CONFIGURE_TENANT,
+		GET_TENANT_GROUP,
+		LIST_TENANT_GROUPS,
+		LOCK_TENANT,
+		UNLOCK_TENANT,
+		MAX_OP
+	};
+
+	static TenantOperation randomOperation() {
+		auto maxOp = static_cast<int>(TenantOperation::MAX_OP);
+		auto resInt = deterministicRandom()->randomInt(0, maxOp);
+		return static_cast<TenantOperation>(resInt);
+	}
+
 	std::map<TenantName, TenantData> createdTenants;
 	std::map<TenantGroupName, TenantGroupData> createdTenantGroups;
 	int64_t maxId = -1;
@@ -1632,27 +1652,48 @@ struct TenantManagementWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
+		state Future<Void> operation;
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 8);
-			if (operation == 0) {
-				wait(createTenant(self));
-			} else if (operation == 1) {
-				wait(deleteTenant(self));
-			} else if (operation == 2) {
-				wait(getTenant(self));
-			} else if (operation == 3) {
-				wait(listTenants(self));
-			} else if (operation == 4) {
-				wait(renameTenant(self));
-			} else if (operation == 5) {
-				wait(configureTenant(self));
-			} else if (operation == 6) {
-				wait(getTenantGroup(self));
-			} else if (operation == 7) {
-				wait(listTenantGroups(self));
+			switch (randomOperation()) {
+			case TenantOperation::CREATE_TENANT:
+				operation = createTenant(self);
+				break;
+			case TenantOperation::DELETE_TENANT:
+				operation = deleteTenant(self);
+				break;
+			case TenantOperation::GET_TENANT:
+				operation = getTenant(self);
+				break;
+			case TenantOperation::LIST_TENANTS:
+				operation = listTenants(self);
+				break;
+			case TenantOperation::RENAME_TENANT:
+				operation = renameTenant(self);
+				break;
+			case TenantOperation::CONFIGURE_TENANT:
+				operation = configureTenant(self);
+				break;
+			case TenantOperation::GET_TENANT_GROUP:
+				operation = getTenantGroup(self);
+				break;
+			case TenantOperation::LIST_TENANT_GROUPS:
+				operation = listTenantGroups(self);
+				break;
+			case TenantOperation::LOCK_TENANT:
+#warning "Implement"
+				operation = delay(1.0);
+				break;
+			case TenantOperation::UNLOCK_TENANT:
+#warning "Implement"
+				operation = delay(1.0);
+				break;
+			case TenantOperation::MAX_OP:
+				UNSTOPPABLE_ASSERT(false);
+				break;
 			}
+			wait(operation);
 		}
 
 		return Void();
