@@ -18,7 +18,8 @@ using namespace std::string_view_literals;
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "cppcoreguidelines-narrowing-conversions"
 // calculate the vtable for a
-std::vector<flowflat::voffset_t> generateVTable(std::vector<std::pair<unsigned, unsigned>> const& alignmentAndSize) {
+std::vector<flowserializer::voffset_t> generateVTable(
+    std::vector<std::pair<unsigned, unsigned>> const& alignmentAndSize) {
 	// std::multimap is stable which is a desired property (although not strictly a requirement)
 	// 0. Build a mapping alignment -> size -> index
 	std::map<unsigned, std::multimap<unsigned, int, std::greater<>>, std::greater<>> map;
@@ -28,10 +29,10 @@ std::vector<flowflat::voffset_t> generateVTable(std::vector<std::pair<unsigned, 
 	for (auto p : alignmentAndSize) {
 		map[p.first].emplace(p.second, ++idx);
 	}
-	std::vector<flowflat::voffset_t> result(alignmentAndSize.size() + 2, flowflat::voffset_t(0));
+	std::vector<flowserializer::voffset_t> result(alignmentAndSize.size() + 2, flowserializer::voffset_t(0));
 	result[0] = 2 * (result.size());
 	// order the elements by size
-	flowflat::voffset_t curr = 4;
+	flowserializer::voffset_t curr = 4;
 	for (auto const& [a, m] : map) {
 		for (auto [s, i] : m) {
 			auto padding = (a - (curr % a)) % a;
@@ -89,7 +90,7 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 		// first we need to make sure that type information for every possible type is available
 		for (auto const& typeName : type->types) {
 			auto child = *assertTrue(resolve(typeName));
-			if (!state.contains(child.first)) {
+			if (state.find(child.first) == state.end()) {
 				serializationInformation(state, child);
 			}
 		}
@@ -110,9 +111,9 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 		fieldTypes.reserve(type->fields.size());
 		for (auto const& field : type->fields) {
 			auto fieldType = *assertTrue(resolve(field.type));
-			if (!state.contains(fieldType.first)) {
+			if (state.find(fieldType.first) == state.end()) {
 				serializationInformation(state, fieldType);
-				assertTrue(state.contains(fieldType.first));
+				assertTrue(state.find(fieldType.first) != state.end());
 			}
 			if (field.isArrayType) {
 				alignmentAndSize.emplace_back(4u, 4u);
@@ -127,7 +128,7 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 		}
 		if (type->typeType() == expression::TypeType::Table) {
 			auto vtable = generateVTable(alignmentAndSize);
-			flowflat::voffset_t maxOffset = 0;
+			flowserializer::voffset_t maxOffset = 0;
 			int maxIndex = 0;
 			for (int i = 2; i < vtable.size(); ++i) {
 				if (vtable[i] > maxOffset) {
@@ -150,7 +151,7 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 			state[t.first] = SerializationInfo{ .alignment = alignment, .staticSize = totalSize };
 		}
 	}
-	assertTrue(state.contains(t.first));
+	assertTrue(state.find(t.first) != state.end());
 }
 #pragma clang diagnostic pop
 

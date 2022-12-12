@@ -13,7 +13,8 @@ set(SRCS
   Config.cpp
   Error.cpp
   Parser.cpp
-  StaticContext.cpp)
+  StaticContext.cpp
+  main.cpp)
 
 add_executable(flowserializer ${SRCS})
 target_link_libraries(flowserializer PRIVATE boost_target fmt::fmt)
