@@ -74,7 +74,7 @@ using x3::lit;
 struct struct_decl_class;
 struct table_decl_class;
 x3::rule<struct_decl_class, ast::StructDeclaration> struct_decl = "struct";
-x3::rule<table_decl_class, ast::TableDeclaration> table_decl = "table";
+x3::rule<table_decl_class, ast::TableDeclaration> table_decl = "st";
 
 auto semicolon = x3::lit(';');
 auto ident = x3::rule<class ident, std::string>{} = lexeme[char_("a-zA-Z_") >> *char_("a-zA-Z0-9_")];
@@ -101,7 +101,7 @@ auto field_value = x3::rule<class position, std::optional<ast::SingleValue>>{} =
 auto field_decl = x3::rule<class field_decl, ast::FieldDeclaration>{} =
     (ident >> ':' >> type >> field_value >> metadata) > ';';
 auto const struct_decl_def = "struct" > ident >> metadata > '{' >> +(field_decl) > '}';
-auto const table_decl_def = "table" > ident >> metadata > '{' >> +(field_decl) > '}';
+auto const table_decl_def = "st" > ident >> metadata > '{' >> +(field_decl) > '}';
 
 auto include_stmt = x3::rule<class include_stmt, ast::IncludeDeclaration>{} =
     lit("include") > string_constant > semicolon;

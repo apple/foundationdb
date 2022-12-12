@@ -23,6 +23,12 @@ struct Streams {
 	std::ostream& source;
 };
 
+template <class T>
+void operator<<(Streams& streams, T const& value) {
+	streams.header << value;
+	streams.source << value;
+}
+
 namespace {
 
 struct Defer {
@@ -125,15 +131,30 @@ std::string headerGuard(std::string const& stem) {
 	return res;
 }
 
+void emitIncludes(Streams& out, std::vector<std::string> const& includes) {
+	out.header << fmt::format("#include \"flow/serialize.h\"\n");
+	for (auto const& p : includes) {
+		out.header << fmt::format("#include \"{}.h\"\n", p.substr(0, p.size() - ".fbs"s.size()));
+	}
+}
+
+std::vector<std::string> oldReaders = { "BinaryReader"s, "ArenaReader" };
+std::vector<std::string> oldWriters = { "BinaryWriter"s, "PacketWriter"s };
+
 } // namespace
+
+struct OldSerializers {
+	expression::StructOrTable const& st;
+};
 
 CodeGenerator::CodeGenerator(StaticContext* context) : context(context) {}
 
 void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
+	auto underlying = convertType(f.type);
 	// 0. generate the enum
 	{
 		Defer defer;
-		out.header << fmt::format("enum class {} : {} {{\n", f.name, convertType(f.type));
+		out.header << fmt::format("enum class {} : {} {{\n", f.name, underlying);
 		defer([&out]() { out.header << "};\n\n"; });
 		std::vector<std::string> definitions;
 		for (auto const& [k, v] : f.values) {
@@ -141,7 +162,27 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 		}
 		out.header << fmt::format("{}\n", fmt::join(definitions, ",\n"));
 	}
-	// 1. Generate the helper functions
+	// 1. Generate code for old serializers
+	// 1.1. Readers
+	out.header << fmt::format("// {} functions for old serializer\n");
+	out.source << fmt::format("// {} functions for old serializer\n");
+	for (auto const& ar : oldReaders) {
+		out.header << fmt::format("void load({}& ar, {}& out);\n", ar, f.name);
+
+		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, f.name);
+		out.source << fmt::format("\t{} value;\n", underlying);
+		out.source << fmt::format("\tar >> value;\n");
+		out.source << fmt::format("\tout = static_cast<{}>({});\n", f.name, underlying);
+		out.source << fmt::format("}}\n");
+	}
+	for (auto const& ar : oldWriters) {
+		out.header << fmt::format("void save({}& ar, {} const& in);\n", ar, f.name);
+		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, f.name);
+		out.source << fmt::format("\t{0} value = static_cast<{0}>(in);\n", underlying);
+		out.source << fmt::format("\tar << value;\n");
+		out.source << fmt::format("}}\n");
+	}
+	// 2. Generate the helper functions
 	{
 		out.header << fmt::format("// {} helper functions\n", f.name);
 		out.source << fmt::format("// {} helper functions\n", f.name);
@@ -180,11 +221,53 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 }
 
 void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
-	std::vector<std::string_view> types;
+	std::vector<std::string> types;
 	types.reserve(u.types.size());
 	std::transform(
 	    u.types.begin(), u.types.end(), std::back_inserter(types), [](auto const& t) { return convertType(t); });
 	out.header << fmt::format("using {} = std::variant<{}>;\n", u.name, fmt::join(types, ", "));
+	// generate code for old serializer
+	out << "// Functions for old serializer\n";
+	for (auto const& ar : oldReaders) {
+		out.header << fmt::format("void load({}& ar, {}& value);\n", ar, u.name);
+
+		out.header << fmt::format("void load({}& ar, {}& value) {{\n", ar, u.name);
+		out.source << fmt::format("\tint idx;\n");
+		out.source << fmt::format("\tar >> idx;\n");
+		out.source << fmt::format("\tswitch (idx) {{\n");
+		for (int i = 0; i < types.size(); ++i) {
+			out.source << fmt::format("\tcase {}:\n", i);
+			out.source << fmt::format("\t{{\n");
+			out.source << fmt::format("\t\t{} v;\n", types[i]);
+			out.source << fmt::format("\t\tar >> v;\n");
+			out.source << fmt::format("\t\tvalue = v;\n");
+			out.source << fmt::format("\t\tbreak;\n");
+			out.source << fmt::format("\t}}\n");
+		}
+		out.source << fmt::format("\tdefault:\n");
+		out.source << fmt::format("\t\tUNSTOPPABLE_ASSERT(false);\n");
+		out.source << fmt::format("\t}}\n");
+		out.source << fmt::format("}}\n");
+	}
+	for (auto const& ar : oldWriters) {
+		out.header << fmt::format("void save({}& ar, {} const& value);\n");
+
+		out.header << fmt::format("void save({}& ar, {} const& value) {{\n");
+		out.source << fmt::format("\tint idx = value.index();\n");
+		out.source << fmt::format("\tar << idx;\n");
+		out.source << fmt::format("\tswitch (idx) {{\n");
+		for (int i = 0; i < types.size(); ++i) {
+			out.source << fmt::format("\tcase {}:\n", i);
+			out.source << fmt::format("\t{{\n");
+			out.source << fmt::format("\t\tar << std::get<{}>(value);\n", i);
+			out.source << fmt::format("\t\tbreak;\n");
+			out.source << fmt::format("\t}}\n");
+		}
+		out.source << fmt::format("\tdefault:\n");
+		out.source << fmt::format("\t\tUNSTOPPABLE_ASSERT(false);\n");
+		out.source << fmt::format("\t}}\n");
+		out.source << fmt::format("}}\n");
+	}
 }
 
 void CodeGenerator::emit(Streams& out, expression::Field const& f) const {
@@ -213,24 +296,62 @@ void CodeGenerator::emit(Streams& out, expression::Struct const& st) const {
 	out.header << fmt::format("struct {} {{\n", st.name);
 	out.header << fmt::format(
 	    "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Struct; }};\n\n");
-	defer([&out]() { out.header << "};\n"; });
 	for (auto const& f : st.fields) {
 		emit(out, f);
 	}
+	out.header << "};\n";
+	emit(out, OldSerializers{ st });
+}
+
+void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
+	for (auto const& w : oldWriters) {
+		out.header << fmt::format("\tvoid save({}& reader, {} const& in);\n", w, s.st.name);
+	}
+	for (auto const& r : oldReaders) {
+		out.header << fmt::format("\tvoid load({}& reader, {}& out);\n", r, s.st.name);
+	}
+
+	// write serialization code for old serializers (load and save)
+	// 1. Implement the generic functions
+	out.source << fmt::format("template<class Ar>\n");
+	out.source << fmt::format("void loadImpl(Ar& ar, {}& in) {{\n", s.st.name);
+	for (auto const& f : s.st.fields) {
+		out.source << fmt::format("\tar >> in.{};\n", f.name);
+	}
+	out.source << fmt::format("}}\n\n");
+	out.source << fmt::format("template<class Ar>\n");
+	out.source << fmt::format("void saveImpl(Ar& ar, {}& out) {{\n", s.st.name);
+	for (auto const& f : s.st.fields) {
+		out.source << fmt::format("\tar << out.{};\n", f.name);
+	}
+	out.source << fmt::format("}}\n\n");
+	// 2. Implement the specializations -- this forces the compiler to instantiate all templates in the current
+	//    compilation unit. So we won't do this once per compilation unit
+	for (auto const& ar : oldReaders) {
+		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, s.st.name);
+		out.source << fmt::format("\tloadImpl(ar, out);\n");
+		out.source << fmt::format("}}\n");
+	}
+	out.source << fmt::format("\n");
+	for (auto const& ar : oldWriters) {
+		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, s.st.name);
+		out.source << fmt::format("\tsaveImpl(ar, in);\n");
+		out.source << fmt::format("}}\n");
+	}
+	out.source << fmt::format("\n");
 }
 
 void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
-	Defer defer;
 	out.header << fmt::format("struct {} {{\n", table.name);
 	out.header << fmt::format(
 	    "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Table; }};\n\n");
-	out.header << fmt::format("\tvoid write(flowflat::Writer& w) const;");
+	out.header << fmt::format("\tvoid write(flowflat::Writer& w) const;\n");
 
-	defer([&out]() { out.header << "};\n"; });
 	for (auto const& f : table.fields) {
 		emit(out, f);
 	}
-	// write serialization code
+
+	// write flatbuffers serialization code
 	out.source << fmt::format("void {}::write(flowflat::Writer& w) {{", table.name);
 	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
 	// known data
@@ -260,6 +381,8 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		int inlineSpace = 0;
 	}
 	out.source << "}\n";
+	out.header << "};\n";
+	emit(out, OldSerializers{ table });
 }
 
 void CodeGenerator::emit(Streams& out, expression::ExpressionTree const& tree) const {
@@ -290,6 +413,16 @@ void CodeGenerator::emit(Streams& out, expression::ExpressionTree const& tree) c
 	}
 }
 
+void CodeGenerator::forwardDeclarations(struct Streams& out) const {
+	for (auto const& s : oldReaders) {
+		out.header << fmt::format("class {};\n", s);
+	}
+	for (auto const& s : oldWriters) {
+		out.header << fmt::format("class {};\n", s);
+	}
+	out.header << "\n";
+}
+
 void CodeGenerator::emit(std::string const& stem,
                          const boost::filesystem::path& header,
                          const boost::filesystem::path& source) const {
@@ -297,10 +430,11 @@ void CodeGenerator::emit(std::string const& stem,
 	std::ofstream sourceStream(source.c_str(), std::ios_base::out | std::ios_base::trunc);
 	auto guard = headerGuard(stem);
 	headerStream << "// THIS FILE WAS GENERATED BY FLOWFLATC, DO NOT EDIT!\n";
-	headerStream << fmt::format("#ifndef {0}\n#define {0}\n#include <flowflat/flowflat.h>\n\n", guard);
+	headerStream << fmt::format("#ifndef {0}\n#define {0}\n", guard);
+	Streams streams{ headerStream, sourceStream };
+	emitIncludes(streams, context->currentFile->includes);
 	Defer defer;
 	defer([&headerStream, &guard]() { headerStream << fmt::format("\n#endif // #ifndef {}\n", guard); });
-	Streams streams{ headerStream, sourceStream };
 	emit(streams, *context->currentFile);
 }
 

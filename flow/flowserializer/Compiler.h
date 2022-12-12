@@ -73,6 +73,7 @@ struct Table : StructOrTable {
 };
 
 struct ExpressionTree {
+	std::vector<std::string> includes;
 	std::optional<std::vector<std::string>> namespacePath;
 	boost::unordered_set<std::string> attributes;
 	boost::unordered_set<std::string> rootTypes;

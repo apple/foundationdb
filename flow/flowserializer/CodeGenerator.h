@@ -9,6 +9,8 @@
 
 namespace flowserializer {
 
+struct OldSerializers;
+
 class CodeGenerator {
 	StaticContext* context;
 	void emit(struct Streams& out, expression::ExpressionTree const& tree) const;
@@ -17,6 +19,9 @@ class CodeGenerator {
 	void emit(struct Streams& out, expression::Field const& field) const;
 	void emit(struct Streams& out, expression::Struct const& st) const;
 	void emit(struct Streams& out, expression::Table const& table) const;
+	void emit(struct Streams& out, OldSerializers const&) const;
+
+	void forwardDeclarations(struct Streams& out) const;
 
 public:
 	explicit CodeGenerator(StaticContext* context);

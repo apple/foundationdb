@@ -96,7 +96,10 @@ struct CompilerVisitor : ast::Visitor {
 
 	explicit CompilerVisitor(StaticContext& state) : state(state) {}
 
-	void visit(const struct ast::IncludeDeclaration& declaration) override { Visitor::visit(declaration); }
+	void visit(const struct ast::IncludeDeclaration& declaration) override {
+		state.currentFile->includes.push_back(declaration.path);
+		Visitor::visit(declaration);
+	}
 	void visit(const struct ast::NamespaceDeclaration& declaration) override {
 		if (state.currentFile->namespacePath.has_value()) {
 			fmt::print(stderr, "Error: Unexpected namespace declaration: {}\n", fmt::join(declaration.name, "."));
@@ -279,7 +282,7 @@ void ExpressionTree::verifyField(std::string name, bool isStruct, const Field& f
 		fmt::print(stderr,
 		           "Field {} in {} {}: Can't assign value to array type {}\n",
 		           field.name,
-		           isStruct ? "struct" : "table",
+		           isStruct ? "struct" : "st",
 		           name,
 		           typeLiteral);
 		throw Error("Assign value to array type");
@@ -295,7 +298,7 @@ void ExpressionTree::verifyField(std::string name, bool isStruct, const Field& f
 				fmt::print(stderr,
 				           "Error: Field {} in {} {}: invalid enum value {}\n",
 				           field.name,
-				           isStruct ? "struct" : "table",
+				           isStruct ? "struct" : "st",
 				           name,
 				           field.defaultValue.value());
 				std::vector<std::string> values;
@@ -309,7 +312,7 @@ void ExpressionTree::verifyField(std::string name, bool isStruct, const Field& f
 			fmt::print(stderr,
 			           "Error: Field {} in {} {}: Can't assign value to user defined type {}\n",
 			           field.name,
-			           isStruct ? "struct" : "table",
+			           isStruct ? "struct" : "st",
 			           name,
 			           typeLiteral);
 			throw Error("Assign value to user defined type");
@@ -331,9 +334,8 @@ void ExpressionTree::verify(StaticContext const& context) const {
 	// verify all root types exist in current file and are tables
 	for (auto const& t : rootTypes) {
 		if (tables.count(t) == 0) {
-			fmt::print(
-			    stderr, "Error: Type {} was declared to be root but either doesn't exist or is not a table\n", t);
-			throw Error("Root type not a table");
+			fmt::print(stderr, "Error: Type {} was declared to be root but either doesn't exist or is not a st\n", t);
+			throw Error("Root type not a st");
 		}
 	}
 	// verify that all unions reference tables
@@ -341,11 +343,9 @@ void ExpressionTree::verify(StaticContext const& context) const {
 		assertTypeIsUnique(u.name);
 		for (auto const& t : u.types) {
 			if (tables.count(t) == 0) {
-				fmt::print(stderr,
-				           "Error: Type {} was used in union {} but either doesn't exist or is not a table\n",
-				           t,
-				           name);
-				throw Error("Union member not a table");
+				fmt::print(
+				    stderr, "Error: Type {} was used in union {} but either doesn't exist or is not a st\n", t, name);
+				throw Error("Union member not a st");
 			}
 		}
 	}
@@ -412,7 +412,7 @@ void Compiler::describeTables() const {
 		fmt::print("Discribing tables in {}:\n", path.string());
 		fmt::print("================================================\n");
 		for (auto const& [_, table] : context->currentFile->tables) {
-			fmt::print("Describing table {}\n", table.name);
+			fmt::print("Describing st {}\n", table.name);
 			context->describeTable(table.name);
 			fmt::print("------------------------------------------------\n");
 		}
