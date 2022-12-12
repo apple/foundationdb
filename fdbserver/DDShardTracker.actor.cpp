@@ -1544,6 +1544,40 @@ FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
+void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) {
+	if (g_network->isSimulated()) {
+		// Test that new range must not overlap with any existing range in this shard.
+		for (const auto& [range, data] : rangeData) {
+			ASSERT(!range.intersects(newRange));
+		}
+	}
+
+	// TODO(zhewu): add metrics tracking actor.
+	RangeData data;
+	rangeData.emplace(newRange, data);
+}
+
+void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRange) {
+	std::vector<KeyRangeRef> updateRanges;
+	for (auto& [range, data] : rangeData) {
+		if (range.intersects(outRange)) {
+			updateRanges.push_back(range);
+		}
+	}
+
+	for (auto& range : updateRanges) {
+		std::vector<KeyRangeRef> remainingRanges = range - outRange;
+		for (auto& r : remainingRanges) {
+			ASSERT(r != range);
+			// TODO(zhewu): add metrics tracking actor.
+			RangeData data;
+			rangeData.emplace(r, data);
+		}
+		// Must erase last since `remainingRanges` uses data in `range`.
+		rangeData.erase(range);
+	}
+}
+
 // Decide whether a physical shard is available at the moment when the func is calling
 PhysicalShardAvailable PhysicalShardCollection::checkPhysicalShardAvailable(uint64_t physicalShardID,
                                                                             StorageMetrics const& moveInMetrics) {
@@ -1593,12 +1627,65 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
 	return;
 }
 
+// This method maintains the consistency between keyRangePhysicalShardIDMap and the RangeData in physicalShardInstances.
+// They are all updated in this method.
 void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
                                                                uint64_t physicalShardID,
                                                                uint64_t debugID) {
 	ASSERT(physicalShardID != UID().first());
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
+	std::set<uint64_t> physicalShardIDSet;
+
+	// If there are any existing physical shards own `keyRange`, remove the overlaping ranges from existing physical
+	// shards.
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		uint64_t shardID = it->value();
+		if (shardID == UID().first()) {
+			continue;
+		}
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		physicalShardInstances[shardID].removeRange(keyRange);
+	}
+
+	// Insert `keyRange` to the new physical shard.
 	keyRangePhysicalShardIDMap.insert(keyRange, physicalShardID);
-	return;
+	ASSERT(physicalShardInstances.find(physicalShardID) != physicalShardInstances.end());
+	physicalShardInstances[physicalShardID].addRange(keyRange);
+
+	// KeyRange to physical shard mapping consistency sanity check.
+	checkKeyRangePhysicalShardMapping();
+}
+
+void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
+	if (!g_network->isSimulated()) {
+		return;
+	}
+
+	// Check the invariant that keyRangePhysicalShardIDMap and physicalShardInstances should be consistent.
+	KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = keyRangePhysicalShardIDMap.ranges();
+	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
+	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
+		uint64_t shardID = it->value();
+		if (shardID == UID().first()) {
+			continue;
+		}
+		auto keyRangePiece = KeyRangeRef(it->range().begin, it->range().end);
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		bool exist = false;
+		for (const auto& [range, data] : physicalShardInstances[shardID].rangeData) {
+			if (range == keyRangePiece) {
+				exist = true;
+				break;
+			}
+		}
+		ASSERT(exist);
+	}
+
+	for (auto& [shardID, physicalShard] : physicalShardInstances) {
+		for (auto& [range, data] : physicalShard.rangeData) {
+			ASSERT(keyRangePhysicalShardIDMap[range.begin] == shardID);
+		}
+	}
 }
 
 // At beginning of the transition from the initial state without physical shard notion
