@@ -545,18 +545,54 @@ struct PhysicalShard {
 
 	// Restore from the checkpoint.
 	rocksdb::Status restore(const CheckpointMetaData& checkpoint) {
-		rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
-		rocksdb::ImportColumnFamilyOptions importOptions;
-		importOptions.move_files = true;
-		rocksdb::Status status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
+		const CheckpointFormat format = checkpoint.getFormat();
+		rocksdb::Status status;
+		if (format == DataMoveRocksCF) {
+			rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
+			rocksdb::ImportColumnFamilyOptions importOptions;
+			importOptions.move_files = true;
+			status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
 
-		if (!status.ok()) {
-			logRocksDBError(status, "Restore");
-			return status;
+			if (!status.ok()) {
+				logRocksDBError(status, "RocksImportColumnFamily");
+			}
+		} else if (format == RocksDBKeyValues) {
+			std::vector<std::string> sstFiles;
+			const RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(checkpoint);
+			for (const auto& file : rcp.fetchedFiles) {
+				TraceEvent(SevDebug, "RocksDBRestoreFile")
+				    .detail("Shard", id)
+				    .detail("CheckpointID", checkpoint.checkpointID)
+				    .detail("File", file.toString());
+				sstFiles.push_back(file.path);
+			}
+
+			if (!sstFiles.empty()) {
+				rocksdb::IngestExternalFileOptions ingestOptions;
+				ingestOptions.move_files = true;
+				ingestOptions.write_global_seqno = false;
+				ingestOptions.verify_checksums_before_ingest = true;
+				status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
+				if (!status.ok()) {
+					logRocksDBError(status, "RocksIngestExternalFile");
+				}
+			} else {
+				TraceEvent(SevWarn, "RocksDBServeRestoreEmptyRange")
+				    .detail("Shard", id)
+				    .detail("RocksKeyValuesCheckpoint", rcp.toString())
+				    .detail("Checkpoint", checkpoint.toString());
+			}
+			TraceEvent(SevInfo, "RocksDBServeRestoreEnd")
+			    .detail("Shard", id)
+			    .detail("Checkpoint", checkpoint.toString());
+		} else {
+			throw not_implemented();
 		}
 
-		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
-		this->isInitialized.store(true);
+		if (status.ok()) {
+			readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
+			this->isInitialized.store(true);
+		}
 		return status;
 	}
 
@@ -2236,6 +2272,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::Status status;
 			rocksdb::WriteBatch writeBatch;
+			rocksdb::WriteOptions options;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+
 			if (format == DataMoveRocksCF) {
 				CheckpointMetaData& checkpoint = a.checkpoints.front();
 				std::sort(a.ranges.begin(), a.ranges.end(), KeyRangeRef::ArbitraryOrder());
@@ -2293,8 +2332,54 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					}
 				}
 			} else if (format == RocksDBKeyValues) {
-				a.done.sendError(not_implemented());
-				return;
+				// Make sure the files are complete for the desired ranges.
+				if (!ps->initialized()) {
+					TraceEvent(SevDebug, "ShardedRocksRestoreInitPS", logId)
+					    .detail("Path", a.path)
+					    .detail("Checkpoints", describe(a.checkpoints))
+					    .detail("PhysicalShard", ps->toString());
+					status = ps->init();
+				}
+				if (!status.ok()) {
+					logRocksDBError(status, "RestoreInitPhysicalShard");
+					a.done.sendError(statusToError(status));
+					return;
+				}
+
+				for (const auto& checkpoint : a.checkpoints) {
+					status = ps->restore(checkpoint);
+					if (!status.ok()) {
+						TraceEvent(SevWarnAlways, "ShardedRocksIngestFileError", logId)
+						    .detail("Error", status.ToString())
+						    .detail("Path", a.path)
+						    .detail("Checkpoint", checkpoint.toString())
+						    .detail("PhysicalShard", ps->toString());
+						break;
+					}
+				}
+
+				if (!status.ok()) {
+					logRocksDBError(status, "RestoreIngestFile");
+					for (const auto& range : a.ranges) {
+						writeBatch.DeleteRange(ps->cf, toSlice(range.begin), toSlice(range.end));
+					}
+					TraceEvent(SevInfo, "ShardedRocksRevertRestore", logId)
+					    .detail("Path", a.path)
+					    .detail("Checkpoints", describe(a.checkpoints))
+					    .detail("PhysicalShard", ps->toString())
+					    .detail("RestoreRanges", describe(a.ranges));
+
+					rocksdb::Status s = a.shardManager->getDb()->Write(options, &writeBatch);
+					if (!s.ok()) {
+						TraceEvent(SevError, "ShardedRocksRevertRestoreError", logId)
+						    .detail("Error", s.ToString())
+						    .detail("Path", a.path)
+						    .detail("PhysicalShard", ps->toString())
+						    .detail("RestoreRanges", describe(a.ranges));
+					}
+					a.done.sendError(statusToError(status));
+					return;
+				}
 			} else if (format == RocksDB) {
 				a.done.sendError(not_implemented());
 				return;
@@ -2305,9 +2390,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				a.shardManager->populateRangeMappingMutations(&writeBatch, range, /*isAdd=*/true);
 			}
 
-			rocksdb::WriteOptions options;
-			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
-
 			status = a.shardManager->getDb()->Write(options, &writeBatch);
 			if (!status.ok()) {
 				logRocksDBError(status, "RestorePersistMetaData");
@@ -2316,8 +2398,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 			TraceEvent(SevDebug, "ShardedRocksRestoredMetaDataPersisted", logId)
 			    .detail("Path", a.path)
-			    .detail("Checkpoints", describe(a.checkpoints))
-			    .detail("RocksDBCF", getRocksCF(a.checkpoints[0]).toString());
+			    .detail("Checkpoints", describe(a.checkpoints));
 			a.shardManager->getMetaDataShard()->refreshReadIteratorPool();
 			a.done.send(Void());
 			TraceEvent(SevInfo, "ShardedRocksDBRestoreEnd", logId)

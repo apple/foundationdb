@@ -861,9 +861,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				}
 			} else {
 				if (totalBytes > 0) {
-					RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
+					RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(*metaData);
 					rcp.fetchedFiles.emplace_back(localFile, range, totalBytes);
-					rcp.checkpointDir = dir;
 					metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
 				}
 				if (!fileExists(localFile)) {

@@ -301,7 +301,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
 		wait(kvStore->init());
 		try {
-			wait(kvStore->restore(shardId, testRanges, fetchedCheckpoints));
+			// wait(kvStore->restore(shardId, testRanges, fetchedCheckpoints));
+			wait(kvStore->restore(shardId, testRanges, fetchedKvCheckpoints));
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestRestoreCheckpointError")
 			    .errorUnsuppressed(e)

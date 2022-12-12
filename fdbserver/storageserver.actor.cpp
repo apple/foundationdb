@@ -2481,13 +2481,14 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 	state ICheckpointReader* reader = nullptr;
 	{
-		auto it = self->liveCheckpointReaders.find(req.checkpointID);
-		if (iter != self->liveCheckpointReaders.end()) {
-			reader = it->second;
+		auto crIt = self->liveCheckpointReaders.find(req.checkpointID);
+		if (crIt != self->liveCheckpointReaders.end()) {
+			reader = crIt->second;
 		} else {
 			reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
 		}
 	}
+
 	state std::unique_ptr<ICheckpointIterator> iter;
 	try {
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
