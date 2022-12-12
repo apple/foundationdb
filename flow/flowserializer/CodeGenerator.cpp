@@ -369,7 +369,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		                      typeName.path.empty() ? "" : "::",
 		                      typeName.name);
 		for (auto o : *serInfo.vtable) {
-			writer << fmt::format("\t*reinterpret_cast<voffset_t*>(buffer + {}}) = {};", curr, o);
+			writer << fmt::format("\t*reinterpret_cast<voffset_t*>(buffer + {}) = {};", curr, o);
 		}
 		vtableOffsets[typeName] = curr;
 		curr += serInfo.vtable->size() * 2;
