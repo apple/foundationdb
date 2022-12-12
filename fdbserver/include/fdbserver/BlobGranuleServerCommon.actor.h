@@ -164,6 +164,7 @@ ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Refe
 ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef range);
 ACTOR Future<Void> updateRestoreStatus(Database db, KeyRangeRef range, BlobRestoreStatus status);
+ACTOR Future<KeyRange> getRestoringRange(Database db, KeyRangeRef keys);
 ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range);
 #include "flow/unactorcompiler.h"
 

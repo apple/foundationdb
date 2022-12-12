@@ -28,6 +28,14 @@
 #include <thread>
 #include <string_view>
 
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <process.h>
+#else
+#error Unsupported platform
+#endif
+
 #undef ERROR
 #define ERROR(name, number, description) enum { error_code_##name = number };
 
@@ -51,6 +59,7 @@ enum TesterOptionId {
 	OPT_TRACE_DIR,
 	OPT_TMP_DIR,
 	OPT_IGNORE_EXTERNAL_CLIENT_FAILURES,
+	OPT_FAIL_INCOMPATIBLE_CLIENT,
 	OPT_EXPECTED_ERROR
 };
 
@@ -70,6 +79,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
 	  { OPT_TMP_DIR, "--tmp-dir", SO_REQ_SEP },
 	  { OPT_IGNORE_EXTERNAL_CLIENT_FAILURES, "--ignore-external-client-failures", SO_NONE },
+	  { OPT_FAIL_INCOMPATIBLE_CLIENT, "--fail-incompatible-client", SO_NONE },
 	  { OPT_EXPECTED_ERROR, "--expected-error", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
@@ -86,6 +96,7 @@ public:
 	std::string traceDir;
 	std::string tmpDir;
 	bool ignoreExternalClientFailures = false;
+	bool failIncompatibleClient = false;
 	fdb::Error::CodeType expectedError = 0;
 };
 
@@ -120,6 +131,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Directory for temporary files of the client.\n"
 	       "  --ignore-external-client-failures\n"
 	       "                 Ignore failures to initialize external clients.\n"
+	       "  --fail-incompatible-client\n"
+	       "                 Fail if there is no client matching the server version.\n"
 	       "  --expected-error ERR\n"
 	       "                 FDB error code the test expected to fail with (default: 0).\n"
 	       "  -h, --help     Display this help and exit.\n",
@@ -176,6 +189,9 @@ bool processArg(const CSimpleOpt& args) {
 	case OPT_IGNORE_EXTERNAL_CLIENT_FAILURES:
 		options.ignoreExternalClientFailures = true;
 		break;
+	case OPT_FAIL_INCOMPATIBLE_CLIENT:
+		options.failIncompatibleClient = true;
+		break;
 	case OPT_EXPECTED_ERROR:
 		if (!processIntOption(args.OptionText(), args.OptionArg(), 0, 10000, options.expectedError)) {
 			return false;
@@ -208,12 +224,20 @@ bool parseArgs(int argc, char** argv) {
 	return true;
 }
 
+void exitImmediately(int exitCode) {
+#ifdef _WIN32
+	TerminateProcess(GetCurrentProcess(), exitCode);
+#else
+	_exit(exitCode);
+#endif
+}
+
 void checkErrorCodeAndExit(fdb::Error::CodeType e) {
 	if (e == options.expectedError) {
-		std::exit(0);
+		exitImmediately(0);
 	}
 	fmt::print(stderr, "Expected Error: {}, but got {}\n", options.expectedError, e);
-	std::exit(1);
+	exitImmediately(1);
 }
 
 void fdb_check(fdb::Error e, std::string_view msg) {
@@ -243,6 +267,9 @@ void applyNetworkOptions() {
 	if (options.ignoreExternalClientFailures) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_IGNORE_EXTERNAL_CLIENT_FAILURES);
 	}
+	if (options.failIncompatibleClient) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_FAIL_INCOMPATIBLE_CLIENT);
+	}
 }
 
 void testTransaction() {
@@ -260,7 +287,7 @@ void testTransaction() {
 		}
 		if (err.code() == error_code_timed_out) {
 			fmt::print(stderr, "Transaction timed out\n");
-			exit(1);
+			exitImmediately(1);
 		}
 		auto onErrorFuture = tx.onError(err);
 		fdb_check(onErrorFuture.blockUntilReady(), "Wait on onError failed");

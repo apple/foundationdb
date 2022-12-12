@@ -2246,35 +2246,21 @@ namespace platform {
 int getRandomSeed() {
 	INJECT_FAULT(platform_error, "getRandomSeed"); // getting a random seed failed
 	int randomSeed;
-	int retryCount = 0;
 
 #ifdef _WIN32
-	do {
-		retryCount++;
-		if (rand_s((unsigned int*)&randomSeed) != 0) {
-			TraceEvent(SevError, "WindowsRandomSeedError").log();
-			throw platform_error();
-		}
-	} while (randomSeed == 0 &&
-	         retryCount <
-	             FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT); // randomSeed cannot be 0 since we use mersenne twister in
-	                                                  // DeterministicRandom. Get a new one if randomSeed is 0.
+	if (rand_s((unsigned int*)&randomSeed) != 0) {
+		TraceEvent(SevError, "WindowsRandomSeedError").log();
+		throw platform_error();
+	}
 #else
 	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	do {
-		retryCount++;
-		if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
-			TraceEvent(SevError, "OpenURandom").GetLastError();
-			throw platform_error();
-		}
-	} while (randomSeed == 0 && retryCount < FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT);
+	if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
+		TraceEvent(SevError, "OpenURandom").GetLastError();
+		throw platform_error();
+	}
 	close(devRandom);
 #endif
 
-	if (randomSeed == 0) {
-		TraceEvent(SevError, "RandomSeedZeroError").log();
-		throw platform_error();
-	}
 	return randomSeed;
 }
 } // namespace platform
