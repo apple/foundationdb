@@ -78,6 +78,21 @@
 
 #define TIME_KEEPER_VERSION "1"_sr
 
+ACTOR Future<Void> doEmptyCommit(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.makeSelfConflicting();
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 class ClusterControllerDataImpl {
 public:
 	ACTOR static Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
@@ -1073,6 +1088,1017 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> handleForcedRecoveries(ClusterControllerData* self,
+	                                                 ClusterControllerFullInterface interf) {
+		loop {
+			state ForceRecoveryRequest req = waitNext(interf.clientInterface.forceRecovery.getFuture());
+			TraceEvent("ForcedRecoveryStart", self->id)
+			    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+			    .detail("DcId", req.dcId.printable());
+			state Future<Void> fCommit = doEmptyCommit(self->cx);
+			wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
+			if (!fCommit.isReady() || fCommit.isError()) {
+				if (self->clusterControllerDcId != req.dcId) {
+					std::vector<Optional<Key>> dcPriority;
+					dcPriority.push_back(req.dcId);
+					dcPriority.push_back(self->clusterControllerDcId);
+					self->desiredDcIds.set(dcPriority);
+				} else {
+					self->db.forceRecovery = true;
+					self->db.forceMasterFailure.trigger();
+				}
+				wait(fCommit);
+			}
+			TraceEvent("ForcedRecoveryFinish", self->id).log();
+			self->db.forceRecovery = false;
+			req.reply.send(Void());
+		}
+	}
+
+	ACTOR static Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
+		TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
+		    .detail("Range", req.range)
+		    .detail("AuditType", req.type);
+		state UID auditId;
+
+		try {
+			while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+			       !self->db.serverInfo->get().distributor.present()) {
+				wait(self->db.serverInfo->onChange());
+			}
+
+			TriggerAuditRequest fReq(req.getType(), req.range);
+			UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+			auditId = auditId_;
+			TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
+			    .detail("AuditID", auditId)
+			    .detail("Range", req.range)
+			    .detail("AuditType", req.type);
+			if (!req.reply.isSet()) {
+				req.reply.send(auditId);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "CCTriggerAuditStorageError", self->id)
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("Range", req.range)
+			    .detail("AuditType", req.type);
+			if (!req.reply.isSet()) {
+				req.reply.sendError(audit_storage_failed());
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> handleTriggerAuditStorage(ClusterControllerData* self,
+	                                                    ClusterControllerFullInterface interf) {
+		loop {
+			TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
+			TraceEvent(SevDebug, "TriggerAuditStorageReceived", self->id)
+			    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+			    .detail("Range", req.range)
+			    .detail("AuditType", req.type);
+			self->addActor.send(triggerAuditStorage(self, req));
+		}
+	}
+
+	ACTOR static Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
+		// If master fails at the same time, give it a chance to clear master PID.
+		// Also wait to avoid too many consecutive recruits in a small time window.
+		wait(delay(waitTime));
+
+		TraceEvent("CCStartDataDistributor", self->id).log();
+		loop {
+			try {
+				state bool noDistributor = !self->db.serverInfo->get().distributor.present();
+				while (!self->masterProcessId.present() ||
+				       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+				       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+					wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				}
+				if (noDistributor && self->db.serverInfo->get().distributor.present()) {
+					// Existing distributor registers while waiting, so skip.
+					return Void();
+				}
+
+				std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
+				WorkerFitnessInfo ddWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+				                                                                ProcessClass::DataDistributor,
+				                                                                ProcessClass::NeverAssign,
+				                                                                self->db.config,
+				                                                                idUsed);
+				InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
+				state WorkerDetails worker = ddWorker.worker;
+				if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
+					worker = self->id_worker[self->masterProcessId.get()].details;
+				}
+
+				self->recruitingDistributorID = req.reqId;
+				TraceEvent("CCRecruitDataDistributor", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("DDID", req.reqId);
+
+				ErrorOr<DataDistributorInterface> ddInterf = wait(worker.interf.dataDistributor.getReplyUnlessFailedFor(
+				    req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0));
+
+				if (ddInterf.present()) {
+					self->recruitDistributor.set(false);
+					self->recruitingDistributorID = ddInterf.get().id();
+					const auto& distributor = self->db.serverInfo->get().distributor;
+					TraceEvent("CCDataDistributorRecruited", self->id)
+					    .detail("Addr", worker.interf.address())
+					    .detail("DDID", ddInterf.get().id());
+					if (distributor.present() && distributor.get().id() != ddInterf.get().id() &&
+					    self->id_worker.count(distributor.get().locality.processId())) {
+
+						TraceEvent("CCHaltDataDistributorAfterRecruit", self->id)
+						    .detail("DDID", distributor.get().id())
+						    .detail("DcID", printable(self->clusterControllerDcId));
+
+						DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
+					}
+					if (!distributor.present() || distributor.get().id() != ddInterf.get().id()) {
+						self->db.setDistributor(ddInterf.get());
+					}
+					self->checkOutstandingRequests();
+					return Void();
+				}
+			} catch (Error& e) {
+				TraceEvent("CCDataDistributorRecruitError", self->id).error(e);
+				if (e.code() != error_code_no_more_servers) {
+					throw;
+				}
+			}
+			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		}
+	}
+
+	ACTOR static Future<Void> monitorDataDistributor(ClusterControllerData* self) {
+		state SingletonRecruitThrottler recruitThrottler;
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			wait(self->db.serverInfo->onChange());
+		}
+
+		loop {
+			if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
+				choose {
+					when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
+					                            SERVER_KNOBS->DD_FAILURE_TIME))) {
+						const auto& distributor = self->db.serverInfo->get().distributor;
+						TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
+						DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
+						self->db.clearInterf(ProcessClass::DataDistributorClass);
+					}
+					when(wait(self->recruitDistributor.onChange())) {}
+				}
+			} else {
+				wait(startDataDistributor(self, recruitThrottler.newRecruitment()));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
+		// If master fails at the same time, give it a chance to clear master PID.
+		// Also wait to avoid too many consecutive recruits in a small time window.
+		wait(delay(waitTime));
+
+		TraceEvent("CCStartRatekeeper", self->id).log();
+		loop {
+			try {
+				state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
+				while (!self->masterProcessId.present() ||
+				       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+				       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+					wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				}
+				if (no_ratekeeper && self->db.serverInfo->get().ratekeeper.present()) {
+					// Existing ratekeeper registers while waiting, so skip.
+					return Void();
+				}
+
+				std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+				WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+				                                                                ProcessClass::Ratekeeper,
+				                                                                ProcessClass::NeverAssign,
+				                                                                self->db.config,
+				                                                                id_used);
+				InitializeRatekeeperRequest req(deterministicRandom()->randomUniqueID());
+				state WorkerDetails worker = rkWorker.worker;
+				if (self->onMasterIsBetter(worker, ProcessClass::Ratekeeper)) {
+					worker = self->id_worker[self->masterProcessId.get()].details;
+				}
+
+				self->recruitingRatekeeperID = req.reqId;
+				TraceEvent("CCRecruitRatekeeper", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("RKID", req.reqId);
+
+				ErrorOr<RatekeeperInterface> interf = wait(worker.interf.ratekeeper.getReplyUnlessFailedFor(
+				    req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0));
+				if (interf.present()) {
+					self->recruitRatekeeper.set(false);
+					self->recruitingRatekeeperID = interf.get().id();
+					const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+					TraceEvent("CCRatekeeperRecruited", self->id)
+					    .detail("Addr", worker.interf.address())
+					    .detail("RKID", interf.get().id());
+					if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id() &&
+					    self->id_worker.count(ratekeeper.get().locality.processId())) {
+						TraceEvent("CCHaltRatekeeperAfterRecruit", self->id)
+						    .detail("RKID", ratekeeper.get().id())
+						    .detail("DcID", printable(self->clusterControllerDcId));
+						RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
+					}
+					if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
+						self->db.setRatekeeper(interf.get());
+					}
+					self->checkOutstandingRequests();
+					return Void();
+				}
+			} catch (Error& e) {
+				TraceEvent("CCRatekeeperRecruitError", self->id).error(e);
+				if (e.code() != error_code_no_more_servers) {
+					throw;
+				}
+			}
+			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		}
+	}
+
+	ACTOR static Future<Void> monitorRatekeeper(ClusterControllerData* self) {
+		state SingletonRecruitThrottler recruitThrottler;
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			wait(self->db.serverInfo->onChange());
+		}
+
+		loop {
+			if (self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get()) {
+				choose {
+					when(wait(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
+					                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
+						const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+						TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
+						RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
+						self->db.clearInterf(ProcessClass::RatekeeperClass);
+					}
+					when(wait(self->recruitRatekeeper.onChange())) {}
+				}
+			} else {
+				wait(startRatekeeper(self, recruitThrottler.newRecruitment()));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> startConsistencyScan(ClusterControllerData* self) {
+		wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+		TraceEvent("CCStartConsistencyScan", self->id).log();
+		loop {
+			try {
+				state bool no_consistencyScan = !self->db.serverInfo->get().consistencyScan.present();
+				while (!self->masterProcessId.present() ||
+				       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+				       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+					wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				}
+				if (no_consistencyScan && self->db.serverInfo->get().consistencyScan.present()) {
+					// Existing consistencyScan registers while waiting, so skip.
+					return Void();
+				}
+
+				std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+				WorkerFitnessInfo csWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+				                                                                ProcessClass::ConsistencyScan,
+				                                                                ProcessClass::NeverAssign,
+				                                                                self->db.config,
+				                                                                id_used);
+
+				InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
+				state WorkerDetails worker = csWorker.worker;
+				if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyScan)) {
+					worker = self->id_worker[self->masterProcessId.get()].details;
+				}
+
+				self->recruitingConsistencyScanID = req.reqId;
+				TraceEvent("CCRecruitConsistencyScan", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("CSID", req.reqId);
+
+				ErrorOr<ConsistencyScanInterface> interf = wait(worker.interf.consistencyScan.getReplyUnlessFailedFor(
+				    req, SERVER_KNOBS->WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY, 0));
+				if (interf.present()) {
+					self->recruitConsistencyScan.set(false);
+					self->recruitingConsistencyScanID = interf.get().id();
+					const auto& consistencyScan = self->db.serverInfo->get().consistencyScan;
+					TraceEvent("CCConsistencyScanRecruited", self->id)
+					    .detail("Addr", worker.interf.address())
+					    .detail("CKID", interf.get().id());
+					if (consistencyScan.present() && consistencyScan.get().id() != interf.get().id() &&
+					    self->id_worker.count(consistencyScan.get().locality.processId())) {
+						TraceEvent("CCHaltConsistencyScanAfterRecruit", self->id)
+						    .detail("CKID", consistencyScan.get().id())
+						    .detail("DcID", printable(self->clusterControllerDcId));
+						ConsistencyScanSingleton(consistencyScan)
+						    .halt(*self, consistencyScan.get().locality.processId());
+					}
+					if (!consistencyScan.present() || consistencyScan.get().id() != interf.get().id()) {
+						self->db.setConsistencyScan(interf.get());
+					}
+					self->checkOutstandingRequests();
+					return Void();
+				} else {
+					TraceEvent("CCConsistencyScanRecruitEmpty", self->id).log();
+				}
+			} catch (Error& e) {
+				TraceEvent("CCConsistencyScanRecruitError", self->id).error(e);
+				if (e.code() != error_code_no_more_servers) {
+					throw;
+				}
+			}
+			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		}
+	}
+
+	ACTOR static Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
+			wait(self->db.serverInfo->onChange());
+		}
+
+		TraceEvent("CCMonitorConsistencyScan", self->id).log();
+		loop {
+			if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
+				state Future<Void> wfClient =
+				    waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
+				                      SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
+				choose {
+					when(wait(wfClient)) {
+						TraceEvent("CCMonitorConsistencyScanDied", self->id)
+						    .detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
+						self->db.clearInterf(ProcessClass::ConsistencyScanClass);
+					}
+					when(wait(self->recruitConsistencyScan.onChange())) {}
+				}
+			} else {
+				TraceEvent("CCMonitorConsistencyScanStarting", self->id).log();
+				wait(startConsistencyScan(self));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
+		// If master fails at the same time, give it a chance to clear master PID.
+		// Also wait to avoid too many consecutive recruits in a small time window.
+		wait(delay(waitTime));
+
+		TraceEvent("CCEKP_Start", self->id).log();
+		loop {
+			try {
+				// EncryptKeyServer interface is critical in recovering tlog encrypted transactions,
+				// hence, the process only waits for the master recruitment and not the full cluster recovery.
+				state bool noEncryptKeyServer = !self->db.serverInfo->get().encryptKeyProxy.present();
+				while (!self->masterProcessId.present() ||
+				       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+				       self->db.serverInfo->get().recoveryState < RecoveryState::LOCKING_CSTATE) {
+					wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				}
+				if (noEncryptKeyServer && self->db.serverInfo->get().encryptKeyProxy.present()) {
+					// Existing encryptKeyServer registers while waiting, so skip.
+					return Void();
+				}
+
+				// Recruit EncryptKeyProxy in the same datacenter as the ClusterController.
+				// This should always be possible, given EncryptKeyProxy is stateless, we can recruit EncryptKeyProxy
+				// on the same process as the CluserController.
+				state std::map<Optional<Standalone<StringRef>>, int> id_used;
+				self->updateKnownIds(&id_used);
+				state WorkerFitnessInfo ekpWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+				                                                                       ProcessClass::EncryptKeyProxy,
+				                                                                       ProcessClass::NeverAssign,
+				                                                                       self->db.config,
+				                                                                       id_used);
+
+				InitializeEncryptKeyProxyRequest req(deterministicRandom()->randomUniqueID());
+				state WorkerDetails worker = ekpWorker.worker;
+				if (self->onMasterIsBetter(worker, ProcessClass::EncryptKeyProxy)) {
+					worker = self->id_worker[self->masterProcessId.get()].details;
+				}
+
+				self->recruitingEncryptKeyProxyID = req.reqId;
+				TraceEvent("CCEKP_Recruit", self->id).detail("Addr", worker.interf.address()).detail("Id", req.reqId);
+
+				ErrorOr<EncryptKeyProxyInterface> interf = wait(worker.interf.encryptKeyProxy.getReplyUnlessFailedFor(
+				    req, SERVER_KNOBS->WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY, 0));
+				if (interf.present()) {
+					self->recruitEncryptKeyProxy.set(false);
+					self->recruitingEncryptKeyProxyID = interf.get().id();
+					const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
+					TraceEvent("CCEKP_Recruited", self->id)
+					    .detail("Addr", worker.interf.address())
+					    .detail("Id", interf.get().id())
+					    .detail("ProcessId", interf.get().locality.processId());
+					if (encryptKeyProxy.present() && encryptKeyProxy.get().id() != interf.get().id() &&
+					    self->id_worker.count(encryptKeyProxy.get().locality.processId())) {
+						TraceEvent("CCEKP_HaltAfterRecruit", self->id)
+						    .detail("Id", encryptKeyProxy.get().id())
+						    .detail("DcId", printable(self->clusterControllerDcId));
+						EncryptKeyProxySingleton(encryptKeyProxy)
+						    .halt(*self, encryptKeyProxy.get().locality.processId());
+					}
+					if (!encryptKeyProxy.present() || encryptKeyProxy.get().id() != interf.get().id()) {
+						self->db.setEncryptKeyProxy(interf.get());
+						TraceEvent("CCEKP_UpdateInf", self->id)
+						    .detail("Id", self->db.serverInfo->get().encryptKeyProxy.get().id());
+					}
+					self->checkOutstandingRequests();
+					return Void();
+				}
+			} catch (Error& e) {
+				TraceEvent("CCEKP_RecruitError", self->id).error(e);
+				if (e.code() != error_code_no_more_servers) {
+					throw;
+				}
+			}
+			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		}
+	}
+
+	ACTOR static Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
+		state SingletonRecruitThrottler recruitThrottler;
+		loop {
+			if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
+				choose {
+					when(wait(waitFailureClient(self->db.serverInfo->get().encryptKeyProxy.get().waitFailure,
+					                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
+						TraceEvent("CCEKP_Died", self->id);
+						const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
+						EncryptKeyProxySingleton(encryptKeyProxy)
+						    .halt(*self, encryptKeyProxy.get().locality.processId());
+						self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
+					}
+					when(wait(self->recruitEncryptKeyProxy.onChange())) {}
+				}
+			} else {
+				wait(startEncryptKeyProxy(self, recruitThrottler.newRecruitment()));
+			}
+		}
+	}
+
+	// Acquires the BM lock by getting the next epoch no.
+	ACTOR static Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+
+		loop {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			try {
+				Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+				state int64_t newEpoch = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) + 1 : 1;
+				tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
+
+				wait(tr->commit());
+				TraceEvent(SevDebug, "CCNextBlobManagerEpoch", self->id).detail("Epoch", newEpoch);
+				return newEpoch;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		state Key blobRestoreCommandKey = blobRestoreCommandKeyFor(normalKeys);
+		loop {
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
+				if (blobRestoreCommand.present()) {
+					Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
+					TraceEvent("WatchBlobRestoreCommand")
+					    .detail("Progress", status.progress)
+					    .detail("Phase", status.phase);
+					if (status.phase == BlobRestorePhase::INIT) {
+						self->db.blobRestoreEnabled.set(true);
+						if (self->db.blobGranulesEnabled.get()) {
+							const auto& blobManager = self->db.serverInfo->get().blobManager;
+							if (blobManager.present()) {
+								BlobManagerSingleton(blobManager)
+								    .haltBlobGranules(*self, blobManager.get().locality.processId());
+							}
+							const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
+							if (blobMigrator.present()) {
+								BlobMigratorSingleton(blobMigrator)
+								    .halt(*self, blobMigrator.get().locality.processId());
+							}
+						}
+					}
+				}
+
+				state Future<Void> watch = tr->watch(blobRestoreCommandKey);
+				wait(tr->commit());
+				wait(watch);
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTime) {
+		// If master fails at the same time, give it a chance to clear master PID.
+		// Also wait to avoid too many consecutive recruits in a small time window.
+		wait(delay(waitTime));
+
+		TraceEvent("CCStartBlobMigrator", self->id).log();
+		loop {
+			try {
+				state bool noBlobMigrator = !self->db.serverInfo->get().blobMigrator.present();
+				while (!self->masterProcessId.present() ||
+				       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+				       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+					wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				}
+				if (noBlobMigrator && self->db.serverInfo->get().blobMigrator.present()) {
+					// Existing instance registers while waiting, so skip.
+					return Void();
+				}
+
+				std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+				WorkerFitnessInfo blobMigratorWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+				                                                                          ProcessClass::BlobMigrator,
+				                                                                          ProcessClass::NeverAssign,
+				                                                                          self->db.config,
+				                                                                          id_used);
+				InitializeBlobMigratorRequest req(deterministicRandom()->randomUniqueID());
+				state WorkerDetails worker = blobMigratorWorker.worker;
+				if (self->onMasterIsBetter(worker, ProcessClass::BlobMigrator)) {
+					worker = self->id_worker[self->masterProcessId.get()].details;
+				}
+
+				self->recruitingBlobMigratorID = req.reqId;
+				TraceEvent("CCRecruitBlobMigrator", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("MGID", req.reqId);
+
+				ErrorOr<BlobMigratorInterface> interf = wait(worker.interf.blobMigrator.getReplyUnlessFailedFor(
+				    req, SERVER_KNOBS->WAIT_FOR_BLOB_MANAGER_JOIN_DELAY, 0));
+
+				if (interf.present()) {
+					self->recruitBlobMigrator.set(false);
+					self->recruitingBlobMigratorID = interf.get().id();
+					const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
+					TraceEvent("CCBlobMigratorRecruited", self->id)
+					    .detail("Addr", worker.interf.address())
+					    .detail("MGID", interf.get().id());
+					if (blobMigrator.present() && blobMigrator.get().id() != interf.get().id() &&
+					    self->id_worker.count(blobMigrator.get().locality.processId())) {
+						TraceEvent("CCHaltBlobMigratorAfterRecruit", self->id)
+						    .detail("MGID", blobMigrator.get().id())
+						    .detail("DcID", printable(self->clusterControllerDcId));
+						BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
+					}
+					if (!blobMigrator.present() || blobMigrator.get().id() != interf.get().id()) {
+						self->db.setBlobMigrator(interf.get());
+					}
+					self->checkOutstandingRequests();
+					return Void();
+				}
+			} catch (Error& e) {
+				TraceEvent("CCBlobMigratorRecruitError", self->id).error(e);
+				if (e.code() != error_code_no_more_servers) {
+					throw;
+				}
+			}
+			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		}
+	}
+
+	ACTOR static Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
+		state SingletonRecruitThrottler recruitThrottler;
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			wait(self->db.serverInfo->onChange());
+		}
+		loop {
+			if (self->db.serverInfo->get().blobMigrator.present() && !self->recruitBlobMigrator.get()) {
+				state Future<Void> wfClient =
+				    waitFailureClient(self->db.serverInfo->get().blobMigrator.get().waitFailure,
+				                      SERVER_KNOBS->BLOB_MIGRATOR_FAILURE_TIME);
+				loop {
+					choose {
+						when(wait(wfClient)) {
+							TraceEvent("CCBlobMigratorDied", self->id)
+							    .detail("MGID", self->db.serverInfo->get().blobMigrator.get().id());
+							self->db.clearInterf(ProcessClass::BlobMigratorClass);
+							break;
+						}
+						when(wait(self->recruitBlobMigrator.onChange())) {}
+					}
+				}
+			} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get()) {
+				// if there is no blob migrator present but blob granules are now enabled, recruit a BM
+				wait(startBlobMigrator(self, recruitThrottler.newRecruitment()));
+			} else {
+				wait(self->db.blobGranulesEnabled.onChange() || self->db.blobRestoreEnabled.onChange());
+			}
+		}
+	}
+
+	ACTOR static Future<Void> startBlobManager(ClusterControllerData* self, double waitTime) {
+		// If master fails at the same time, give it a chance to clear master PID.
+		// Also wait to avoid too many consecutive recruits in a small time window.
+		wait(delay(waitTime));
+
+		TraceEvent("CCStartBlobManager", self->id).log();
+		loop {
+			try {
+				state bool noBlobManager = !self->db.serverInfo->get().blobManager.present();
+				while (!self->masterProcessId.present() ||
+				       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+				       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+					wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+				}
+				if (noBlobManager && self->db.serverInfo->get().blobManager.present()) {
+					// Existing blob manager registers while waiting, so skip.
+					return Void();
+				}
+
+				state std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+				state WorkerFitnessInfo bmWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+				                                                                      ProcessClass::BlobManager,
+				                                                                      ProcessClass::NeverAssign,
+				                                                                      self->db.config,
+				                                                                      id_used);
+
+				int64_t nextEpoch = wait(getNextBMEpoch(self));
+				if (!self->masterProcessId.present() ||
+				    self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+				    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+					continue;
+				}
+				InitializeBlobManagerRequest req(deterministicRandom()->randomUniqueID(), nextEpoch);
+				state WorkerDetails worker = bmWorker.worker;
+				if (self->onMasterIsBetter(worker, ProcessClass::BlobManager)) {
+					worker = self->id_worker[self->masterProcessId.get()].details;
+				}
+
+				self->recruitingBlobManagerID = req.reqId;
+				TraceEvent("CCRecruitBlobManager", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("BMID", req.reqId)
+				    .detail("Epoch", nextEpoch);
+
+				ErrorOr<BlobManagerInterface> interf = wait(worker.interf.blobManager.getReplyUnlessFailedFor(
+				    req, SERVER_KNOBS->WAIT_FOR_BLOB_MANAGER_JOIN_DELAY, 0));
+				if (interf.present()) {
+					self->recruitBlobManager.set(false);
+					self->recruitingBlobManagerID = interf.get().id();
+					const auto& blobManager = self->db.serverInfo->get().blobManager;
+					TraceEvent("CCBlobManagerRecruited", self->id)
+					    .detail("Addr", worker.interf.address())
+					    .detail("BMID", interf.get().id());
+					if (blobManager.present() && blobManager.get().id() != interf.get().id() &&
+					    self->id_worker.count(blobManager.get().locality.processId())) {
+						TraceEvent("CCHaltBlobManagerAfterRecruit", self->id)
+						    .detail("BMID", blobManager.get().id())
+						    .detail("DcID", printable(self->clusterControllerDcId));
+						BlobManagerSingleton(blobManager).halt(*self, blobManager.get().locality.processId());
+					}
+					if (!blobManager.present() || blobManager.get().id() != interf.get().id()) {
+						self->db.setBlobManager(interf.get());
+					}
+					self->checkOutstandingRequests();
+					return Void();
+				}
+			} catch (Error& e) {
+				TraceEvent("CCBlobManagerRecruitError", self->id).error(e);
+				if (e.code() != error_code_no_more_servers) {
+					throw;
+				}
+			}
+			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+		}
+	}
+
+	ACTOR static Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		state Key blobGranuleConfigKey = configKeysPrefix.withSuffix("blob_granules_enabled"_sr);
+
+		loop {
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
+				if (blobConfig.present()) {
+					self->db.blobGranulesEnabled.set(blobConfig.get() == "1"_sr);
+				}
+
+				state Future<Void> watch = tr->watch(blobGranuleConfigKey);
+				wait(tr->commit());
+				wait(watch);
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> monitorBlobManager(ClusterControllerData* self) {
+		state SingletonRecruitThrottler recruitThrottler;
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			wait(self->db.serverInfo->onChange());
+		}
+
+		loop {
+			if (self->db.serverInfo->get().blobManager.present() && !self->recruitBlobManager.get()) {
+				state Future<Void> wfClient = waitFailureClient(
+				    self->db.serverInfo->get().blobManager.get().waitFailure, SERVER_KNOBS->BLOB_MANAGER_FAILURE_TIME);
+				loop {
+					choose {
+						when(wait(wfClient)) {
+							const auto& blobManager = self->db.serverInfo->get().blobManager;
+							TraceEvent("CCBlobManagerDied", self->id).detail("BMID", blobManager.get().id());
+							BlobManagerSingleton(blobManager).halt(*self, blobManager.get().locality.processId());
+							self->db.clearInterf(ProcessClass::BlobManagerClass);
+							break;
+						}
+						when(wait(self->recruitBlobManager.onChange())) {
+							break;
+						}
+						when(wait(self->db.blobGranulesEnabled.onChange())) {
+							// if there is a blob manager present but blob granules are now disabled, stop the BM
+							if (!self->db.blobGranulesEnabled.get()) {
+								const auto& blobManager = self->db.serverInfo->get().blobManager;
+								BlobManagerSingleton(blobManager)
+								    .haltBlobGranules(*self, blobManager.get().locality.processId());
+								if (self->db.blobRestoreEnabled.get()) {
+									const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
+									BlobMigratorSingleton(blobMigrator)
+									    .halt(*self, blobMigrator.get().locality.processId());
+								}
+								break;
+							}
+						}
+					}
+				}
+			} else if (self->db.blobGranulesEnabled.get()) {
+				// if there is no blob manager present but blob granules are now enabled, recruit a BM
+				wait(startBlobManager(self, recruitThrottler.newRecruitment()));
+			} else {
+				// if there is no blob manager present and blob granules are disabled, wait for a config change
+				wait(self->db.blobGranulesEnabled.onChange());
+			}
+		}
+	}
+
+	ACTOR static Future<Void> dbInfoUpdater(ClusterControllerData* self) {
+		state Future<Void> dbInfoChange = self->db.serverInfo->onChange();
+		state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
+		loop {
+			choose {
+				when(wait(updateDBInfo)) {
+					wait(delay(SERVER_KNOBS->DBINFO_BATCH_DELAY) || dbInfoChange);
+				}
+				when(wait(dbInfoChange)) {}
+			}
+
+			UpdateServerDBInfoRequest req;
+			if (dbInfoChange.isReady()) {
+				for (auto& it : self->id_worker) {
+					req.broadcastInfo.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
+				}
+			} else {
+				for (auto it : self->removedDBInfoEndpoints) {
+					self->updateDBInfoEndpoints.erase(it);
+				}
+				req.broadcastInfo =
+				    std::vector<Endpoint>(self->updateDBInfoEndpoints.begin(), self->updateDBInfoEndpoints.end());
+			}
+
+			self->updateDBInfoEndpoints.clear();
+			self->removedDBInfoEndpoints.clear();
+
+			dbInfoChange = self->db.serverInfo->onChange();
+			updateDBInfo = self->updateDBInfo.onTrigger();
+
+			req.serializedDbInfo =
+			    BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
+
+			TraceEvent("DBInfoStartBroadcast", self->id).log();
+			choose {
+				when(std::vector<Endpoint> notUpdated = wait(
+				         broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
+					TraceEvent("DBInfoFinishBroadcast", self->id).detail("NotUpdated", notUpdated.size());
+					if (notUpdated.size()) {
+						self->updateDBInfoEndpoints.insert(notUpdated.begin(), notUpdated.end());
+						self->updateDBInfo.trigger();
+					}
+				}
+				when(wait(dbInfoChange)) {}
+			}
+		}
+	}
+
+	// The actor that periodically monitors the health of tracked workers.
+	ACTOR static Future<Void> workerHealthMonitor(ClusterControllerData* self) {
+		loop {
+			try {
+				while (!self->goodRecruitmentTime.isReady()) {
+					wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
+				}
+
+				self->degradationInfo = self->getDegradationInfo();
+
+				// Compare `self->degradationInfo` with `self->excludedDegradedServers` and remove those that have
+				// recovered.
+				for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
+					if (self->degradationInfo.degradedServers.find(*it) ==
+					        self->degradationInfo.degradedServers.end() &&
+					    self->degradationInfo.disconnectedServers.find(*it) ==
+					        self->degradationInfo.disconnectedServers.end()) {
+						self->excludedDegradedServers.erase(it++);
+					} else {
+						++it;
+					}
+				}
+
+				if (!self->degradationInfo.degradedServers.empty() ||
+				    !self->degradationInfo.disconnectedServers.empty() || self->degradationInfo.degradedSatellite) {
+					std::string degradedServerString;
+					for (const auto& server : self->degradationInfo.degradedServers) {
+						degradedServerString += server.toString() + " ";
+					}
+					std::string disconnectedServerString;
+					for (const auto& server : self->degradationInfo.disconnectedServers) {
+						disconnectedServerString += server.toString() + " ";
+					}
+					TraceEvent("ClusterControllerHealthMonitor")
+					    .detail("DegradedServers", degradedServerString)
+					    .detail("DisconnectedServers", disconnectedServerString)
+					    .detail("DegradedSatellite", self->degradationInfo.degradedSatellite);
+
+					// Check if the cluster controller should trigger a recovery to exclude any degraded servers from
+					// the transaction system.
+					if (self->shouldTriggerRecoveryDueToDegradedServers()) {
+						if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
+							if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
+								self->recentHealthTriggeredRecoveryTime.push(now());
+								self->excludedDegradedServers = self->degradationInfo.degradedServers;
+								self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
+								                                     self->degradationInfo.disconnectedServers.end());
+								TraceEvent("DegradedServerDetectedAndTriggerRecovery")
+								    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
+								self->db.forceMasterFailure.trigger();
+							}
+						} else {
+							self->excludedDegradedServers.clear();
+							TraceEvent("DegradedServerDetectedAndSuggestRecovery").log();
+						}
+					} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
+						double ccUpTime = now() - machineStartTime();
+						if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
+						    ccUpTime > SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
+							TraceEvent("DegradedServerDetectedAndTriggerFailover").log();
+							std::vector<Optional<Key>> dcPriority;
+							auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
+							                      ? self->db.config.regions[1].dcId
+							                      : self->db.config.regions[0].dcId;
+
+							// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC
+							// becomes the new primary, and the primary DC becomes the new remote.
+							dcPriority.push_back(remoteDcId);
+							dcPriority.push_back(self->clusterControllerDcId);
+							self->desiredDcIds.set(dcPriority);
+						} else {
+							TraceEvent("DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
+						}
+					}
+				}
+
+				wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "ClusterControllerHealthMonitorError").error(e);
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
+		loop {
+			state Future<Void> updaterDelay =
+			    self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? delay(60.0) : Never();
+			choose {
+				when(wait(self->db.serverInfo->onChange())) {}
+				when(wait(updaterDelay)) {
+					state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+					loop {
+						try {
+							tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+							state std::map<ClusterName, DataClusterMetadata> clusters;
+							state int64_t tenantCount;
+							wait(store(clusters,
+							           MetaclusterAPI::listClustersTransaction(
+							               tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
+							     store(tenantCount,
+							           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
+							               tr, Snapshot::False, 0)));
+							state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
+							    MetaclusterAPI::metaclusterCapacity(clusters);
+
+							MetaclusterMetrics metrics;
+							metrics.numTenants = tenantCount;
+							metrics.numDataClusters = clusters.size();
+							metrics.tenantGroupCapacity = capacityNumbers.first.numTenantGroups;
+							metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
+							self->db.metaclusterMetrics = metrics;
+							TraceEvent("MetaclusterCapacity")
+							    .detail("TotalTenants", self->db.metaclusterMetrics.numTenants)
+							    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
+							    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
+							    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
+							break;
+						} catch (Error& e) {
+							TraceEvent("MetaclusterUpdaterError").error(e);
+							// Cluster can change types during/before a metacluster transaction
+							// and throw an error due to timing issues.
+							// In such cases, go back to choose loop instead of retrying
+							if (e.code() == error_code_invalid_metacluster_operation) {
+								break;
+							}
+							wait(tr->onError(e));
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Update the DBInfo state with this processes cluster ID. If this process does
+	// not have a cluster ID and one does not exist in the database, generate one.
+	ACTOR static Future<Void> updateClusterId(ClusterControllerData* self) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		loop {
+			try {
+				state Optional<UID> durableClusterId = self->clusterId->get();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+
+				if (clusterIdVal.present()) {
+					UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
+					if (durableClusterId.present()) {
+						// If this process has an on disk file for the cluster ID,
+						// verify it matches the value in the database.
+						ASSERT(clusterId == durableClusterId.get());
+					} else {
+						// Otherwise, write the cluster ID in the database to the
+						// DbInfo object so all clients will learn of the cluster
+						// ID.
+						durableClusterId = clusterId;
+					}
+				} else if (!durableClusterId.present()) {
+					// No cluster ID exists in the database or on the machine. Generate and set one.
+					ASSERT(!durableClusterId.present());
+					durableClusterId = deterministicRandom()->randomUniqueID();
+					tr->set(clusterIdKey, BinaryWriter::toValue(durableClusterId.get(), IncludeVersion()));
+					wait(tr->commit());
+				}
+				auto serverInfo = self->db.serverInfo->get();
+				if (!serverInfo.client.clusterId.isValid()) {
+					ASSERT(durableClusterId.present());
+					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.client.clusterId = durableClusterId.get();
+					self->db.serverInfo->set(serverInfo);
+
+					ClientDBInfo clientInfo = self->db.clientInfo->get();
+					clientInfo.id = deterministicRandom()->randomUniqueID();
+					clientInfo.clusterId = durableClusterId.get();
+					self->db.clientInfo->set(clientInfo);
+				}
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self,
+	                                                        ClusterControllerFullInterface ccInterf) {
+		loop {
+			state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
+			TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
+			EncryptionAtRestMode mode = wait(self->encryptionAtRestMode.getFuture());
+			GetEncryptionAtRestModeResponse resp;
+			resp.mode = mode;
+			req.reply.send(resp);
+			TraceEvent("HandleGetEncryptionAtRestModeEnd").detail("TlogId", req.tlogId).detail("Mode", resp.mode);
+		}
+	}
+
 }; // class ClusterControllerDataImpl
 
 Future<Optional<Value>> ClusterControllerData::getPreviousCoordinators() {
@@ -1907,1019 +2933,96 @@ Future<Void> ClusterControllerData::updateRemoteDCHealth() {
 	return ClusterControllerDataImpl::updateRemoteDCHealth(this);
 }
 
-ACTOR Future<Void> doEmptyCommit(Database cx) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.makeSelfConflicting();
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
+Future<Void> ClusterControllerData::handleForcedRecoveries(ClusterControllerFullInterface interf) {
+	return ClusterControllerDataImpl::handleForcedRecoveries(this, interf);
 }
 
-ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterControllerFullInterface interf) {
-	loop {
-		state ForceRecoveryRequest req = waitNext(interf.clientInterface.forceRecovery.getFuture());
-		TraceEvent("ForcedRecoveryStart", self->id)
-		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
-		    .detail("DcId", req.dcId.printable());
-		state Future<Void> fCommit = doEmptyCommit(self->cx);
-		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
-		if (!fCommit.isReady() || fCommit.isError()) {
-			if (self->clusterControllerDcId != req.dcId) {
-				std::vector<Optional<Key>> dcPriority;
-				dcPriority.push_back(req.dcId);
-				dcPriority.push_back(self->clusterControllerDcId);
-				self->desiredDcIds.set(dcPriority);
-			} else {
-				self->db.forceRecovery = true;
-				self->db.forceMasterFailure.trigger();
-			}
-			wait(fCommit);
-		}
-		TraceEvent("ForcedRecoveryFinish", self->id).log();
-		self->db.forceRecovery = false;
-		req.reply.send(Void());
-	}
+Future<Void> ClusterControllerData::triggerAuditStorage(TriggerAuditRequest req) {
+	return ClusterControllerDataImpl::triggerAuditStorage(this, req);
 }
 
-ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
-	    .detail("Range", req.range)
-	    .detail("AuditType", req.type);
-	state UID auditId;
-
-	try {
-		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
-		       !self->db.serverInfo->get().distributor.present()) {
-			wait(self->db.serverInfo->onChange());
-		}
-
-		TriggerAuditRequest fReq(req.getType(), req.range);
-		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
-		auditId = auditId_;
-		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
-		    .detail("AuditID", auditId)
-		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		if (!req.reply.isSet()) {
-			req.reply.send(auditId);
-		}
-	} catch (Error& e) {
-		TraceEvent(SevDebug, "CCTriggerAuditStorageError", self->id)
-		    .errorUnsuppressed(e)
-		    .detail("AuditID", auditId)
-		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		if (!req.reply.isSet()) {
-			req.reply.sendError(audit_storage_failed());
-		}
-	}
-
-	return Void();
+Future<Void> ClusterControllerData::handleTriggerAuditStorage(ClusterControllerFullInterface interf) {
+	return ClusterControllerDataImpl::handleTriggerAuditStorage(this, interf);
 }
 
-ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
-	loop {
-		TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
-		TraceEvent(SevDebug, "TriggerAuditStorageReceived", self->id)
-		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
-		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		self->addActor.send(triggerAuditStorage(self, req));
-	}
+Future<Void> ClusterControllerData::startDataDistributor(double waitTime) {
+	return ClusterControllerDataImpl::startDataDistributor(this, waitTime);
 }
 
-ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
-	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
-
-	TraceEvent("CCStartDataDistributor", self->id).log();
-	loop {
-		try {
-			state bool noDistributor = !self->db.serverInfo->get().distributor.present();
-			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (noDistributor && self->db.serverInfo->get().distributor.present()) {
-				// Existing distributor registers while waiting, so skip.
-				return Void();
-			}
-
-			std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
-			WorkerFitnessInfo ddWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                ProcessClass::DataDistributor,
-			                                                                ProcessClass::NeverAssign,
-			                                                                self->db.config,
-			                                                                idUsed);
-			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = ddWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
-				worker = self->id_worker[self->masterProcessId.get()].details;
-			}
-
-			self->recruitingDistributorID = req.reqId;
-			TraceEvent("CCRecruitDataDistributor", self->id)
-			    .detail("Addr", worker.interf.address())
-			    .detail("DDID", req.reqId);
-
-			ErrorOr<DataDistributorInterface> ddInterf = wait(worker.interf.dataDistributor.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_DISTRIBUTOR_JOIN_DELAY, 0));
-
-			if (ddInterf.present()) {
-				self->recruitDistributor.set(false);
-				self->recruitingDistributorID = ddInterf.get().id();
-				const auto& distributor = self->db.serverInfo->get().distributor;
-				TraceEvent("CCDataDistributorRecruited", self->id)
-				    .detail("Addr", worker.interf.address())
-				    .detail("DDID", ddInterf.get().id());
-				if (distributor.present() && distributor.get().id() != ddInterf.get().id() &&
-				    self->id_worker.count(distributor.get().locality.processId())) {
-
-					TraceEvent("CCHaltDataDistributorAfterRecruit", self->id)
-					    .detail("DDID", distributor.get().id())
-					    .detail("DcID", printable(self->clusterControllerDcId));
-
-					DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
-				}
-				if (!distributor.present() || distributor.get().id() != ddInterf.get().id()) {
-					self->db.setDistributor(ddInterf.get());
-				}
-				self->checkOutstandingRequests();
-				return Void();
-			}
-		} catch (Error& e) {
-			TraceEvent("CCDataDistributorRecruitError", self->id).error(e);
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
+Future<Void> ClusterControllerData::monitorDataDistributor() {
+	return ClusterControllerDataImpl::monitorDataDistributor(this);
 }
 
-ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
-	state SingletonRecruitThrottler recruitThrottler;
-	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		wait(self->db.serverInfo->onChange());
-	}
-
-	loop {
-		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
-			choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
-				                            SERVER_KNOBS->DD_FAILURE_TIME))) {
-					const auto& distributor = self->db.serverInfo->get().distributor;
-					TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
-					DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
-					self->db.clearInterf(ProcessClass::DataDistributorClass);
-				}
-				when(wait(self->recruitDistributor.onChange())) {}
-			}
-		} else {
-			wait(startDataDistributor(self, recruitThrottler.newRecruitment()));
-		}
-	}
+Future<Void> ClusterControllerData::startRatekeeper(double waitTime) {
+	return ClusterControllerDataImpl::startRatekeeper(this, waitTime);
 }
 
-ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
-	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
-
-	TraceEvent("CCStartRatekeeper", self->id).log();
-	loop {
-		try {
-			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
-			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (no_ratekeeper && self->db.serverInfo->get().ratekeeper.present()) {
-				// Existing ratekeeper registers while waiting, so skip.
-				return Void();
-			}
-
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                ProcessClass::Ratekeeper,
-			                                                                ProcessClass::NeverAssign,
-			                                                                self->db.config,
-			                                                                id_used);
-			InitializeRatekeeperRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = rkWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::Ratekeeper)) {
-				worker = self->id_worker[self->masterProcessId.get()].details;
-			}
-
-			self->recruitingRatekeeperID = req.reqId;
-			TraceEvent("CCRecruitRatekeeper", self->id)
-			    .detail("Addr", worker.interf.address())
-			    .detail("RKID", req.reqId);
-
-			ErrorOr<RatekeeperInterface> interf = wait(
-			    worker.interf.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0));
-			if (interf.present()) {
-				self->recruitRatekeeper.set(false);
-				self->recruitingRatekeeperID = interf.get().id();
-				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
-				TraceEvent("CCRatekeeperRecruited", self->id)
-				    .detail("Addr", worker.interf.address())
-				    .detail("RKID", interf.get().id());
-				if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id() &&
-				    self->id_worker.count(ratekeeper.get().locality.processId())) {
-					TraceEvent("CCHaltRatekeeperAfterRecruit", self->id)
-					    .detail("RKID", ratekeeper.get().id())
-					    .detail("DcID", printable(self->clusterControllerDcId));
-					RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
-				}
-				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
-					self->db.setRatekeeper(interf.get());
-				}
-				self->checkOutstandingRequests();
-				return Void();
-			}
-		} catch (Error& e) {
-			TraceEvent("CCRatekeeperRecruitError", self->id).error(e);
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
+Future<Void> ClusterControllerData::monitorRatekeeper() {
+	return ClusterControllerDataImpl::monitorRatekeeper(this);
 }
 
-ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
-	state SingletonRecruitThrottler recruitThrottler;
-	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		wait(self->db.serverInfo->onChange());
-	}
-
-	loop {
-		if (self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get()) {
-			choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
-				                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
-					const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
-					TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
-					RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
-					self->db.clearInterf(ProcessClass::RatekeeperClass);
-				}
-				when(wait(self->recruitRatekeeper.onChange())) {}
-			}
-		} else {
-			wait(startRatekeeper(self, recruitThrottler.newRecruitment()));
-		}
-	}
+Future<Void> ClusterControllerData::startConsistencyScan() {
+	return ClusterControllerDataImpl::startConsistencyScan(this);
 }
 
-ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
-	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
-	TraceEvent("CCStartConsistencyScan", self->id).log();
-	loop {
-		try {
-			state bool no_consistencyScan = !self->db.serverInfo->get().consistencyScan.present();
-			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (no_consistencyScan && self->db.serverInfo->get().consistencyScan.present()) {
-				// Existing consistencyScan registers while waiting, so skip.
-				return Void();
-			}
-
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo csWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                ProcessClass::ConsistencyScan,
-			                                                                ProcessClass::NeverAssign,
-			                                                                self->db.config,
-			                                                                id_used);
-
-			InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = csWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyScan)) {
-				worker = self->id_worker[self->masterProcessId.get()].details;
-			}
-
-			self->recruitingConsistencyScanID = req.reqId;
-			TraceEvent("CCRecruitConsistencyScan", self->id)
-			    .detail("Addr", worker.interf.address())
-			    .detail("CSID", req.reqId);
-
-			ErrorOr<ConsistencyScanInterface> interf = wait(worker.interf.consistencyScan.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY, 0));
-			if (interf.present()) {
-				self->recruitConsistencyScan.set(false);
-				self->recruitingConsistencyScanID = interf.get().id();
-				const auto& consistencyScan = self->db.serverInfo->get().consistencyScan;
-				TraceEvent("CCConsistencyScanRecruited", self->id)
-				    .detail("Addr", worker.interf.address())
-				    .detail("CKID", interf.get().id());
-				if (consistencyScan.present() && consistencyScan.get().id() != interf.get().id() &&
-				    self->id_worker.count(consistencyScan.get().locality.processId())) {
-					TraceEvent("CCHaltConsistencyScanAfterRecruit", self->id)
-					    .detail("CKID", consistencyScan.get().id())
-					    .detail("DcID", printable(self->clusterControllerDcId));
-					ConsistencyScanSingleton(consistencyScan).halt(*self, consistencyScan.get().locality.processId());
-				}
-				if (!consistencyScan.present() || consistencyScan.get().id() != interf.get().id()) {
-					self->db.setConsistencyScan(interf.get());
-				}
-				self->checkOutstandingRequests();
-				return Void();
-			} else {
-				TraceEvent("CCConsistencyScanRecruitEmpty", self->id).log();
-			}
-		} catch (Error& e) {
-			TraceEvent("CCConsistencyScanRecruitError", self->id).error(e);
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
+Future<Void> ClusterControllerData::monitorConsistencyScan() {
+	return ClusterControllerDataImpl::monitorConsistencyScan(this);
 }
 
-ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
-	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
-		wait(self->db.serverInfo->onChange());
-	}
-
-	TraceEvent("CCMonitorConsistencyScan", self->id).log();
-	loop {
-		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
-			state Future<Void> wfClient =
-			    waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
-			                      SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
-			choose {
-				when(wait(wfClient)) {
-					TraceEvent("CCMonitorConsistencyScanDied", self->id)
-					    .detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
-					self->db.clearInterf(ProcessClass::ConsistencyScanClass);
-				}
-				when(wait(self->recruitConsistencyScan.onChange())) {}
-			}
-		} else {
-			TraceEvent("CCMonitorConsistencyScanStarting", self->id).log();
-			wait(startConsistencyScan(self));
-		}
-	}
+Future<Void> ClusterControllerData::startEncryptKeyProxy(double waitTime) {
+	return ClusterControllerDataImpl::startEncryptKeyProxy(this, waitTime);
 }
 
-ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
-	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
-
-	TraceEvent("CCEKP_Start", self->id).log();
-	loop {
-		try {
-			// EncryptKeyServer interface is critical in recovering tlog encrypted transactions,
-			// hence, the process only waits for the master recruitment and not the full cluster recovery.
-			state bool noEncryptKeyServer = !self->db.serverInfo->get().encryptKeyProxy.present();
-			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::LOCKING_CSTATE) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (noEncryptKeyServer && self->db.serverInfo->get().encryptKeyProxy.present()) {
-				// Existing encryptKeyServer registers while waiting, so skip.
-				return Void();
-			}
-
-			// Recruit EncryptKeyProxy in the same datacenter as the ClusterController.
-			// This should always be possible, given EncryptKeyProxy is stateless, we can recruit EncryptKeyProxy
-			// on the same process as the CluserController.
-			state std::map<Optional<Standalone<StringRef>>, int> id_used;
-			self->updateKnownIds(&id_used);
-			state WorkerFitnessInfo ekpWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                       ProcessClass::EncryptKeyProxy,
-			                                                                       ProcessClass::NeverAssign,
-			                                                                       self->db.config,
-			                                                                       id_used);
-
-			InitializeEncryptKeyProxyRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = ekpWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::EncryptKeyProxy)) {
-				worker = self->id_worker[self->masterProcessId.get()].details;
-			}
-
-			self->recruitingEncryptKeyProxyID = req.reqId;
-			TraceEvent("CCEKP_Recruit", self->id).detail("Addr", worker.interf.address()).detail("Id", req.reqId);
-
-			ErrorOr<EncryptKeyProxyInterface> interf = wait(worker.interf.encryptKeyProxy.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY, 0));
-			if (interf.present()) {
-				self->recruitEncryptKeyProxy.set(false);
-				self->recruitingEncryptKeyProxyID = interf.get().id();
-				const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
-				TraceEvent("CCEKP_Recruited", self->id)
-				    .detail("Addr", worker.interf.address())
-				    .detail("Id", interf.get().id())
-				    .detail("ProcessId", interf.get().locality.processId());
-				if (encryptKeyProxy.present() && encryptKeyProxy.get().id() != interf.get().id() &&
-				    self->id_worker.count(encryptKeyProxy.get().locality.processId())) {
-					TraceEvent("CCEKP_HaltAfterRecruit", self->id)
-					    .detail("Id", encryptKeyProxy.get().id())
-					    .detail("DcId", printable(self->clusterControllerDcId));
-					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
-				}
-				if (!encryptKeyProxy.present() || encryptKeyProxy.get().id() != interf.get().id()) {
-					self->db.setEncryptKeyProxy(interf.get());
-					TraceEvent("CCEKP_UpdateInf", self->id)
-					    .detail("Id", self->db.serverInfo->get().encryptKeyProxy.get().id());
-				}
-				self->checkOutstandingRequests();
-				return Void();
-			}
-		} catch (Error& e) {
-			TraceEvent("CCEKP_RecruitError", self->id).error(e);
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
+Future<Void> ClusterControllerData::monitorEncryptKeyProxy() {
+	return ClusterControllerDataImpl::monitorEncryptKeyProxy(this);
 }
 
-ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
-	state SingletonRecruitThrottler recruitThrottler;
-	loop {
-		if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
-			choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().encryptKeyProxy.get().waitFailure,
-				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
-					TraceEvent("CCEKP_Died", self->id);
-					const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
-					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
-					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
-				}
-				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
-			}
-		} else {
-			wait(startEncryptKeyProxy(self, recruitThrottler.newRecruitment()));
-		}
-	}
+Future<int64_t> ClusterControllerData::getNextBMEpoch() {
+	return ClusterControllerDataImpl::getNextBMEpoch(this);
 }
 
-// Acquires the BM lock by getting the next epoch no.
-ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		try {
-			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
-			state int64_t newEpoch = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) + 1 : 1;
-			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
-
-			wait(tr->commit());
-			TraceEvent(SevDebug, "CCNextBlobManagerEpoch", self->id).detail("Epoch", newEpoch);
-			return newEpoch;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
+Future<Void> ClusterControllerData::watchBlobRestoreCommand() {
+	return ClusterControllerDataImpl::watchBlobRestoreCommand(this);
 }
 
-ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	state Key blobRestoreCommandKey = blobRestoreCommandKeyFor(normalKeys);
-	loop {
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
-			if (blobRestoreCommand.present()) {
-				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
-				TraceEvent("WatchBlobRestoreCommand").detail("Progress", status.progress).detail("Phase", status.phase);
-				if (status.phase == BlobRestorePhase::INIT) {
-					self->db.blobRestoreEnabled.set(true);
-					if (self->db.blobGranulesEnabled.get()) {
-						const auto& blobManager = self->db.serverInfo->get().blobManager;
-						if (blobManager.present()) {
-							BlobManagerSingleton(blobManager)
-							    .haltBlobGranules(*self, blobManager.get().locality.processId());
-						}
-						const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
-						if (blobMigrator.present()) {
-							BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
-						}
-					}
-				}
-			}
-
-			state Future<Void> watch = tr->watch(blobRestoreCommandKey);
-			wait(tr->commit());
-			wait(watch);
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
+Future<Void> ClusterControllerData::startBlobMigrator(double waitTime) {
+	return ClusterControllerDataImpl::startBlobMigrator(this, waitTime);
 }
 
-ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTime) {
-	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
-
-	TraceEvent("CCStartBlobMigrator", self->id).log();
-	loop {
-		try {
-			state bool noBlobMigrator = !self->db.serverInfo->get().blobMigrator.present();
-			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (noBlobMigrator && self->db.serverInfo->get().blobMigrator.present()) {
-				// Existing instance registers while waiting, so skip.
-				return Void();
-			}
-
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo blobMigratorWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                          ProcessClass::BlobMigrator,
-			                                                                          ProcessClass::NeverAssign,
-			                                                                          self->db.config,
-			                                                                          id_used);
-			InitializeBlobMigratorRequest req(deterministicRandom()->randomUniqueID());
-			state WorkerDetails worker = blobMigratorWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::BlobMigrator)) {
-				worker = self->id_worker[self->masterProcessId.get()].details;
-			}
-
-			self->recruitingBlobMigratorID = req.reqId;
-			TraceEvent("CCRecruitBlobMigrator", self->id)
-			    .detail("Addr", worker.interf.address())
-			    .detail("MGID", req.reqId);
-
-			ErrorOr<BlobMigratorInterface> interf = wait(worker.interf.blobMigrator.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_BLOB_MANAGER_JOIN_DELAY, 0));
-
-			if (interf.present()) {
-				self->recruitBlobMigrator.set(false);
-				self->recruitingBlobMigratorID = interf.get().id();
-				const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
-				TraceEvent("CCBlobMigratorRecruited", self->id)
-				    .detail("Addr", worker.interf.address())
-				    .detail("MGID", interf.get().id());
-				if (blobMigrator.present() && blobMigrator.get().id() != interf.get().id() &&
-				    self->id_worker.count(blobMigrator.get().locality.processId())) {
-					TraceEvent("CCHaltBlobMigratorAfterRecruit", self->id)
-					    .detail("MGID", blobMigrator.get().id())
-					    .detail("DcID", printable(self->clusterControllerDcId));
-					BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
-				}
-				if (!blobMigrator.present() || blobMigrator.get().id() != interf.get().id()) {
-					self->db.setBlobMigrator(interf.get());
-				}
-				self->checkOutstandingRequests();
-				return Void();
-			}
-		} catch (Error& e) {
-			TraceEvent("CCBlobMigratorRecruitError", self->id).error(e);
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
+Future<Void> ClusterControllerData::monitorBlobMigrator() {
+	return ClusterControllerDataImpl::monitorBlobMigrator(this);
 }
 
-ACTOR Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
-	state SingletonRecruitThrottler recruitThrottler;
-	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		wait(self->db.serverInfo->onChange());
-	}
-	loop {
-		if (self->db.serverInfo->get().blobMigrator.present() && !self->recruitBlobMigrator.get()) {
-			state Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().blobMigrator.get().waitFailure,
-			                                                SERVER_KNOBS->BLOB_MIGRATOR_FAILURE_TIME);
-			loop {
-				choose {
-					when(wait(wfClient)) {
-						TraceEvent("CCBlobMigratorDied", self->id)
-						    .detail("MGID", self->db.serverInfo->get().blobMigrator.get().id());
-						self->db.clearInterf(ProcessClass::BlobMigratorClass);
-						break;
-					}
-					when(wait(self->recruitBlobMigrator.onChange())) {}
-				}
-			}
-		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get()) {
-			// if there is no blob migrator present but blob granules are now enabled, recruit a BM
-			wait(startBlobMigrator(self, recruitThrottler.newRecruitment()));
-		} else {
-			wait(self->db.blobGranulesEnabled.onChange() || self->db.blobRestoreEnabled.onChange());
-		}
-	}
+Future<Void> ClusterControllerData::startBlobManager(double waitTime) {
+	return ClusterControllerDataImpl::startBlobManager(this, waitTime);
 }
 
-ACTOR Future<Void> startBlobManager(ClusterControllerData* self, double waitTime) {
-	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
-
-	TraceEvent("CCStartBlobManager", self->id).log();
-	loop {
-		try {
-			state bool noBlobManager = !self->db.serverInfo->get().blobManager.present();
-			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (noBlobManager && self->db.serverInfo->get().blobManager.present()) {
-				// Existing blob manager registers while waiting, so skip.
-				return Void();
-			}
-
-			state std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			state WorkerFitnessInfo bmWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                      ProcessClass::BlobManager,
-			                                                                      ProcessClass::NeverAssign,
-			                                                                      self->db.config,
-			                                                                      id_used);
-
-			int64_t nextEpoch = wait(getNextBMEpoch(self));
-			if (!self->masterProcessId.present() ||
-			    self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-				continue;
-			}
-			InitializeBlobManagerRequest req(deterministicRandom()->randomUniqueID(), nextEpoch);
-			state WorkerDetails worker = bmWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::BlobManager)) {
-				worker = self->id_worker[self->masterProcessId.get()].details;
-			}
-
-			self->recruitingBlobManagerID = req.reqId;
-			TraceEvent("CCRecruitBlobManager", self->id)
-			    .detail("Addr", worker.interf.address())
-			    .detail("BMID", req.reqId)
-			    .detail("Epoch", nextEpoch);
-
-			ErrorOr<BlobManagerInterface> interf = wait(worker.interf.blobManager.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_BLOB_MANAGER_JOIN_DELAY, 0));
-			if (interf.present()) {
-				self->recruitBlobManager.set(false);
-				self->recruitingBlobManagerID = interf.get().id();
-				const auto& blobManager = self->db.serverInfo->get().blobManager;
-				TraceEvent("CCBlobManagerRecruited", self->id)
-				    .detail("Addr", worker.interf.address())
-				    .detail("BMID", interf.get().id());
-				if (blobManager.present() && blobManager.get().id() != interf.get().id() &&
-				    self->id_worker.count(blobManager.get().locality.processId())) {
-					TraceEvent("CCHaltBlobManagerAfterRecruit", self->id)
-					    .detail("BMID", blobManager.get().id())
-					    .detail("DcID", printable(self->clusterControllerDcId));
-					BlobManagerSingleton(blobManager).halt(*self, blobManager.get().locality.processId());
-				}
-				if (!blobManager.present() || blobManager.get().id() != interf.get().id()) {
-					self->db.setBlobManager(interf.get());
-				}
-				self->checkOutstandingRequests();
-				return Void();
-			}
-		} catch (Error& e) {
-			TraceEvent("CCBlobManagerRecruitError", self->id).error(e);
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
+Future<Void> ClusterControllerData::monitorBlobManager() {
+	return ClusterControllerDataImpl::monitorBlobManager(this);
 }
 
-ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	state Key blobGranuleConfigKey = configKeysPrefix.withSuffix("blob_granules_enabled"_sr);
-
-	loop {
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
-			if (blobConfig.present()) {
-				self->db.blobGranulesEnabled.set(blobConfig.get() == "1"_sr);
-			}
-
-			state Future<Void> watch = tr->watch(blobGranuleConfigKey);
-			wait(tr->commit());
-			wait(watch);
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
+Future<Void> ClusterControllerData::watchBlobGranulesConfigKey() {
+	return ClusterControllerDataImpl::watchBlobGranulesConfigKey(this);
 }
 
-ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
-	state SingletonRecruitThrottler recruitThrottler;
-	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		wait(self->db.serverInfo->onChange());
-	}
-
-	loop {
-		if (self->db.serverInfo->get().blobManager.present() && !self->recruitBlobManager.get()) {
-			state Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().blobManager.get().waitFailure,
-			                                                SERVER_KNOBS->BLOB_MANAGER_FAILURE_TIME);
-			loop {
-				choose {
-					when(wait(wfClient)) {
-						const auto& blobManager = self->db.serverInfo->get().blobManager;
-						TraceEvent("CCBlobManagerDied", self->id).detail("BMID", blobManager.get().id());
-						BlobManagerSingleton(blobManager).halt(*self, blobManager.get().locality.processId());
-						self->db.clearInterf(ProcessClass::BlobManagerClass);
-						break;
-					}
-					when(wait(self->recruitBlobManager.onChange())) {
-						break;
-					}
-					when(wait(self->db.blobGranulesEnabled.onChange())) {
-						// if there is a blob manager present but blob granules are now disabled, stop the BM
-						if (!self->db.blobGranulesEnabled.get()) {
-							const auto& blobManager = self->db.serverInfo->get().blobManager;
-							BlobManagerSingleton(blobManager)
-							    .haltBlobGranules(*self, blobManager.get().locality.processId());
-							if (self->db.blobRestoreEnabled.get()) {
-								const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
-								BlobMigratorSingleton(blobMigrator)
-								    .halt(*self, blobMigrator.get().locality.processId());
-							}
-							break;
-						}
-					}
-				}
-			}
-		} else if (self->db.blobGranulesEnabled.get()) {
-			// if there is no blob manager present but blob granules are now enabled, recruit a BM
-			wait(startBlobManager(self, recruitThrottler.newRecruitment()));
-		} else {
-			// if there is no blob manager present and blob granules are disabled, wait for a config change
-			wait(self->db.blobGranulesEnabled.onChange());
-		}
-	}
+Future<Void> ClusterControllerData::dbInfoUpdater() {
+	return ClusterControllerDataImpl::dbInfoUpdater(this);
 }
 
-ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
-	state Future<Void> dbInfoChange = self->db.serverInfo->onChange();
-	state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
-	loop {
-		choose {
-			when(wait(updateDBInfo)) {
-				wait(delay(SERVER_KNOBS->DBINFO_BATCH_DELAY) || dbInfoChange);
-			}
-			when(wait(dbInfoChange)) {}
-		}
-
-		UpdateServerDBInfoRequest req;
-		if (dbInfoChange.isReady()) {
-			for (auto& it : self->id_worker) {
-				req.broadcastInfo.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
-			}
-		} else {
-			for (auto it : self->removedDBInfoEndpoints) {
-				self->updateDBInfoEndpoints.erase(it);
-			}
-			req.broadcastInfo =
-			    std::vector<Endpoint>(self->updateDBInfoEndpoints.begin(), self->updateDBInfoEndpoints.end());
-		}
-
-		self->updateDBInfoEndpoints.clear();
-		self->removedDBInfoEndpoints.clear();
-
-		dbInfoChange = self->db.serverInfo->onChange();
-		updateDBInfo = self->updateDBInfo.onTrigger();
-
-		req.serializedDbInfo =
-		    BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
-
-		TraceEvent("DBInfoStartBroadcast", self->id).log();
-		choose {
-			when(std::vector<Endpoint> notUpdated =
-			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
-				TraceEvent("DBInfoFinishBroadcast", self->id).detail("NotUpdated", notUpdated.size());
-				if (notUpdated.size()) {
-					self->updateDBInfoEndpoints.insert(notUpdated.begin(), notUpdated.end());
-					self->updateDBInfo.trigger();
-				}
-			}
-			when(wait(dbInfoChange)) {}
-		}
-	}
+Future<Void> ClusterControllerData::workerHealthMonitor() {
+	return ClusterControllerDataImpl::workerHealthMonitor(this);
 }
 
-// The actor that periodically monitors the health of tracked workers.
-ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
-	loop {
-		try {
-			while (!self->goodRecruitmentTime.isReady()) {
-				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
-			}
-
-			self->degradationInfo = self->getDegradationInfo();
-
-			// Compare `self->degradationInfo` with `self->excludedDegradedServers` and remove those that have
-			// recovered.
-			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
-				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
-				    self->degradationInfo.disconnectedServers.find(*it) ==
-				        self->degradationInfo.disconnectedServers.end()) {
-					self->excludedDegradedServers.erase(it++);
-				} else {
-					++it;
-				}
-			}
-
-			if (!self->degradationInfo.degradedServers.empty() || !self->degradationInfo.disconnectedServers.empty() ||
-			    self->degradationInfo.degradedSatellite) {
-				std::string degradedServerString;
-				for (const auto& server : self->degradationInfo.degradedServers) {
-					degradedServerString += server.toString() + " ";
-				}
-				std::string disconnectedServerString;
-				for (const auto& server : self->degradationInfo.disconnectedServers) {
-					disconnectedServerString += server.toString() + " ";
-				}
-				TraceEvent("ClusterControllerHealthMonitor")
-				    .detail("DegradedServers", degradedServerString)
-				    .detail("DisconnectedServers", disconnectedServerString)
-				    .detail("DegradedSatellite", self->degradationInfo.degradedSatellite);
-
-				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from
-				// the transaction system.
-				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
-					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
-						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
-							self->recentHealthTriggeredRecoveryTime.push(now());
-							self->excludedDegradedServers = self->degradationInfo.degradedServers;
-							self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
-							                                     self->degradationInfo.disconnectedServers.end());
-							TraceEvent("DegradedServerDetectedAndTriggerRecovery")
-							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
-							self->db.forceMasterFailure.trigger();
-						}
-					} else {
-						self->excludedDegradedServers.clear();
-						TraceEvent("DegradedServerDetectedAndSuggestRecovery").log();
-					}
-				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
-					double ccUpTime = now() - machineStartTime();
-					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
-					    ccUpTime > SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
-						TraceEvent("DegradedServerDetectedAndTriggerFailover").log();
-						std::vector<Optional<Key>> dcPriority;
-						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
-						                      ? self->db.config.regions[1].dcId
-						                      : self->db.config.regions[0].dcId;
-
-						// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC
-						// becomes the new primary, and the primary DC becomes the new remote.
-						dcPriority.push_back(remoteDcId);
-						dcPriority.push_back(self->clusterControllerDcId);
-						self->desiredDcIds.set(dcPriority);
-					} else {
-						TraceEvent("DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
-					}
-				}
-			}
-
-			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
-		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ClusterControllerHealthMonitorError").error(e);
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-		}
-	}
+Future<Void> ClusterControllerData::metaclusterMetricsUpdater() {
+	return ClusterControllerDataImpl::metaclusterMetricsUpdater(this);
 }
 
-ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
-	loop {
-		state Future<Void> updaterDelay =
-		    self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? delay(60.0) : Never();
-		choose {
-			when(wait(self->db.serverInfo->onChange())) {}
-			when(wait(updaterDelay)) {
-				state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-				loop {
-					try {
-						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						state std::map<ClusterName, DataClusterMetadata> clusters;
-						state int64_t tenantCount;
-						wait(store(clusters,
-						           MetaclusterAPI::listClustersTransaction(
-						               tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
-						     store(tenantCount,
-						           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
-						               tr, Snapshot::False, 0)));
-						state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
-						    MetaclusterAPI::metaclusterCapacity(clusters);
-
-						MetaclusterMetrics metrics;
-						metrics.numTenants = tenantCount;
-						metrics.numDataClusters = clusters.size();
-						metrics.tenantGroupCapacity = capacityNumbers.first.numTenantGroups;
-						metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
-						self->db.metaclusterMetrics = metrics;
-						TraceEvent("MetaclusterCapacity")
-						    .detail("TotalTenants", self->db.metaclusterMetrics.numTenants)
-						    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
-						    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
-						    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
-						break;
-					} catch (Error& e) {
-						TraceEvent("MetaclusterUpdaterError").error(e);
-						// Cluster can change types during/before a metacluster transaction
-						// and throw an error due to timing issues.
-						// In such cases, go back to choose loop instead of retrying
-						if (e.code() == error_code_invalid_metacluster_operation) {
-							break;
-						}
-						wait(tr->onError(e));
-					}
-				}
-			}
-		}
-	}
+Future<Void> ClusterControllerData::updateClusterId() {
+	return ClusterControllerDataImpl::updateClusterId(this);
 }
 
-// Update the DBInfo state with this processes cluster ID. If this process does
-// not have a cluster ID and one does not exist in the database, generate one.
-ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	loop {
-		try {
-			state Optional<UID> durableClusterId = self->clusterId->get();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
-
-			if (clusterIdVal.present()) {
-				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
-				if (durableClusterId.present()) {
-					// If this process has an on disk file for the cluster ID,
-					// verify it matches the value in the database.
-					ASSERT(clusterId == durableClusterId.get());
-				} else {
-					// Otherwise, write the cluster ID in the database to the
-					// DbInfo object so all clients will learn of the cluster
-					// ID.
-					durableClusterId = clusterId;
-				}
-			} else if (!durableClusterId.present()) {
-				// No cluster ID exists in the database or on the machine. Generate and set one.
-				ASSERT(!durableClusterId.present());
-				durableClusterId = deterministicRandom()->randomUniqueID();
-				tr->set(clusterIdKey, BinaryWriter::toValue(durableClusterId.get(), IncludeVersion()));
-				wait(tr->commit());
-			}
-			auto serverInfo = self->db.serverInfo->get();
-			if (!serverInfo.client.clusterId.isValid()) {
-				ASSERT(durableClusterId.present());
-				serverInfo.id = deterministicRandom()->randomUniqueID();
-				serverInfo.client.clusterId = durableClusterId.get();
-				self->db.serverInfo->set(serverInfo);
-
-				ClientDBInfo clientInfo = self->db.clientInfo->get();
-				clientInfo.id = deterministicRandom()->randomUniqueID();
-				clientInfo.clusterId = durableClusterId.get();
-				self->db.clientInfo->set(clientInfo);
-			}
-			return Void();
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
-ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, ClusterControllerFullInterface ccInterf) {
-	loop {
-		state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
-		TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
-		EncryptionAtRestMode mode = wait(self->encryptionAtRestMode.getFuture());
-		GetEncryptionAtRestModeResponse resp;
-		resp.mode = mode;
-		req.reply.send(resp);
-		TraceEvent("HandleGetEncryptionAtRestModeEnd").detail("TlogId", req.tlogId).detail("Mode", resp.mode);
-	}
+Future<Void> ClusterControllerData::handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf) {
+	return ClusterControllerDataImpl::handleGetEncryptionAtRestMode(this, ccInterf);
 }
 
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
@@ -2940,7 +3043,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		self.addActor.send(monitorEncryptKeyProxy(&self));
+		self.addActor.send(self.monitorEncryptKeyProxy());
 	}
 	// TODO: Extract db within function?
 	self.addActor.send(
@@ -2956,19 +3059,19 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(self.updatedChangingDatacenters());
 	self.addActor.send(self.updatedChangedDatacenters());
 	self.addActor.send(self.updateDatacenterVersionDifference());
-	self.addActor.send(handleForcedRecoveries(&self, interf));
-	self.addActor.send(handleTriggerAuditStorage(&self, interf));
-	self.addActor.send(monitorDataDistributor(&self));
-	self.addActor.send(monitorRatekeeper(&self));
-	self.addActor.send(monitorBlobManager(&self));
-	self.addActor.send(watchBlobGranulesConfigKey(&self));
-	self.addActor.send(monitorBlobMigrator(&self));
-	self.addActor.send(watchBlobRestoreCommand(&self));
-	self.addActor.send(monitorConsistencyScan(&self));
-	self.addActor.send(metaclusterMetricsUpdater(&self));
-	self.addActor.send(dbInfoUpdater(&self));
-	self.addActor.send(updateClusterId(&self));
-	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));
+	self.addActor.send(self.handleForcedRecoveries(interf));
+	self.addActor.send(self.handleTriggerAuditStorage(interf));
+	self.addActor.send(self.monitorDataDistributor());
+	self.addActor.send(self.monitorRatekeeper());
+	self.addActor.send(self.monitorBlobManager());
+	self.addActor.send(self.watchBlobGranulesConfigKey());
+	self.addActor.send(self.monitorBlobMigrator());
+	self.addActor.send(self.watchBlobRestoreCommand());
+	self.addActor.send(self.monitorConsistencyScan());
+	self.addActor.send(self.metaclusterMetricsUpdater());
+	self.addActor.send(self.dbInfoUpdater());
+	self.addActor.send(self.updateClusterId());
+	self.addActor.send(self.handleGetEncryptionAtRestMode(interf));
 	self.addActor.send(self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
 	                                                               self.id,
 	                                                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
@@ -2977,7 +3080,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
-		self.addActor.send(workerHealthMonitor(&self));
+		self.addActor.send(self.workerHealthMonitor());
 		self.addActor.send(self.updateRemoteDCHealth());
 	}
 

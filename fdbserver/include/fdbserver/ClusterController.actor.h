@@ -3376,6 +3376,30 @@ public:
 	// recovers.
 	Future<Void> updateRemoteDCHealth();
 
+	Future<Void> handleForcedRecoveries(ClusterControllerFullInterface);
+	Future<Void> triggerAuditStorage(TriggerAuditRequest req);
+	Future<Void> handleTriggerAuditStorage(ClusterControllerFullInterface);
+	Future<Void> startDataDistributor(double waitTime);
+	Future<Void> monitorDataDistributor();
+	Future<Void> startRatekeeper(double waitTime);
+	Future<Void> monitorRatekeeper();
+	Future<Void> startConsistencyScan();
+	Future<Void> monitorConsistencyScan();
+	Future<Void> startEncryptKeyProxy(double waitTime);
+	Future<Void> monitorEncryptKeyProxy();
+	Future<int64_t> getNextBMEpoch();
+	Future<Void> watchBlobRestoreCommand();
+	Future<Void> startBlobMigrator(double waitTime);
+	Future<Void> monitorBlobMigrator();
+	Future<Void> startBlobManager(double waitTime);
+	Future<Void> monitorBlobManager();
+	Future<Void> watchBlobGranulesConfigKey();
+	Future<Void> dbInfoUpdater();
+	Future<Void> workerHealthMonitor();
+	Future<Void> metaclusterMetricsUpdater();
+	Future<Void> updateClusterId();
+	Future<Void> handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf);
+
 	// Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
 	// or, halts the existing singleton in favour of the requesting one
 	template <class SingletonClass>
