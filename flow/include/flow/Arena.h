@@ -359,7 +359,7 @@ struct union_like_traits<Optional<T>> : std::true_type {
 	}
 };
 
-//#define STANDALONE_ALWAYS_COPY
+// #define STANDALONE_ALWAYS_COPY
 
 template <class T>
 class Standalone : private Arena, public T {
@@ -443,7 +443,7 @@ class StringRef {
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
-	StringRef(Arena& p, const StringRef& toCopy) : data(new (p) uint8_t[toCopy.size()]), length(toCopy.size()) {
+	StringRef(Arena& p, const StringRef& toCopy) : data(new(p) uint8_t[toCopy.size()]), length(toCopy.size()) {
 		if (length > 0) {
 			memcpy((void*)data, toCopy.data, length);
 		}
@@ -454,7 +454,7 @@ public:
 		if (length)
 			memcpy((void*)data, &toCopy[0], length);
 	}
-	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new (p) uint8_t[length]), length(length) {
+	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new(p) uint8_t[length]), length(length) {
 		if (length > 0) {
 			memcpy((void*)data, toCopy, length);
 		}
@@ -997,7 +997,7 @@ public:
 	// Arena constructor for non-Ref types, identified by !flow_ref
 	template <class T2 = T, VecSerStrategy S>
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
-	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
+	  : VPS(toCopy), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
 		if (m_size > 0) {
 			std::copy(toCopy.data, toCopy.data + m_size, data);
@@ -1007,7 +1007,7 @@ public:
 	// Arena constructor for Ref types, which must have an Arena constructor
 	template <class T2 = T, VecSerStrategy S>
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
-	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
+	  : VPS(), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
 			VPS::add(*ptr);

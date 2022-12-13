@@ -2572,7 +2572,9 @@ ACTOR Future<Void> expireBackupData(const char* name,
 						lastProgress = p;
 					}
 				}
-				when(wait(expire)) { break; }
+				when(wait(expire)) {
+					break;
+				}
 			}
 		}
 
@@ -2615,7 +2617,9 @@ ACTOR Future<Void> deleteBackupContainer(const char* name,
 
 		loop {
 			choose {
-				when(wait(done)) { break; }
+				when(wait(done)) {
+					break;
+				}
 				when(wait(delay(5))) {
 					if (numDeleted != lastUpdate) {
 						printf("\r%d...", numDeleted);
@@ -3021,7 +3025,7 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 
 static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRef>>& keyRanges) {
 	bool err = false, partial = false;
-	int tokenArray = 0;
+	[[maybe_unused]] int tokenArray = 0;
 
 	auto parsed = parseLine(optionValue, err, partial);
 
