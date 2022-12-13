@@ -227,7 +227,7 @@ public:
 			}
 			return data;
 		};
-		ASSERT(data == nullptr); // object serializer can only serialize one object
+		ASSERT(data == nullptr); // object serializer` can only serialize one object
 		SaveContext<ObjectWriter, decltype(allocator)> context(this, allocator);
 		save_members(context, file_identifier, items...);
 		ASSERT(allocations == 1);
