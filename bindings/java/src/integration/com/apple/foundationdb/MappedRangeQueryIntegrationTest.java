@@ -193,12 +193,13 @@ class MappedRangeQueryIntegrationTest {
 
 	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
-			List<MappedKeyValue> kvs = tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                                             KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                                             ReadTransaction.ROW_LIMIT_UNLIMITED,
-			                                             FDBTransaction.MATCH_INDEX_ALL, false, StreamingMode.WANT_ALL)
-			                               .asList()
-			                               .get();
+
+			List<MappedKeyValue> kvs =
+			    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+			        .asList()
+			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
 
 			if (validate) {

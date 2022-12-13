@@ -63,9 +63,9 @@ public:
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
-	                                         int matchIndex,
 	                                         Snapshot = Snapshot::False,
-	                                         Reverse = Reverse::False) override {
+	                                         Reverse = Reverse::False,
+	                                         int matchIndex = MATCH_INDEX_ALL) override {
 		throw client_invalid_operation();
 	}
 	Future<Void> commit() override;

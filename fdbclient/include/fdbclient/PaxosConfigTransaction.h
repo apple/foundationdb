@@ -54,9 +54,9 @@ public:
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
-	                                         int matchIndex = MATCH_INDEX_ALL,
 	                                         Snapshot = Snapshot::False,
-	                                         Reverse = Reverse::False) override {
+	                                         Reverse = Reverse::False,
+	                                         int matchIndex = MATCH_INDEX_ALL) override {
 		throw client_invalid_operation();
 	}
 	void set(KeyRef const& key, ValueRef const& value) override;

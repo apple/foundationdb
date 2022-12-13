@@ -91,7 +91,7 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 
 			FutureMappedResults range =
 			    tr.getMappedRange_internal(this.begin, this.end, this.mapper, this.rowLimit, 0,
-			                               StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse, this.matchIndex);
+			                               StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse, matchIndex);
 			return range.thenApply(result -> result.get().values).whenComplete((result, e) -> range.close());
 		}
 

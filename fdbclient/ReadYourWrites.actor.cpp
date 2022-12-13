@@ -1160,9 +1160,9 @@ public:
 		                                                  read.end,
 		                                                  read.mapper,
 		                                                  read.limits,
-		                                                  read.matchIndex,
 		                                                  snapshot,
-		                                                  backwards ? Reverse::True : Reverse::False));
+		                                                  backwards ? Reverse::True : Reverse::False,
+		                                                  read.matchIndex));
 		return v;
 	}
 
@@ -1708,9 +1708,9 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
                                                                     KeySelector end,
                                                                     Key mapper,
                                                                     GetRangeLimits limits,
-                                                                    int matchIndex,
                                                                     Snapshot snapshot,
-                                                                    Reverse reverse) {
+                                                                    Reverse reverse,
+                                                                    int matchIndex) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {

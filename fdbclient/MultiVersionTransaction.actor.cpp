@@ -160,27 +160,27 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
                                                               const KeySelectorRef& end,
                                                               const StringRef& mapper,
                                                               GetRangeLimits limits,
-                                                              int matchIndex,
                                                               bool snapshot,
-                                                              bool reverse) {
-	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
-	                                                       begin.getKey().begin(),
-	                                                       begin.getKey().size(),
-	                                                       begin.orEqual,
-	                                                       begin.offset,
-	                                                       end.getKey().begin(),
-	                                                       end.getKey().size(),
-	                                                       end.orEqual,
-	                                                       end.offset,
-	                                                       mapper.begin(),
-	                                                       mapper.size(),
-	                                                       limits.rows,
-	                                                       limits.bytes,
-	                                                       FDB_STREAMING_MODE_EXACT,
-	                                                       0,
-	                                                       matchIndex,
-	                                                       snapshot,
-	                                                       reverse);
+                                                              bool reverse,
+                                                              int matchIndex) {
+	FdbCApi::FDBFuture* f = api->transactionGetMappedRangeOptionalIndex(tr,
+	                                                                    begin.getKey().begin(),
+	                                                                    begin.getKey().size(),
+	                                                                    begin.orEqual,
+	                                                                    begin.offset,
+	                                                                    end.getKey().begin(),
+	                                                                    end.getKey().size(),
+	                                                                    end.orEqual,
+	                                                                    end.offset,
+	                                                                    mapper.begin(),
+	                                                                    mapper.size(),
+	                                                                    limits.rows,
+	                                                                    limits.bytes,
+	                                                                    FDB_STREAMING_MODE_EXACT,
+	                                                                    0,
+	                                                                    snapshot,
+	                                                                    reverse,
+	                                                                    matchIndex);
 	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBMappedKeyValue* kvms;
 		int count;
@@ -954,6 +954,11 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range", headerVersion >= 0);
 	loadClientFunction(
 	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 710);
+	loadClientFunction(&api->transactionGetMappedRangeOptionalIndex,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_mapped_range_optional_index",
+	                   headerVersion >= 720);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set", headerVersion >= 0);
@@ -1347,17 +1352,17 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
                                                                         const KeySelectorRef& end,
                                                                         const StringRef& mapper,
                                                                         GetRangeLimits limits,
-                                                                        int matchIndex,
                                                                         bool snapshot,
-                                                                        bool reverse) {
+                                                                        bool reverse,
+                                                                        int matchIndex) {
 	return executeOperation(&ITransaction::getMappedRange,
 	                        begin,
 	                        end,
 	                        mapper,
 	                        std::forward<GetRangeLimits>(limits),
-	                        std::forward<int>(matchIndex),
 	                        std::forward<bool>(snapshot),
-	                        std::forward<bool>(reverse));
+	                        std::forward<bool>(reverse),
+	                        std::forward<int>(matchIndex));
 }
 
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {
