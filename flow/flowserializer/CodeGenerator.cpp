@@ -29,6 +29,8 @@ void operator<<(Streams& streams, T const& value) {
 	streams.source << value;
 }
 
+#define EMIT(out, str, ...) out << fmt::format(str "\n", ##__VA_ARGS__)
+
 namespace {
 
 struct Defer {
@@ -132,7 +134,7 @@ std::string headerGuard(std::string const& stem) {
 }
 
 void emitIncludes(Streams& out, std::vector<std::string> const& includes) {
-	out.header << fmt::format("#include \"flow/serialize.h\"\n");
+	EMIT(out.header, "#include \"flow/serialize.h\"");
 	for (auto const& p : includes) {
 		out.header << fmt::format("#include \"{}.h\"\n", p.substr(0, p.size() - ".fbs"s.size()));
 	}
@@ -164,8 +166,7 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 	}
 	// 1. Generate code for old serializers
 	// 1.1. Readers
-	out.header << fmt::format("// {} functions for old serializer\n");
-	out.source << fmt::format("// {} functions for old serializer\n");
+	EMIT(out, "// {} functions for old serializer", f.name);
 	for (auto const& ar : oldReaders) {
 		out.header << fmt::format("void load({}& ar, {}& out);\n", ar, f.name);
 

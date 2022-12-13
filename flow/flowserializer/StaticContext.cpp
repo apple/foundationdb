@@ -261,14 +261,14 @@ void StaticContext::describeTable(std::string const& name) const {
 	int padding = (root.alignment - (curr % root.alignment)) % root.alignment;
 	curr += padding;
 	fmt::print("// Start of the buffer\n");
-	fmt::print("0: uint32_t {} // Offset to the root st\n", curr);
+	fmt::print("0: uint32_t {} // Offset to the root table\n", curr);
 	int printOffset = 4;
 	for (auto const& [typeName, serInfo] : serMap) {
 		if (serInfo.vtable->empty()) {
 			continue;
 		}
 		fmt::print("// vtable for {}.{}\n", fmt::join(typeName.path, "::"), typeName.name);
-		fmt::print("{}: uint16_t {} // size of st starting from here\n", printOffset, (*serInfo.vtable)[0]);
+		fmt::print("{}: uint16_t {} // size of table starting from here\n", printOffset, (*serInfo.vtable)[0]);
 		printOffset += 2;
 		fmt::print("{}: uint16_t {} // Size of object inline data\n", printOffset, (*serInfo.vtable)[1]);
 		printOffset += 2;
