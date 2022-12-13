@@ -104,10 +104,17 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 		@Override
 		public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper,
-		                                                    int limit, int matchIndex, boolean reverse,
-		                                                    StreamingMode mode) {
+		                                                    int limit, boolean reverse, StreamingMode mode) {
 
 			throw new UnsupportedOperationException("getMappedRange is only supported in serializable");
+		}
+
+		@Override
+		public AsyncIterable<MappedKeyValue> getMappedRangeOptionalIndex(KeySelector begin, KeySelector end,
+		                                                                 byte[] mapper, int limit, boolean reverse,
+		                                                                 StreamingMode mode, int matchIndex) {
+
+			throw new UnsupportedOperationException("getMappedRangeOptionalIndex is only supported in serializable");
 		}
 
 		///////////////////
@@ -369,7 +376,18 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
-	                                                    int matchIndex, boolean reverse, StreamingMode mode) {
+	                                                    boolean reverse, StreamingMode mode) {
+		if (mapper == null) {
+			throw new IllegalArgumentException("Mapper must be non-null");
+		}
+		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, 0, reverse, mode,
+		                            eventKeeper);
+	}
+
+	@Override
+	public AsyncIterable<MappedKeyValue> getMappedRangeOptionalIndex(KeySelector begin, KeySelector end, byte[] mapper,
+	                                                                 int limit, boolean reverse, StreamingMode mode,
+	                                                                 int matchIndex) {
 		if (mapper == null) {
 			throw new IllegalArgumentException("Mapper must be non-null");
 		}
@@ -493,7 +511,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			return new FutureMappedResults(
 			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
 			                               end.orEqual(), end.getOffset(), mapper, rowLimit, targetBytes, streamingMode,
-			                               iteration, matchIndex, isSnapshot, reverse),
+			                               iteration, isSnapshot, reverse, matchIndex),
 			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
@@ -837,7 +855,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	                                               byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 	                                               byte[] mapper, // Nonnull
 	                                               int rowLimit, int targetBytes, int streamingMode, int iteration,
-	                                               int matchIndex, boolean isSnapshot, boolean reverse);
+	                                               boolean isSnapshot, boolean reverse, int matchIndex);
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);

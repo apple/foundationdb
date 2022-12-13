@@ -233,9 +233,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				                                                   endSelector,
 				                                                   mapper,
 				                                                   GetRangeLimits(limit, byteLimit),
-				                                                   matchIndex,
 				                                                   self->snapshot,
-				                                                   Reverse::False));
+				                                                   Reverse::False,
+				                                                   matchIndex));
 				//			showResult(result);
 				if (self->BAD_MAPPER) {
 					TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
@@ -378,9 +378,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                          endSelector,
 		                          mapper,
 		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED),
-		                          MATCH_INDEX_ALL,
 		                          self->snapshot,
-		                          Reverse::False);
+		                          Reverse::False,
+		                          MATCH_INDEX_ALL);
 	}
 
 	// If another transaction writes to our read set (the scanned ranges) before we commit, the transaction should

@@ -329,10 +329,26 @@ public:
 	                                           int target_bytes,
 	                                           FDBStreamingMode mode,
 	                                           int iteration,
-	                                           int matchIndex,
 	                                           fdb_bool_t snapshot,
 	                                           fdb_bool_t reverse);
 
+	MappedKeyValueArrayFuture get_mapped_range_optional_index(const uint8_t* begin_key_name,
+	                                                          int begin_key_name_length,
+	                                                          fdb_bool_t begin_or_equal,
+	                                                          int begin_offset,
+	                                                          const uint8_t* end_key_name,
+	                                                          int end_key_name_length,
+	                                                          fdb_bool_t end_or_equal,
+	                                                          int end_offset,
+	                                                          const uint8_t* mapper_name,
+	                                                          int mapper_name_length,
+	                                                          int limit,
+	                                                          int target_bytes,
+	                                                          FDBStreamingMode mode,
+	                                                          int iteration,
+	                                                          fdb_bool_t snapshot,
+	                                                          fdb_bool_t reverse,
+	                                                          int matchIndex);
 	// Wrapper around fdb_transaction_watch. Returns a future representing an
 	// empty value.
 	EmptyFuture watch(std::string_view key);

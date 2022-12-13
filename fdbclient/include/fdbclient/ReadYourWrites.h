@@ -113,9 +113,9 @@ public:
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
-	                                         int matchIndex,
 	                                         Snapshot = Snapshot::False,
-	                                         Reverse = Reverse::False) override;
+	                                         Reverse = Reverse::False,
+	                                         int matchIndex = MATCH_INDEX_ALL) override;
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key) override;
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
