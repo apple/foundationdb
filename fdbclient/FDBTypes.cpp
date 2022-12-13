@@ -162,3 +162,51 @@ std::string describe(const std::string& s) {
 std::string describe(UID const& item) {
 	return item.shortString();
 }
+
+TEST_CASE("/KeyRangeUtil/KeyRangeComplement") {
+	Key begin = "b"_sr;
+	Key end = "y"_sr;
+	KeyRangeRef range(begin, end);
+
+	{
+		Key b = "c"_sr;
+		Key e = "f"_sr;
+		std::vector<KeyRangeRef> result = range - KeyRangeRef(b, e);
+		ASSERT(result.size() == 2);
+		ASSERT(result[0] == KeyRangeRef("b"_sr, "c"_sr));
+		ASSERT(result[1] == KeyRangeRef("f"_sr, "y"_sr));
+	}
+
+	{
+		Key b = "1"_sr;
+		Key e = "9"_sr;
+		std::vector<KeyRangeRef> result = range - KeyRangeRef(b, e);
+		ASSERT(result.size() == 1);
+		ASSERT(result[0] == KeyRangeRef("b"_sr, "y"_sr));
+	}
+
+	{
+		Key b = "a"_sr;
+		Key e = "f"_sr;
+		std::vector<KeyRangeRef> result = range - KeyRangeRef(b, e);
+		ASSERT(result.size() == 1);
+		ASSERT(result[0] == KeyRangeRef("f"_sr, "y"_sr));
+	}
+
+	{
+		Key b = "f"_sr;
+		Key e = "z"_sr;
+		std::vector<KeyRangeRef> result = range - KeyRangeRef(b, e);
+		ASSERT(result.size() == 1);
+		ASSERT(result[0] == KeyRangeRef("b"_sr, "f"_sr));
+	}
+
+	{
+		Key b = "a"_sr;
+		Key e = "z"_sr;
+		std::vector<KeyRangeRef> result = range - KeyRangeRef(b, e);
+		ASSERT(result.size() == 0);
+	}
+
+	return Void();
+}
