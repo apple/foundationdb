@@ -3307,8 +3307,9 @@ void DDTeamCollection::traceServerInfo() const {
 		    .detail("StatusString", status.toString())
 		    .detail("MachineIsValid", get(server_info, serverID)->machine.isValid())
 		    .detail("MachineTeamSize",
-		            get(server_info, uid)->machine.isValid() ? get(server_info, uid)->machine->machineTeams.size()
-		                                                     : -1);
+		            get(server_info, serverID)->machine.isValid()
+		                ? get(server_info, serverID)->machine->machineTeams.size()
+		                : -1);
 	}
 }
 
@@ -4217,7 +4218,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 		} else {
 			// When too many teams exist in simulation, traceAllInfo will buffer too many trace logs before
 			// trace has a chance to flush its buffer, which causes assertion failure.
-			traceAllInfo(g_network->isSimulated() ? false : true);
+			traceAllInfo(!g_network->isSimulated());
 			TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 			    .detail("Primary", primary)
 			    .detail("Reason", "Unable to make desired machine Teams")
