@@ -43,6 +43,8 @@ struct CommitResult {
 // The type of the value stored at the key |idempotencyIdsExpiredVersion|
 struct IdempotencyIdsExpiredVersion {
 	static constexpr auto file_identifier = 3746945;
+	// Any version at or below expired might have had its idempotency id expired. Any version greater than `expired`
+	// definitely has not had it's idempotency id expired.
 	Version expired = 0;
 
 	template <class Archive>
@@ -184,6 +186,9 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex);
 
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
+
+// Delete zero or more idempotency ids older than minAgeSeconds
+ACTOR Future<Void> idempotencyIdsCleaner(Database db, int64_t minAgeSeconds);
 
 #include "flow/unactorcompiler.h"
 #endif

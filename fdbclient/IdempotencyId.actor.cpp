@@ -203,3 +203,121 @@ void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrder
 	commitVersion = bigEndian64(commitVersion);
 	reader >> highOrderBatchIndex;
 }
+
+// Find the youngest or oldest idempotency id key in `range` (depending on `reverse`)
+// Write the timestamp to `*time` and the version to `*version` when non-null.
+ACTOR static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransaction> tr,
+                                               KeyRange range,
+                                               Reverse reverse,
+                                               Version* version,
+                                               int64_t* time) {
+	RangeResult result = wait(tr->getRange(range, /*limit*/ 1, Snapshot::False, reverse));
+	if (!result.size()) {
+		return Optional<Key>();
+	}
+	if (version != nullptr) {
+		BinaryReader rd(result.front().key, Unversioned());
+		rd.readBytes(idempotencyIdKeys.begin.size());
+		rd >> *version;
+		*version = bigEndian64(*version);
+	}
+	if (time != nullptr) {
+		BinaryReader rd(result.front().value, IncludeVersion());
+		rd >> *time;
+	}
+	return result.front().key;
+}
+
+ACTOR Future<Void> cleanIdempotencyIds(Database db, int64_t minAgeSeconds) {
+	state int64_t idmpKeySize;
+	state int64_t candidateDeleteSize;
+	state KeyRange candidateRangeToClean;
+	state KeyRange finalRange;
+	state Reference<ReadYourWritesTransaction> tr;
+	state Key oldestKey;
+	state Version oldestVersion;
+	state int64_t oldestTime;
+	state Version candidateDeleteVersion;
+	state int64_t candidateDeleteTime;
+	tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			// Check if any keys are older than minAgeSeconds
+			Optional<Key> oldestKey_ =
+			    wait(getBoundary(tr, idempotencyIdKeys, Reverse::False, &oldestVersion, &oldestTime));
+			if (!oldestKey_.present()) {
+				break;
+			}
+			oldestKey = oldestKey_.get();
+			if (int64_t(now()) - oldestTime < minAgeSeconds) {
+				break;
+			}
+
+			// Only used for a trace event
+			wait(store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)));
+
+			// Get the version of the most recent idempotency ID
+			wait(success(
+			    getBoundary(tr, idempotencyIdKeys, Reverse::True, &candidateDeleteVersion, &candidateDeleteTime)));
+
+			// Keep dividing the candidate range until clearing it would not delete something younger than
+			// minAgeSeconds
+			loop {
+				if (oldestVersion == candidateDeleteVersion) {
+					candidateRangeToClean = KeyRangeRef(idempotencyIdKeys.begin, idempotencyIdKeys.begin);
+					break;
+				}
+
+				candidateRangeToClean =
+				    KeyRangeRef(oldestKey,
+				                BinaryWriter::toValue(bigEndian64(candidateDeleteVersion + 1), Unversioned())
+				                    .withPrefix(idempotencyIdKeys.begin));
+				// Find the youngest key in candidate range
+				wait(success(getBoundary(
+				    tr, candidateRangeToClean, Reverse::True, &candidateDeleteVersion, &candidateDeleteTime)));
+
+				// Update the range so that it ends at an idempotency id key. Since we're binary searching, the
+				// candidate range was probably too large before.
+				candidateRangeToClean =
+				    KeyRangeRef(oldestKey,
+				                BinaryWriter::toValue(bigEndian64(candidateDeleteVersion + 1), Unversioned())
+				                    .withPrefix(idempotencyIdKeys.begin));
+
+				wait(store(candidateDeleteSize, tr->getEstimatedRangeSizeBytes(candidateRangeToClean)));
+
+				int64_t youngestAge = int64_t(now()) - candidateDeleteTime;
+				TraceEvent("IdempotencyIdsCleanerCandidateDelete")
+				    .detail("Range", candidateRangeToClean.toString())
+				    .detail("IdmpKeySizeEstimate", idmpKeySize)
+				    .detail("YoungestIdAge", youngestAge)
+				    .detail("MinAgeSeconds", minAgeSeconds)
+				    .detail("ClearRangeSizeEstimate", candidateDeleteSize);
+				if (youngestAge > minAgeSeconds) {
+					break;
+				}
+				candidateDeleteVersion = (oldestVersion + candidateDeleteVersion) / 2;
+			}
+			finalRange = KeyRangeRef(idempotencyIdKeys.begin, candidateRangeToClean.end);
+			if (!finalRange.empty()) {
+				tr->addReadConflictRange(finalRange);
+				tr->clear(finalRange);
+				tr->set(idempotencyIdsExpiredVersion,
+				        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ candidateDeleteVersion }, Unversioned()));
+				TraceEvent("IdempotencyIdsCleanerAttempt")
+				    .detail("IdmpKeySizeEstimate", idmpKeySize)
+				    .detail("ClearRangeSizeEstimate", candidateDeleteSize)
+				    .detail("ExpiredVersion", candidateDeleteVersion)
+				    .detail("ExpiredVersionAgeEstimate", static_cast<int64_t>(now()) - candidateDeleteTime);
+				wait(tr->commit());
+			}
+			break;
+		} catch (Error& e) {
+			TraceEvent("IdempotencyIdsCleanerError").error(e);
+			wait(tr->onError(e));
+		}
+	}
+	return Void();
+}
