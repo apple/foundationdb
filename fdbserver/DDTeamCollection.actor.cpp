@@ -4242,7 +4242,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 		} else {
 			// When too many teams exist in simulation, traceAllInfo will buffer too many trace logs before
 			// trace has a chance to flush its buffer, which causes assertion failure.
-			traceAllInfo(g_network->isSimulated() ? false : true);
+			traceAllInfo(!g_network->isSimulated());
 			TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
 			    .detail("Primary", primary)
 			    .detail("Reason", "Unable to make desired machine Teams")
