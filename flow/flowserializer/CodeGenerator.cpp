@@ -153,6 +153,8 @@ struct OldSerializers {
 CodeGenerator::CodeGenerator(StaticContext* context) : context(context) {}
 
 void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
+	auto tableTypeName = assertTrue(context->resolve(f.name))->first;
+	auto fullName = fmt::format("{}::{}", fmt::join(tableTypeName.path, "::"), tableTypeName.name);
 	auto underlying = convertType(f.type);
 	// 0. generate the enum
 	{
@@ -167,19 +169,19 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 	}
 	// 1. Generate code for old serializers
 	// 1.1. Readers
-	EMIT(out, "// {} functions for old serializer", f.name);
+	EMIT(out, "// {} functions for old serializer", fullName);
 	for (auto const& ar : oldReaders) {
-		out.header << fmt::format("void load({}& ar, {}& out);\n", ar, f.name);
+		out.header << fmt::format("void load({}& ar, {}& out);\n", ar, fullName);
 
-		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, f.name);
+		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, fullName);
 		out.source << fmt::format("\t{} value;\n", underlying);
 		out.source << fmt::format("\tar >> value;\n");
-		out.source << fmt::format("\tout = static_cast<{}>({});\n", f.name, underlying);
+		out.source << fmt::format("\tout = static_cast<{}>({});\n", fullName, underlying);
 		out.source << fmt::format("}}\n");
 	}
 	for (auto const& ar : oldWriters) {
 		out.header << fmt::format("void save({}& ar, {} const& in);\n", ar, f.name);
-		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, f.name);
+		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, fullName);
 		out.source << fmt::format("\t{0} value = static_cast<{0}>(in);\n", underlying);
 		out.source << fmt::format("\tar << value;\n");
 		out.source << fmt::format("}}\n");
@@ -187,27 +189,27 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 	// 2. Generate the helper functions
 	{
 		out.header << fmt::format("// {} helper functions\n", f.name);
-		out.source << fmt::format("// {} helper functions\n", f.name);
+		out.source << fmt::format("// {} helper functions\n", fullName);
 		// toString
 		out.header << fmt::format("{0} toString({1});\n", config::stringType, f.name);
-		out.source << fmt::format("{0} toString({1} e) {{\n", config::stringType, f.name);
+		out.source << fmt::format("{0} toString({1} e) {{\n", config::stringType, fullName);
 		out.source << "\tswitch (e) {\n";
 		for (auto const& [k, _] : f.values) {
-			out.source << fmt::format("\tcase {0}::{1}:\n", f.name, k);
+			out.source << fmt::format("\tcase {0}::{1}:\n", fullName, k);
 			out.source << fmt::format("\t\treturn \"{0}\"{1};\n", k, config::stringLiteral);
 		}
 		out.source << "\t}\n";
 		out.source << "}\n\n";
 		// fromString and fromStringView
 
-		auto fromString = [out, &f](auto stringType, auto stringLiteral) {
+		auto fromString = [out, fullName, &f](auto stringType, auto stringLiteral) {
 			out.header << fmt::format("void fromString({0}& out, {1} const& str);\n", f.name, stringType);
-			out.source << fmt::format("void fromString({0}& out, {1} const& str) {{\n", f.name, stringType);
+			out.source << fmt::format("void fromString({0}& out, {1} const& str) {{\n", fullName, stringType);
 			bool first = true;
 			for (auto const& [k, _] : f.values) {
 				out.source << fmt::format(
 				    "\t{0} (str == \"{1}\"{2}) {{\n", first ? "if" : "} else if", k, stringLiteral);
-				out.source << fmt::format("\t\treturn {}::{};\n", f.name, k);
+				out.source << fmt::format("\t\treturn {}::{};\n", fullName, k);
 				first = false;
 			}
 			out.source << "\t} else {\n";
@@ -309,10 +311,10 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 	auto tableTypeName = assertTrue(context->resolve(s.st.name))->first;
 	auto fullName = fmt::format("{}::{}", fmt::join(tableTypeName.path, "::"), tableTypeName.name);
 	for (auto const& w : oldWriters) {
-		out.header << fmt::format("\tvoid save({}& reader, {} const& in);\n", w, fullName);
+		out.header << fmt::format("\tvoid save({}& reader, {} const& in);\n", w, s.st.name);
 	}
 	for (auto const& r : oldReaders) {
-		out.header << fmt::format("\tvoid load({}& reader, {}& out);\n", r, fullName);
+		out.header << fmt::format("\tvoid load({}& reader, {}& out);\n", r, s.st.name);
 	}
 
 	// write serialization code for old serializers (load and save)
