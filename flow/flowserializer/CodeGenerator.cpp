@@ -250,9 +250,9 @@ void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
 		out.source << fmt::format("}}\n");
 	}
 	for (auto const& ar : oldWriters) {
-		out.header << fmt::format("void save({}& ar, {} const& value);\n");
+		out.header << fmt::format("void save({}& ar, {} const& value);\n", ar, u.name);
 
-		out.header << fmt::format("void save({}& ar, {} const& value) {{\n");
+		out.header << fmt::format("void save({}& ar, {} const& value) {{\n", ar, u.name);
 		out.source << fmt::format("\tint idx = value.index();\n");
 		out.source << fmt::format("\tar << idx;\n");
 		out.source << fmt::format("\tswitch (idx) {{\n");
