@@ -228,7 +228,7 @@ ACTOR static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransacti
 	return result.front().key;
 }
 
-ACTOR Future<Void> cleanIdempotencyIds(Database db, int64_t minAgeSeconds) {
+ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 	state int64_t idmpKeySize;
 	state int64_t candidateDeleteSize;
 	state KeyRange candidateRangeToClean;

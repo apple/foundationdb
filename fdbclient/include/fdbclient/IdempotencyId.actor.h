@@ -188,7 +188,7 @@ KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
 
 // Delete zero or more idempotency ids older than minAgeSeconds
-ACTOR Future<Void> idempotencyIdsCleaner(Database db, int64_t minAgeSeconds);
+ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds);
 
 #include "flow/unactorcompiler.h"
 #endif
