@@ -306,23 +306,25 @@ void CodeGenerator::emit(Streams& out, expression::Struct const& st) const {
 }
 
 void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
+	auto tableTypeName = assertTrue(context->resolve(s.st.name))->first;
+	auto fullName = fmt::format("{}::{}", fmt::join(tableTypeName.path, "::"), tableTypeName.name);
 	for (auto const& w : oldWriters) {
-		out.header << fmt::format("\tvoid save({}& reader, {} const& in);\n", w, s.st.name);
+		out.header << fmt::format("\tvoid save({}& reader, {} const& in);\n", w, fullName);
 	}
 	for (auto const& r : oldReaders) {
-		out.header << fmt::format("\tvoid load({}& reader, {}& out);\n", r, s.st.name);
+		out.header << fmt::format("\tvoid load({}& reader, {}& out);\n", r, fullName);
 	}
 
 	// write serialization code for old serializers (load and save)
 	// 1. Implement the generic functions
 	out.source << fmt::format("template<class Ar>\n");
-	out.source << fmt::format("void loadImpl(Ar& ar, {}& in) {{\n", s.st.name);
+	out.source << fmt::format("void loadImpl(Ar& ar, {}& in) {{\n", fullName);
 	for (auto const& f : s.st.fields) {
 		out.source << fmt::format("\tar >> in.{};\n", f.name);
 	}
 	out.source << fmt::format("}}\n\n");
 	out.source << fmt::format("template<class Ar>\n");
-	out.source << fmt::format("void saveImpl(Ar& ar, {}& out) {{\n", s.st.name);
+	out.source << fmt::format("void saveImpl(Ar& ar, {} const& out) {{\n", fullName);
 	for (auto const& f : s.st.fields) {
 		out.source << fmt::format("\tar << out.{};\n", f.name);
 	}
@@ -330,13 +332,13 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 	// 2. Implement the specializations -- this forces the compiler to instantiate all templates in the current
 	//    compilation unit. So we won't do this once per compilation unit
 	for (auto const& ar : oldReaders) {
-		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, s.st.name);
+		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, fullName);
 		out.source << fmt::format("\tloadImpl(ar, out);\n");
 		out.source << fmt::format("}}\n");
 	}
 	out.source << fmt::format("\n");
 	for (auto const& ar : oldWriters) {
-		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, s.st.name);
+		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, fullName);
 		out.source << fmt::format("\tsaveImpl(ar, in);\n");
 		out.source << fmt::format("}}\n");
 	}
