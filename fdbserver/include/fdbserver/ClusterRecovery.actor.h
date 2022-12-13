@@ -165,7 +165,7 @@ private:
 };
 
 struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> {
-	ClusterControllerData* controllerData;
+	ClusterController* controllerData;
 
 	UID dbgid;
 
@@ -255,7 +255,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	Reference<EventCacheHolder> clusterRecoveryDurationEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryAvailableEventHolder;
 
-	ClusterRecoveryData(ClusterControllerData* controllerData,
+	ClusterRecoveryData(ClusterController* controllerData,
 	                    Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	                    MasterInterface const& masterInterface,
 	                    LifetimeToken const& masterLifetimeToken,
@@ -304,8 +304,8 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	}
 };
 
-ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
-                                    ClusterControllerData::DBInfo* db,
+ACTOR Future<Void> recruitNewMaster(ClusterController* cluster,
+                                    ClusterController::DBInfo* db,
                                     MasterInterface* newMaster);
 ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self, bool exThrown);
 ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);

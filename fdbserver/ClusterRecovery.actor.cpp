@@ -73,8 +73,8 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 	}
 }
 
-ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
-                                    ClusterControllerData::DBInfo* db,
+ACTOR Future<Void> recruitNewMaster(ClusterController* cluster,
+                                    ClusterController::DBInfo* db,
                                     MasterInterface* newMaster) {
 	state Future<ErrorOr<MasterInterface>> fNewMaster;
 	state WorkerFitnessInfo masterWorker;
@@ -122,7 +122,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 	}
 }
 
-ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, Reference<RecruitWorkersInfo> req) {
+ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterController* self, Reference<RecruitWorkersInfo> req) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
 	CODE_PROBE(true, "ClusterController RecruitTLogsRequest");
 	loop {
@@ -153,7 +153,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, 
 }
 
 ACTOR Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
-    ClusterControllerData* self,
+    ClusterController* self,
     Reference<RecruitRemoteWorkersInfo> req) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
 	CODE_PROBE(true, "ClusterController RecruitTLogsRequest Remote");

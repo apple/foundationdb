@@ -123,8 +123,8 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
 };
 
-class ClusterControllerData {
-	friend class ClusterControllerDataImpl;
+class ClusterController {
+	friend class ClusterControllerImpl;
 
 public:
 	struct DBInfo {
@@ -3532,10 +3532,10 @@ public:
 
 	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
 
-	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
-	                      LocalityData const& locality,
-	                      ServerCoordinators const& coordinators,
-	                      Reference<AsyncVar<Optional<UID>>> clusterId)
+	ClusterController(ClusterControllerFullInterface const& ccInterface,
+	                  LocalityData const& locality,
+	                  ServerCoordinators const& coordinators,
+	                  Reference<AsyncVar<Optional<UID>>> clusterId)
 	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
 	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
@@ -3564,7 +3564,7 @@ public:
 		specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
 	}
 
-	~ClusterControllerData() {
+	~ClusterController() {
 		ac.clear(false);
 		id_worker.clear();
 	}

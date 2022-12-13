@@ -93,9 +93,9 @@ ACTOR Future<Void> doEmptyCommit(Database cx) {
 	}
 }
 
-class ClusterControllerDataImpl {
+class ClusterControllerImpl {
 public:
-	ACTOR static Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
+	ACTOR static Future<Optional<Value>> getPreviousCoordinators(ClusterController* self) {
 		state ReadYourWritesTransaction tr(self->db.db);
 		loop {
 			try {
@@ -110,8 +110,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> clusterWatchDatabase(ClusterControllerData* self,
-	                                               ClusterControllerData::DBInfo* db,
+	ACTOR static Future<Void> clusterWatchDatabase(ClusterController* self,
+	                                               ClusterController::DBInfo* db,
 	                                               ServerCoordinators coordinators,
 	                                               Future<Void> recoveredDiskFiles) {
 		state MasterInterface iMaster;
@@ -267,7 +267,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
+	ACTOR static Future<Void> doCheckOutstandingRequests(ClusterController* self) {
 		try {
 			wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
 			while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY ||
@@ -302,7 +302,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self) {
+	ACTOR static Future<Void> doCheckOutstandingRemoteRequests(ClusterController* self) {
 		try {
 			wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
 			while (!self->goodRemoteRecruitmentTime.isReady()) {
@@ -318,7 +318,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> rebootAndCheck(ClusterControllerData* self, Optional<Standalone<StringRef>> processID) {
+	ACTOR static Future<Void> rebootAndCheck(ClusterController* self, Optional<Standalone<StringRef>> processID) {
 		{
 			ASSERT(processID.present());
 			auto watcher = self->id_worker.find(processID);
@@ -340,7 +340,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> workerAvailabilityWatch(ClusterControllerData* self,
+	ACTOR static Future<Void> workerAvailabilityWatch(ClusterController* self,
 	                                                  WorkerInterface worker,
 	                                                  ProcessClass startingClass) {
 		state Future<Void> failed =
@@ -387,7 +387,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> registerWorker(ClusterControllerData* self,
+	ACTOR static Future<Void> registerWorker(ClusterController* self,
 	                                         RegisterWorkerRequest req,
 	                                         ClusterConnectionString cs,
 	                                         ConfigBroadcaster* configBroadcaster) {
@@ -603,7 +603,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
+	ACTOR static Future<Void> timeKeeperSetVersion(ClusterController* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
@@ -624,7 +624,7 @@ public:
 	// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid
 	// running out of space, it limits the max number of entries and clears old entries on each update. This mapping is
 	// used from backup and restore to get the version information for a timestamp.
-	ACTOR static Future<Void> timeKeeper(ClusterControllerData* self) {
+	ACTOR static Future<Void> timeKeeper(ClusterController* self) {
 		state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
 		TraceEvent("TimeKeeperStarted").log();
@@ -673,7 +673,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> statusServer(ClusterControllerData* self,
+	ACTOR static Future<Void> statusServer(ClusterController* self,
 	                                       FutureStream<StatusRequest> requests,
 	                                       ServerCoordinators coordinators,
 	                                       ConfigBroadcaster const* configBroadcaster) {
@@ -771,7 +771,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorProcessClasses(ClusterControllerData* self) {
+	ACTOR static Future<Void> monitorProcessClasses(ClusterController* self) {
 
 		state ReadYourWritesTransaction trVer(self->db.db);
 		loop {
@@ -859,7 +859,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
+	ACTOR static Future<Void> updatedChangingDatacenters(ClusterController* self) {
 		// do not change the cluster controller until all the processes have had a chance to register
 		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 		loop {
@@ -914,7 +914,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
+	ACTOR static Future<Void> updatedChangedDatacenters(ClusterController* self) {
 		state Future<Void> changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
 		state Future<Void> onChange = self->changingDcIds.onChange();
 		loop {
@@ -976,7 +976,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self) {
+	ACTOR static Future<Void> updateDatacenterVersionDifference(ClusterController* self) {
 		state double lastLogTime = 0;
 		loop {
 			self->versionDifferenceUpdated = false;
@@ -1064,7 +1064,7 @@ public:
 
 	// A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC
 	// recovers.
-	ACTOR static Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
+	ACTOR static Future<Void> updateRemoteDCHealth(ClusterController* self) {
 		// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote
 		// DC health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
 		wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
@@ -1088,8 +1088,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> handleForcedRecoveries(ClusterControllerData* self,
-	                                                 ClusterControllerFullInterface interf) {
+	ACTOR static Future<Void> handleForcedRecoveries(ClusterController* self, ClusterControllerFullInterface interf) {
 		loop {
 			state ForceRecoveryRequest req = waitNext(interf.clientInterface.forceRecovery.getFuture());
 			TraceEvent("ForcedRecoveryStart", self->id)
@@ -1115,7 +1114,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
+	ACTOR static Future<Void> triggerAuditStorage(ClusterController* self, TriggerAuditRequest req) {
 		TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
@@ -1151,7 +1150,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> handleTriggerAuditStorage(ClusterControllerData* self,
+	ACTOR static Future<Void> handleTriggerAuditStorage(ClusterController* self,
 	                                                    ClusterControllerFullInterface interf) {
 		loop {
 			TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
@@ -1163,7 +1162,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
+	ACTOR static Future<Void> startDataDistributor(ClusterController* self, double waitTime) {
 		// If master fails at the same time, give it a chance to clear master PID.
 		// Also wait to avoid too many consecutive recruits in a small time window.
 		wait(delay(waitTime));
@@ -1234,7 +1233,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorDataDistributor(ClusterControllerData* self) {
+	ACTOR static Future<Void> monitorDataDistributor(ClusterController* self) {
 		state SingletonRecruitThrottler recruitThrottler;
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			wait(self->db.serverInfo->onChange());
@@ -1258,7 +1257,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
+	ACTOR static Future<Void> startRatekeeper(ClusterController* self, double waitTime) {
 		// If master fails at the same time, give it a chance to clear master PID.
 		// Also wait to avoid too many consecutive recruits in a small time window.
 		wait(delay(waitTime));
@@ -1326,7 +1325,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorRatekeeper(ClusterControllerData* self) {
+	ACTOR static Future<Void> monitorRatekeeper(ClusterController* self) {
 		state SingletonRecruitThrottler recruitThrottler;
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			wait(self->db.serverInfo->onChange());
@@ -1350,7 +1349,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> startConsistencyScan(ClusterControllerData* self) {
+	ACTOR static Future<Void> startConsistencyScan(ClusterController* self) {
 		wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 		TraceEvent("CCStartConsistencyScan", self->id).log();
 		loop {
@@ -1419,7 +1418,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
+	ACTOR static Future<Void> monitorConsistencyScan(ClusterController* self) {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
 			wait(self->db.serverInfo->onChange());
@@ -1446,7 +1445,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
+	ACTOR static Future<Void> startEncryptKeyProxy(ClusterController* self, double waitTime) {
 		// If master fails at the same time, give it a chance to clear master PID.
 		// Also wait to avoid too many consecutive recruits in a small time window.
 		wait(delay(waitTime));
@@ -1523,7 +1522,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
+	ACTOR static Future<Void> monitorEncryptKeyProxy(ClusterController* self) {
 		state SingletonRecruitThrottler recruitThrottler;
 		loop {
 			if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
@@ -1545,7 +1544,7 @@ public:
 	}
 
 	// Acquires the BM lock by getting the next epoch no.
-	ACTOR static Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
+	ACTOR static Future<int64_t> getNextBMEpoch(ClusterController* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 		loop {
@@ -1565,7 +1564,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
+	ACTOR static Future<Void> watchBlobRestoreCommand(ClusterController* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		state Key blobRestoreCommandKey = blobRestoreCommandKeyFor(normalKeys);
 		loop {
@@ -1605,7 +1604,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTime) {
+	ACTOR static Future<Void> startBlobMigrator(ClusterController* self, double waitTime) {
 		// If master fails at the same time, give it a chance to clear master PID.
 		// Also wait to avoid too many consecutive recruits in a small time window.
 		wait(delay(waitTime));
@@ -1674,7 +1673,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
+	ACTOR static Future<Void> monitorBlobMigrator(ClusterController* self) {
 		state SingletonRecruitThrottler recruitThrottler;
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			wait(self->db.serverInfo->onChange());
@@ -1704,7 +1703,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> startBlobManager(ClusterControllerData* self, double waitTime) {
+	ACTOR static Future<Void> startBlobManager(ClusterController* self, double waitTime) {
 		// If master fails at the same time, give it a chance to clear master PID.
 		// Also wait to avoid too many consecutive recruits in a small time window.
 		wait(delay(waitTime));
@@ -1780,7 +1779,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
+	ACTOR static Future<Void> watchBlobGranulesConfigKey(ClusterController* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		state Key blobGranuleConfigKey = configKeysPrefix.withSuffix("blob_granules_enabled"_sr);
 
@@ -1804,7 +1803,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorBlobManager(ClusterControllerData* self) {
+	ACTOR static Future<Void> monitorBlobManager(ClusterController* self) {
 		state SingletonRecruitThrottler recruitThrottler;
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			wait(self->db.serverInfo->onChange());
@@ -1852,7 +1851,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> dbInfoUpdater(ClusterControllerData* self) {
+	ACTOR static Future<Void> dbInfoUpdater(ClusterController* self) {
 		state Future<Void> dbInfoChange = self->db.serverInfo->onChange();
 		state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
 		loop {
@@ -1901,7 +1900,7 @@ public:
 	}
 
 	// The actor that periodically monitors the health of tracked workers.
-	ACTOR static Future<Void> workerHealthMonitor(ClusterControllerData* self) {
+	ACTOR static Future<Void> workerHealthMonitor(ClusterController* self) {
 		loop {
 			try {
 				while (!self->goodRecruitmentTime.isReady()) {
@@ -1986,7 +1985,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
+	ACTOR static Future<Void> metaclusterMetricsUpdater(ClusterController* self) {
 		loop {
 			state Future<Void> updaterDelay =
 			    self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? delay(60.0) : Never();
@@ -2038,7 +2037,7 @@ public:
 
 	// Update the DBInfo state with this processes cluster ID. If this process does
 	// not have a cluster ID and one does not exist in the database, generate one.
-	ACTOR static Future<Void> updateClusterId(ClusterControllerData* self) {
+	ACTOR static Future<Void> updateClusterId(ClusterController* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
@@ -2086,7 +2085,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self,
+	ACTOR static Future<Void> handleGetEncryptionAtRestMode(ClusterController* self,
 	                                                        ClusterControllerFullInterface ccInterf) {
 		loop {
 			state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
@@ -2099,19 +2098,19 @@ public:
 		}
 	}
 
-}; // class ClusterControllerDataImpl
+}; // class ClusterControllerImpl
 
-Future<Optional<Value>> ClusterControllerData::getPreviousCoordinators() {
-	return ClusterControllerDataImpl::getPreviousCoordinators(this);
+Future<Optional<Value>> ClusterController::getPreviousCoordinators() {
+	return ClusterControllerImpl::getPreviousCoordinators(this);
 }
 
-Future<Void> ClusterControllerData::clusterWatchDatabase(ClusterControllerData::DBInfo* db,
-                                                         ServerCoordinators coordinators,
-                                                         Future<Void> recoveredDiskFiles) {
-	return ClusterControllerDataImpl::clusterWatchDatabase(this, db, coordinators, recoveredDiskFiles);
+Future<Void> ClusterController::clusterWatchDatabase(ClusterController::DBInfo* db,
+                                                     ServerCoordinators coordinators,
+                                                     Future<Void> recoveredDiskFiles) {
+	return ClusterControllerImpl::clusterWatchDatabase(this, db, coordinators, recoveredDiskFiles);
 }
 
-ACTOR static Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
+ACTOR static Future<Void> clusterGetServerInfo(ClusterController::DBInfo* db,
                                                UID knownServerInfoID,
                                                ReplyPromise<ServerDBInfo> reply) {
 	while (db->serverInfo->get().id == knownServerInfoID) {
@@ -2126,7 +2125,7 @@ ACTOR static Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db
 	return Void();
 }
 
-ACTOR static Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
+ACTOR static Future<Void> clusterOpenDatabase(ClusterController::DBInfo* db, OpenDatabaseRequest req) {
 	db->clientStatus[req.reply.getEndpoint().getPrimaryAddress()] = std::make_pair(now(), req);
 	if (db->clientStatus.size() > 10000) {
 		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
@@ -2145,7 +2144,7 @@ ACTOR static Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db,
 	return Void();
 }
 
-void ClusterControllerData::checkOutstandingRecruitmentRequests() {
+void ClusterController::checkOutstandingRecruitmentRequests() {
 	for (int i = 0; i < outstandingRecruitmentRequests.size(); i++) {
 		Reference<RecruitWorkersInfo> info = outstandingRecruitmentRequests[i];
 		try {
@@ -2167,7 +2166,7 @@ void ClusterControllerData::checkOutstandingRecruitmentRequests() {
 	}
 }
 
-void ClusterControllerData::checkOutstandingRemoteRecruitmentRequests() {
+void ClusterController::checkOutstandingRemoteRecruitmentRequests() {
 	for (int i = 0; i < outstandingRemoteRecruitmentRequests.size(); i++) {
 		Reference<RecruitRemoteWorkersInfo> info = outstandingRemoteRecruitmentRequests[i];
 		try {
@@ -2189,7 +2188,7 @@ void ClusterControllerData::checkOutstandingRemoteRecruitmentRequests() {
 	}
 }
 
-void ClusterControllerData::checkOutstandingStorageRequests() {
+void ClusterController::checkOutstandingStorageRequests() {
 	for (int i = 0; i < outstandingStorageRequests.size(); i++) {
 		auto& req = outstandingStorageRequests[i];
 		try {
@@ -2225,7 +2224,7 @@ void ClusterControllerData::checkOutstandingStorageRequests() {
 // When workers aren't available at the time of request, the request
 // gets added to a list of outstanding reqs. Here, we try to resolve these
 // outstanding requests.
-void ClusterControllerData::checkOutstandingBlobWorkerRequests() {
+void ClusterController::checkOutstandingBlobWorkerRequests() {
 	for (int i = 0; i < outstandingBlobWorkerRequests.size(); i++) {
 		auto& req = outstandingBlobWorkerRequests[i];
 		try {
@@ -2259,9 +2258,8 @@ void ClusterControllerData::checkOutstandingBlobWorkerRequests() {
 }
 
 // Finds and returns a new process for role
-WorkerDetails ClusterControllerData::findNewProcessForSingleton(
-    ProcessClass::ClusterRole role,
-    std::map<Optional<Standalone<StringRef>>, int>& id_used) {
+WorkerDetails ClusterController::findNewProcessForSingleton(ProcessClass::ClusterRole role,
+                                                            std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 	// find new process in cluster for role
 	WorkerDetails newWorker = getWorkerForRoleInDatacenter(
 	                              clusterControllerDcId, role, ProcessClass::NeverAssign, db.config, id_used, {}, true)
@@ -2279,8 +2277,8 @@ WorkerDetails ClusterControllerData::findNewProcessForSingleton(
 }
 
 // Return best possible fitness for singleton. Note that lower fitness is better.
-ProcessClass::Fitness ClusterControllerData::findBestFitnessForSingleton(const WorkerDetails& worker,
-                                                                         const ProcessClass::ClusterRole& role) {
+ProcessClass::Fitness ClusterController::findBestFitnessForSingleton(const WorkerDetails& worker,
+                                                                     const ProcessClass::ClusterRole& role) {
 	auto bestFitness = worker.processClass.machineClassFitness(role);
 	// If the process has been marked as excluded, we take the max with ExcludeFit to ensure its fit
 	// is at least as bad as ExcludeFit. This assists with successfully offboarding such processes
@@ -2295,7 +2293,7 @@ ProcessClass::Fitness ClusterControllerData::findBestFitnessForSingleton(const W
 // the singleton is stable (see below) and doesn't need to be rerecruited.
 // Side effects: (possibly) initiates recruitment
 template <class SingletonClass>
-bool isHealthySingleton(ClusterControllerData* self,
+bool isHealthySingleton(ClusterController* self,
                         const WorkerDetails& newWorker,
                         const SingletonClass& singleton,
                         const ProcessClass::Fitness& bestFitness,
@@ -2352,7 +2350,7 @@ std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
 // to the process it is currently on.
 // Note: there is a lot of extra logic here to only recruit the blob manager when gate is open.
 // When adding new singletons, just follow the ratekeeper/data distributor examples.
-void ClusterControllerData::checkBetterSingletons() {
+void ClusterController::checkBetterSingletons() {
 	if (!masterProcessId.present() || db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		return;
 	}
@@ -2533,15 +2531,15 @@ void ClusterControllerData::checkBetterSingletons() {
 	}
 }
 
-Future<Void> ClusterControllerData::doCheckOutstandingRequests() {
-	return ClusterControllerDataImpl::doCheckOutstandingRequests(this);
+Future<Void> ClusterController::doCheckOutstandingRequests() {
+	return ClusterControllerImpl::doCheckOutstandingRequests(this);
 }
 
-Future<Void> ClusterControllerData::doCheckOutstandingRemoteRequests() {
-	return ClusterControllerDataImpl::doCheckOutstandingRemoteRequests(this);
+Future<Void> ClusterController::doCheckOutstandingRemoteRequests() {
+	return ClusterControllerImpl::doCheckOutstandingRemoteRequests(this);
 }
 
-void ClusterControllerData::checkOutstandingRequests() {
+void ClusterController::checkOutstandingRequests() {
 	if (outstandingRemoteRequestChecker.isReady()) {
 		outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests();
 	}
@@ -2551,8 +2549,8 @@ void ClusterControllerData::checkOutstandingRequests() {
 	}
 }
 
-Future<Void> ClusterControllerData::workerAvailabilityWatch(WorkerInterface worker, ProcessClass startingClass) {
-	return ClusterControllerDataImpl::workerAvailabilityWatch(this, worker, startingClass);
+Future<Void> ClusterController::workerAvailabilityWatch(WorkerInterface worker, ProcessClass startingClass) {
+	return ClusterControllerImpl::workerAvailabilityWatch(this, worker, startingClass);
 }
 
 struct FailureStatusInfo {
@@ -2584,7 +2582,7 @@ ACTOR Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<
 	return out;
 }
 
-void ClusterControllerData::clusterRecruitStorage(RecruitStorageRequest req) {
+void ClusterController::clusterRecruitStorage(RecruitStorageRequest req) {
 	try {
 		if (!gotProcessClasses && !req.criticalRecruitment)
 			throw no_more_servers();
@@ -2608,7 +2606,7 @@ void ClusterControllerData::clusterRecruitStorage(RecruitStorageRequest req) {
 
 // Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
 // Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
-void ClusterControllerData::clusterRecruitBlobWorker(RecruitBlobWorkerRequest req) {
+void ClusterController::clusterRecruitBlobWorker(RecruitBlobWorkerRequest req) {
 	try {
 		if (!gotProcessClasses)
 			throw no_more_servers();
@@ -2628,7 +2626,7 @@ void ClusterControllerData::clusterRecruitBlobWorker(RecruitBlobWorkerRequest re
 	}
 }
 
-void ClusterControllerData::clusterRegisterMaster(RegisterMasterRequest const& req) {
+void ClusterController::clusterRegisterMaster(RegisterMasterRequest const& req) {
 	req.reply.send(Void());
 
 	TraceEvent("MasterRegistrationReceived", id)
@@ -2760,34 +2758,34 @@ void ClusterControllerData::clusterRegisterMaster(RegisterMasterRequest const& r
 	checkOutstandingRequests();
 }
 
-Future<Void> ClusterControllerData::registerWorker(RegisterWorkerRequest req,
-                                                   ClusterConnectionString cs,
-                                                   ConfigBroadcaster* configBroadcaster) {
-	return ClusterControllerDataImpl::registerWorker(this, req, cs, configBroadcaster);
+Future<Void> ClusterController::registerWorker(RegisterWorkerRequest req,
+                                               ClusterConnectionString cs,
+                                               ConfigBroadcaster* configBroadcaster) {
+	return ClusterControllerImpl::registerWorker(this, req, cs, configBroadcaster);
 }
 
-Future<Void> ClusterControllerData::timeKeeperSetVersion() {
-	return ClusterControllerDataImpl::timeKeeperSetVersion(this);
+Future<Void> ClusterController::timeKeeperSetVersion() {
+	return ClusterControllerImpl::timeKeeperSetVersion(this);
 }
 
 // This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid
 // running out of space, it limits the max number of entries and clears old entries on each update. This mapping is
 // used from backup and restore to get the version information for a timestamp.
-Future<Void> ClusterControllerData::timeKeeper() {
-	return ClusterControllerDataImpl::timeKeeper(this);
+Future<Void> ClusterController::timeKeeper() {
+	return ClusterControllerImpl::timeKeeper(this);
 }
 
-Future<Void> ClusterControllerData::statusServer(FutureStream<StatusRequest> requests,
-                                                 ServerCoordinators coordinators,
-                                                 ConfigBroadcaster const* configBroadcaster) {
-	return ClusterControllerDataImpl::statusServer(this, requests, coordinators, configBroadcaster);
+Future<Void> ClusterController::statusServer(FutureStream<StatusRequest> requests,
+                                             ServerCoordinators coordinators,
+                                             ConfigBroadcaster const* configBroadcaster) {
+	return ClusterControllerImpl::statusServer(this, requests, coordinators, configBroadcaster);
 }
 
-Future<Void> ClusterControllerData::monitorProcessClasses() {
-	return ClusterControllerDataImpl::monitorProcessClasses(this);
+Future<Void> ClusterController::monitorProcessClasses() {
+	return ClusterControllerImpl::monitorProcessClasses(this);
 }
 
-ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
+ACTOR Future<Void> monitorServerInfoConfig(ClusterController::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
 		loop {
@@ -2829,7 +2827,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 // all processes in the system by updating the ClientDBInfo object. The
 // GlobalConfig actor class contains the functionality to read the latest
 // history and update the processes local view.
-ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
+ACTOR Future<Void> monitorGlobalConfig(ClusterController::DBInfo* db) {
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
 		loop {
@@ -2917,112 +2915,112 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	}
 }
 
-Future<Void> ClusterControllerData::updatedChangingDatacenters() {
-	return ClusterControllerDataImpl::updatedChangingDatacenters(this);
+Future<Void> ClusterController::updatedChangingDatacenters() {
+	return ClusterControllerImpl::updatedChangingDatacenters(this);
 }
 
-Future<Void> ClusterControllerData::updatedChangedDatacenters() {
-	return ClusterControllerDataImpl::updatedChangedDatacenters(this);
+Future<Void> ClusterController::updatedChangedDatacenters() {
+	return ClusterControllerImpl::updatedChangedDatacenters(this);
 }
 
-Future<Void> ClusterControllerData::updateDatacenterVersionDifference() {
-	return ClusterControllerDataImpl::updateDatacenterVersionDifference(this);
+Future<Void> ClusterController::updateDatacenterVersionDifference() {
+	return ClusterControllerImpl::updateDatacenterVersionDifference(this);
 }
 
-Future<Void> ClusterControllerData::updateRemoteDCHealth() {
-	return ClusterControllerDataImpl::updateRemoteDCHealth(this);
+Future<Void> ClusterController::updateRemoteDCHealth() {
+	return ClusterControllerImpl::updateRemoteDCHealth(this);
 }
 
-Future<Void> ClusterControllerData::handleForcedRecoveries(ClusterControllerFullInterface interf) {
-	return ClusterControllerDataImpl::handleForcedRecoveries(this, interf);
+Future<Void> ClusterController::handleForcedRecoveries(ClusterControllerFullInterface interf) {
+	return ClusterControllerImpl::handleForcedRecoveries(this, interf);
 }
 
-Future<Void> ClusterControllerData::triggerAuditStorage(TriggerAuditRequest req) {
-	return ClusterControllerDataImpl::triggerAuditStorage(this, req);
+Future<Void> ClusterController::triggerAuditStorage(TriggerAuditRequest req) {
+	return ClusterControllerImpl::triggerAuditStorage(this, req);
 }
 
-Future<Void> ClusterControllerData::handleTriggerAuditStorage(ClusterControllerFullInterface interf) {
-	return ClusterControllerDataImpl::handleTriggerAuditStorage(this, interf);
+Future<Void> ClusterController::handleTriggerAuditStorage(ClusterControllerFullInterface interf) {
+	return ClusterControllerImpl::handleTriggerAuditStorage(this, interf);
 }
 
-Future<Void> ClusterControllerData::startDataDistributor(double waitTime) {
-	return ClusterControllerDataImpl::startDataDistributor(this, waitTime);
+Future<Void> ClusterController::startDataDistributor(double waitTime) {
+	return ClusterControllerImpl::startDataDistributor(this, waitTime);
 }
 
-Future<Void> ClusterControllerData::monitorDataDistributor() {
-	return ClusterControllerDataImpl::monitorDataDistributor(this);
+Future<Void> ClusterController::monitorDataDistributor() {
+	return ClusterControllerImpl::monitorDataDistributor(this);
 }
 
-Future<Void> ClusterControllerData::startRatekeeper(double waitTime) {
-	return ClusterControllerDataImpl::startRatekeeper(this, waitTime);
+Future<Void> ClusterController::startRatekeeper(double waitTime) {
+	return ClusterControllerImpl::startRatekeeper(this, waitTime);
 }
 
-Future<Void> ClusterControllerData::monitorRatekeeper() {
-	return ClusterControllerDataImpl::monitorRatekeeper(this);
+Future<Void> ClusterController::monitorRatekeeper() {
+	return ClusterControllerImpl::monitorRatekeeper(this);
 }
 
-Future<Void> ClusterControllerData::startConsistencyScan() {
-	return ClusterControllerDataImpl::startConsistencyScan(this);
+Future<Void> ClusterController::startConsistencyScan() {
+	return ClusterControllerImpl::startConsistencyScan(this);
 }
 
-Future<Void> ClusterControllerData::monitorConsistencyScan() {
-	return ClusterControllerDataImpl::monitorConsistencyScan(this);
+Future<Void> ClusterController::monitorConsistencyScan() {
+	return ClusterControllerImpl::monitorConsistencyScan(this);
 }
 
-Future<Void> ClusterControllerData::startEncryptKeyProxy(double waitTime) {
-	return ClusterControllerDataImpl::startEncryptKeyProxy(this, waitTime);
+Future<Void> ClusterController::startEncryptKeyProxy(double waitTime) {
+	return ClusterControllerImpl::startEncryptKeyProxy(this, waitTime);
 }
 
-Future<Void> ClusterControllerData::monitorEncryptKeyProxy() {
-	return ClusterControllerDataImpl::monitorEncryptKeyProxy(this);
+Future<Void> ClusterController::monitorEncryptKeyProxy() {
+	return ClusterControllerImpl::monitorEncryptKeyProxy(this);
 }
 
-Future<int64_t> ClusterControllerData::getNextBMEpoch() {
-	return ClusterControllerDataImpl::getNextBMEpoch(this);
+Future<int64_t> ClusterController::getNextBMEpoch() {
+	return ClusterControllerImpl::getNextBMEpoch(this);
 }
 
-Future<Void> ClusterControllerData::watchBlobRestoreCommand() {
-	return ClusterControllerDataImpl::watchBlobRestoreCommand(this);
+Future<Void> ClusterController::watchBlobRestoreCommand() {
+	return ClusterControllerImpl::watchBlobRestoreCommand(this);
 }
 
-Future<Void> ClusterControllerData::startBlobMigrator(double waitTime) {
-	return ClusterControllerDataImpl::startBlobMigrator(this, waitTime);
+Future<Void> ClusterController::startBlobMigrator(double waitTime) {
+	return ClusterControllerImpl::startBlobMigrator(this, waitTime);
 }
 
-Future<Void> ClusterControllerData::monitorBlobMigrator() {
-	return ClusterControllerDataImpl::monitorBlobMigrator(this);
+Future<Void> ClusterController::monitorBlobMigrator() {
+	return ClusterControllerImpl::monitorBlobMigrator(this);
 }
 
-Future<Void> ClusterControllerData::startBlobManager(double waitTime) {
-	return ClusterControllerDataImpl::startBlobManager(this, waitTime);
+Future<Void> ClusterController::startBlobManager(double waitTime) {
+	return ClusterControllerImpl::startBlobManager(this, waitTime);
 }
 
-Future<Void> ClusterControllerData::monitorBlobManager() {
-	return ClusterControllerDataImpl::monitorBlobManager(this);
+Future<Void> ClusterController::monitorBlobManager() {
+	return ClusterControllerImpl::monitorBlobManager(this);
 }
 
-Future<Void> ClusterControllerData::watchBlobGranulesConfigKey() {
-	return ClusterControllerDataImpl::watchBlobGranulesConfigKey(this);
+Future<Void> ClusterController::watchBlobGranulesConfigKey() {
+	return ClusterControllerImpl::watchBlobGranulesConfigKey(this);
 }
 
-Future<Void> ClusterControllerData::dbInfoUpdater() {
-	return ClusterControllerDataImpl::dbInfoUpdater(this);
+Future<Void> ClusterController::dbInfoUpdater() {
+	return ClusterControllerImpl::dbInfoUpdater(this);
 }
 
-Future<Void> ClusterControllerData::workerHealthMonitor() {
-	return ClusterControllerDataImpl::workerHealthMonitor(this);
+Future<Void> ClusterController::workerHealthMonitor() {
+	return ClusterControllerImpl::workerHealthMonitor(this);
 }
 
-Future<Void> ClusterControllerData::metaclusterMetricsUpdater() {
-	return ClusterControllerDataImpl::metaclusterMetricsUpdater(this);
+Future<Void> ClusterController::metaclusterMetricsUpdater() {
+	return ClusterControllerImpl::metaclusterMetricsUpdater(this);
 }
 
-Future<Void> ClusterControllerData::updateClusterId() {
-	return ClusterControllerDataImpl::updateClusterId(this);
+Future<Void> ClusterController::updateClusterId() {
+	return ClusterControllerImpl::updateClusterId(this);
 }
 
-Future<Void> ClusterControllerData::handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf) {
-	return ClusterControllerDataImpl::handleGetEncryptionAtRestMode(this, ccInterf);
+Future<Void> ClusterController::handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf) {
+	return ClusterControllerImpl::handleGetEncryptionAtRestMode(this, ccInterf);
 }
 
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
@@ -3032,7 +3030,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          ConfigDBType configDBType,
                                          Future<Void> recoveredDiskFiles,
                                          Reference<AsyncVar<Optional<UID>>> clusterId) {
-	state ClusterControllerData self(interf, locality, coordinators, clusterId);
+	state ClusterController self(interf, locality, coordinators, clusterId);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
@@ -3284,15 +3282,15 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 
 namespace {
 
-// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
+// Tests `ClusterController::updateWorkerHealth()` can update `ClusterController::workerHealth`
 // based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
-	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	state ClusterControllerData data(ClusterControllerFullInterface(),
-	                                 LocalityData(),
-	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                                 makeReference<AsyncVar<Optional<UID>>>());
+	// Create a testing ClusterController. Most of the internal states do not matter in this test.
+	state ClusterController data(ClusterControllerFullInterface(),
+	                             LocalityData(),
+	                             ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                 new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                             makeReference<AsyncVar<Optional<UID>>>());
 	state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
 	state NetworkAddress badPeer1(IPAddress(0x02020202), 1);
 	state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
@@ -3383,12 +3381,12 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 }
 
 TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
-	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                           makeReference<AsyncVar<Optional<UID>>>());
+	// Create a testing ClusterController. Most of the internal states do not matter in this test.
+	ClusterController data(ClusterControllerFullInterface(),
+	                       LocalityData(),
+	                       ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                           new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                       makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress worker1(IPAddress(0x01010101), 1);
 	NetworkAddress worker2(IPAddress(0x11111111), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
@@ -3433,12 +3431,12 @@ TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 }
 
 TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
-	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                           makeReference<AsyncVar<Optional<UID>>>());
+	// Create a testing ClusterController. Most of the internal states do not matter in this test.
+	ClusterController data(ClusterControllerFullInterface(),
+	                       LocalityData(),
+	                       ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                           new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                       makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress worker(IPAddress(0x01010101), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
 	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
@@ -3588,12 +3586,12 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 }
 
 TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
-	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                           makeReference<AsyncVar<Optional<UID>>>());
+	// Create a testing ClusterController. Most of the internal states do not matter in this test.
+	ClusterController data(ClusterControllerFullInterface(),
+	                       LocalityData(),
+	                       ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                           new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                       makeReference<AsyncVar<Optional<UID>>>());
 
 	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
 
@@ -3610,12 +3608,12 @@ TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
 }
 
 TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServers") {
-	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                           makeReference<AsyncVar<Optional<UID>>>());
+	// Create a testing ClusterController. Most of the internal states do not matter in this test.
+	ClusterController data(ClusterControllerFullInterface(),
+	                       LocalityData(),
+	                       ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                           new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                       makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress master(IPAddress(0x01010101), 1);
 	NetworkAddress tlog(IPAddress(0x02020202), 1);
 	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
@@ -3747,12 +3745,12 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 }
 
 TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServers") {
-	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                           makeReference<AsyncVar<Optional<UID>>>());
+	// Create a testing ClusterController. Most of the internal states do not matter in this test.
+	ClusterController data(ClusterControllerFullInterface(),
+	                       LocalityData(),
+	                       ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                           new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                       makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress master(IPAddress(0x01010101), 1);
 	NetworkAddress tlog(IPAddress(0x02020202), 1);
 	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);

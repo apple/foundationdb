@@ -49,19 +49,19 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 	Role getRole() const { return Role::RATEKEEPER; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::Ratekeeper; }
 
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
+	void setInterfaceToDbInfo(ClusterController& cc) const {
 		if (interface.present()) {
 			TraceEvent("CCRK_SetInf", cc.id).detail("Id", interface.get().id());
 			cc.db.setRatekeeper(interface.get());
 		}
 	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
+	void halt(ClusterController& cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present() && cc.id_worker.count(pid)) {
 			cc.id_worker[pid].haltRatekeeper =
 			    brokenPromiseToNever(interface.get().haltRatekeeper.getReply(HaltRatekeeperRequest(cc.id)));
 		}
 	}
-	void recruit(ClusterControllerData& cc) const {
+	void recruit(ClusterController& cc) const {
 		cc.lastRecruitTime = now();
 		cc.recruitRatekeeper.set(true);
 	}
@@ -74,19 +74,19 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 	Role getRole() const { return Role::DATA_DISTRIBUTOR; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::DataDistributor; }
 
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
+	void setInterfaceToDbInfo(ClusterController& cc) const {
 		if (interface.present()) {
 			TraceEvent("CCDD_SetInf", cc.id).detail("Id", interface.get().id());
 			cc.db.setDistributor(interface.get());
 		}
 	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
+	void halt(ClusterController& cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present() && cc.id_worker.count(pid)) {
 			cc.id_worker[pid].haltDistributor =
 			    brokenPromiseToNever(interface.get().haltDataDistributor.getReply(HaltDataDistributorRequest(cc.id)));
 		}
 	}
-	void recruit(ClusterControllerData& cc) const {
+	void recruit(ClusterController& cc) const {
 		cc.lastRecruitTime = now();
 		cc.recruitDistributor.set(true);
 	}
@@ -99,19 +99,20 @@ struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 	Role getRole() const { return Role::CONSISTENCYSCAN; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyScan; }
 
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
+	void setInterfaceToDbInfo(ClusterController& cc) const {
 		if (interface.present()) {
 			TraceEvent("CCCK_SetInf", cc.id).detail("Id", interface.get().id());
 			cc.db.setConsistencyScan(interface.get());
 		}
 	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
+	void halt(ClusterController& cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present()) {
 			cc.id_worker[pid].haltConsistencyScan =
 			    brokenPromiseToNever(interface.get().haltConsistencyScan.getReply(HaltConsistencyScanRequest(cc.id)));
 		}
 	}
-	void recruit(ClusterControllerData& cc) const {
+
+	void recruit(ClusterController& cc) const {
 		cc.lastRecruitTime = now();
 		cc.recruitConsistencyScan.set(true);
 	}
@@ -124,24 +125,24 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 	Role getRole() const { return Role::BLOB_MANAGER; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::BlobManager; }
 
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
+	void setInterfaceToDbInfo(ClusterController& cc) const {
 		if (interface.present()) {
 			TraceEvent("CCBM_SetInf", cc.id).detail("Id", interface.get().id());
 			cc.db.setBlobManager(interface.get());
 		}
 	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
+	void halt(ClusterController& cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present() && cc.id_worker.count(pid)) {
 			cc.id_worker[pid].haltBlobManager =
 			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc.id)));
 		}
 	}
-	void recruit(ClusterControllerData& cc) const {
+	void recruit(ClusterController& cc) const {
 		cc.lastRecruitTime = now();
 		cc.recruitBlobManager.set(true);
 	}
 
-	void haltBlobGranules(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
+	void haltBlobGranules(ClusterController& cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present()) {
 			cc.id_worker[pid].haltBlobManager =
 			    brokenPromiseToNever(interface.get().haltBlobGranules.getReply(HaltBlobGranulesRequest(cc.id)));
@@ -156,20 +157,20 @@ struct BlobMigratorSingleton : Singleton<BlobMigratorInterface> {
 	Role getRole() const { return Role::BLOB_MIGRATOR; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::BlobMigrator; }
 
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
+	void setInterfaceToDbInfo(ClusterController& cc) const {
 		if (interface.present()) {
 			TraceEvent("CCMG_SetInf", cc.id).detail("Id", interface.get().id());
 			cc.db.setBlobMigrator(interface.get());
 		}
 	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
+	void halt(ClusterController& cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present()) {
 			TraceEvent("CCMG_Halt", cc.id).detail("Id", interface.get().id());
 			cc.id_worker[pid].haltBlobMigrator =
 			    brokenPromiseToNever(interface.get().haltBlobMigrator.getReply(HaltBlobMigratorRequest(cc.id)));
 		}
 	}
-	void recruit(ClusterControllerData& cc) const {
+	void recruit(ClusterController& cc) const {
 		cc.lastRecruitTime = now();
 		cc.recruitBlobMigrator.set(true);
 	}
@@ -182,19 +183,19 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 	Role getRole() const { return Role::ENCRYPT_KEY_PROXY; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::EncryptKeyProxy; }
 
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
+	void setInterfaceToDbInfo(ClusterController& cc) const {
 		if (interface.present()) {
 			TraceEvent("CCEKP_SetInf", cc.id).detail("Id", interface.get().id());
 			cc.db.setEncryptKeyProxy(interface.get());
 		}
 	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
+	void halt(ClusterController& cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present() && cc.id_worker.count(pid)) {
 			cc.id_worker[pid].haltEncryptKeyProxy =
 			    brokenPromiseToNever(interface.get().haltEncryptKeyProxy.getReply(HaltEncryptKeyProxyRequest(cc.id)));
 		}
 	}
-	void recruit(ClusterControllerData& cc) const {
+	void recruit(ClusterController& cc) const {
 		cc.lastRecruitTime = now();
 		cc.recruitEncryptKeyProxy.set(true);
 	}
