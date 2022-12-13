@@ -231,14 +231,19 @@ ACTOR static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransacti
 ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 	state int64_t idmpKeySize;
 	state int64_t candidateDeleteSize;
-	state KeyRange candidateRangeToClean;
 	state KeyRange finalRange;
 	state Reference<ReadYourWritesTransaction> tr;
+
+	// Only assigned to once
 	state Key oldestKey;
 	state Version oldestVersion;
 	state int64_t oldestTime;
+
+	// Assigned to multiple times looking for a suitable range
 	state Version candidateDeleteVersion;
 	state int64_t candidateDeleteTime;
+	state KeyRange candidateRangeToClean;
+
 	tr = makeReference<ReadYourWritesTransaction>(db);
 	loop {
 		try {
@@ -266,15 +271,17 @@ ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 			// Keep dividing the candidate range until clearing it would not delete something younger than
 			// minAgeSeconds
 			loop {
-				if (oldestVersion == candidateDeleteVersion) {
-					candidateRangeToClean = KeyRangeRef(idempotencyIdKeys.begin, idempotencyIdKeys.begin);
-					break;
-				}
 
 				candidateRangeToClean =
 				    KeyRangeRef(oldestKey,
 				                BinaryWriter::toValue(bigEndian64(candidateDeleteVersion + 1), Unversioned())
 				                    .withPrefix(idempotencyIdKeys.begin));
+
+				// We know that we're okay deleting oldestVersion at this point. Go ahead and do that.
+				if (oldestVersion == candidateDeleteVersion) {
+					break;
+				}
+
 				// Find the youngest key in candidate range
 				wait(success(getBoundary(
 				    tr, candidateRangeToClean, Reverse::True, &candidateDeleteVersion, &candidateDeleteTime)));
@@ -307,6 +314,7 @@ ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 				tr->set(idempotencyIdsExpiredVersion,
 				        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ candidateDeleteVersion }, Unversioned()));
 				TraceEvent("IdempotencyIdsCleanerAttempt")
+				    .detail("Range", finalRange.toString())
 				    .detail("IdmpKeySizeEstimate", idmpKeySize)
 				    .detail("ClearRangeSizeEstimate", candidateDeleteSize)
 				    .detail("ExpiredVersion", candidateDeleteVersion)
