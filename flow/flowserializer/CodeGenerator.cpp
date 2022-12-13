@@ -352,16 +352,18 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	for (auto const& f : table.fields) {
 		emit(out, f);
 	}
+	auto tableTypeName = assertTrue(context->resolve(table.name))->first;
 	int totalBytes = 8;
 	// write serialization code
 	// TODO: Return pointer to buffer for testing
 	out.source << fmt::format("#include <FlatbuffersTypes.h>\n");
 	out.source << fmt::format("#include <utility>\n");
 	out.source << fmt::format("using namespace flowserializer;\n");
-	out.source << fmt::format("std::pair<uint8_t*, int> {}::{}::write(flowflat::Writer& w) const {{", "", table.name);
+	out.source << fmt::format("std::pair<uint8_t*, int> {}::{}::write(flowflat::Writer& w) const {{",
+	                          fmt::join(tableTypeName.path, "::"),
+	                          table.name);
 	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
 	// known data
-	// TODO: Create buffer
 	// TODO: Only generate serialization for root_type
 	std::stringstream writer;
 	auto serMap = context->serializationInformation(table.name);
@@ -369,6 +371,11 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	int curr = 8;
 	// 0. write all vtables
 	for (auto const& [typeName, serInfo] : serMap) {
+		fmt::print("serMapPath: {}, serMapTypeName: {}, serMapSize: {}, vtable empty: {}\n",
+		           fmt::join(typeName.path, "::"),
+		           typeName.name,
+		           serMap.size(),
+		           serInfo.vtable->empty());
 		if (serInfo.vtable->empty()) {
 			continue;
 		}
@@ -388,23 +395,26 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.source << writer.str();
 
 	// 1. Iterate through all fields and generate all types simultaneously
-	int curr2 = curr;
 	out.source << fmt::format("\n\t// table (data or offsets to data)\n");
 	out.source << fmt::format("\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
 	                          "(subtracted from current address to get vtable address)\n",
-	                          curr2,
-	                          curr2 - 8);
-	curr2 += sizeof(soffset_t);
-	for (auto const& field : table.fields) {
-		auto fieldType = assertTrue(context->resolve(field.type))->second;
-		auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType);
-		fmt::print("FieldType: {}, typeSize={}\n", field.type, type->_size);
+	                          curr,
+	                          curr - 8);
+	for (int i = 0; i < table.fields.size(); ++i) {
+		const auto field = table.fields[i];
+		auto vtable = serMap.at(tableTypeName).vtable;
+		if (vtable->empty()) {
+			continue;
+		}
 		if (field.type == "int") {
-			out.source << fmt::format("\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
+			out.source << fmt::format(
+			    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr + vtable.value()[i + 2], field.name);
 		} else if (field.type == "short") {
-			out.source << fmt::format("\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
+			out.source << fmt::format(
+			    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr + vtable.value()[i + 2], field.name);
 		} else if (field.type == "string") {
-			out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr2, '?');
+			out.source << fmt::format(
+			    "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr + vtable.value()[i + 2], '?');
 			out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();\n", '?', field.name);
 			out.source << fmt::format("\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size();\n", '?', sizeof(uoffset_t), field.name);
 			out.source << fmt::format("\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;\n", '?', sizeof(uoffset_t), field.name);
