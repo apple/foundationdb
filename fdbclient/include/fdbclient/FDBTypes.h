@@ -1521,6 +1521,8 @@ struct EncryptionAtRestMode {
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
 
+	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
+
 	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
