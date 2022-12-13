@@ -346,10 +346,9 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 }
 
 void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
-	out.header << fmt::format("struct {} {{\n", table.name);
-	out.header << fmt::format(
-	    "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Table; }};\n\n");
-	out.header << fmt::format("\tstd::pair<uint8_t*, int> write(flowflat::Writer& w) const;");
+	EMIT(out.header, "struct {} {{", table.name);
+	EMIT(out.header, "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Table; }};\n");
+	EMIT(out.header, "\tstd::pair<uint8_t*, int> write(flowflat::Writer& w) const;");
 
 	for (auto const& f : table.fields) {
 		emit(out, f);
@@ -358,12 +357,13 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	int totalBytes = 8;
 	// write serialization code
 	// TODO: Return pointer to buffer for testing
-	out.source << fmt::format("#include <FlatbuffersTypes.h>\n");
-	out.source << fmt::format("#include <utility>\n");
-	out.source << fmt::format("using namespace flowserializer;\n");
-	out.source << fmt::format("std::pair<uint8_t*, int> {}::{}::write(flowflat::Writer& w) const {{",
-	                          fmt::join(tableTypeName.path, "::"),
-	                          table.name);
+	EMIT(out.source, "#include <FlatbuffersTypes.h>");
+	EMIT(out.source, "#include <utility>");
+	EMIT(out.source, "using namespace flowserializer;");
+	EMIT(out.source,
+	     "std::pair<uint8_t*, int> {}::{}::write(flowflat::Writer& w) const {{",
+	     fmt::join(tableTypeName.path, "::"),
+	     table.name);
 	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
 	// known data
 	// TODO: Only generate serialization for root_type
@@ -381,7 +381,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		if (serInfo.vtable->empty()) {
 			continue;
 		}
-		writer << fmt::format("\n\t// vtable for {}{}{}\n",
+		writer << fmt::format("\t// vtable for {}{}{}\n",
 		                      fmt::join(typeName.path, "::"),
 		                      typeName.path.empty() ? "" : "::",
 		                      typeName.name);
@@ -393,15 +393,16 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		totalBytes += (*serInfo.vtable)[0];
 		totalBytes += (*serInfo.vtable)[1];
 	}
-	out.source << fmt::format("\n\tuint8_t* buffer = new uint8_t[{}];\n", totalBytes);
+	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{}];\n", totalBytes);
 	out.source << writer.str();
 
 	// 1. Iterate through all fields and generate all types simultaneously
-	out.source << fmt::format("\n\t// table (data or offsets to data)\n");
-	out.source << fmt::format("\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
-	                          "(subtracted from current address to get vtable address)\n",
-	                          curr,
-	                          curr - 8);
+	EMIT(out.source, "\n\t// table (data or offsets to data)");
+	EMIT(out.source,
+	     "\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
+	     "(subtracted from current address to get vtable address)",
+	     curr,
+	     curr - 8);
 	for (int i = 0; i < table.fields.size(); ++i) {
 		const auto field = table.fields[i];
 		auto vtable = serMap.at(tableTypeName).vtable;
@@ -409,31 +410,44 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 			continue;
 		}
 		if (field.type == "int") {
-			out.source << fmt::format(
-			    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr + vtable.value()[i + 2], field.name);
+			EMIT(out.source,
+			     "\t*reinterpret_cast<{}*>(buffer + {}) = {};",
+			     field.type,
+			     curr + vtable.value()[i + 2],
+			     field.name);
 		} else if (field.type == "short") {
-			out.source << fmt::format(
-			    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr + vtable.value()[i + 2], field.name);
+			EMIT(out.source,
+			     "\t*reinterpret_cast<{}*>(buffer + {}) = {};",
+			     field.type,
+			     curr + vtable.value()[i + 2],
+			     field.name);
 		} else if (field.type == "string") {
-			out.source << fmt::format(
-			    "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr + vtable.value()[i + 2], '?');
-			out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();\n", '?', field.name);
-			out.source << fmt::format("\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size();\n", '?', sizeof(uoffset_t), field.name);
-			out.source << fmt::format("\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;\n", '?', sizeof(uoffset_t), field.name);
+			EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr + vtable.value()[i + 2], '?');
+			EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();", '?', field.name);
+			EMIT(out.source,
+			     "\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size();",
+			     '?',
+			     sizeof(uoffset_t),
+			     field.name);
+			EMIT(out.source,
+			     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;",
+			     '?',
+			     sizeof(uoffset_t),
+			     field.name);
 		}
 	}
 
 	// 2. Write header
-	out.source << fmt::format("\n\t// header\n");
-	out.source << fmt::format("\t// offset to root table\n");
-	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer) = {};\n", curr);
-	out.source << fmt::format("\t// file identifier\n");
-	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};\n", 0);
+	EMIT(out.source, "\n\t// header");
+	EMIT(out.source, "\t// offset to root table");
+	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer) = {};", curr);
+	EMIT(out.source, "\t// file identifier");
+	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};", 0);
 
-	out.source << fmt::format("\treturn std::make_pair(buffer, {});\n", totalBytes);
+	EMIT(out.source, "\treturn std::make_pair(buffer, {});", totalBytes);
 
-	out.source << "}\n";
-	out.header << "};\n";
+	EMIT(out.source, "}}");
+	EMIT(out.header, "}};");
 	emit(out, OldSerializers{ table });
 }
 
