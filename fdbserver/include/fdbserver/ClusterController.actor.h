@@ -36,6 +36,7 @@
 #include "fdbclient/Metacluster.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/ClusterControllerDBInfo.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/SystemMonitor.h"
@@ -127,140 +128,6 @@ class ClusterController {
 	friend class ClusterControllerImpl;
 
 public:
-	struct DBInfo {
-		Reference<AsyncVar<ClientDBInfo>> clientInfo;
-		Reference<AsyncVar<ServerDBInfo>> serverInfo;
-		std::map<NetworkAddress, double> incompatibleConnections;
-		AsyncTrigger forceMasterFailure;
-		int64_t masterRegistrationCount;
-		int64_t dbInfoCount;
-		bool recoveryStalled;
-		bool forceRecovery;
-		DatabaseConfiguration config; // Asynchronously updated via master registration
-		DatabaseConfiguration fullyRecoveredConfig;
-		Database db;
-		int unfinishedRecoveries;
-		int logGenerations;
-		bool cachePopulated;
-		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
-		Future<Void> clientCounter;
-		int clientCount;
-		AsyncVar<bool> blobGranulesEnabled;
-		AsyncVar<bool> blobRestoreEnabled;
-		ClusterType clusterType = ClusterType::STANDALONE;
-		Optional<ClusterName> metaclusterName;
-		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		MetaclusterMetrics metaclusterMetrics;
-
-		DBInfo()
-		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
-		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
-		    db(DatabaseContext::create(clientInfo,
-		                               Future<Void>(),
-		                               LocalityData(),
-		                               EnableLocalityLoadBalance::True,
-		                               TaskPriority::DefaultEndpoint,
-		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
-		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
-			clientCounter = countClients(this);
-		}
-
-		void setDistributor(const DataDistributorInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.distributor = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void setRatekeeper(const RatekeeperInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.ratekeeper = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void setBlobManager(const BlobManagerInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.blobManager = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void setBlobMigrator(const BlobMigratorInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.blobMigrator = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
-			auto newInfo = serverInfo->get();
-			auto newClientInfo = clientInfo->get();
-			newClientInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.encryptKeyProxy = interf;
-			newInfo.client.encryptKeyProxy = interf;
-			newClientInfo.encryptKeyProxy = interf;
-			serverInfo->set(newInfo);
-			clientInfo->set(newClientInfo);
-		}
-
-		void setConsistencyScan(const ConsistencyScanInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.consistencyScan = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void clearInterf(ProcessClass::ClassType t) {
-			auto newInfo = serverInfo->get();
-			auto newClientInfo = clientInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newClientInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			if (t == ProcessClass::DataDistributorClass) {
-				newInfo.distributor = Optional<DataDistributorInterface>();
-			} else if (t == ProcessClass::RatekeeperClass) {
-				newInfo.ratekeeper = Optional<RatekeeperInterface>();
-			} else if (t == ProcessClass::BlobManagerClass) {
-				newInfo.blobManager = Optional<BlobManagerInterface>();
-			} else if (t == ProcessClass::BlobMigratorClass) {
-				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
-			} else if (t == ProcessClass::EncryptKeyProxyClass) {
-				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
-				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
-				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
-			} else if (t == ProcessClass::ConsistencyScanClass) {
-				newInfo.consistencyScan = Optional<ConsistencyScanInterface>();
-			}
-			serverInfo->set(newInfo);
-			clientInfo->set(newClientInfo);
-		}
-
-		ACTOR static Future<Void> countClients(DBInfo* self) {
-			loop {
-				wait(delay(SERVER_KNOBS->CC_PRUNE_CLIENTS_INTERVAL));
-
-				self->clientCount = 0;
-				for (auto itr = self->clientStatus.begin(); itr != self->clientStatus.end();) {
-					if (now() - itr->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
-						self->clientCount += itr->second.second.clientCount;
-						++itr;
-					} else {
-						itr = self->clientStatus.erase(itr);
-					}
-				}
-			}
-		}
-	};
-
 	struct UpdateWorkerList {
 		Future<Void> init(Database const& db) { return update(this, db); }
 
@@ -3336,7 +3203,7 @@ public:
 	}
 
 	Future<Optional<Value>> getPreviousCoordinators();
-	Future<Void> clusterWatchDatabase(DBInfo* db, ServerCoordinators coordinators, Future<Void> recoveredDiskFiles);
+	Future<Void> clusterWatchDatabase(ClusterControllerDBInfo* db, ServerCoordinators coordinators, Future<Void> recoveredDiskFiles);
 	void checkOutstandingRecruitmentRequests();
 	void checkOutstandingRemoteRecruitmentRequests();
 	void checkOutstandingStorageRequests();
@@ -3477,7 +3344,7 @@ public:
 	std::set<Endpoint> updateDBInfoEndpoints;
 	std::set<Endpoint> removedDBInfoEndpoints;
 
-	DBInfo db;
+	ClusterControllerDBInfo db;
 	Database cx;
 	double startTime;
 	Future<Void> goodRecruitmentTime;

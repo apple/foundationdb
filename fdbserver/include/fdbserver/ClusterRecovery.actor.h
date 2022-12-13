@@ -37,6 +37,7 @@
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/ClusterController.actor.h"
+#include "fdbserver/ClusterControllerDBInfo.h"
 #include "fdbserver/DBCoreState.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -305,7 +306,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 };
 
 ACTOR Future<Void> recruitNewMaster(ClusterController* cluster,
-                                    ClusterController::DBInfo* db,
+                                    ClusterControllerDBInfo* db,
                                     MasterInterface* newMaster);
 ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self, bool exThrown);
 ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);

@@ -74,7 +74,7 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 }
 
 ACTOR Future<Void> recruitNewMaster(ClusterController* cluster,
-                                    ClusterController::DBInfo* db,
+                                    ClusterControllerDBInfo* db,
                                     MasterInterface* newMaster) {
 	state Future<ErrorOr<MasterInterface>> fNewMaster;
 	state WorkerFitnessInfo masterWorker;
