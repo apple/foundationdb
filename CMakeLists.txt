@@ -212,6 +212,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 ################################################################################
+# flowserializer tests
+################################################################################
+
+include(CompileFlatBuffers)
+add_subdirectory(flow/flowserializer/test)
+
+################################################################################
 # process compile commands for IDE
 ################################################################################
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
