@@ -3400,6 +3400,14 @@ public:
 	Future<Void> updateClusterId();
 	Future<Void> handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf);
 
+	static Future<Void> run(ClusterControllerFullInterface interf,
+	                        Future<Void> leaderFail,
+	                        ServerCoordinators coordinators,
+	                        LocalityData locality,
+	                        ConfigDBType configDBType,
+	                        Future<Void> recoveredDiskFiles,
+	                        Reference<AsyncVar<Optional<UID>>> clusterId);
+
 	// Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
 	// or, halts the existing singleton in favour of the requesting one
 	template <class SingletonClass>

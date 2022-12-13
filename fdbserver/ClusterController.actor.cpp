@@ -78,6 +78,170 @@
 
 #define TIME_KEEPER_VERSION "1"_sr
 
+ACTOR static Future<Void> clusterGetServerInfo(ClusterController::DBInfo* db,
+                                               UID knownServerInfoID,
+                                               ReplyPromise<ServerDBInfo> reply) {
+	while (db->serverInfo->get().id == knownServerInfoID) {
+		choose {
+			when(wait(yieldedFuture(db->serverInfo->onChange()))) {}
+			when(wait(delayJittered(300))) {
+				break;
+			} // The server might be long gone!
+		}
+	}
+	reply.send(db->serverInfo->get());
+	return Void();
+}
+
+ACTOR static Future<Void> clusterOpenDatabase(ClusterController::DBInfo* db, OpenDatabaseRequest req) {
+	db->clientStatus[req.reply.getEndpoint().getPrimaryAddress()] = std::make_pair(now(), req);
+	if (db->clientStatus.size() > 10000) {
+		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
+	}
+
+	while (db->clientInfo->get().id == req.knownClientInfoID) {
+		choose {
+			when(wait(db->clientInfo->onChange())) {}
+			when(wait(delayJittered(SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL))) {
+				break;
+			} // The client might be long gone!
+		}
+	}
+
+	req.reply.send(db->clientInfo->get());
+	return Void();
+}
+
+ACTOR Future<Void> monitorServerInfoConfig(ClusterController::DBInfo* db) {
+	loop {
+		state ReadYourWritesTransaction tr(db->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Optional<Value> configVal = wait(tr.get(latencyBandConfigKey));
+				Optional<LatencyBandConfig> config;
+				if (configVal.present()) {
+					config = LatencyBandConfig::parse(configVal.get());
+				}
+
+				auto serverInfo = db->serverInfo->get();
+				if (config != serverInfo.latencyBandConfig) {
+					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
+					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.infoGeneration = ++db->dbInfoCount;
+					serverInfo.latencyBandConfig = config;
+					db->serverInfo->set(serverInfo);
+				}
+
+				state Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
+
+				wait(tr.commit());
+				wait(configChangeFuture);
+
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
+// Monitors the global configuration version key for changes. When changes are
+// made, the global configuration history is read and any updates are sent to
+// all processes in the system by updating the ClientDBInfo object. The
+// GlobalConfig actor class contains the functionality to read the latest
+// history and update the processes local view.
+ACTOR Future<Void> monitorGlobalConfig(ClusterController::DBInfo* db) {
+	loop {
+		state ReadYourWritesTransaction tr(db->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
+				state ClientDBInfo clientInfo = db->serverInfo->get().client;
+
+				if (globalConfigVersion.present()) {
+					// Since the history keys end with versionstamps, they
+					// should be sorted correctly (versionstamps are stored in
+					// big-endian order).
+					RangeResult globalConfigHistory =
+					    wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
+					// If the global configuration version key has been set,
+					// the history should contain at least one item.
+					ASSERT(globalConfigHistory.size() > 0);
+					clientInfo.history.clear();
+
+					for (const auto& kv : globalConfigHistory) {
+						ObjectReader reader(kv.value.begin(), IncludeVersion());
+						if (reader.protocolVersion() != g_network->protocolVersion()) {
+							// If the protocol version has changed, the
+							// GlobalConfig actor should refresh its view by
+							// reading the entire global configuration key
+							// range.  Setting the version to the max int64_t
+							// will always cause the global configuration
+							// updater to refresh its view of the configuration
+							// keyspace.
+							clientInfo.history.clear();
+							clientInfo.history.emplace_back(std::numeric_limits<Version>::max());
+							break;
+						}
+
+						VersionHistory vh;
+						reader.deserialize(vh);
+
+						// Read commit version out of versionstamp at end of key.
+						BinaryReader versionReader =
+						    BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), Unversioned());
+						Version historyCommitVersion;
+						versionReader >> historyCommitVersion;
+						historyCommitVersion = bigEndian64(historyCommitVersion);
+						vh.version = historyCommitVersion;
+
+						clientInfo.history.push_back(std::move(vh));
+					}
+
+					if (clientInfo.history.size() > 0) {
+						// The first item in the historical list of mutations
+						// is only used to:
+						//   a) Recognize that some historical changes may have
+						//      been missed, and the entire global
+						//      configuration keyspace needs to be read, or..
+						//   b) Check which historical updates have already
+						//      been applied. If this is the case, the first
+						//      history item must have a version greater than
+						//      or equal to whatever version the global
+						//      configuration was last updated at, and
+						//      therefore won't need to be applied again.
+						clientInfo.history[0].mutations = Standalone<VectorRef<MutationRef>>();
+					}
+
+					clientInfo.id = deterministicRandom()->randomUniqueID();
+					// Update ServerDBInfo so fdbserver processes receive updated history.
+					ServerDBInfo serverInfo = db->serverInfo->get();
+					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.infoGeneration = ++db->dbInfoCount;
+					serverInfo.client = clientInfo;
+					db->serverInfo->set(serverInfo);
+
+					// Update ClientDBInfo so client processes receive updated history.
+					db->clientInfo->set(clientInfo);
+				}
+
+				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
+				wait(tr.commit());
+				wait(globalConfigFuture);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> doEmptyCommit(Database cx) {
 	state Transaction tr(cx);
 	loop {
@@ -2098,6 +2262,156 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> run(ClusterControllerFullInterface interf,
+	                              Future<Void> leaderFail,
+	                              ServerCoordinators coordinators,
+	                              LocalityData locality,
+	                              ConfigDBType configDBType,
+	                              Future<Void> recoveredDiskFiles,
+	                              Reference<AsyncVar<Optional<UID>>> clusterId) {
+		state ClusterController self(interf, locality, coordinators, clusterId);
+		state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
+		state uint64_t step = 0;
+		state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
+		state ConfigBroadcaster configBroadcaster;
+		if (configDBType != ConfigDBType::DISABLED) {
+			configBroadcaster = ConfigBroadcaster(coordinators, configDBType, self.getPreviousCoordinators());
+		}
+
+		// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+			self.addActor.send(self.monitorEncryptKeyProxy());
+		}
+		// TODO: Extract db within function?
+		self.addActor.send(
+		    self.clusterWatchDatabase(&self.db, coordinators, recoveredDiskFiles)); // Start the master database
+		self.addActor.send(self.updateWorkerList.init(self.db.db));
+		self.addActor.send(self.statusServer(interf.clientInterface.databaseStatus.getFuture(),
+		                                     coordinators,
+		                                     (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
+		self.addActor.send(self.timeKeeper());
+		self.addActor.send(self.monitorProcessClasses());
+		self.addActor.send(monitorServerInfoConfig(&self.db));
+		self.addActor.send(monitorGlobalConfig(&self.db));
+		self.addActor.send(self.updatedChangingDatacenters());
+		self.addActor.send(self.updatedChangedDatacenters());
+		self.addActor.send(self.updateDatacenterVersionDifference());
+		self.addActor.send(self.handleForcedRecoveries(interf));
+		self.addActor.send(self.handleTriggerAuditStorage(interf));
+		self.addActor.send(self.monitorDataDistributor());
+		self.addActor.send(self.monitorRatekeeper());
+		self.addActor.send(self.monitorBlobManager());
+		self.addActor.send(self.watchBlobGranulesConfigKey());
+		self.addActor.send(self.monitorBlobMigrator());
+		self.addActor.send(self.watchBlobRestoreCommand());
+		self.addActor.send(self.monitorConsistencyScan());
+		self.addActor.send(self.metaclusterMetricsUpdater());
+		self.addActor.send(self.dbInfoUpdater());
+		self.addActor.send(self.updateClusterId());
+		self.addActor.send(self.handleGetEncryptionAtRestMode(interf));
+		self.addActor.send(
+		    self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
+		                                                self.id,
+		                                                SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+		                                                self.id.toString() + "/ClusterControllerMetrics"));
+		self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
+		// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
+
+		if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
+			self.addActor.send(self.workerHealthMonitor());
+			self.addActor.send(self.updateRemoteDCHealth());
+		}
+
+		loop choose {
+			when(ErrorOr<Void> err = wait(error)) {
+				if (err.isError() && err.getError().code() != error_code_restart_cluster_controller) {
+					endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Error", false, err.getError());
+				} else {
+					endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
+				}
+
+				// We shut down normally even if there was a serious error (so this fdbserver may be re-elected
+				// cluster controller)
+				return Void();
+			}
+			when(OpenDatabaseRequest req = waitNext(interf.clientInterface.openDatabase.getFuture())) {
+				++self.openDatabaseRequests;
+				self.addActor.send(clusterOpenDatabase(&self.db, req));
+			}
+			when(RecruitStorageRequest req = waitNext(interf.recruitStorage.getFuture())) {
+				self.clusterRecruitStorage(req);
+			}
+			when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
+				self.clusterRecruitBlobWorker(req);
+			}
+			when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
+				++self.registerWorkerRequests;
+				self.addActor.send(
+				    self.registerWorker(req,
+				                        coordinators.ccr->getConnectionString(),
+				                        (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
+			}
+			when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
+				++self.getWorkersRequests;
+				std::vector<WorkerDetails> workers;
+
+				for (auto const& [id, worker] : self.id_worker) {
+					if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
+					    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
+						continue;
+					}
+
+					if ((req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) &&
+					    worker.details.processClass.classType() != ProcessClass::TesterClass) {
+						continue;
+					}
+
+					workers.push_back(worker.details);
+				}
+
+				req.reply.send(workers);
+			}
+			when(GetClientWorkersRequest req = waitNext(interf.clientInterface.getClientWorkers.getFuture())) {
+				++self.getClientWorkersRequests;
+				std::vector<ClientWorkerInterface> workers;
+				for (auto& it : self.id_worker) {
+					if (it.second.details.processClass.classType() != ProcessClass::TesterClass) {
+						workers.push_back(it.second.details.interf.clientInterface);
+					}
+				}
+				req.reply.send(workers);
+			}
+			when(wait(coordinationPingDelay)) {
+				CoordinationPingMessage message(self.id, step++);
+				for (auto& it : self.id_worker)
+					it.second.details.interf.coordinationPing.send(message);
+				coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
+				TraceEvent("CoordinationPingSent", self.id).detail("TimeStep", message.timeStep);
+			}
+			when(RegisterMasterRequest req = waitNext(interf.registerMaster.getFuture())) {
+				++self.registerMasterRequests;
+				self.clusterRegisterMaster(req);
+			}
+			when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
+				if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
+					self.updateWorkerHealth(req);
+				}
+			}
+			when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
+				self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
+			}
+			when(wait(leaderFail)) {
+				// We are no longer the leader if this has changed.
+				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
+				CODE_PROBE(true, "Leader replaced");
+				return Void();
+			}
+			when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) {
+				ping.send(Void());
+			}
+		}
+	}
+
 }; // class ClusterControllerImpl
 
 Future<Optional<Value>> ClusterController::getPreviousCoordinators() {
@@ -2108,40 +2422,6 @@ Future<Void> ClusterController::clusterWatchDatabase(ClusterController::DBInfo* 
                                                      ServerCoordinators coordinators,
                                                      Future<Void> recoveredDiskFiles) {
 	return ClusterControllerImpl::clusterWatchDatabase(this, db, coordinators, recoveredDiskFiles);
-}
-
-ACTOR static Future<Void> clusterGetServerInfo(ClusterController::DBInfo* db,
-                                               UID knownServerInfoID,
-                                               ReplyPromise<ServerDBInfo> reply) {
-	while (db->serverInfo->get().id == knownServerInfoID) {
-		choose {
-			when(wait(yieldedFuture(db->serverInfo->onChange()))) {}
-			when(wait(delayJittered(300))) {
-				break;
-			} // The server might be long gone!
-		}
-	}
-	reply.send(db->serverInfo->get());
-	return Void();
-}
-
-ACTOR static Future<Void> clusterOpenDatabase(ClusterController::DBInfo* db, OpenDatabaseRequest req) {
-	db->clientStatus[req.reply.getEndpoint().getPrimaryAddress()] = std::make_pair(now(), req);
-	if (db->clientStatus.size() > 10000) {
-		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
-	}
-
-	while (db->clientInfo->get().id == req.knownClientInfoID) {
-		choose {
-			when(wait(db->clientInfo->onChange())) {}
-			when(wait(delayJittered(SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL))) {
-				break;
-			} // The client might be long gone!
-		}
-	}
-
-	req.reply.send(db->clientInfo->get());
-	return Void();
 }
 
 void ClusterController::checkOutstandingRecruitmentRequests() {
@@ -2785,136 +3065,6 @@ Future<Void> ClusterController::monitorProcessClasses() {
 	return ClusterControllerImpl::monitorProcessClasses(this);
 }
 
-ACTOR Future<Void> monitorServerInfoConfig(ClusterController::DBInfo* db) {
-	loop {
-		state ReadYourWritesTransaction tr(db->db);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-				Optional<Value> configVal = wait(tr.get(latencyBandConfigKey));
-				Optional<LatencyBandConfig> config;
-				if (configVal.present()) {
-					config = LatencyBandConfig::parse(configVal.get());
-				}
-
-				auto serverInfo = db->serverInfo->get();
-				if (config != serverInfo.latencyBandConfig) {
-					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
-					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++db->dbInfoCount;
-					serverInfo.latencyBandConfig = config;
-					db->serverInfo->set(serverInfo);
-				}
-
-				state Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
-
-				wait(tr.commit());
-				wait(configChangeFuture);
-
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-}
-
-// Monitors the global configuration version key for changes. When changes are
-// made, the global configuration history is read and any updates are sent to
-// all processes in the system by updating the ClientDBInfo object. The
-// GlobalConfig actor class contains the functionality to read the latest
-// history and update the processes local view.
-ACTOR Future<Void> monitorGlobalConfig(ClusterController::DBInfo* db) {
-	loop {
-		state ReadYourWritesTransaction tr(db->db);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
-				state ClientDBInfo clientInfo = db->serverInfo->get().client;
-
-				if (globalConfigVersion.present()) {
-					// Since the history keys end with versionstamps, they
-					// should be sorted correctly (versionstamps are stored in
-					// big-endian order).
-					RangeResult globalConfigHistory =
-					    wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
-					// If the global configuration version key has been set,
-					// the history should contain at least one item.
-					ASSERT(globalConfigHistory.size() > 0);
-					clientInfo.history.clear();
-
-					for (const auto& kv : globalConfigHistory) {
-						ObjectReader reader(kv.value.begin(), IncludeVersion());
-						if (reader.protocolVersion() != g_network->protocolVersion()) {
-							// If the protocol version has changed, the
-							// GlobalConfig actor should refresh its view by
-							// reading the entire global configuration key
-							// range.  Setting the version to the max int64_t
-							// will always cause the global configuration
-							// updater to refresh its view of the configuration
-							// keyspace.
-							clientInfo.history.clear();
-							clientInfo.history.emplace_back(std::numeric_limits<Version>::max());
-							break;
-						}
-
-						VersionHistory vh;
-						reader.deserialize(vh);
-
-						// Read commit version out of versionstamp at end of key.
-						BinaryReader versionReader =
-						    BinaryReader(kv.key.removePrefix(globalConfigHistoryPrefix), Unversioned());
-						Version historyCommitVersion;
-						versionReader >> historyCommitVersion;
-						historyCommitVersion = bigEndian64(historyCommitVersion);
-						vh.version = historyCommitVersion;
-
-						clientInfo.history.push_back(std::move(vh));
-					}
-
-					if (clientInfo.history.size() > 0) {
-						// The first item in the historical list of mutations
-						// is only used to:
-						//   a) Recognize that some historical changes may have
-						//      been missed, and the entire global
-						//      configuration keyspace needs to be read, or..
-						//   b) Check which historical updates have already
-						//      been applied. If this is the case, the first
-						//      history item must have a version greater than
-						//      or equal to whatever version the global
-						//      configuration was last updated at, and
-						//      therefore won't need to be applied again.
-						clientInfo.history[0].mutations = Standalone<VectorRef<MutationRef>>();
-					}
-
-					clientInfo.id = deterministicRandom()->randomUniqueID();
-					// Update ServerDBInfo so fdbserver processes receive updated history.
-					ServerDBInfo serverInfo = db->serverInfo->get();
-					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++db->dbInfoCount;
-					serverInfo.client = clientInfo;
-					db->serverInfo->set(serverInfo);
-
-					// Update ClientDBInfo so client processes receive updated history.
-					db->clientInfo->set(clientInfo);
-				}
-
-				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
-				wait(tr.commit());
-				wait(globalConfigFuture);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-}
-
 Future<Void> ClusterController::updatedChangingDatacenters() {
 	return ClusterControllerImpl::updatedChangingDatacenters(this);
 }
@@ -3023,153 +3173,15 @@ Future<Void> ClusterController::handleGetEncryptionAtRestMode(ClusterControllerF
 	return ClusterControllerImpl::handleGetEncryptionAtRestMode(this, ccInterf);
 }
 
-ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
-                                         Future<Void> leaderFail,
-                                         ServerCoordinators coordinators,
-                                         LocalityData locality,
-                                         ConfigDBType configDBType,
-                                         Future<Void> recoveredDiskFiles,
-                                         Reference<AsyncVar<Optional<UID>>> clusterId) {
-	state ClusterController self(interf, locality, coordinators, clusterId);
-	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
-	state uint64_t step = 0;
-	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
-	state ConfigBroadcaster configBroadcaster;
-	if (configDBType != ConfigDBType::DISABLED) {
-		configBroadcaster = ConfigBroadcaster(coordinators, configDBType, self.getPreviousCoordinators());
-	}
-
-	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		self.addActor.send(self.monitorEncryptKeyProxy());
-	}
-	// TODO: Extract db within function?
-	self.addActor.send(
-	    self.clusterWatchDatabase(&self.db, coordinators, recoveredDiskFiles)); // Start the master database
-	self.addActor.send(self.updateWorkerList.init(self.db.db));
-	self.addActor.send(self.statusServer(interf.clientInterface.databaseStatus.getFuture(),
-	                                     coordinators,
-	                                     (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
-	self.addActor.send(self.timeKeeper());
-	self.addActor.send(self.monitorProcessClasses());
-	self.addActor.send(monitorServerInfoConfig(&self.db));
-	self.addActor.send(monitorGlobalConfig(&self.db));
-	self.addActor.send(self.updatedChangingDatacenters());
-	self.addActor.send(self.updatedChangedDatacenters());
-	self.addActor.send(self.updateDatacenterVersionDifference());
-	self.addActor.send(self.handleForcedRecoveries(interf));
-	self.addActor.send(self.handleTriggerAuditStorage(interf));
-	self.addActor.send(self.monitorDataDistributor());
-	self.addActor.send(self.monitorRatekeeper());
-	self.addActor.send(self.monitorBlobManager());
-	self.addActor.send(self.watchBlobGranulesConfigKey());
-	self.addActor.send(self.monitorBlobMigrator());
-	self.addActor.send(self.watchBlobRestoreCommand());
-	self.addActor.send(self.monitorConsistencyScan());
-	self.addActor.send(self.metaclusterMetricsUpdater());
-	self.addActor.send(self.dbInfoUpdater());
-	self.addActor.send(self.updateClusterId());
-	self.addActor.send(self.handleGetEncryptionAtRestMode(interf));
-	self.addActor.send(self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
-	                                                               self.id,
-	                                                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                                                               self.id.toString() + "/ClusterControllerMetrics"));
-	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
-	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
-
-	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
-		self.addActor.send(self.workerHealthMonitor());
-		self.addActor.send(self.updateRemoteDCHealth());
-	}
-
-	loop choose {
-		when(ErrorOr<Void> err = wait(error)) {
-			if (err.isError() && err.getError().code() != error_code_restart_cluster_controller) {
-				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Error", false, err.getError());
-			} else {
-				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
-			}
-
-			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected
-			// cluster controller)
-			return Void();
-		}
-		when(OpenDatabaseRequest req = waitNext(interf.clientInterface.openDatabase.getFuture())) {
-			++self.openDatabaseRequests;
-			self.addActor.send(clusterOpenDatabase(&self.db, req));
-		}
-		when(RecruitStorageRequest req = waitNext(interf.recruitStorage.getFuture())) {
-			self.clusterRecruitStorage(req);
-		}
-		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
-			self.clusterRecruitBlobWorker(req);
-		}
-		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
-			++self.registerWorkerRequests;
-			self.addActor.send(
-			    self.registerWorker(req,
-			                        coordinators.ccr->getConnectionString(),
-			                        (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
-		}
-		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
-			++self.getWorkersRequests;
-			std::vector<WorkerDetails> workers;
-
-			for (auto const& [id, worker] : self.id_worker) {
-				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
-					continue;
-				}
-
-				if ((req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) &&
-				    worker.details.processClass.classType() != ProcessClass::TesterClass) {
-					continue;
-				}
-
-				workers.push_back(worker.details);
-			}
-
-			req.reply.send(workers);
-		}
-		when(GetClientWorkersRequest req = waitNext(interf.clientInterface.getClientWorkers.getFuture())) {
-			++self.getClientWorkersRequests;
-			std::vector<ClientWorkerInterface> workers;
-			for (auto& it : self.id_worker) {
-				if (it.second.details.processClass.classType() != ProcessClass::TesterClass) {
-					workers.push_back(it.second.details.interf.clientInterface);
-				}
-			}
-			req.reply.send(workers);
-		}
-		when(wait(coordinationPingDelay)) {
-			CoordinationPingMessage message(self.id, step++);
-			for (auto& it : self.id_worker)
-				it.second.details.interf.coordinationPing.send(message);
-			coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
-			TraceEvent("CoordinationPingSent", self.id).detail("TimeStep", message.timeStep);
-		}
-		when(RegisterMasterRequest req = waitNext(interf.registerMaster.getFuture())) {
-			++self.registerMasterRequests;
-			self.clusterRegisterMaster(req);
-		}
-		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
-			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
-				self.updateWorkerHealth(req);
-			}
-		}
-		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
-			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
-		}
-		when(wait(leaderFail)) {
-			// We are no longer the leader if this has changed.
-			endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
-			CODE_PROBE(true, "Leader replaced");
-			return Void();
-		}
-		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) {
-			ping.send(Void());
-		}
-	}
+Future<Void> ClusterController::run(ClusterControllerFullInterface interf,
+                                    Future<Void> leaderFail,
+                                    ServerCoordinators coordinators,
+                                    LocalityData locality,
+                                    ConfigDBType configDBType,
+                                    Future<Void> recoveredDiskFiles,
+                                    Reference<AsyncVar<Optional<UID>>> clusterId) {
+	return ClusterControllerImpl::run(
+	    interf, leaderFail, coordinators, locality, configDBType, recoveredDiskFiles, clusterId);
 }
 
 ACTOR Future<Void> replaceInterface(ClusterControllerFullInterface interf) {
@@ -3218,7 +3230,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(
+				wait(ClusterController::run(
 				    cci, leaderFail, coordinators, locality, configDBType, recoveredDiskFiles, clusterId));
 			}
 		} catch (Error& e) {
