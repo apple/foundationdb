@@ -1,5 +1,6 @@
 [configuration]
 testClass = "Encryption"
+encryptModes = ['domain_aware', 'cluster_aware']
 
 [[knobs]]
 enable_encryption = true
