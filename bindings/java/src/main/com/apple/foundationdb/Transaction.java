@@ -76,6 +76,12 @@ import com.apple.foundationdb.tuple.Tuple;
  */
 public interface Transaction extends AutoCloseable, ReadTransaction, TransactionContext {
 
+	static public final int MATCH_INDEX_NOT_COMPATIBLE = -1;
+	static public final int MATCH_INDEX_ALL = 0;
+	static public final int MATCH_INDEX_NONE = 1;
+	static public final int MATCH_INDEX_MATCHED_ONLY = 2;
+	static public final int MATCH_INDEX_UNMATCHED_ONLY = 3;
+
 	/**
 	 * Adds a range of keys to the transaction's read conflict ranges as if you
 	 * had read the range. As a result, other transactions that write a key in

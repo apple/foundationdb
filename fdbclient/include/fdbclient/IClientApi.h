@@ -68,9 +68,15 @@ public:
 	                                                       const KeySelectorRef& end,
 	                                                       const StringRef& mapper,
 	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false) = 0;
+	virtual ThreadFuture<MappedRangeResultV2> getMappedRangeV2(const KeySelectorRef& begin,
+	                                                           const KeySelectorRef& end,
+	                                                           const StringRef& mapper,
+	                                                           GetRangeLimits limits,
+	                                                           bool snapshot = false,
+	                                                           bool reverse = false,
+	                                                           int matchIndex = MATCH_INDEX_ALL) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 

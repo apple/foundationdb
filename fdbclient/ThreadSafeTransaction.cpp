@@ -428,17 +428,34 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
                                                                       const KeySelectorRef& end,
                                                                       const StringRef& mapper,
                                                                       GetRangeLimits limits,
-                                                                      int matchIndex,
                                                                       bool snapshot,
                                                                       bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 	Key h = mapper;
-
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeResult> {
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<MappedRangeResult> {
 		tr->checkDeferredError();
-		return tr->getMappedRange(b, e, h, limits, matchIndex, Snapshot{ snapshot }, Reverse{ reverse });
+		return tr->getMappedRange(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+	});
+}
+
+ThreadFuture<MappedRangeResultV2> ThreadSafeTransaction::getMappedRangeV2(const KeySelectorRef& begin,
+                                                                          const KeySelectorRef& end,
+                                                                          const StringRef& mapper,
+                                                                          GetRangeLimits limits,
+                                                                          bool snapshot,
+                                                                          bool reverse,
+                                                                          int matchIndex) {
+	KeySelector b = begin;
+	KeySelector e = end;
+	Key h = mapper;
+	ISingleThreadTransaction* tr = this->tr;
+	TraceEvent("Hfu5 ThreadSafeTransaction::getMappedRangeV2").detail("MatchIndex", matchIndex);
+	std::cout << "Hfu5 ThreadSafeTransaction::getMappedRangeV2" << std::endl;
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse, matchIndex]() -> Future<MappedRangeResultV2> {
+		tr->checkDeferredError();
+		return tr->getMappedRangeV2(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse }, matchIndex);
 	});
 }
 

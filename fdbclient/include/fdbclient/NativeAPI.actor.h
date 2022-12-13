@@ -360,9 +360,16 @@ public:
 	                                                       const KeySelector& end,
 	                                                       const Key& mapper,
 	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       Snapshot = Snapshot::False,
 	                                                       Reverse = Reverse::False);
+
+	[[nodiscard]] Future<MappedRangeResultV2> getMappedRangeV2(const KeySelector& begin,
+	                                                           const KeySelector& end,
+	                                                           const Key& mapper,
+	                                                           GetRangeLimits limits,
+	                                                           Snapshot = Snapshot::False,
+	                                                           Reverse = Reverse::False,
+	                                                           int matchIndex = MATCH_INDEX_ALL);
 
 private:
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
@@ -370,9 +377,9 @@ private:
 	                                           const KeySelector& end,
 	                                           const Key& mapper,
 	                                           GetRangeLimits limits,
-	                                           int matchIndex,
 	                                           Snapshot snapshot,
-	                                           Reverse reverse);
+	                                           Reverse reverse,
+	                                           int matchIndex);
 
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large

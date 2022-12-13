@@ -29,11 +29,14 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+using Result = std::variant<MappedRangeResult, MappedRangeResultV2>;
+
 const Value EMPTY = Tuple().pack();
 ValueRef SOMETHING = "SOMETHING"_sr;
 const KeyRef prefix = "prefix"_sr;
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
+const int MATCH_INDEX_TEST_710_API = -1;
 
 int recordSize;
 int indexSize;
@@ -155,8 +158,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	// Return true if need to retry.
+	template <class KV>
 	static bool validateRecord(int expectedId,
-	                           const MappedKeyValueRef* it,
+	                           const KV* it,
 	                           GetMappedRangeWorkload* self,
 	                           int matchIndex,
 	                           bool isBoundary,
@@ -164,7 +168,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		// std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
 		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId))
 		//           << " matchIndex: " << matchIndex << std::endl;
-		if (matchIndex == MATCH_INDEX_ALL || isBoundary) {
+		if (matchIndex == MATCH_INDEX_ALL || matchIndex == MATCH_INDEX_TEST_710_API || isBoundary) {
 			ASSERT(it->key == indexEntryKey(expectedId));
 		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
 			ASSERT(it->key == (allMissing ? EMPTY : indexEntryKey(expectedId)));
@@ -175,6 +179,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 		ASSERT(it->value == EMPTY);
 
+		if constexpr (std::is_same<KV, MappedKeyValueRefV2>::value) {
+			ASSERT(it->local == true);
+		}
 		if (self->SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
 			auto& getRange = std::get<GetRangeReqAndResultRef>(it->reqAndResult);
@@ -199,7 +206,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					ASSERT(kv.value == recordValue(expectedId, split));
 				}
 			}
-
 		} else {
 			ASSERT(std::holds_alternative<GetValueReqAndResultRef>(it->reqAndResult));
 			auto& getValue = std::get<GetValueReqAndResultRef>(it->reqAndResult);
@@ -210,63 +216,98 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return false;
 	}
 
-	ACTOR Future<MappedRangeResult> scanMappedRangeWithLimits(Database cx,
-	                                                          KeySelector beginSelector,
-	                                                          KeySelector endSelector,
-	                                                          Key mapper,
-	                                                          int limit,
-	                                                          int byteLimit,
-	                                                          int expectedBeginId,
-	                                                          GetMappedRangeWorkload* self,
-	                                                          int matchIndex,
-	                                                          bool allMissing) {
+	template <class Result, class KV>
+	static bool validate(Result result,
+	                     int limit,
+	                     int expectedBeginId,
+	                     GetMappedRangeWorkload* self,
+	                     int matchIndex,
+	                     int allMissing) {
+		if (self->BAD_MAPPER) {
+			TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
+		}
+		std::cout << "result.size()=" << result.size() << ". result.more=" << result.more << std::endl;
+		std::cout << "matchIndex=" << matchIndex << std::endl;
+		ASSERT(result.size() <= limit);
+		int expectedId = expectedBeginId;
+		bool needRetry = false;
+		int cnt = 0;
+		const KV* it = result.begin();
+		for (; cnt < result.size(); cnt++, it++) {
+			if (validateRecord<KV>(
+			        expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1, allMissing)) {
+				needRetry = true;
+				break;
+			}
+			expectedId++;
+		}
+		if (needRetry) {
+			return true;
+		}
+		std::cout << "finished scanMappedRangeWithLimits" << std::endl;
+		return false;
+	}
+
+	ACTOR Future<std::pair<int, int>> scanMappedRangeWithLimits(Database cx,
+	                                                            KeySelector beginSelector,
+	                                                            KeySelector endSelector,
+	                                                            Key mapper,
+	                                                            int limit,
+	                                                            int byteLimit,
+	                                                            int expectedBeginId,
+	                                                            GetMappedRangeWorkload* self,
+	                                                            KeyRef* next,
+	                                                            int matchIndex,
+	                                                            bool allMissing) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId
 		          << " limit:" << limit << " byteLimit: " << byteLimit << "  recordSize: " << recordSize
 		          << " STRICTLY_ENFORCE_BYTE_LIMIT: " << SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT << " allMissing "
-		          << allMissing << std::endl;
+		          << allMissing << " matchIndex: " << matchIndex << std::endl;
 		loop {
 			state Reference<TransactionWrapper> tr = self->createTransaction();
 			try {
-				MappedRangeResult result = wait(tr->getMappedRange(beginSelector,
-				                                                   endSelector,
-				                                                   mapper,
-				                                                   GetRangeLimits(limit, byteLimit),
-				                                                   matchIndex,
-				                                                   self->snapshot,
-				                                                   Reverse::False));
-				//			showResult(result);
-				if (self->BAD_MAPPER) {
-					TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
-				}
-				std::cout << "result.size()=" << result.size() << std::endl;
-				std::cout << "result.more=" << result.more << std::endl;
-				ASSERT(result.size() <= limit);
-				int expectedId = expectedBeginId;
-				bool needRetry = false;
-				int cnt = 0;
-				const MappedKeyValueRef* it = result.begin();
-				for (; cnt < result.size(); cnt++, it++) {
-					if (validateRecord(
-					        expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1, allMissing)) {
-						needRetry = true;
-						break;
+				if (matchIndex == MATCH_INDEX_TEST_710_API) {
+					MappedRangeResult result = wait(tr->getMappedRange(beginSelector,
+					                                                   endSelector,
+					                                                   mapper,
+					                                                   GetRangeLimits(limit, byteLimit),
+					                                                   self->snapshot,
+					                                                   Reverse::False));
+					if (validate<MappedRangeResult, MappedKeyValueRef>(
+					        result, limit, expectedBeginId, self, matchIndex, allMissing)) {
+						continue;
 					}
-					expectedId++;
+					if (result.size() != 0) {
+						*next = result.back().key;
+					}
+					return std::make_pair(result.size(), result.more);
+				} else {
+					MappedRangeResultV2 result = wait(tr->getMappedRangeV2(beginSelector,
+					                                                       endSelector,
+					                                                       mapper,
+					                                                       GetRangeLimits(limit, byteLimit),
+					                                                       self->snapshot,
+					                                                       Reverse::False,
+					                                                       matchIndex));
+
+					if (validate<MappedRangeResultV2, MappedKeyValueRefV2>(
+					        result, limit, expectedBeginId, self, matchIndex, allMissing)) {
+						continue;
+					}
+					if (result.size() != 0) {
+						*next = result.back().key;
+					}
+					return std::make_pair(result.size(), result.more);
 				}
-				if (needRetry) {
-					continue;
-				}
-				std::cout << "finished scanMappedRangeWithLimits" << std::endl;
-				return result;
 			} catch (Error& e) {
 				if ((self->BAD_MAPPER && e.code() == error_code_mapper_bad_index) ||
 				    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && e.code() == error_code_quick_get_value_miss) ||
 				    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
 				     e.code() == error_code_quick_get_key_values_miss)) {
 					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(e);
-					return MappedRangeResult();
+					return std::make_pair(0, 0);
 				} else {
 					std::cout << "error " << e.what() << std::endl;
 					wait(tr->onError(e));
@@ -290,23 +331,25 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state int limit = 100;
 		state int byteLimit = deterministicRandom()->randomInt(1, 9) * 10000;
 		state int expectedBeginId = beginId;
+		state KeyRef next;
 		std::cout << "ByteLimit: " << byteLimit << " limit: " << limit
 		          << " FRACTION_INDEX_BYTELIMIT_PREFETCH: " << SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH
 		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
-			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(cx,
-			                                                                beginSelector,
-			                                                                endSelector,
-			                                                                mapper,
-			                                                                limit,
-			                                                                byteLimit,
-			                                                                expectedBeginId,
-			                                                                self,
-			                                                                matchIndex,
-			                                                                allMissing));
-			expectedBeginId += result.size();
-			if (result.more) {
-				if (result.empty()) {
+			std::pair<int, int> p = wait(self->scanMappedRangeWithLimits(cx,
+			                                                             beginSelector,
+			                                                             endSelector,
+			                                                             mapper,
+			                                                             limit,
+			                                                             byteLimit,
+			                                                             expectedBeginId,
+			                                                             self,
+			                                                             &next,
+			                                                             matchIndex,
+			                                                             allMissing));
+			expectedBeginId += p.first;
+			if (p.second) {
+				if (p.first == 0) {
 					// This is usually not expected.
 					std::cout << "not result but have more, try again" << std::endl;
 				} else {
@@ -317,7 +360,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					int indexCount = std::min(limit, indexCountByteLimit);
 					std::cout << "indexCount:  " << indexCount << std::endl;
 					// result set cannot be larger than the number of index fetched
-					ASSERT(result.size() <= indexCount);
+					ASSERT(p.first <= indexCount);
 
 					expectedCnt = std::min(expectedCnt, indexCount);
 					int boundByRecord;
@@ -332,8 +375,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					}
 					expectedCnt = std::min(expectedCnt, boundByRecord);
 					std::cout << "boundByRecord:  " << boundByRecord << std::endl;
-					ASSERT(result.size() == expectedCnt);
-					beginSelector = KeySelector(firstGreaterThan(result.back().key));
+					ASSERT(p.first == expectedCnt);
+					beginSelector = KeySelector(firstGreaterThan(next));
 				}
 			} else {
 				// No more, finished.
@@ -378,7 +421,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                          endSelector,
 		                          mapper,
 		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED),
-		                          MATCH_INDEX_ALL,
 		                          self->snapshot,
 		                          Reverse::False);
 	}
@@ -478,13 +520,16 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		const double r = deterministicRandom()->random01();
+		std::cout << "r is " << r << std::endl;
 		int matchIndex = MATCH_INDEX_ALL;
-		if (r < 0.25) {
+		if (r < 0.2) {
 			matchIndex = MATCH_INDEX_NONE;
-		} else if (r < 0.5) {
+		} else if (r < 0.4) {
 			matchIndex = MATCH_INDEX_MATCHED_ONLY;
-		} else if (r < 0.75) {
+		} else if (r < 0.6) {
 			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		} else if (r < 0.8) {
+			matchIndex = MATCH_INDEX_TEST_710_API; // use 7.1 version API
 		}
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();

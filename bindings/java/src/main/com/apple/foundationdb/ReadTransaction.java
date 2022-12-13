@@ -440,12 +440,6 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param matchIndex the mode to return index entries based on whether their
-	 *  corresponding records are present, examples:
-	 *     {@link FDBTransaction#MATCH_INDEX_ALL}
-	 *     {@link FDBTransaction#MATCH_INDEX_NONE}
-	 *     {@link FDBTransaction#MATCH_INDEX_MATCHED_ONLY}
-	 *     {@link FDBTransaction#MATCH_INDEX_UNMATCHED_ONLY}
 	 * @param reverse return results starting at the end of the range in reverse order.
 	 *  Reading ranges in reverse is supported natively by the database and should
 	 *  have minimal extra cost.
@@ -466,8 +460,49 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
-	                                             int matchIndex, boolean reverse, StreamingMode mode);
-
+	                                             boolean reverse, StreamingMode mode);
+	/**
+	 * WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
+	 * AND disabling read-your-writes.
+	 *
+	 * @see KeySelector
+	 * @see AsyncIterator
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 * @param mapper defines how to map a key-value pair (one of the key-value pairs got
+	 *  from the first range query) to a GetRange (or GetValue) request.
+	 *  more details: https://github.com/apple/foundationdb/wiki/Everything-about-GetMappedRange
+	 * @param limit the maximum number of results to return. Limits results to the
+	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
+	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
+	 *  will be limited starting at the end of the range.
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
+	 * @param mode provide a hint about how the results are to be used. This
+	 *  can provide speed improvements or efficiency gains based on the caller's
+	 *  knowledge of the upcoming access pattern.
+	 * @param matchIndex the mode to return index entries based on whether their
+	 *  corresponding records are present, examples:
+	 *     {@link Transaction#MATCH_INDEX_ALL}
+	 *     {@link Transaction#MATCH_INDEX_NONE}
+	 *     {@link Transaction#MATCH_INDEX_MATCHED_ONLY}
+	 *     {@link Transaction#MATCH_INDEX_UNMATCHED_ONLY}
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code
+	 * ITERATOR} streaming mode, the query is automatically modified to fetch results in larger batches. This is done
+	 * because it is known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the
+	 * range. If a limit is specified, the {@code EXACT} streaming mode will be used, and otherwise it will use {@code
+	 * WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link
+	 * AsyncIterable#asList()}, the same streaming mode would need to be used.
+	 * </p>
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
+	                                             boolean reverse, StreamingMode mode, int matchIndex);
 	/**
 	 * Gets an estimate for the number of bytes stored in the given range.
 	 * Note: the estimated size is calculated based on the sampling done by FDB server. The sampling

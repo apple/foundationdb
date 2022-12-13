@@ -133,6 +133,7 @@ static void traceKeyValuesSummary(TraceEvent& event,
                                   Version version,
                                   int limit,
                                   int limitBytes,
+                                  int matchIndex,
                                   size_t ssSize,
                                   bool ssMore,
                                   size_t tssSize,
@@ -145,8 +146,23 @@ static void traceKeyValuesSummary(TraceEvent& event,
 	    .detail("Version", version)
 	    .detail("Limit", limit)
 	    .detail("LimitBytes", limitBytes)
+	    .detail("MatchIndex", matchIndex == -1 ? "NA" : std::to_string(matchIndex))
 	    .detail("SSReplySummary", ssSummaryString)
 	    .detail("TSSReplySummary", tssSummaryString);
+}
+
+static void traceKeyValuesSummary(TraceEvent& event,
+                                  const KeySelectorRef& begin,
+                                  const KeySelectorRef& end,
+                                  Optional<TenantNameRef> tenant,
+                                  Version version,
+                                  int limit,
+                                  int limitBytes,
+                                  size_t ssSize,
+                                  bool ssMore,
+                                  size_t tssSize,
+                                  bool tssMore) {
+	traceKeyValuesSummary(event, begin, end, tenant, version, limit, limitBytes, -1, ssSize, ssMore, tssSize, tssMore);
 }
 
 static void traceKeyValuesDiff(TraceEvent& event,
@@ -206,8 +222,18 @@ bool TSS_doCompare(const GetMappedKeyValuesReply& src, const GetMappedKeyValuesR
 }
 
 template <>
+bool TSS_doCompare(const GetMappedKeyValuesReplyV2& src, const GetMappedKeyValuesReplyV2& tss) {
+	return src.more == tss.more && src.data == tss.data;
+}
+
+template <>
 const char* TSS_mismatchTraceName(const GetMappedKeyValuesRequest& req) {
 	return "TSSMismatchGetMappedKeyValues";
+}
+
+template <>
+const char* TSS_mismatchTraceName(const GetMappedKeyValuesRequestV2& req) {
+	return "TSSMismatchGetMappedKeyValuesV2";
 }
 
 template <>
@@ -215,6 +241,25 @@ void TSS_traceMismatch(TraceEvent& event,
                        const GetMappedKeyValuesRequest& req,
                        const GetMappedKeyValuesReply& src,
                        const GetMappedKeyValuesReply& tss) {
+	traceKeyValuesSummary(event,
+	                      req.begin,
+	                      req.end,
+	                      req.tenantInfo.name,
+	                      req.version,
+	                      req.limit,
+	                      req.limitBytes,
+	                      src.data.size(),
+	                      src.more,
+	                      tss.data.size(),
+	                      tss.more);
+	// FIXME: trace details for TSS mismatch of mapped data
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const GetMappedKeyValuesRequestV2& req,
+                       const GetMappedKeyValuesReplyV2& src,
+                       const GetMappedKeyValuesReplyV2& tss) {
 	traceKeyValuesSummary(event,
 	                      req.begin,
 	                      req.end,
@@ -425,6 +470,12 @@ void TSSMetrics::recordLatency(const GetKeyValuesRequest& req, double ssLatency,
 
 template <>
 void TSSMetrics::recordLatency(const GetMappedKeyValuesRequest& req, double ssLatency, double tssLatency) {
+	SSgetMappedKeyValuesLatency.addSample(ssLatency);
+	TSSgetMappedKeyValuesLatency.addSample(tssLatency);
+}
+
+template <>
+void TSSMetrics::recordLatency(const GetMappedKeyValuesRequestV2& req, double ssLatency, double tssLatency) {
 	SSgetMappedKeyValuesLatency.addSample(ssLatency);
 	TSSgetMappedKeyValuesLatency.addSample(tssLatency);
 }

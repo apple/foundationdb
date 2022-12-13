@@ -82,6 +82,16 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		unsigned char buffer[32];
 	} FDBMappedKeyValue;
 
+	typedef struct mappedkeyvaluev2 {
+		FDBKey key;
+		FDBKey value;
+		/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange
+		 * and take the shortcut. */
+		FDBGetRangeReqAndResult getRange;
+		unsigned char buffer[32];
+		int local;
+	} FDBMappedKeyValueV2;
+
 #pragma pack(push, 4)
 	typedef struct keyrange {
 		const void* beginKey;
@@ -296,9 +306,26 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                        int targetBytes,
 	                                        FDBStreamingMode mode,
 	                                        int iteration,
-	                                        int matchIndex,
 	                                        fdb_bool_t snapshot,
 	                                        fdb_bool_t reverse);
+	FDBFuture* (*transactiongetMappedRangeV2)(FDBTransaction* tr,
+	                                          uint8_t const* beginKeyName,
+	                                          int beginKeyNameLength,
+	                                          fdb_bool_t beginOrEqual,
+	                                          int beginOffset,
+	                                          uint8_t const* endKeyName,
+	                                          int endKeyNameLength,
+	                                          fdb_bool_t endOrEqual,
+	                                          int endOffset,
+	                                          uint8_t const* mapper_name,
+	                                          int mapper_name_length,
+	                                          int limit,
+	                                          int targetBytes,
+	                                          FDBStreamingMode mode,
+	                                          int iteration,
+	                                          fdb_bool_t snapshot,
+	                                          fdb_bool_t reverse,
+	                                          int matchIndex);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
 
 	void (*transactionSet)(FDBTransaction* tr,
@@ -406,6 +433,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            FDBMappedKeyValue const** outKVM,
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
+	fdb_error_t (*futureGetMappedKeyValueArrayV2)(FDBFuture* f,
+	                                              FDBMappedKeyValueV2 const** outKVM,
+	                                              int* outCount,
+	                                              fdb_bool_t* outMore);
 	fdb_error_t (*futureGetGranuleSummaryArray)(FDBFuture* f, const FDBGranuleSummary** out_summaries, int* outCount);
 	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
@@ -457,9 +488,15 @@ public:
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
-	                                               int matchIndex,
 	                                               bool snapshot,
 	                                               bool reverse) override;
+	ThreadFuture<MappedRangeResultV2> getMappedRangeV2(const KeySelectorRef& begin,
+	                                                   const KeySelectorRef& end,
+	                                                   const StringRef& mapper,
+	                                                   GetRangeLimits limits,
+	                                                   bool snapshot,
+	                                                   bool reverse,
+	                                                   int matchIndex) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
@@ -684,9 +721,15 @@ public:
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
-	                                               int matchIndex,
 	                                               bool snapshot,
 	                                               bool reverse) override;
+	ThreadFuture<MappedRangeResultV2> getMappedRangeV2(const KeySelectorRef& begin,
+	                                                   const KeySelectorRef& end,
+	                                                   const StringRef& mapper,
+	                                                   GetRangeLimits limits,
+	                                                   bool snapshot,
+	                                                   bool reverse,
+	                                                   int matchIndex) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 

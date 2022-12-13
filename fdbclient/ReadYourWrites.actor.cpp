@@ -86,6 +86,17 @@ public:
 		using Result = MappedRangeResult;
 	};
 
+	template <bool reverse>
+	struct GetMappedRangeReqV2 {
+		GetMappedRangeReqV2(KeySelector begin, KeySelector end, Key mapper, int matchIndex, GetRangeLimits limits)
+		  : begin(begin), end(end), mapper(mapper), limits(limits), matchIndex(matchIndex) {}
+		KeySelector begin, end;
+		Key mapper;
+		GetRangeLimits limits;
+		int matchIndex;
+		using Result = MappedRangeResultV2;
+	};
+
 	// read() Performs a read (get, getKey, getRange, etc), in the context of the given transaction.  Snapshot or RYW
 	// reads are distingushed by the type Iter being SnapshotCache::iterator or RYWIterator. Fills in the snapshot cache
 	// as a side effect but does not affect conflict ranges. Some (indicated) overloads of read are required to update
@@ -1131,18 +1142,6 @@ public:
 #pragma region GetMappedRange
 #endif
 
-	template <class Iter>
-	static Future<MappedRangeResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<false> read, Iter* it) {
-		return getMappedRangeValue(ryw, read.begin, read.end, read.mapper, read.limits, it);
-	};
-
-	template <class Iter>
-	static Future<MappedRangeResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<true> read, Iter* it) {
-		throw unsupported_operation();
-		// TODO: Support reverse. return getMappedRangeValueBack(ryw, read.begin, read.end, read.mapper,
-		// read.limits, it);
-	};
-
 	ACTOR template <bool backwards>
 	static Future<MappedRangeResult> readThrough(ReadYourWritesTransaction* ryw,
 	                                             GetMappedRangeReq<backwards> read,
@@ -1156,14 +1155,32 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
-		                                                  read.end,
-		                                                  read.mapper,
-		                                                  read.limits,
-		                                                  read.matchIndex,
-		                                                  snapshot,
-		                                                  backwards ? Reverse::True : Reverse::False));
-		return v;
+		MappedRangeResult res = wait(ryw->tr.getMappedRange(
+		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
+		return res;
+	}
+
+	ACTOR template <bool backwards>
+	static Future<MappedRangeResultV2> readThrough(ReadYourWritesTransaction* ryw,
+	                                               GetMappedRangeReqV2<backwards> read,
+	                                               Snapshot snapshot) {
+		if (backwards && read.end.offset > 1) {
+			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
+			// actually does.
+			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			if (key > ryw->getMaxReadKey())
+				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
+			else
+				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
+		}
+		MappedRangeResultV2 res = wait(ryw->tr.getMappedRangeV2(read.begin,
+		                                                        read.end,
+		                                                        read.mapper,
+		                                                        read.limits,
+		                                                        snapshot,
+		                                                        backwards ? Reverse::True : Reverse::False,
+		                                                        read.matchIndex));
+		return res;
 	}
 
 	template <bool backwards>
@@ -1173,6 +1190,37 @@ public:
 	                                              MappedRangeResult result) {
 		// Primary getRange.
 		addConflictRange<true, MappedRangeResult>(
+		    ryw, GetRangeReq<backwards>(read.begin, read.end, read.limits), it, result);
+
+		// Secondary getValue/getRanges.
+		for (const auto& mappedKeyValue : result) {
+			const auto& reqAndResult = mappedKeyValue.reqAndResult;
+			if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
+				auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+				// GetValueReq variation of addConflictRange require it to point at the right segment.
+				it.skip(getValue.key);
+				// The result is not used in GetValueReq variation of addConflictRange. Let's just pass in a
+				// placeholder.
+				addConflictRange<true>(ryw, GetValueReq(getValue.key), it, Optional<Value>());
+			} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
+				auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+				// We only support forward scan for secondary getRange requests.
+				// The limits are not used in addConflictRange. Let's just pass in a placeholder.
+				addConflictRange<true>(
+				    ryw, GetRangeReq<false>(getRange.begin, getRange.end, GetRangeLimits()), it, getRange.result);
+			} else {
+				throw internal_error();
+			}
+		}
+	}
+
+	template <bool backwards>
+	static void addConflictRangeAndMustUnmodified(ReadYourWritesTransaction* ryw,
+	                                              GetMappedRangeReqV2<backwards> read,
+	                                              WriteMap::iterator& it,
+	                                              MappedRangeResultV2 result) {
+		// Primary getRange.
+		addConflictRange<true, MappedRangeResultV2>(
 		    ryw, GetRangeReq<backwards>(read.begin, read.end, read.limits), it, result);
 
 		// Secondary getValue/getRanges.
@@ -1217,6 +1265,25 @@ public:
 		}
 	}
 
+	ACTOR template <bool backwards>
+	static Future<MappedRangeResultV2> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,
+	                                                            GetMappedRangeReqV2<backwards> req,
+	                                                            Snapshot snapshot) {
+		choose {
+			when(MappedRangeResultV2 result = wait(readThrough(ryw, req, Snapshot::True))) {
+				// Insert read conflicts (so that it supported Snapshot::True) and check it is not modified (so it masks
+				// sure not break RYW semantic while not implementing RYW) for both the primary getRange and all
+				// underlying getValue/getRanges.
+				WriteMap::iterator writes(&ryw->writes);
+				addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
+				return result;
+			}
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
+		}
+	}
+
 	template <bool backwards>
 	static inline Future<MappedRangeResult> readWithConflictRangeForGetMappedRange(
 	    ReadYourWritesTransaction* ryw,
@@ -1239,9 +1306,33 @@ public:
 			throw unsupported_operation();
 		}
 
-		return readWithConflictRangeRYW(ryw, req, snapshot);
+		return readWithConflictRangeRYW<backwards>(ryw, req, snapshot);
 	}
 
+	template <bool backwards>
+	static inline Future<MappedRangeResultV2> readWithConflictRangeForGetMappedRange(
+	    ReadYourWritesTransaction* ryw,
+	    GetMappedRangeReqV2<backwards> const& req,
+	    Snapshot snapshot) {
+		// For now, getMappedRange requires serializable isolation. (Technically it is trivial to add snapshot
+		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
+		// coverage for it.)
+		if (snapshot) {
+			CODE_PROBE(true, "getMappedRange not supported for snapshot.", probe::decoration::rare);
+			throw unsupported_operation();
+		}
+		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
+		// to throwing get_mapped_range_reads_your_writes error when getMappedRange actually reads your own writes.
+		// Applications should fall back in their own ways. This is different from what is usually expected from RYW,
+		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
+		// actually implementing reading from the writes.
+		if (ryw->options.readYourWritesDisabled) {
+			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.", probe::decoration::rare);
+			throw unsupported_operation();
+		}
+
+		return readWithConflictRangeRYW<backwards>(ryw, req, snapshot);
+	}
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif
@@ -1708,7 +1799,6 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
                                                                     KeySelector end,
                                                                     Key mapper,
                                                                     GetRangeLimits limits,
-                                                                    int matchIndex,
                                                                     Snapshot snapshot,
                                                                     Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1755,10 +1845,69 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	}
 
 	Future<MappedRangeResult> result =
-	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, matchIndex, limits), snapshot)
-	            : RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, matchIndex, limits), snapshot);
+	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange<true>(
+	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, 0, limits), snapshot)
+	            : RYWImpl::readWithConflictRangeForGetMappedRange<false>(
+	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, 0, limits), snapshot);
+
+	return result;
+}
+
+Future<MappedRangeResultV2> ReadYourWritesTransaction::getMappedRangeV2(KeySelector begin,
+                                                                        KeySelector end,
+                                                                        Key mapper,
+                                                                        GetRangeLimits limits,
+                                                                        Snapshot snapshot,
+                                                                        Reverse reverse,
+                                                                        int matchIndex) {
+	if (getDatabase()->apiVersionAtLeast(630)) {
+		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
+		    end.getKey() <= specialKeys.end) {
+			CODE_PROBE(true, "Special key space get range (getMappedRange)", probe::decoration::rare);
+			throw client_invalid_operation(); // Not support special keys.
+		}
+	} else {
+		if (begin.getKey() == "\xff\xff/worker_interfaces"_sr) {
+			throw client_invalid_operation(); // Not support special keys.
+		}
+	}
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (begin.getKey() > maxKey || end.getKey() > maxKey)
+		return key_outside_legal_range();
+
+	// This optimization prevents nullptr operations from being added to the conflict range
+	if (limits.isReached()) {
+		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)", probe::decoration::rare);
+		return MappedRangeResultV2();
+	}
+
+	if (!limits.isValid())
+		return range_limits_invalid();
+
+	if (begin.orEqual)
+		begin.removeOrEqual(begin.arena());
+
+	if (end.orEqual)
+		end.removeOrEqual(end.arena());
+
+	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
+		CODE_PROBE(true, "RYW range inverted (getMappedRange)", probe::decoration::rare);
+		return MappedRangeResultV2();
+	}
+
+	Future<MappedRangeResultV2> result =
+	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange<true>(
+	                  this, RYWImpl::GetMappedRangeReqV2<true>(begin, end, mapper, matchIndex, limits), snapshot)
+	            : RYWImpl::readWithConflictRangeForGetMappedRange<false>(
+	                  this, RYWImpl::GetMappedRangeReqV2<false>(begin, end, mapper, matchIndex, limits), snapshot);
 
 	return result;
 }

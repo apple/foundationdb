@@ -301,6 +301,16 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDBFuture* 
 	                 *out_more = rrr.more;);
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_mappedkeyvalue_array_v2(FDBFuture* f,
+                                                                        FDBMappedKeyValueV2 const** out_kvm,
+                                                                        int* out_count,
+                                                                        fdb_bool_t* out_more) {
+	CATCH_AND_RETURN(Standalone<MappedRangeResultRefV2> rrr = TSAV(Standalone<MappedRangeResultRefV2>, f)->get();
+	                 *out_kvm = (FDBMappedKeyValueV2*)rrr.begin();
+	                 *out_count = rrr.size();
+	                 *out_more = rrr.more;);
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, DatabaseSharedState** outPtr) {
 	CATCH_AND_RETURN(*outPtr = (DatabaseSharedState*)((TSAV(DatabaseSharedState*, f)->get())););
 }
@@ -787,6 +797,41 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 	                    .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range_v2(FDBTransaction* tr,
+                                                                    uint8_t const* begin_key_name,
+                                                                    int begin_key_name_length,
+                                                                    fdb_bool_t begin_or_equal,
+                                                                    int begin_offset,
+                                                                    uint8_t const* end_key_name,
+                                                                    int end_key_name_length,
+                                                                    fdb_bool_t end_or_equal,
+                                                                    int end_offset,
+                                                                    uint8_t const* mapper_name,
+                                                                    int mapper_name_length,
+                                                                    int limit,
+                                                                    int target_bytes,
+                                                                    FDBStreamingMode mode,
+                                                                    int iteration,
+                                                                    fdb_bool_t snapshot,
+                                                                    fdb_bool_t reverse,
+                                                                    int matchIndex) {
+	std::cout << "Hfu5 fdb_c::getMappedRangeV2" << std::endl;
+	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
+	if (r != nullptr)
+		return r;
+	return (
+	    FDBFuture*)(TXN(tr)
+	                    ->getMappedRangeV2(
+	                        KeySelectorRef(KeyRef(begin_key_name, begin_key_name_length), begin_or_equal, begin_offset),
+	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
+	                        StringRef(mapper_name, mapper_name_length),
+	                        GetRangeLimits(limit, target_bytes),
+	                        snapshot,
+	                        reverse,
+	                        matchIndex)
+	                    .extractPtr());
+}
+
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
                                                                  uint8_t const* begin_key_name,
                                                                  int begin_key_name_length,
@@ -802,7 +847,6 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction*
                                                                  int target_bytes,
                                                                  FDBStreamingMode mode,
                                                                  int iteration,
-                                                                 int matchIndex,
                                                                  fdb_bool_t snapshot,
                                                                  fdb_bool_t reverse) {
 	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
@@ -815,7 +859,6 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction*
 	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
 	                        StringRef(mapper_name, mapper_name_length),
 	                        GetRangeLimits(limit, target_bytes),
-	                        matchIndex,
 	                        snapshot,
 	                        reverse)
 	                    .extractPtr());

@@ -104,6 +104,12 @@ void Future::cancel() {
 	return fdb_future_get_mappedkeyvalue_array(future_, out_kv, out_count, out_more);
 }
 
+[[nodiscard]] fdb_error_t MappedKeyValueArrayFutureV2::get(const FDBMappedKeyValueV2** out_kv,
+                                                           int* out_count,
+                                                           fdb_bool_t* out_more) {
+	return fdb_future_get_mappedkeyvalue_array_v2(future_, out_kv, out_count, out_more);
+}
+
 // Result
 
 Result::~Result() {
@@ -300,7 +306,6 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
                                                         int target_bytes,
                                                         FDBStreamingMode mode,
                                                         int iteration,
-                                                        int matchIndex,
                                                         fdb_bool_t snapshot,
                                                         fdb_bool_t reverse) {
 	return MappedKeyValueArrayFuture(fdb_transaction_get_mapped_range(tr_,
@@ -318,9 +323,45 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
 	                                                                  target_bytes,
 	                                                                  mode,
 	                                                                  iteration,
-	                                                                  matchIndex,
 	                                                                  snapshot,
 	                                                                  reverse));
+}
+
+MappedKeyValueArrayFutureV2 Transaction::get_mapped_range_v2(const uint8_t* begin_key_name,
+                                                             int begin_key_name_length,
+                                                             fdb_bool_t begin_or_equal,
+                                                             int begin_offset,
+                                                             const uint8_t* end_key_name,
+                                                             int end_key_name_length,
+                                                             fdb_bool_t end_or_equal,
+                                                             int end_offset,
+                                                             const uint8_t* mapper_name,
+                                                             int mapper_name_length,
+                                                             int limit,
+                                                             int target_bytes,
+                                                             FDBStreamingMode mode,
+                                                             int iteration,
+                                                             fdb_bool_t snapshot,
+                                                             fdb_bool_t reverse,
+                                                             int matchIndex) {
+	return MappedKeyValueArrayFutureV2(fdb_transaction_get_mapped_range_v2(tr_,
+	                                                                       begin_key_name,
+	                                                                       begin_key_name_length,
+	                                                                       begin_or_equal,
+	                                                                       begin_offset,
+	                                                                       end_key_name,
+	                                                                       end_key_name_length,
+	                                                                       end_or_equal,
+	                                                                       end_offset,
+	                                                                       mapper_name,
+	                                                                       mapper_name_length,
+	                                                                       limit,
+	                                                                       target_bytes,
+	                                                                       mode,
+	                                                                       iteration,
+	                                                                       snapshot,
+	                                                                       reverse,
+	                                                                       matchIndex));
 }
 
 EmptyFuture Transaction::watch(std::string_view key) {

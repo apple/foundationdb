@@ -171,6 +171,16 @@ typedef struct mappedkeyvalue {
 	unsigned char buffer[32];
 } FDBMappedKeyValue;
 
+typedef struct mappedkeyvaluev2 {
+	FDBKey key;
+	FDBKey value;
+	/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange and
+	 * take the shortcut. */
+	FDBGetRangeReqAndResult getRange;
+	unsigned char buffer[32];
+	int local;
+} FDBMappedKeyValueV2;
+
 #pragma pack(push, 4)
 typedef struct keyrange {
 	const uint8_t* begin_key;
@@ -258,6 +268,11 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDB
                                                                              FDBMappedKeyValue const** out_kv,
                                                                              int* out_count,
                                                                              fdb_bool_t* out_more);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_mappedkeyvalue_array_v2(FDBFuture* f,
+                                                                                FDBMappedKeyValueV2 const** out_kv,
+                                                                                int* out_count,
+                                                                                fdb_bool_t* out_more);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key_array(FDBFuture* f,
                                                                   FDBKey const** out_key_array,
@@ -481,10 +496,27 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTran
                                                                          int target_bytes,
                                                                          FDBStreamingMode mode,
                                                                          int iteration,
-                                                                         int matchIndex,
                                                                          fdb_bool_t snapshot,
                                                                          fdb_bool_t reverse);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range_v2(FDBTransaction* tr,
+                                                                            uint8_t const* begin_key_name,
+                                                                            int begin_key_name_length,
+                                                                            fdb_bool_t begin_or_equal,
+                                                                            int begin_offset,
+                                                                            uint8_t const* end_key_name,
+                                                                            int end_key_name_length,
+                                                                            fdb_bool_t end_or_equal,
+                                                                            int end_offset,
+                                                                            uint8_t const* mapper_name,
+                                                                            int mapper_name_length,
+                                                                            int limit,
+                                                                            int target_bytes,
+                                                                            FDBStreamingMode mode,
+                                                                            int iteration,
+                                                                            fdb_bool_t snapshot,
+                                                                            fdb_bool_t reverse,
+                                                                            int matchIndex);
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
                                    int key_name_length,

@@ -2279,6 +2279,9 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 			when(GetMappedKeyValuesRequest req = waitNext(ssi.getMappedKeyValues.getFuture())) {
 				ASSERT(false);
 			}
+			when(GetMappedKeyValuesRequestV2 req = waitNext(ssi.getMappedKeyValuesV2.getFuture())) {
+				ASSERT(false);
+			}
 			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				ASSERT(false);
 			}

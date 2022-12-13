@@ -80,6 +80,7 @@ if __name__ == "__main__":
     )
     print(cluster_paths)
     env = dict(**os.environ)
+    env["FDB_CLUSTER_FILE"] = env.get("FDB_CLUSTER_FILE", cluster_paths)
     env["FDB_CLUSTERS"] = env.get("FDB_CLUSTERS", cluster_paths)
     errcode = subprocess.run(
         args.cmd, stdout=sys.stdout, stderr=sys.stderr, env=env
