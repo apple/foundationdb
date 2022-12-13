@@ -97,11 +97,12 @@ auto enum_decl = x3::rule<class enum_decl, ast::EnumDeclaration>{} =
 auto union_decl = x3::rule<class union_decl, ast::UnionDeclaration>{} =
     "union" >> ident >> metadata >> '{' >> enum_decls >> '}';
 
-auto field_value = x3::rule<class position, std::optional<ast::SingleValue>>{} = -('=' > (string_constant | ident | scalar));
+auto field_value = x3::rule<class position, std::optional<ast::SingleValue>>{} =
+    -('=' > (string_constant | ident | scalar));
 auto field_decl = x3::rule<class field_decl, ast::FieldDeclaration>{} =
     (ident >> ':' >> type >> field_value >> metadata) > ';';
-auto const struct_decl_def = "struct" > ident >> metadata > '{' >> +(field_decl) > '}';
-auto const table_decl_def = "table" > ident >> metadata > '{' >> +(field_decl) > '}';
+auto const struct_decl_def = "struct" > ident >> metadata > '{' >> *(field_decl) > '}';
+auto const table_decl_def = "table" > ident >> metadata > '{' >> *(field_decl) > '}';
 
 auto include_stmt = x3::rule<class include_stmt, ast::IncludeDeclaration>{} =
     lit("include") > string_constant > semicolon;

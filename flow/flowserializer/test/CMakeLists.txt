@@ -1,36 +1,46 @@
-string(RANDOM LENGTH 8 ALPHABET "0123456789abcdef" SEED_)
-set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
-#set(SEED "9")
+#string(RANDOM LENGTH 8 ALPHABET "0123456789abcdef" SEED_)
+#set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
+set(SEED "2")
 FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/seed "${SEED}")
 
 add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/table.h
-    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/flat_buffers_fuzz.py "${SEED}" cpp > ${CMAKE_CURRENT_BINARY_DIR}/table.h
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/table_fdbflatbuffers.h
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/flat_buffers_fuzz.py "${SEED}" cpp > ${CMAKE_CURRENT_BINARY_DIR}/table_fdbflatbuffers.h
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/flat_buffers_fuzz.py ${CMAKE_CURRENT_BINARY_DIR}/seed
-    COMMENT "Generate flat buffer schema")
-add_custom_target(tableh DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/table.h)
+    COMMENT "Generate test FDB flatbuffers serialization code")
+add_custom_target(table_fdbflatbuffers DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/table_fdbflatbuffers.h)
 
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/table.fbs
     COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/flat_buffers_fuzz.py "${SEED}" fbs > ${CMAKE_CURRENT_BINARY_DIR}/table.fbs
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/flat_buffers_fuzz.py ${CMAKE_CURRENT_BINARY_DIR}/seed
-    COMMENT "Generate flat buffer schema")
+    COMMENT "Generate test flatbuffers schema")
 add_custom_target(tablefbs DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/table.fbs)
 
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/table_generated.h
     COMMAND ${FLATC} --cpp ${CMAKE_CURRENT_BINARY_DIR}/table.fbs
     DEPENDS flatbuffers tablefbs ${CMAKE_CURRENT_BINARY_DIR}/seed
-    COMMENT "Generate flat buffer schema")
-add_custom_target(tablegenerated DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/table_generated.h)
+    COMMENT "Generate test Google flatbuffers serialization code")
+add_custom_target(table_flatbuffers DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/table_generated.h)
 
-add_flow_target(EXECUTABLE NAME flat_buffers_fuzz SRCS flat_buffers_fuzz.cpp)
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/table.h ${CMAKE_CURRENT_BINARY_DIR}/table.cpp
+    COMMAND $<TARGET_FILE:flowserializer> ${CMAKE_CURRENT_BINARY_DIR}/table.fbs
+    DEPENDS flowserializer tablefbs ${CMAKE_CURRENT_BINARY_DIR}/seed
+    COMMENT "Generate test flowbuffers serialization code")
+add_custom_target(table_flowbuffers DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/table.h ${CMAKE_CURRENT_BINARY_DIR}/table.cpp)
+
+add_executable(flat_buffers_fuzz
+    ${CMAKE_CURRENT_SOURCE_DIR}/flat_buffers_fuzz.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/table.cpp)
 target_link_libraries(flat_buffers_fuzz flow boost_target Threads::Threads doctest)
 target_include_directories(flat_buffers_fuzz PRIVATE ${FLATBUFFERS_INCLUDE} ${CMAKE_CURRENT_BINARY_DIR})
-add_dependencies(flat_buffers_fuzz tableh)
-add_dependencies(flat_buffers_fuzz tablegenerated)
 add_dependencies(flat_buffers_fuzz flatbuffers)
+add_dependencies(flat_buffers_fuzz table_fdbflatbuffers)
+add_dependencies(flat_buffers_fuzz table_flatbuffers)
+add_dependencies(flat_buffers_fuzz table_flowbuffers)
 
 add_test(
     NAME unittests/flat_buffers_fuzz
-    COMMAND $<TARGET_FILE:flat_buffers_fuzz> ${SEED})
+    COMMAND $<TARGET_FILE:flat_buffers_fuzz>)

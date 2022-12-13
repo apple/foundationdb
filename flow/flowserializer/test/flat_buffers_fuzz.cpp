@@ -73,7 +73,7 @@ void RandomizeUnionHelper(std::mt19937_64& r, int i, Union& x);
 template <class... T>
 void Randomize(std::mt19937_64& r, std::variant<T...>& x);
 
-#include "table.h"
+#include "table_fdbflatbuffers.h"
 
 template <class T>
 std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T>> Verify(T lhs, T rhs, std::string context) {
@@ -188,6 +188,10 @@ void Randomize(std::mt19937_64& r, std::variant<T...>& x) {
 
 } // namespace ours
 
+// namespace flowbuffers {
+//#include "table.h"
+// }
+
 using namespace std;
 
 namespace {
@@ -256,18 +260,18 @@ void doFuzz() {
 		TestContext context{ arena };
 		auto* serialized = detail::save(context, ours, FileIdentifier{});
 		flatbuffers::Verifier verifier(serialized, arena.get_size(serialized));
-		auto result = theirs::VerifyTable0Buffer(verifier);
+		auto result = theirs::testfb::VerifyTable0Buffer(verifier);
 		CHECK(result);
-		Verify(ours, theirs::GetTable0(serialized), "SavePath[" + std::to_string(i) + "]: ");
+		Verify(ours, theirs::testfb::GetTable0(serialized), "SavePath[" + std::to_string(i) + "]: ");
 
 		flatbuffers::FlatBufferBuilder fbb;
-		flatbuffers::Offset<theirs::Table0> theirs;
+		flatbuffers::Offset<theirs::testfb::Table0> theirs;
 		ours::Randomize(r, theirs, fbb);
 		fbb.Finish(theirs);
 
 		ours = {};
 		detail::load(ours, fbb.GetBufferPointer(), context);
-		Verify(ours, theirs::GetTable0(fbb.GetBufferPointer()), "LoadPath[" + std::to_string(i) + "]: ");
+		Verify(ours, theirs::testfb::GetTable0(fbb.GetBufferPointer()), "LoadPath[" + std::to_string(i) + "]: ");
 	}
 }
 } // namespace

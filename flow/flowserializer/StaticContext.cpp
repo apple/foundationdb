@@ -128,18 +128,22 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 		}
 		if (type->typeType() == expression::TypeType::Table) {
 			auto vtable = generateVTable(alignmentAndSize);
-			flowserializer::voffset_t maxOffset = 0;
-			int maxIndex = 0;
-			for (int i = 2; i < vtable.size(); ++i) {
-				if (vtable[i] > maxOffset) {
-					maxOffset = vtable[i];
-					maxIndex = i - 2;
+			if (fieldTypes.size() == 0) {
+				vtable[1] = 2 * sizeof(short); // the two entries of the vtable
+			} else {
+				flowserializer::voffset_t maxOffset = 0;
+				int maxIndex = 0;
+				for (int i = 2; i < vtable.size(); ++i) {
+					if (vtable[i] > maxOffset) {
+						maxOffset = vtable[i];
+						maxIndex = i - 2;
+					}
 				}
+				assertTrue(maxIndex < fieldTypes.size());
+				auto lastElement = state[fieldTypes[maxIndex].first];
+				unsigned totalSize = maxOffset + lastElement.staticSize;
+				vtable[1] = totalSize;
 			}
-			assertTrue(maxIndex < fieldTypes.size());
-			auto lastElement = state[fieldTypes[maxIndex].first];
-			unsigned totalSize = maxOffset + lastElement.staticSize;
-			vtable[1] = totalSize;
 			state[t.first] = SerializationInfo{ .alignment = alignment, .staticSize = 4, .vtable = std::move(vtable) };
 		} else {
 			unsigned totalSize = 0;
