@@ -8,27 +8,10 @@ func clamp(_ v: Version, lowerBound: Version, upperBound: Version) -> Version {
     return max(min(v, upperBound), lowerBound)
 }
 
-// FIXME: This should be synthesized?
-extension Swift.Optional where Wrapped == Version {
-    init(cxxOptional value: OptionalVersion) {
-        guard value.present() else {
-            self = nil
-            return
-        }
-        self = Version(value.__getUnsafe().pointee)
-    }
-}
-
-// FIXME: This should be synthesized?
-extension Swift.Optional where Wrapped == SetTag {
-    init(cxxOptional value: OptionalSetTag) {
-        guard value.present() else {
-            self = nil
-            return
-        }
-        self = value.__getUnsafe().pointee
-    }
-}
+// FIXME: Make Flow.Optional automatically conform to `FlowOptionalProtocol`
+// when https://github.com/apple/swift/pull/62330 is merged and remove them.
+extension OptionalVersion: FlowOptionalProtocol {}
+extension OptionalSetTag: FlowOptionalProtocol {}
 
 @_expose(Cxx)
 public func figureVersion(current: Version,
@@ -161,7 +144,7 @@ public actor MasterDataActor {
             if let referenceVersion = Swift.Optional(cxxOptional: myself.referenceVersion) {
                 myself.version = figureVersion(current: myself.version,
                         now: SwiftGNetwork.timer(),
-                        reference: referenceVersion,
+                        reference: Version(referenceVersion),
                         toAdd: toAdd,
                         maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
                         maxVersionRateOffset: getServerKnobs().MAX_VERSION_RATE_OFFSET)

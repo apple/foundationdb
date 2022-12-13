@@ -119,6 +119,7 @@ add_library(flow_swift STATIC
     flow_future_support.swift # conformances for future types that we vend with this module (E.g. CInt, Void)
     reply_support.swift
     clock_support.swift
+    flow_optional_support.swift
 )
 
 target_include_directories(flow_swift PUBLIC
