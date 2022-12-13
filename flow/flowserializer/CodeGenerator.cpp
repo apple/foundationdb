@@ -141,7 +141,30 @@ void emitIncludes(Streams& out, std::vector<std::string> const& includes) {
 	EMIT(out.header, "");
 }
 
-std::vector<std::string> oldReaders = { "BinaryReader"s, "ArenaReader" };
+void emitDeserialize(Streams& out, expression::Table const& table) {
+	EMIT(out.header, "\t[[nodiscard]] static {} read(ObjectReader& reader);", table.name);
+	EMIT(out.header, "\t[[nodiscard]] static {} read(ArenaObjectReader& reader);", table.name);
+	EMIT(out.header, "");
+
+	EMIT(out.source, "namespace {{");
+	EMIT(out.source, "template <class Ar>");
+	EMIT(out.source, "{0} read{0}(Ar& reader) {{", table.name);
+	EMIT(out.source, "\t{} res;", table.name);
+	EMIT(out.source, "\treturn res;");
+	EMIT(out.source, "}}");
+	EMIT(out.source, "}} // namespace");
+	EMIT(out.source, "");
+
+	EMIT(out.source, "{0} {0}::read(ObjectReader& reader) {{", table.name);
+	EMIT(out.source, "\treturn read{}(reader);", table.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "{0} {0}::read(ArenaObjectReader& reader) {{", table.name);
+	EMIT(out.source, "\treturn read{}(reader);", table.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "");
+}
+
+std::vector<std::string> oldReaders = { "BinaryReader"s, "ArenaReader"s };
 std::vector<std::string> oldWriters = { "BinaryWriter"s, "PacketWriter"s };
 
 } // namespace
@@ -348,6 +371,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.header << fmt::format(
 	    "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Table; }};\n\n");
 	out.header << fmt::format("\tvoid write(flowflat::Writer& w) const;\n");
+	emitDeserialize(out, table);
 
 	for (auto const& f : table.fields) {
 		emit(out, f);
