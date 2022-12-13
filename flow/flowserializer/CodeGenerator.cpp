@@ -355,6 +355,8 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.source << fmt::format("void {}::write(flowflat::Writer& w) {{", table.name);
 	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
 	// known data
+	// TODO: Create buffer
+	// TODO: Only generate serialization for root_type
 	std::stringstream writer;
 	auto serMap = context->serializationInformation(table.name);
 	boost::unordered_map<TypeName, int> vtableOffsets;
@@ -364,22 +366,49 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		if (serInfo.vtable->empty()) {
 			continue;
 		}
-		writer << fmt::format("\t// vtable for {}{}{}\n",
+		writer << fmt::format("\n\t// vtable for {}{}{}\n",
 		                      fmt::join(typeName.path, "::"),
 		                      typeName.path.empty() ? "" : "::",
 		                      typeName.name);
 		for (auto o : *serInfo.vtable) {
-			writer << fmt::format("\t*reinterpret_cast<voffset_t*>(buffer + {}) = {};", curr, o);
+			writer << fmt::format("\t*reinterpret_cast<voffset_t*>(buffer + {}) = {};\n", curr, o);
+			curr += 2;
 		}
 		vtableOffsets[typeName] = curr;
-		curr += serInfo.vtable->size() * 2;
+		// curr += serInfo.vtable->size() * 2;
 	}
-	// 1. Iterate through all fields and generate all types simultaneously
+	out.source << writer.str();
 
+	// 1. Iterate through all fields and generate all types simultaneously
+	int curr2 = curr;
+	out.source << fmt::format("\n\t// table (data or offsets to data)\n");
+	out.source << fmt::format("\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
+	                          "(subtracted from current address to get vtable address)\n",
+	                          curr2,
+	                          curr2 - 8);
+	curr2 += sizeof(soffset_t);
 	for (auto const& field : table.fields) {
 		auto fieldType = assertTrue(context->resolve(field.type))->second;
+		auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType);
+		fmt::print("FieldType: {}, typeSize={}\n", field.type, type->_size);
+		if (field.type == "int") {
+			out.source << fmt::format("\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
+		} else if (field.type == "short") {
+			out.source << fmt::format("\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
+		} else if (field.type == "string") {
+			// Need to write string at end, then add a pointer to it
+		}
+		curr2 += type->_size;
 		int inlineSpace = 0;
 	}
+
+	// 2. Write header
+	out.source << fmt::format("\n\t// header\n");
+	out.source << fmt::format("\t// offset to root table\n");
+	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer) = {};\n", curr);
+	out.source << fmt::format("\t// file identifier\n");
+	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};\n", 0);
+
 	out.source << "}\n";
 	out.header << "};\n";
 	emit(out, OldSerializers{ table });
