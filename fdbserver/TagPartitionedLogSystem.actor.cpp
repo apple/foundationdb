@@ -312,6 +312,8 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 	if (remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isError())
 		throw remoteRecoveryComplete.getError();
 
+	Version oldestGenerationStartVersion = std::min(recoveredVersion->get(), remoteRecoveredVersion->get());
+
 	newState.tLogs.clear();
 	newState.logRouterTags = logRouterTags;
 	newState.txsTags = txsTags;
@@ -330,7 +332,16 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 	if (!recoveryComplete.isValid() || !recoveryComplete.isReady() ||
 	    (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady())) ||
 	    epoch != oldestBackupEpoch) {
-		for (const auto& oldData : oldLogData) {
+		for (int i = 0; i < oldLogData.size(); ++i) {
+			const auto& oldData = oldLogData[i];
+			if (oldData.epochBegin < oldestGenerationStartVersion) {
+				if (g_network->isSimulated()) {
+					for (int j = i + ; j < oldLogData.size(); ++j) {
+						ASSERT(oldLogData[j].epochBegin < oldestGenerationStartVersion);
+					}
+				}
+				break;
+			}
 			newState.oldTLogData.emplace_back(oldData);
 			TraceEvent("BWToCore")
 			    .detail("Epoch", newState.oldTLogData.back().epoch)
@@ -360,6 +371,8 @@ Future<Void> TagPartitionedLogSystem::onCoreStateChanged() const {
 		changes.push_back(remoteRecoveryComplete);
 	}
 	changes.push_back(backupWorkerChanged.onTrigger()); // changes to oldestBackupEpoch
+	changes.push_back(recoveredVersion->onChange());
+	changes.push_back(remoteRecoveredVersion->onChange());
 	return waitForAny(changes);
 }
 
@@ -3127,6 +3140,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		logSystem->hasRemoteServers = false;
 		logSystem->remoteRecovery = logSystem->recoveryComplete;
 		logSystem->remoteRecoveryComplete = logSystem->recoveryComplete;
+		logSystem->remoteRecoveredVersion->set(MAX_VERSION);
 	}
 
 	return logSystem;
