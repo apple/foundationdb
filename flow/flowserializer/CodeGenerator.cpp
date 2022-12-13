@@ -138,6 +138,7 @@ void emitIncludes(Streams& out, std::vector<std::string> const& includes) {
 	for (auto const& p : includes) {
 		out.header << fmt::format("#include \"{}.h\"\n", p.substr(0, p.size() - ".fbs"s.size()));
 	}
+	EMIT(out.header, "");
 }
 
 std::vector<std::string> oldReaders = { "BinaryReader"s, "ArenaReader" };
@@ -390,17 +391,21 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	curr2 += sizeof(soffset_t);
 	for (auto const& field : table.fields) {
 		auto fieldType = assertTrue(context->resolve(field.type))->second;
-		auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType);
-		fmt::print("FieldType: {}, typeSize={}\n", field.type, type->_size);
-		if (field.type == "int") {
-			out.source << fmt::format("\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
-		} else if (field.type == "short") {
-			out.source << fmt::format("\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
-		} else if (field.type == "string") {
-			// Need to write string at end, then add a pointer to it
+		if (fieldType->typeType() == expression::TypeType::Primitive) {
+			auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType);
+			fmt::print("FieldType: {}, typeSize={}\n", field.type, type->_size);
+			if (field.type == "int") {
+				out.source << fmt::format(
+				    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
+			} else if (field.type == "short") {
+				out.source << fmt::format(
+				    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
+			} else if (field.type == "string") {
+				// Need to write string at end, then add a pointer to it
+			}
+			curr2 += type->_size;
+			int inlineSpace = 0;
 		}
-		curr2 += type->_size;
-		int inlineSpace = 0;
 	}
 
 	// 2. Write header
