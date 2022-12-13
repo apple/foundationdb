@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/Msgpack.h"
+#include "flow/Msgpack.h"
 #include "fdbclient/Tracing.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
@@ -355,21 +355,25 @@ Span& Span::operator=(Span&& o) {
 		g_tracer->trace(*this);
 	}
 	arena = std::move(o.arena);
-	context = o.context;
-	parentContext = o.parentContext;
-	begin = o.begin;
-	end = o.end;
-	location = o.location;
-	links = std::move(o.links);
-	events = std::move(o.events);
-	status = o.status;
-	kind = o.kind;
-	o.context = SpanContext();
-	o.parentContext = SpanContext();
-	o.kind = SpanKind::INTERNAL;
-	o.begin = 0.0;
-	o.end = 0.0;
-	o.status = SpanStatus::UNSET;
+	// All memory referenced in *Ref fields of Span is now (potentially)
+	// invalid, and o no longer has ownership of any memory referenced by *Ref
+	// fields of o. We must ensure that o no longer references any memory it no
+	// longer owns, and that *this no longer references any memory it no longer
+	// owns. Not every field references arena memory, but this std::exchange
+	// pattern provides a nice template for getting this right in a concise way
+	// should we add more fields to Span.
+
+	attributes = std::exchange(o.attributes, decltype(o.attributes)());
+	begin = std::exchange(o.begin, decltype(o.begin)());
+	context = std::exchange(o.context, decltype(o.context)());
+	end = std::exchange(o.end, decltype(o.end)());
+	events = std::exchange(o.events, decltype(o.events)());
+	kind = std::exchange(o.kind, decltype(o.kind)());
+	links = std::exchange(o.links, decltype(o.links)());
+	location = std::exchange(o.location, decltype(o.location)());
+	parentContext = std::exchange(o.parentContext, decltype(o.parentContext)());
+	status = std::exchange(o.status, decltype(o.status)());
+
 	return *this;
 }
 
@@ -443,8 +447,6 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	           SpanContext(deterministicRandom()->randomUniqueID(),
 	                       deterministicRandom()->randomUInt64(),
 	                       TraceFlags::sampled));
-	IKnobCollection::getMutableGlobalKnobCollection().setKnob("tracing_span_attributes_enabled",
-	                                                          KnobValueRef::create(bool{ true }));
 	auto arena = span1.arena;
 	span1.addAttribute(StringRef(arena, "foo"_sr), StringRef(arena, "bar"_sr));
 	span1.addAttribute(StringRef(arena, "operation"_sr), StringRef(arena, "grv"_sr));
@@ -563,8 +565,6 @@ std::string readMPString(uint8_t* index) {
 // Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
 #ifndef WIN32
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
-	IKnobCollection::getMutableGlobalKnobCollection().setKnob("tracing_span_attributes_enabled",
-	                                                          KnobValueRef::create(bool{ true }));
 	Span span1("encoded_span"_loc);
 	auto request = MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 		                          .data_size = 0,

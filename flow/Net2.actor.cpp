@@ -232,6 +232,7 @@ public:
 	double taskBegin;
 	TaskPriority currentTaskID;
 	TDMetricCollection tdmetrics;
+	MetricCollection metrics;
 	ChaosMetrics chaosMetrics;
 	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
 	// not. For portability this should be atomic
@@ -933,8 +934,12 @@ public:
 		doAcceptHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -993,8 +998,12 @@ public:
 		doConnectHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
@@ -1219,6 +1228,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		setGlobal(INetwork::enChaosMetrics, (flowGlobalType)&chaosMetrics);
 	}
+	setGlobal(INetwork::enMetrics, (flowGlobalType)&metrics);
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType)network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType)&reactor.ios);
 	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);

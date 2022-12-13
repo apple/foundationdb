@@ -244,8 +244,8 @@ private:
 		std::map<typename T::Option, Optional<Standalone<StringRef>>> options;
 		std::map<std::string, typename T::Option> legalOptions;
 
-		OptionGroup<T>() {}
-		OptionGroup<T>(OptionGroup<T>& base)
+		OptionGroup() {}
+		OptionGroup(OptionGroup<T>& base)
 		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
 
 		// Enable or disable an option. Returns true if option value changed
@@ -685,7 +685,9 @@ ACTOR template <class T>
 Future<T> makeInterruptable(Future<T> f) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
-		when(T t = wait(f)) { return t; }
+		when(T t = wait(f)) {
+			return t;
+		}
 		when(wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
