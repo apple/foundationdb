@@ -591,6 +591,12 @@ void initHelp() {
 	                "All commands that are used to read or write keys will be done without a tenant and will operate "
 	                "on the raw key-space. This is the default behavior. The tenant cannot be configured while a "
 	                "transaction started with `begin' is open.");
+	helpMap["idempotencyids"] =
+	    CommandHelp("idempotencyids",
+	                "idempotencyids [status | clear <min_age_seconds>]",
+	                "Get the status for the idempotency IDs currently in the cluster; or clear "
+	                "all the IDs older than min_age_seconds from now (which expire all idempotent "
+	                "transaction versions older than this age).");
 }
 
 void printVersion() {
@@ -2114,6 +2120,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "idempotencyids")) {
+					bool _result = wait(makeInterruptable(idempotencyIdsCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
 					continue;
 				}
 
