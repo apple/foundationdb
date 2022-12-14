@@ -1179,6 +1179,58 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
+inline int64_t extractTenantIdFromStringRef(StringRef s) {
+	if (s.size() < TenantAPI::PREFIX_SIZE) {
+		return TenantInfo::INVALID_TENANT;
+	}
+	// Parse mutation key to determine mutation encryption domain
+	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
+	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+}
+
+int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
+	ASSERT_WE_THINK(!isSystemKey(m.param1));
+	ASSERT_WE_THINK(isSingleKeyMutation((MutationRef::Type)m.type));
+
+	return extractTenantIdFromStringRef(m.param1);
+}
+
+// Check a single-key mutation is associated with a valid tenant id
+// FIXME(xwang): handle clear range properly
+ErrorOr<Void> checkTenantModeAccess(MutationRef m) {
+	if (isSystemKey(m.param1))
+		return Void();
+
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		auto tenantId = extractTenantIdFromSingleKeyMutation(m);
+		// throw exception for invalid raw access
+		if (tenantId == TenantInfo::INVALID_TENANT) {
+			return illegal_tenant_access();
+		}
+	} else {
+		// For clear range, we allow raw access
+		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
+		auto beginTenantId = extractTenantIdFromStringRef(m.param1);
+		auto endTenantId = extractTenantIdFromStringRef(m.param2);
+		CODE_PROBE(!(beginTenantId == endTenantId && beginTenantId != TenantInfo::INVALID_TENANT),
+		           "Clear Range raw access or cross multiple tenants");
+	}
+	return Void();
+}
+
+// Return true if all the mutations in txn only write to valid tenant and system keys.
+// Otherwise, return false and send error back
+bool validTenantModeAccess(const CommitTransactionRequest& tr) {
+	for (auto& mutation : tr.transaction.mutations) {
+		ErrorOr<Void> checkRes = checkTenantModeAccess(mutation);
+		if (checkRes.isError()) {
+			tr.reply.sendError(checkRes.getError());
+			return false;
+		}
+	}
+	return true;
+}
+
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
@@ -1195,6 +1247,13 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
 				trs[t].reply.sendError(result.getError());
 			} else {
+				// raw access transactions don't have TenantMapEntry, in this case the writes have to be made only to
+				// keys within existing tenants or system keys
+				if (!result.get().present() && self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED &&
+				    !(validTenantModeAccess(trs[t]))) {
+					continue;
+				}
+
 				self->commitCount++;
 				applyMetadataMutations(trs[t].spanContext,
 				                       *pProxyCommitData,
@@ -1325,12 +1384,10 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 	if (self->pProxyCommitData->isEncryptionEnabled) {
 		EncryptCipherDomainId domainId = tenantId;
 		MutationRef encryptedMutation;
-		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::DISABLED,
-		           "using disabled tenant mode");
-		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::OPTIONAL_TENANT,
+		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED, "using disabled tenant mode");
+		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::OPTIONAL_TENANT,
 		           "using optional tenant mode");
-		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED,
-		           "using required tenant mode");
+		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED, "using required tenant mode");
 
 		if (encryptedMutationOpt && encryptedMutationOpt->present()) {
 			CODE_PROBE(true, "using already encrypted mutation");
