@@ -411,18 +411,12 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		if (vtable->empty()) {
 			continue;
 		}
-		if (field.type == "int") {
+		if (field.type == "int" || field.type == "short") {
 			EMIT(out.source,
-			     "\t*reinterpret_cast<{}*>(buffer + {}) = {};",
-			     field.type,
+			     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
 			     curr + vtable.value()[i + 2],
-			     field.name);
-		} else if (field.type == "short") {
-			EMIT(out.source,
-			     "\t*reinterpret_cast<{}*>(buffer + {}) = {};",
-			     field.type,
-			     curr + vtable.value()[i + 2],
-			     field.name);
+			     field.name,
+			     field.type);
 		} else if (field.type == "string") {
 			EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr + vtable.value()[i + 2], '?');
 			EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();", '?', field.name);
