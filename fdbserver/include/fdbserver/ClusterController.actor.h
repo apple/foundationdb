@@ -3186,6 +3186,10 @@ public:
 	Future<Void> metaclusterMetricsUpdater();
 	Future<Void> updateClusterId();
 	Future<Void> handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf);
+	Future<Void> recruitNewMaster(ClusterControllerDBInfo* db, MasterInterface* newMaster);
+	Future<Void> clusterRecruitFromConfiguration(Reference<RecruitWorkersInfo> req);
+	Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
+	    Reference<RecruitRemoteWorkersInfo> req);
 
 	static Future<Void> run(ClusterControllerFullInterface interf,
 	                        Future<Void> leaderFail,
