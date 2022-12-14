@@ -1150,7 +1150,7 @@ struct DDQueue : public IDDRelocationQueue {
 	// canceled inflight relocateData. Launch the relocation for the rd.
 	void launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>> combined,
 	                      const DDEnabledState* ddEnabledState) {
-		int startedHere = 0;
+		[[maybe_unused]] int startedHere = 0;
 		double startTime = now();
 		// kick off relocators from items in the queue as need be
 		std::set<RelocateData, std::greater<RelocateData>>::iterator it = combined.begin();
@@ -2530,7 +2530,9 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
+					keysToLaunchFrom = done;
+				}
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2633,7 +2635,9 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	std::cout << "Start trace counter unit test for " << duration << "s ...\n";
 	loop choose {
 		when(wait(counterFuture)) {}
-		when(wait(finishFuture)) { break; }
+		when(wait(finishFuture)) {
+			break;
+		}
 		when(wait(delayJittered(2.0))) {
 			std::vector<UID> team(3);
 			for (int i = 0; i < team.size(); ++i) {
