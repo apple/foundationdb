@@ -244,34 +244,69 @@ struct TestContext {
 	TestContext& context() { return *this; }
 };
 
+// Randomly generate instance of our type, serialize, verify, convert to
+// their type and compare.
+void testOursToTheirs(std::mt19937_64& r, int i) {
+	ours::Table0 ours;
+	ours::Randomize(r, ours);
+	Arena arena;
+	TestContext context{ arena };
+	auto* serialized = detail::save(context, ours, FileIdentifier{});
+
+	flatbuffers::Verifier verifier(serialized, arena.get_size(serialized));
+	auto result = theirs::testfb::VerifyTable0Buffer(verifier);
+	CHECK(result);
+	Verify(ours, theirs::testfb::GetTable0(serialized), "SavePath[" + std::to_string(i) + "]: ");
+}
+
+// Randomly generate instance of their type, serialize, verify, convert to
+// our type and compare.
+void testTheirsToOurs(std::mt19937_64& r, int i) {
+	flatbuffers::FlatBufferBuilder fbb;
+	flatbuffers::Offset<theirs::testfb::Table0> theirs;
+	ours::Randomize(r, theirs, fbb);
+	fbb.Finish(theirs);
+
+	ours::Table0 ours;
+	Arena arena;
+	TestContext context{ arena };
+	detail::load(ours, fbb.GetBufferPointer(), context);
+	Verify(ours, theirs::testfb::GetTable0(fbb.GetBufferPointer()), "LoadPath[" + std::to_string(i) + "]: ");
+}
+
+// Randomly generate instance of their type, serialize, verify, convert to
+// flowbuffers type, serialize it again and deserialize it with our old serializer
+void testTheirsToOurNewToOurOld(std::mt19937_64& r, int i) {
+	// Generate random a random instance and serialize using theirs serializer
+	flatbuffers::FlatBufferBuilder fbb;
+	flatbuffers::Offset<theirs::testfb::Table0> theirs;
+	ours::Randomize(r, theirs, fbb);
+	fbb.Finish(theirs);
+
+	// Deserialize using our new serializer
+	ObjectReader reader(fbb.GetBufferPointer(), Unversioned());
+	testfb::Table0 ours_new = testfb::Table0::read(reader);
+
+	// Serialize again using our new serializer
+	flowserializer::Writer w;
+	auto [bufPtr, bufSize] = ours_new.write(w);
+
+	// Deserialize using our old serializer
+	ours::Table0 ours_old;
+	Arena arena;
+	TestContext context{ arena };
+	detail::load(ours_old, bufPtr, context);
+	Verify(ours_old, theirs::testfb::GetTable0(bufPtr), "LoadPath[" + std::to_string(i) + "]: ");
+}
+
 void doFuzz() {
 	std::mt19937_64 r(ours::kSeed);
 
 	// Fuzz
 	for (int i = 0; i < 100; ++i) {
-		// Randomly generate instance of our type, serialize, verify, convert to
-		// their type and compare.
-		ours::Table0 ours;
-		ours::Randomize(r, ours);
-		Arena arena;
-		TestContext context{ arena };
-		auto* serialized = detail::save(context, ours, FileIdentifier{});
-		flatbuffers::Verifier verifier(serialized, arena.get_size(serialized));
-		auto result = theirs::testfb::VerifyTable0Buffer(verifier);
-		CHECK(result);
-		Verify(ours, theirs::testfb::GetTable0(serialized), "SavePath[" + std::to_string(i) + "]: ");
-
-		flatbuffers::FlatBufferBuilder fbb;
-		flatbuffers::Offset<theirs::testfb::Table0> theirs;
-		ours::Randomize(r, theirs, fbb);
-		fbb.Finish(theirs);
-
-		ours = {};
-		detail::load(ours, fbb.GetBufferPointer(), context);
-		Verify(ours, theirs::testfb::GetTable0(fbb.GetBufferPointer()), "LoadPath[" + std::to_string(i) + "]: ");
-
-		// Testing flowbuffers
-		testfb::Table0 ours_new;
+		testOursToTheirs(r, i);
+		testTheirsToOurs(r, i);
+		testTheirsToOurNewToOurOld(r, i);
 	}
 }
 } // namespace
