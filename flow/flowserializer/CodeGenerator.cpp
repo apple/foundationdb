@@ -557,6 +557,8 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	}
 
 	// 1.5. Iterate through all fields and generate all types simultaneously
+	EMIT(out.source, "\tint bufferSize = 0;");
+	EMIT(out.source, "\tvoffset_t dynamicOffset = 0;");
 	std::stringstream appendData;
 	EMIT(writer, "\n\t// table (data or offsets to data)");
 	EMIT(writer,
@@ -585,21 +587,23 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 				voffset_t offset = dataSize;
 				// Offset to string is the offset from where the address the offset is written at!
 				EMIT(writer,
-				     "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n",
+				     "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {} + dynamicOffset;\n",
 				     curr + vtable.value()[i + 2],
 				     offset - (curr + vtable.value()[i + 2]));
-				EMIT(appendData, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();", dataSize, field.name);
+				EMIT(appendData, "\t*reinterpret_cast<uoffset_t*>(buffer + {} + dynamicOffset) = {}.size();", dataSize, field.name);
 				EMIT(appendData,
-				     "\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size());",
+				     "\tstd::memcpy(buffer + {0} + {1} + dynamicOffset, {2}.data(), {2}.size());",
 				     dataSize,
 				     sizeof(uoffset_t),
 				     field.name);
 				EMIT(appendData,
-				     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;",
+				     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1 + dynamicOffset) = 0;",
 				     offset,
 				     sizeof(uoffset_t),
 				     field.name);
-				dataSize += 4 + 1 + type->_size;
+				dataSize += 4 + 1;
+				EMIT(appendData, "\tdynamicOffset += {}.size();", field.name);
+				EMIT(out.source, "\tbufferSize += {}.size();", field.name);
 			}
 			break;
 		}
@@ -621,7 +625,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		}
 	}
 
-	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{}];\n", dataSize);
+	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{} + bufferSize];\n", dataSize);
 	out.source << writer.str();
 
 	std::string appendStr = appendData.str();
@@ -636,7 +640,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	EMIT(out.source, "\t// file identifier");
 	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};", 0);
 
-	EMIT(out.source, "\treturn std::make_pair(buffer, {});", dataSize);
+	EMIT(out.source, "\treturn std::make_pair(buffer, {} + bufferSize);", dataSize);
 
 	EMIT(out.source, "}}");
 	EMIT(out.header, "}};");
