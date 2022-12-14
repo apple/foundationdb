@@ -2647,7 +2647,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			bool doReadDrivenFlush = !metadata->currentDeltas.empty() && metadata->doReadDrivenCompaction();
 			CODE_PROBE(forceFlush, "Force flushing granule");
 			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
-			    forceFlus || doReadDrivenFlush) {
+			    forceFlush || doReadDrivenFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
 				    .detail("Version", lastDeltaVersion);
