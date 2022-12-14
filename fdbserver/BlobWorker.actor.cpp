@@ -2095,9 +2095,10 @@ struct WriteAmpTarget {
 	void decrease() {
 		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
 			double minWriteAmp =
-			    0.5 * (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
+			    SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_MIN_FACTOR *
+			    (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
 			    SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
-			targetWriteAmp = std::max(targetWriteAmp * 0.8, minWriteAmp);
+			targetWriteAmp = std::max(targetWriteAmp * SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR, minWriteAmp);
 		}
 	}
 
