@@ -38,6 +38,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/ClusterControllerDBInfo.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/UpdateWorkerList.h"
 #include "fdbserver/WorkerInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/SystemMonitor.h"
@@ -46,67 +47,74 @@
 
 class ClusterController {
 	friend class ClusterControllerImpl;
+	friend class ClusterControllerTesting;
+
+	std::map<Optional<Standalone<StringRef>>, ProcessClass>
+	    id_class; // contains the mapping from process id to process class from the database
+	RangeResult lastProcessClasses;
+	bool gotProcessClasses;
+	bool gotFullyRecoveredConfig;
+	Optional<Standalone<StringRef>> masterProcessId;
+	Optional<Standalone<StringRef>> clusterControllerProcessId;
+	AsyncVar<Optional<std::vector<Optional<Key>>>> desiredDcIds; // desired DC priorities
+	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
+	    changingDcIds; // current DC priorities to change first, and whether that is the cluster controller
+	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
+	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
+	UID id;
+	Reference<AsyncVar<Optional<UID>>> clusterId;
+	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
+	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
+	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
+	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
+	ActorCollection ac;
+	UpdateWorkerList updateWorkerList;
+	Future<Void> outstandingRequestChecker;
+	Future<Void> outstandingRemoteRequestChecker;
+	AsyncTrigger updateDBInfo;
+	std::set<Endpoint> updateDBInfoEndpoints;
+	std::set<Endpoint> removedDBInfoEndpoints;
+
+	Database cx;
+	double startTime;
+	Future<Void> goodRecruitmentTime;
+	Future<Void> goodRemoteRecruitmentTime;
+	Version datacenterVersionDifference;
+	PromiseStream<Future<Void>> addActor;
+	bool versionDifferenceUpdated;
+
+	bool remoteDCMonitorStarted;
+	bool remoteTransactionSystemDegraded;
+
+	// Stores the health information from a particular worker's perspective.
+	struct WorkerHealth {
+		struct DegradedTimes {
+			double startTime = 0;
+			double lastRefreshTime = 0;
+		};
+		std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
+		std::unordered_map<NetworkAddress, DegradedTimes> disconnectedPeers;
+
+		// TODO(zhewu): Include disk and CPU signals.
+	};
+	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
+	DegradationInfo degradationInfo;
+	std::unordered_set<NetworkAddress>
+	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
+	std::queue<double> recentHealthTriggeredRecoveryTime;
+
+	CounterCollection clusterControllerMetrics;
+
+	Counter openDatabaseRequests;
+	Counter registerWorkerRequests;
+	Counter getWorkersRequests;
+	Counter getClientWorkersRequests;
+	Counter registerMasterRequests;
+	Counter statusRequests;
+
+	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
 
 public:
-	struct UpdateWorkerList {
-		Future<Void> init(Database const& db) { return update(this, db); }
-
-		void set(Optional<Standalone<StringRef>> processID, Optional<ProcessData> data) {
-			delta[processID] = data;
-			anyDelta.set(true);
-		}
-
-	private:
-		std::map<Optional<Standalone<StringRef>>, Optional<ProcessData>> delta;
-		AsyncVar<bool> anyDelta;
-
-		ACTOR static Future<Void> update(UpdateWorkerList* self, Database db) {
-			// The Database we are using is based on worker registrations to this cluster controller, which come only
-			// from master servers that we started, so it shouldn't be possible for multiple cluster controllers to
-			// fight.
-			state Transaction tr(db);
-			loop {
-				try {
-					tr.clear(workerListKeys);
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-
-			loop {
-				tr.reset();
-
-				// Wait for some changes
-				while (!self->anyDelta.get())
-					wait(self->anyDelta.onChange());
-				self->anyDelta.set(false);
-
-				state std::map<Optional<Standalone<StringRef>>, Optional<ProcessData>> delta;
-				delta.swap(self->delta);
-
-				TraceEvent("UpdateWorkerList").detail("DeltaCount", delta.size());
-
-				// Do a transaction to write the changes
-				loop {
-					try {
-						for (auto w = delta.begin(); w != delta.end(); ++w) {
-							if (w->second.present()) {
-								tr.set(workerListKeyFor(w->first.get()), workerListValue(w->second.get()));
-							} else
-								tr.clear(workerListKeyFor(w->first.get()));
-						}
-						wait(tr.commit());
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
-					}
-				}
-			}
-		}
-	};
-
 	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const;
 	bool isLongLivedStateless(Optional<Key> const& processId) const;
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req);
@@ -1716,15 +1724,6 @@ public:
 		}
 	}
 
-	struct DegradationInfo {
-		std::unordered_set<NetworkAddress>
-		    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this
-		                     // list are not excluded unless they are added to `excludedDegradedServers`.
-		std::unordered_set<NetworkAddress>
-		    disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
-
-		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
-	};
 	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
 	// that only one endpoint of a bad link will be included in this list.
 	DegradationInfo getDegradationInfo() {
@@ -2116,98 +2115,6 @@ public:
 		}
 	}
 
-	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
-	std::map<Optional<Standalone<StringRef>>, ProcessClass>
-	    id_class; // contains the mapping from process id to process class from the database
-	RangeResult lastProcessClasses;
-	bool gotProcessClasses;
-	bool gotFullyRecoveredConfig;
-	bool shouldCommitSuicide;
-	Optional<Standalone<StringRef>> masterProcessId;
-	Optional<Standalone<StringRef>> clusterControllerProcessId;
-	Optional<Standalone<StringRef>> clusterControllerDcId;
-	AsyncVar<Optional<std::vector<Optional<Key>>>> desiredDcIds; // desired DC priorities
-	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
-	    changingDcIds; // current DC priorities to change first, and whether that is the cluster controller
-	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
-	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
-	UID id;
-	Reference<AsyncVar<Optional<UID>>> clusterId;
-	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
-	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
-	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
-	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
-	ActorCollection ac;
-	UpdateWorkerList updateWorkerList;
-	Future<Void> outstandingRequestChecker;
-	Future<Void> outstandingRemoteRequestChecker;
-	AsyncTrigger updateDBInfo;
-	std::set<Endpoint> updateDBInfoEndpoints;
-	std::set<Endpoint> removedDBInfoEndpoints;
-
-	ClusterControllerDBInfo db;
-	Database cx;
-	double startTime;
-	Future<Void> goodRecruitmentTime;
-	Future<Void> goodRemoteRecruitmentTime;
-	Version datacenterVersionDifference;
-	PromiseStream<Future<Void>> addActor;
-	bool versionDifferenceUpdated;
-
-	bool remoteDCMonitorStarted;
-	bool remoteTransactionSystemDegraded;
-
-	// recruitX is used to signal when role X needs to be (re)recruited.
-	// recruitingXID is used to track the ID of X's interface which is being recruited.
-	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
-	double lastRecruitTime = 0;
-	AsyncVar<bool> recruitDistributor;
-	Optional<UID> recruitingDistributorID;
-	AsyncVar<bool> recruitRatekeeper;
-	Optional<UID> recruitingRatekeeperID;
-	AsyncVar<bool> recruitBlobManager;
-	Optional<UID> recruitingBlobManagerID;
-	AsyncVar<bool> recruitBlobMigrator;
-	Optional<UID> recruitingBlobMigratorID;
-	AsyncVar<bool> recruitEncryptKeyProxy;
-	Optional<UID> recruitingEncryptKeyProxyID;
-	AsyncVar<bool> recruitConsistencyScan;
-	Optional<UID> recruitingConsistencyScanID;
-
-	// Stores the health information from a particular worker's perspective.
-	struct WorkerHealth {
-		struct DegradedTimes {
-			double startTime = 0;
-			double lastRefreshTime = 0;
-		};
-		std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
-		std::unordered_map<NetworkAddress, DegradedTimes> disconnectedPeers;
-
-		// TODO(zhewu): Include disk and CPU signals.
-	};
-	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
-	DegradationInfo degradationInfo;
-	std::unordered_set<NetworkAddress>
-	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
-	std::queue<double> recentHealthTriggeredRecoveryTime;
-
-	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
-	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
-	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
-	// encryption status.
-	Promise<EncryptionAtRestMode> encryptionAtRestMode;
-
-	CounterCollection clusterControllerMetrics;
-
-	Counter openDatabaseRequests;
-	Counter registerWorkerRequests;
-	Counter getWorkersRequests;
-	Counter getClientWorkersRequests;
-	Counter registerMasterRequests;
-	Counter statusRequests;
-
-	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
-
 	ClusterController(ClusterControllerFullInterface const& ccInterface,
 	                  LocalityData const& locality,
 	                  ServerCoordinators const& coordinators,
@@ -2243,6 +2150,81 @@ public:
 	~ClusterController() {
 		ac.clear(false);
 		id_worker.clear();
+	}
+
+	UID getId() const { return id; }
+
+	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
+
+	// recruitX is used to signal when role X needs to be (re)recruited.
+	// recruitingXID is used to track the ID of X's interface which is being recruited.
+	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
+	double lastRecruitTime = 0;
+	AsyncVar<bool> recruitDistributor;
+	Optional<UID> recruitingDistributorID;
+	AsyncVar<bool> recruitRatekeeper;
+	Optional<UID> recruitingRatekeeperID;
+	AsyncVar<bool> recruitBlobManager;
+	Optional<UID> recruitingBlobManagerID;
+	AsyncVar<bool> recruitBlobMigrator;
+	Optional<UID> recruitingBlobMigratorID;
+	AsyncVar<bool> recruitEncryptKeyProxy;
+	Optional<UID> recruitingEncryptKeyProxyID;
+	AsyncVar<bool> recruitConsistencyScan;
+	Optional<UID> recruitingConsistencyScanID;
+
+	bool shouldCommitSuicide;
+	Optional<Standalone<StringRef>> clusterControllerDcId;
+	ClusterControllerDBInfo db;
+
+	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
+	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
+	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
+	// encryption status.
+	Promise<EncryptionAtRestMode> encryptionAtRestMode;
+
+	// Returns true iff the singleton is healthy. "Healthy" here means that
+	// the singleton is stable (see below) and doesn't need to be rerecruited.
+	// Side effects: (possibly) initiates recruitment
+	template <class SingletonClass>
+	bool isHealthySingleton(const WorkerDetails& newWorker,
+	                        const SingletonClass& singleton,
+	                        const ProcessClass::Fitness& bestFitness,
+	                        const Optional<UID> recruitingID) {
+		// A singleton is stable if it exists in cluster, has not been killed off of proc and is not being recruited
+		bool isStableSingleton = singleton.isPresent() &&
+		                         id_worker.count(singleton.getInterface().locality.processId()) &&
+		                         (!recruitingID.present() || (recruitingID.get() == singleton.getInterface().id()));
+
+		if (!isStableSingleton) {
+			return false; // not healthy because unstable
+		}
+
+		auto& currWorker = id_worker[singleton.getInterface().locality.processId()];
+		auto currFitness = currWorker.details.processClass.machineClassFitness(singleton.getClusterRole());
+		if (currWorker.priorityInfo.isExcluded) {
+			currFitness = ProcessClass::ExcludeFit;
+		}
+		// If any of the following conditions are met, we will switch the singleton's process:
+		// - if the current proc is used by some non-master, non-singleton role
+		// - if the current fitness is less than optimal (lower fitness is better)
+		// - if currently at peak fitness but on same process as master, and the new worker is on different process
+		bool shouldRerecruit =
+		    isUsedNotMaster(currWorker.details.interf.locality.processId()) || bestFitness < currFitness ||
+		    (currFitness == bestFitness && currWorker.details.interf.locality.processId() == masterProcessId &&
+		     newWorker.interf.locality.processId() != masterProcessId);
+		if (shouldRerecruit) {
+			std::string roleAbbr = singleton.getRole().abbreviation;
+			TraceEvent(("CCHalt" + roleAbbr).c_str(), id)
+			    .detail(roleAbbr + "ID", singleton.getInterface().id())
+			    .detail("Excluded", currWorker.priorityInfo.isExcluded)
+			    .detail("Fitness", currFitness)
+			    .detail("BestFitness", bestFitness);
+			singleton.recruit(*this); // SIDE EFFECT: initiating recruitment
+			return false; // not healthy since needed to be rerecruited
+		} else {
+			return true; // healthy because doesn't need to be rerecruited
+		}
 	}
 };
 

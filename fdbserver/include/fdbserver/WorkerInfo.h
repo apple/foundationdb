@@ -5,6 +5,8 @@
 #include "flow/Arena.h"
 #include "flow/genericactors.actor.h"
 
+#include <unordered_set>
+
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -84,4 +86,14 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	Optional<UID> dbgId;
 
 	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
+};
+
+struct DegradationInfo {
+	std::unordered_set<NetworkAddress>
+	    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this
+	// list are not excluded unless they are added to `excludedDegradedServers`.
+	std::unordered_set<NetworkAddress>
+	    disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
+
+	bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 };
