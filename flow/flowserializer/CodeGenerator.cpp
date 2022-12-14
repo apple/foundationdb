@@ -452,11 +452,11 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 			break;
 		}
 		case expression::TypeType::Union: {
-			throw Error("NOT IMPLEMENTED");
+			// throw Error("NOT IMPLEMENTED");
 			break;
 		}
 		default: {
-			throw Error("NOT IMPLEMENTED");
+			// throw Error("NOT IMPLEMENTED");
 			break;
 		}
 		}
