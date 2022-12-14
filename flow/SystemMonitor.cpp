@@ -120,6 +120,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
+			    .detail("Version", machineState.fdbVersion)
 			    .detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 			    .detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
 			    .detail("AIOSubmitLag",
