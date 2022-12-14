@@ -277,7 +277,7 @@ void CodeGenerator::emit(Streams& out, expression::Field const& f) const {
 	std::string assignment;
 	auto type = std::string(convertType(f.type));
 	if (f.isArrayType) {
-		type = fmt::format("std::vector<{}>", type);
+		type = fmt::format("std::vector<{}>", type == "bool" ? "uint8_t" : type.c_str());
 	}
 	if (f.defaultValue) {
 		if (expression::primitiveTypes.count(type) > 0) {
@@ -395,7 +395,8 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	curr2 += sizeof(soffset_t);
 	for (auto const& field : table.fields) {
 		auto fieldType = assertTrue(context->resolve(field.type))->second;
-		if (fieldType->typeType() == expression::TypeType::Primitive) {
+		// FIXME: implement code generation for array types
+		if (fieldType->typeType() == expression::TypeType::Primitive && !field.isArrayType) {
 			auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType);
 			fmt::print("FieldType: {}, typeSize={}\n", field.type, type->_size);
 			if (field.type == "int") {

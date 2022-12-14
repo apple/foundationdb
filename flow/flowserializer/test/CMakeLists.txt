@@ -1,6 +1,6 @@
 #string(RANDOM LENGTH 8 ALPHABET "0123456789abcdef" SEED_)
 #set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
-set(SEED "1")
+set(SEED "9")
 FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/seed "${SEED}")
 
 add_custom_command(
