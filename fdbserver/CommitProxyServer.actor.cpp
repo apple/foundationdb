@@ -2940,10 +2940,19 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
-	addActor.send(idempotencyIdsExpireServer(openDBOnServer(db),
-	                                         proxy.expireIdempotencyId,
-	                                         commitData.expectedIdempotencyIdCountForKey,
-	                                         &commitData.idempotencyClears));
+
+	auto openDb = openDBOnServer(db);
+
+	if (firstProxy) {
+		addActor.send(recurringAsync(
+		    [openDb = openDb]() { return cleanIdempotencyIds(openDb, SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS); },
+		    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL,
+		    true,
+		    SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL));
+	}
+	addActor.send(idempotencyIdsExpireServer(
+	    openDb, proxy.expireIdempotencyId, commitData.expectedIdempotencyIdCountForKey, &commitData.idempotencyClears));
+
 	if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
 		addActor.send(monitorTenantsOverStorageQuota(proxy.id(), db, &commitData));
 	}
