@@ -279,7 +279,7 @@ void CodeGenerator::emit(Streams& out, expression::Field const& f) const {
 	std::string assignment;
 	auto type = std::string(convertType(f.type));
 	if (f.isArrayType) {
-		type = fmt::format("std::vector<{}>", type);
+		type = fmt::format("std::vector<{}>", type == "bool" ? "uint8_t" : type.c_str());
 	}
 	if (f.defaultValue) {
 		if (expression::primitiveTypes.count(type) > 0) {
@@ -413,7 +413,9 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		}
 		switch (fieldType->second->typeType()) {
 		case expression::TypeType::Primitive: {
-			if (field.type == "int" || field.type == "short" || field.type == "long") {
+		    if (field.isArrayType) {
+				// TODO: Implement
+			} else if (field.type == "int" || field.type == "short" || field.type == "long") {
 				EMIT(writer,
 				     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
 				     curr + vtable.value()[i + 2],
