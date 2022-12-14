@@ -336,7 +336,7 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 			const auto& oldData = oldLogData[i];
 			if (oldData.epochBegin < oldestGenerationStartVersion) {
 				if (g_network->isSimulated()) {
-					for (int j = i + ; j < oldLogData.size(); ++j) {
+					for (int j = i + 1; j < oldLogData.size(); ++j) {
 						ASSERT(oldLogData[j].epochBegin < oldestGenerationStartVersion);
 					}
 				}
@@ -3143,6 +3143,8 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		logSystem->remoteRecoveredVersion->set(MAX_VERSION);
 	}
 
+	TraceEvent("DoneNewEpoch").log();
+
 	return logSystem;
 }
 
@@ -3228,10 +3230,14 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 ACTOR Future<Void> TagPartitionedLogSystem::trackTLogRecoveryActor(
     std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> tlogs,
     Reference<AsyncVar<Version>> recoveredVersion) {
+	if (!SERVER_KNOBS->TRACK_TLOG_RECOVERY) {
+		return Never();
+	}
+
 	state std::vector<Future<TrackTLogRecoveryReply>> individualTLogRecovery;
 	loop {
 		individualTLogRecovery.clear();
-		individualTLogRecovery.resize(tlogs.size());
+		individualTLogRecovery.reserve(tlogs.size());
 		TrackTLogRecoveryRequest req(recoveredVersion->get());
 		for (int i = 0; i < tlogs.size(); ++i) {
 			individualTLogRecovery.push_back(transformErrors(
@@ -3247,6 +3253,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackTLogRecoveryActor(
 			currentRecoveredVersion =
 			    std::min(individualTLogRecovery[i].get().oldestUnrecoveredStartVersion, currentRecoveredVersion);
 		}
+
 		recoveredVersion->set(currentRecoveredVersion);
 	}
 }

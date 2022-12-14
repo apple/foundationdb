@@ -133,10 +133,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
 	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
-	    recoveredVersion(makeReference<AsyncVar<Version>>(0)),
-	    remoteRecoveredVersion(makeReference<AsyncVar<Version>>(0)), recoveryCompleteWrittenToCoreState(false),
-	    remoteLogsWrittenToCoreState(false), hasRemoteServers(false), locality(locality), addActor(addActor),
-	    popActors(false) {}
+	    recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
+	    remoteRecoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
+	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
+	    locality(locality), addActor(addActor), popActors(false) {}
 
 	void stopRejoins() final;
 
