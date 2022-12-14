@@ -103,7 +103,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterController* cluster,
 		cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
 		cluster->db.unfinishedRecoveries++;
 		fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
-		wait(ready(fNewMaster) || db->forceMasterFailure.onTrigger());
+		wait(ready(fNewMaster) || db->onMasterFailureForced());
 		if (fNewMaster.isReady() && fNewMaster.get().present()) {
 			TraceEvent("RecruitNewMaster", cluster->id).detail("Recruited", fNewMaster.get().get().id());
 

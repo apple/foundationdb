@@ -13,13 +13,20 @@
 class ClusterControllerDBInfo {
 	friend class ClusterControllerDBInfoImpl;
 
+	// Map of addresses of incompatible connections to the expiration times.
+	// Once expiration time is hit, if this entry has not been refreshed,
+	// the connection will be removed (i.e. marked no longer incompatible)
+	std::map<NetworkAddress, double> incompatibleConnections;
+	AsyncTrigger forceMasterFailureTrigger;
+	int64_t dbInfoCount;
+	Future<Void> clientCounter;
+	Future<Void> countClients();
+	int clientCount;
+
 public:
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Reference<AsyncVar<ServerDBInfo>> serverInfo;
-	std::map<NetworkAddress, double> incompatibleConnections;
-	AsyncTrigger forceMasterFailure;
 	int64_t masterRegistrationCount;
-	int64_t dbInfoCount;
 	bool recoveryStalled;
 	bool forceRecovery;
 	DatabaseConfiguration config; // Asynchronously updated via master registration
@@ -27,10 +34,7 @@ public:
 	Database db;
 	int unfinishedRecoveries;
 	int logGenerations;
-	bool cachePopulated;
 	std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
-	Future<Void> clientCounter;
-	int clientCount;
 	AsyncVar<bool> blobGranulesEnabled;
 	AsyncVar<bool> blobRestoreEnabled;
 	ClusterType clusterType = ClusterType::STANDALONE;
@@ -46,8 +50,6 @@ public:
 	void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf);
 	void setConsistencyScan(const ConsistencyScanInterface& interf);
 	void clearInterf(ProcessClass::ClassType t);
-	Future<Void> countClients();
-	Future<Void> monitorServerInfoConfig();
 	Future<Void> clusterOpenDatabase(OpenDatabaseRequest);
 	Future<Void> clusterGetServerInfo(UID knownServerInfoID, ReplyPromise<ServerDBInfo> reply);
 
@@ -57,4 +59,22 @@ public:
 	// GlobalConfig actor class contains the functionality to read the latest
 	// history and update the processes local view.
 	Future<Void> monitorGlobalConfig();
+
+	// Either mark the connection to the address as newly incompatible,
+	// or refresh the expiration time
+	void markConnectionIncompatible(NetworkAddress address);
+
+	Future<Void> monitorServerInfoConfig();
+
+	// Refreshes incompatibleConnections map and returns vector of currently
+	// incompatible connection addresses
+	std::vector<NetworkAddress> getIncompatibleConnections();
+
+	void forceMasterFailure() { forceMasterFailureTrigger.trigger(); }
+
+	Future<Void> onMasterFailureForced() const { return forceMasterFailureTrigger.onTrigger(); }
+
+	int64_t incrementAndGetDbInfoCount() { return ++dbInfoCount; }
+
+	int getClientCount() const { return clientCount; }
 };

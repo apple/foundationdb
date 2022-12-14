@@ -140,7 +140,7 @@ public:
 				auto dbInfo = ServerDBInfo();
 				dbInfo.master = iMaster;
 				dbInfo.id = deterministicRandom()->randomUniqueID();
-				dbInfo.infoGeneration = ++db->dbInfoCount;
+				dbInfo.infoGeneration = db->incrementAndGetDbInfoCount();
 				dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
 				++dbInfo.masterLifetime;
 				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
@@ -197,7 +197,7 @@ public:
 					              db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
 					                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
 					                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
-					          db->forceMasterFailure.onTrigger())) {
+					          db->onMasterFailureForced())) {
 						break;
 					}
 					when(wait(db->serverInfo->onChange())) {}
@@ -290,7 +290,7 @@ public:
 
 			self->checkRecoveryStalled();
 			if (self->betterMasterExists()) {
-				self->db.forceMasterFailure.trigger();
+				self->db.forceMasterFailure();
 				TraceEvent("MasterRegistrationKill", self->id)
 				    .detail("MasterId", self->db.serverInfo->get().master.id());
 			}
@@ -417,8 +417,8 @@ public:
 		     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.secondaryAddress().get()) !=
 		         coordinatorAddresses.end());
 
-		for (auto it : req.incompatiblePeers) {
-			self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+		for (auto const& address : req.incompatiblePeers) {
+			self->db.markConnectionIncompatible(address);
 		}
 		self->removedDBInfoEndpoints.erase(w.updateServerDBInfo.getEndpoint());
 
@@ -726,16 +726,7 @@ public:
 					}
 				}
 
-				std::vector<NetworkAddress> incompatibleConnections;
-				for (auto it = self->db.incompatibleConnections.begin();
-				     it != self->db.incompatibleConnections.end();) {
-					if (it->second < now()) {
-						it = self->db.incompatibleConnections.erase(it);
-					} else {
-						incompatibleConnections.push_back(it->first);
-						it++;
-					}
-				}
+				std::vector<NetworkAddress> incompatibleConnections = self->db.getIncompatibleConnections();
 
 				state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo,
 				                                                                  self->cx,
@@ -1104,7 +1095,7 @@ public:
 					self->desiredDcIds.set(dcPriority);
 				} else {
 					self->db.forceRecovery = true;
-					self->db.forceMasterFailure.trigger();
+					self->db.forceMasterFailure();
 				}
 				wait(fCommit);
 			}
@@ -1948,7 +1939,7 @@ public:
 								                                     self->degradationInfo.disconnectedServers.end());
 								TraceEvent("DegradedServerDetectedAndTriggerRecovery")
 								    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
-								self->db.forceMasterFailure.trigger();
+								self->db.forceMasterFailure();
 							}
 						} else {
 							self->excludedDegradedServers.clear();
@@ -2867,7 +2858,7 @@ void ClusterController::clusterRegisterMaster(RegisterMasterRequest const& req) 
 
 	if (isChanged) {
 		dbInfo.id = deterministicRandom()->randomUniqueID();
-		dbInfo.infoGeneration = ++db.dbInfoCount;
+		dbInfo.infoGeneration = db.incrementAndGetDbInfoCount();
 		db.serverInfo->set(dbInfo);
 	}
 

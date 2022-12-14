@@ -3428,7 +3428,7 @@ public:
 	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
 		auto serverInfo = ServerDBInfo();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
-		serverInfo.infoGeneration = ++db.dbInfoCount;
+		serverInfo.infoGeneration = db.incrementAndGetDbInfoCount();
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
@@ -3436,7 +3436,7 @@ public:
 		db.serverInfo->set(serverInfo);
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
-		specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
+		specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.getClientCount(); });
 	}
 
 	~ClusterController() {

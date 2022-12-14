@@ -191,8 +191,8 @@ ClusterControllerDBInfo::ClusterControllerDBInfo()
                                EnableLocalityLoadBalance::True,
                                TaskPriority::DefaultEndpoint,
                                LockAware::True)), // SOMEDAY: Locality!
-    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
-    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
+    unfinishedRecoveries(0), logGenerations(0), clientCount(0), blobGranulesEnabled(config.blobGranulesEnabled),
+    blobRestoreEnabled(false) {
 	clientCounter = countClients();
 }
 
@@ -294,5 +294,20 @@ Future<Void> ClusterControllerDBInfo::monitorGlobalConfig() {
 	return ClusterControllerDBInfoImpl::monitorGlobalConfig(this);
 }
 
-Future<Void> clusterOpenDatabase(OpenDatabaseRequest);
-Future<Void> clusterGetServerInfo(UID knownServerInfoID, ReplyPromise<ServerDBInfo> reply);
+void ClusterControllerDBInfo::markConnectionIncompatible(NetworkAddress address) {
+	incompatibleConnections[address] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+}
+
+std::vector<NetworkAddress> ClusterControllerDBInfo::getIncompatibleConnections() {
+	std::vector<NetworkAddress> result;
+	for (auto it = incompatibleConnections.begin(); it != incompatibleConnections.end();) {
+		auto const& [address, expirationTime] = *it;
+		if (expirationTime < now()) {
+			it = incompatibleConnections.erase(it);
+		} else {
+			result.push_back(address);
+			it++;
+		}
+	}
+	return result;
+}
