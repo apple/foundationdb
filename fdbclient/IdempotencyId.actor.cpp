@@ -21,6 +21,7 @@
 #include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "flow/BooleanParam.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // this has to be the last include
 
@@ -204,14 +205,17 @@ void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrder
 	reader >> highOrderBatchIndex;
 }
 
-// Find the youngest or oldest idempotency id key in `range` (depending on `reverse`)
+FDB_BOOLEAN_PARAM(Oldest);
+
+// Find the youngest or oldest idempotency id key in `range` (depending on `oldest`)
 // Write the timestamp to `*time` and the version to `*version` when non-null.
 ACTOR static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransaction> tr,
                                                KeyRange range,
-                                               Reverse reverse,
+                                               Oldest oldest,
                                                Version* version,
                                                int64_t* time) {
-	RangeResult result = wait(tr->getRange(range, /*limit*/ 1, Snapshot::False, reverse));
+	RangeResult result =
+	    wait(tr->getRange(range, /*limit*/ 1, Snapshot::False, oldest ? Reverse::False : Reverse::True));
 	if (!result.size()) {
 		return Optional<Key>();
 	}
@@ -252,7 +256,7 @@ ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 
 			// Check if any keys are older than minAgeSeconds
 			Optional<Key> oldestKey_ =
-			    wait(getBoundary(tr, idempotencyIdKeys, Reverse::False, &oldestVersion, &oldestTime));
+			    wait(getBoundary(tr, idempotencyIdKeys, Oldest::True, &oldestVersion, &oldestTime));
 			if (!oldestKey_.present()) {
 				break;
 			}
@@ -266,7 +270,7 @@ ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 
 			// Get the version of the most recent idempotency ID
 			wait(success(
-			    getBoundary(tr, idempotencyIdKeys, Reverse::True, &candidateDeleteVersion, &candidateDeleteTime)));
+			    getBoundary(tr, idempotencyIdKeys, Oldest::False, &candidateDeleteVersion, &candidateDeleteTime)));
 
 			// Keep dividing the candidate range until clearing it would not delete something younger than
 			// minAgeSeconds
@@ -284,7 +288,7 @@ ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 
 				// Find the youngest key in candidate range
 				wait(success(getBoundary(
-				    tr, candidateRangeToClean, Reverse::True, &candidateDeleteVersion, &candidateDeleteTime)));
+				    tr, candidateRangeToClean, Oldest::False, &candidateDeleteVersion, &candidateDeleteTime)));
 
 				// Update the range so that it ends at an idempotency id key. Since we're binary searching, the
 				// candidate range was probably too large before.

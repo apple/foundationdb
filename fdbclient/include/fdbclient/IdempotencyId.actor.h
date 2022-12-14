@@ -188,6 +188,10 @@ KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
 
 // Delete zero or more idempotency ids older than minAgeSeconds
+//
+// Normally idempotency ids are deleted as part of the normal commit process, so this only needs to clean ids that
+// leaked during a failure scenario. The rate of leaked idempotency ids should be low. The rate is zero during normal
+// operation, and proportional to the number of in-flight transactions during a failure scenario.
 ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds);
 
 #include "flow/unactorcompiler.h"
