@@ -234,7 +234,7 @@ void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
 	for (auto const& ar : oldReaders) {
 		out.header << fmt::format("void load({}& ar, {}& value);\n", ar, u.name);
 
-		out.header << fmt::format("void load({}& ar, {}& value) {{\n", ar, u.name);
+		out.source << fmt::format("void load({}& ar, {}& value) {{\n", ar, u.name);
 		out.source << fmt::format("\tint idx;\n");
 		out.source << fmt::format("\tar >> idx;\n");
 		out.source << fmt::format("\tswitch (idx) {{\n");
@@ -255,7 +255,7 @@ void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
 	for (auto const& ar : oldWriters) {
 		out.header << fmt::format("void save({}& ar, {} const& value);\n", ar, u.name);
 
-		out.header << fmt::format("void save({}& ar, {} const& value) {{\n", ar, u.name);
+		out.source << fmt::format("void save({}& ar, {} const& value) {{\n", ar, u.name);
 		out.source << fmt::format("\tint idx = value.index();\n");
 		out.source << fmt::format("\tar << idx;\n");
 		out.source << fmt::format("\tswitch (idx) {{\n");
