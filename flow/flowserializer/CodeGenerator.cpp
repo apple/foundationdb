@@ -453,16 +453,17 @@ void CodeGenerator::emit(Streams& out, expression::Field const& f) const {
 }
 
 void CodeGenerator::emit(Streams& out, expression::Struct const& st) const {
-	Defer defer;
-	out.header << fmt::format("struct {} {{\n", st.name);
+	EMIT(out.header, "struct {} {{", st.name);
+	EMIT(out.header, "\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{");
+	EMIT(out.header, "\t\treturn flowserializer::Type::Struct;");
+	EMIT(out.header, "\t}}\n");
 	emitDeserialize(context, out, st);
-	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
-	                          "flowserializer::Type::Struct; }};\n\n");
 	for (auto const& f : st.fields) {
 		emit(out, f);
 	}
-	out.header << "};\n";
+	EMIT(out.header, "}};");
 	emit(out, OldSerializers{ st });
+	EMIT(out.header, "");
 }
 
 void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
@@ -510,7 +511,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
 	                          "flowserializer::Type::Table; }};\n\n");
 	out.header << fmt::format("\tstd::pair<uint8_t*, int> write(flowserializer::Writer& w) const;\n");
-	emitDeserialize(context, out, table);
+	//emitDeserialize(context, out, table);
 
 	for (auto const& f : table.fields) {
 		emit(out, f);
@@ -520,8 +521,8 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	     "std::pair<uint8_t*, int> {}::{}::write(flowserializer::Writer& w) const {{",
 	     fmt::join(tableTypeName.path, "::"),
 	     table.name);
-	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
-	// known data
+	// the code to allocate the memory has to be called first, but we can already generate code to write the
+	// statically known data
 	// TODO: Only generate serialization for root_type
 	std::stringstream writer;
 	auto serMap = context->serializationInformation(table.name);
@@ -571,7 +572,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		}
 		switch (fieldType->second->typeType()) {
 		case expression::TypeType::Primitive: {
-		    if (field.isArrayType) {
+			if (field.isArrayType) {
 				// TODO: Implement
 			} else if (field.type == "int" || field.type == "short" || field.type == "long") {
 				EMIT(writer,
