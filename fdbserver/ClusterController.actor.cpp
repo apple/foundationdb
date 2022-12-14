@@ -111,7 +111,6 @@ public:
 	}
 
 	ACTOR static Future<Void> clusterWatchDatabase(ClusterController* self,
-	                                               ClusterControllerDBInfo* db,
 	                                               ServerCoordinators coordinators,
 	                                               Future<Void> recoveredDiskFiles) {
 		state MasterInterface iMaster;
@@ -130,41 +129,42 @@ public:
 				state Future<Void> collection;
 
 				TraceEvent("CCWDB", self->id).detail("Recruiting", "Master");
-				wait(self->recruitNewMaster(db, &newMaster));
+				wait(self->recruitNewMaster(&newMaster));
 
 				iMaster = newMaster;
 
-				db->masterRegistrationCount = 0;
-				db->recoveryStalled = false;
+				self->db.masterRegistrationCount = 0;
+				self->db.recoveryStalled = false;
 
 				auto dbInfo = ServerDBInfo();
 				dbInfo.master = iMaster;
 				dbInfo.id = deterministicRandom()->randomUniqueID();
-				dbInfo.infoGeneration = db->incrementAndGetDbInfoCount();
-				dbInfo.masterLifetime = db->serverInfo->get().masterLifetime;
+				dbInfo.infoGeneration = self->db.incrementAndGetDbInfoCount();
+				dbInfo.masterLifetime = self->db.serverInfo->get().masterLifetime;
 				++dbInfo.masterLifetime;
-				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
-				dbInfo.distributor = db->serverInfo->get().distributor;
-				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
-				dbInfo.blobManager = db->serverInfo->get().blobManager;
-				dbInfo.blobMigrator = db->serverInfo->get().blobMigrator;
-				dbInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
-				dbInfo.consistencyScan = db->serverInfo->get().consistencyScan;
-				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
-				dbInfo.myLocality = db->serverInfo->get().myLocality;
+				dbInfo.clusterInterface = self->db.serverInfo->get().clusterInterface;
+				dbInfo.distributor = self->db.serverInfo->get().distributor;
+				dbInfo.ratekeeper = self->db.serverInfo->get().ratekeeper;
+				dbInfo.blobManager = self->db.serverInfo->get().blobManager;
+				dbInfo.blobMigrator = self->db.serverInfo->get().blobMigrator;
+				dbInfo.encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
+				dbInfo.consistencyScan = self->db.serverInfo->get().consistencyScan;
+				dbInfo.latencyBandConfig = self->db.serverInfo->get().latencyBandConfig;
+				dbInfo.myLocality = self->db.serverInfo->get().myLocality;
 				dbInfo.client = ClientDBInfo();
-				dbInfo.client.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
+				dbInfo.client.encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
 				dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
-				dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
-				dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
-				dbInfo.client.clusterType = db->clusterType;
-				dbInfo.client.metaclusterName = db->metaclusterName;
+				dbInfo.client.tenantMode =
+				    TenantAPI::tenantModeForClusterType(self->db.clusterType, self->db.config.tenantMode);
+				dbInfo.client.clusterId = self->db.serverInfo->get().client.clusterId;
+				dbInfo.client.clusterType = self->db.clusterType;
+				dbInfo.client.metaclusterName = self->db.metaclusterName;
 
 				TraceEvent("CCWDB", self->id)
 				    .detail("NewMaster", dbInfo.master.id().toString())
 				    .detail("Lifetime", dbInfo.masterLifetime.toString())
 				    .detail("ChangeID", dbInfo.id);
-				db->serverInfo->set(dbInfo);
+				self->db.serverInfo->set(dbInfo);
 
 				state Future<Void> spinDelay = delay(
 				    SERVER_KNOBS
@@ -173,14 +173,14 @@ public:
 
 				TraceEvent("CCWDB", self->id).detail("Watching", iMaster.id());
 				recoveryData = makeReference<ClusterRecoveryData>(self,
-				                                                  db->serverInfo,
-				                                                  db->serverInfo->get().master,
-				                                                  db->serverInfo->get().masterLifetime,
+				                                                  self->db.serverInfo,
+				                                                  self->db.serverInfo->get().master,
+				                                                  self->db.serverInfo->get().masterLifetime,
 				                                                  coordinators,
-				                                                  db->serverInfo->get().clusterInterface,
+				                                                  self->db.serverInfo->get().clusterInterface,
 				                                                  ""_sr,
 				                                                  addActor,
-				                                                  db->forceRecovery);
+				                                                  self->db.forceRecovery);
 
 				collection = actorCollection(recoveryData->addActor.getFuture());
 				recoveryCore = clusterRecoveryCore(recoveryData);
@@ -189,20 +189,21 @@ public:
 				// really don't want to have to start over
 				loop choose {
 					when(wait(recoveryCore)) {}
-					when(wait(waitFailureClient(
-					              iMaster.waitFailure,
-					              db->masterRegistrationCount
-					                  ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
-					                  : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
-					              db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
-					                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
-					                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
-					          db->onMasterFailureForced())) {
+					when(wait(waitFailureClient(iMaster.waitFailure,
+					                            self->db.masterRegistrationCount
+					                                ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
+					                                : (now() - recoveryStart) *
+					                                      SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
+					                            self->db.masterRegistrationCount
+					                                ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
+					                                      SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
+					                                : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
+					          self->db.onMasterFailureForced())) {
 						break;
 					}
-					when(wait(db->serverInfo->onChange())) {}
+					when(wait(self->db.serverInfo->onChange())) {}
 					when(BackupWorkerDoneRequest req =
-					         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
+					         waitNext(self->db.serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
 						if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
 							recoveryData->registrationTrigger.trigger();
 						}
@@ -2109,9 +2110,7 @@ public:
 		if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 			self.addActor.send(self.monitorEncryptKeyProxy());
 		}
-		// TODO: Extract db within function?
-		self.addActor.send(
-		    self.clusterWatchDatabase(&self.db, coordinators, recoveredDiskFiles)); // Start the master database
+		self.addActor.send(self.clusterWatchDatabase(coordinators, recoveredDiskFiles)); // Start the master database
 		self.addActor.send(self.updateWorkerList.init(self.db.db));
 		self.addActor.send(self.statusServer(interf.clientInterface.databaseStatus.getFuture(),
 		                                     coordinators,
@@ -2239,9 +2238,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> recruitNewMaster(ClusterController* cluster,
-	                                           ClusterControllerDBInfo* db,
-	                                           MasterInterface* newMaster) {
+	ACTOR static Future<Void> recruitNewMaster(ClusterController* self, MasterInterface* newMaster) {
 		state Future<ErrorOr<MasterInterface>> fNewMaster;
 		state WorkerFitnessInfo masterWorker;
 
@@ -2250,33 +2247,33 @@ public:
 			// This should always be possible, because we can recruit the master on the same process as the cluster
 			// controller.
 			std::map<Optional<Standalone<StringRef>>, int> id_used;
-			id_used[cluster->clusterControllerProcessId]++;
-			masterWorker = cluster->getWorkerForRoleInDatacenter(
-			    cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
+			id_used[self->clusterControllerProcessId]++;
+			masterWorker = self->getWorkerForRoleInDatacenter(
+			    self->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, self->db.config, id_used);
 			if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
 			         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
-			     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
-			    !cluster->goodRecruitmentTime.isReady()) {
-				TraceEvent("RecruitNewMaster", cluster->id)
+			     masterWorker.worker.interf.locality.processId() == self->clusterControllerProcessId) &&
+			    !self->goodRecruitmentTime.isReady()) {
+				TraceEvent("RecruitNewMaster", self->id)
 				    .detail("Fitness", masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master));
 				wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 				continue;
 			}
 			RecruitMasterRequest rmq;
-			rmq.lifetime = db->serverInfo->get().masterLifetime;
-			rmq.forceRecovery = db->forceRecovery;
+			rmq.lifetime = self->db.serverInfo->get().masterLifetime;
+			rmq.forceRecovery = self->db.forceRecovery;
 
-			cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
-			cluster->db.unfinishedRecoveries++;
+			self->masterProcessId = masterWorker.worker.interf.locality.processId();
+			self->db.unfinishedRecoveries++;
 			fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
-			wait(ready(fNewMaster) || db->onMasterFailureForced());
+			wait(ready(fNewMaster) || self->db.onMasterFailureForced());
 			if (fNewMaster.isReady() && fNewMaster.get().present()) {
-				TraceEvent("RecruitNewMaster", cluster->id).detail("Recruited", fNewMaster.get().get().id());
+				TraceEvent("RecruitNewMaster", self->id).detail("Recruited", fNewMaster.get().get().id());
 
 				// for status tool
-				TraceEvent("RecruitedMasterWorker", cluster->id)
+				TraceEvent("RecruitedMasterWorker", self->id)
 				    .detail("Address", fNewMaster.get().get().address())
-				    .trackLatest(cluster->recruitedMasterWorkerEventHolder->trackingKey);
+				    .trackLatest(self->recruitedMasterWorkerEventHolder->trackingKey);
 
 				*newMaster = fNewMaster.get().get();
 
@@ -2357,10 +2354,8 @@ Future<Optional<Value>> ClusterController::getPreviousCoordinators() {
 	return ClusterControllerImpl::getPreviousCoordinators(this);
 }
 
-Future<Void> ClusterController::clusterWatchDatabase(ClusterControllerDBInfo* db,
-                                                     ServerCoordinators coordinators,
-                                                     Future<Void> recoveredDiskFiles) {
-	return ClusterControllerImpl::clusterWatchDatabase(this, db, coordinators, recoveredDiskFiles);
+Future<Void> ClusterController::clusterWatchDatabase(ServerCoordinators coordinators, Future<Void> recoveredDiskFiles) {
+	return ClusterControllerImpl::clusterWatchDatabase(this, coordinators, recoveredDiskFiles);
 }
 
 void ClusterController::checkOutstandingRecruitmentRequests() {
@@ -3067,8 +3062,8 @@ Future<Void> ClusterController::handleGetEncryptionAtRestMode(ClusterControllerF
 	return ClusterControllerImpl::handleGetEncryptionAtRestMode(this, ccInterf);
 }
 
-Future<Void> ClusterController::recruitNewMaster(ClusterControllerDBInfo* db, MasterInterface* newMaster) {
-	return ClusterControllerImpl::recruitNewMaster(this, db, newMaster);
+Future<Void> ClusterController::recruitNewMaster(MasterInterface* newMaster) {
+	return ClusterControllerImpl::recruitNewMaster(this, newMaster);
 }
 
 Future<Void> ClusterController::clusterRecruitFromConfiguration(Reference<RecruitWorkersInfo> req) {

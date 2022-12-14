@@ -237,9 +237,7 @@ class ClusterController {
 	    bool checkStable = false);
 
 	Future<Optional<Value>> getPreviousCoordinators();
-	Future<Void> clusterWatchDatabase(ClusterControllerDBInfo* db,
-	                                  ServerCoordinators coordinators,
-	                                  Future<Void> recoveredDiskFiles);
+	Future<Void> clusterWatchDatabase(ServerCoordinators coordinators, Future<Void> recoveredDiskFiles);
 	void checkOutstandingRecruitmentRequests();
 	void checkOutstandingRemoteRecruitmentRequests();
 	void checkOutstandingStorageRequests();
@@ -302,7 +300,7 @@ class ClusterController {
 	Future<Void> metaclusterMetricsUpdater();
 	Future<Void> updateClusterId();
 	Future<Void> handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf);
-	Future<Void> recruitNewMaster(ClusterControllerDBInfo* db, MasterInterface* newMaster);
+	Future<Void> recruitNewMaster(MasterInterface* newMaster);
 	std::set<Optional<Standalone<StringRef>>> getDatacenters(DatabaseConfiguration const& conf,
 	                                                         bool checkStable = false);
 	void updateKnownIds(std::map<Optional<Standalone<StringRef>>, int>* id_used);
