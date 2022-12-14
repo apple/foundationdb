@@ -58,6 +58,13 @@
 #define SWIFT_SENDABLE 														   \
 	__attribute__((swift_attr("@Sendable")))
 
+#define SWIFT_STRINGIFY(x) #x
+
+/// Specify that the declared type conforms to the given Swift protocol when the type is
+/// imported into Swift.
+#define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)                            \
+    __attribute__((swift_attr(SWIFT_STRINGIFY(conforms_to:ProtocolName))))
+
 #define CONCAT2(id1, id2) id1##id2
 #define CONCAT3(id1, id2, id3) id1##id2##id3
 

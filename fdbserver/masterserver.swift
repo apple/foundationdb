@@ -8,11 +8,6 @@ func clamp(_ v: Version, lowerBound: Version, upperBound: Version) -> Version {
     return max(min(v, upperBound), lowerBound)
 }
 
-// FIXME: Make Flow.Optional automatically conform to `FlowOptionalProtocol`
-// when https://github.com/apple/swift/pull/62330 is merged and remove them.
-extension OptionalVersion: FlowOptionalProtocol {}
-extension OptionalSetTag: FlowOptionalProtocol {}
-
 @_expose(Cxx)
 public func figureVersion(current: Version,
                    now: Double,

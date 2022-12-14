@@ -31,6 +31,7 @@
 #include "flow/Trace.h"
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
+#include "flow/swift_support.h"
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
@@ -229,8 +230,12 @@ inline void save(Archive& ar, const Arena& p) {
 //    assertion failures are preferable. This is the main reason we
 //    don't intend to use std::optional directly.
 template <class T>
-class Optional : public ComposedIdentifier<T, 4> {
+class
+SWIFT_CONFORMS_TO(flow_swift,FlowOptionalProtocol)
+Optional : public ComposedIdentifier<T, 4> {
 public:
+    using Wrapped = T;
+
 	Optional() = default;
 
 	template <class U>
