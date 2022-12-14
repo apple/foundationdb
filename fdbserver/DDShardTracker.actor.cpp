@@ -334,6 +334,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 							        keys, metrics.first.get(), shardMetrics->get().get().metrics, initWithNewMetrics);
 							if (needToMove) {
 								// Do we need to update shardsAffectedByTeamFailure here?
+								// TODO(zhewu): move this to physical shard tracker that does shard split based on size.
 								self()->output.send(
 								    RelocateShard(keys,
 								                  DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
@@ -1551,6 +1552,8 @@ FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
+// Tracks storage metrics fir `keys`. This function is similar to `trackShardMetrics()` and altered for physical shard.
+// This meant to be temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
 ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(Reference<IDDTxnProcessor> db,
                                                        KeyRange keys,
                                                        Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics) {
