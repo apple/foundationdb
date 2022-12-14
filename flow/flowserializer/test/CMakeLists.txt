@@ -44,6 +44,8 @@ add_dependencies(flat_buffers_fuzz table_fdbflatbuffers)
 add_dependencies(flat_buffers_fuzz table_flatbuffers)
 add_dependencies(flat_buffers_fuzz table_flowbuffers)
 
-add_test(
-    NAME unittests/flat_buffers_fuzz
-    COMMAND $<TARGET_FILE:flat_buffers_fuzz>)
+if (NOT OPEN_FOR_IDE)
+    add_test(
+        NAME unittests/flat_buffers_fuzz
+        COMMAND $<TARGET_FILE:flat_buffers_fuzz>)
+endif()

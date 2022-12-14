@@ -1,5 +1,6 @@
 #include <string_view>
 #include <cstdio>
+#include <iostream>
 #include <fmt/format.h>
 
 #include "Compiler.h"
@@ -52,12 +53,16 @@ int main(int argc, const char* argv[]) {
 		}
 	}
 
-	flowserializer::Compiler compiler(includePaths);
-	for (; i < argc; ++i) {
-		compiler.compile(argv[i]);
+	try {
+		flowserializer::Compiler compiler(includePaths);
+		for (; i < argc; ++i) {
+			compiler.compile(argv[i]);
+		}
+		compiler.generateCode(headerDir, sourceDir);
+		compiler.describeTables();
+	} catch (flowserializer::Error& e) {
+		std::cerr << fmt::format("ERROR: {}", e.what());
 	}
-	compiler.generateCode(headerDir, sourceDir);
-	compiler.describeTables();
 
 	//	for (int i = 1; i < argc; ++i) {
 	//		fmt::print("Parsing file: {}\n", argv[i]);

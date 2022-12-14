@@ -33,6 +33,21 @@ struct MetadataEntry {
 // the type of the type -- I like silly names
 enum class TypeType { Primitive, Enum, Union, Struct, Table };
 
+constexpr std::string_view toString(TypeType t) {
+	switch (t) {
+	case TypeType::Primitive:
+		return std::string_view("Primitive");
+	case TypeType::Enum:
+		return std::string_view("Enum");
+	case TypeType::Union:
+		return std::string_view("Union");
+	case TypeType::Struct:
+		return std::string_view("Struct");
+	case TypeType::Table:
+		return std::string_view("Table");
+	}
+}
+
 struct Type {
 	std::string name;
 	Type() = default;
@@ -118,6 +133,13 @@ struct TypeName {
 
 	[[nodiscard]] inline bool operator==(TypeName const& rhs) const { return name == rhs.name && path == rhs.path; }
 	[[nodiscard]] bool operator!=(TypeName const& rhs) const { return !(*this == rhs); }
+
+	std::string fullyQualifiedCppName() const {
+		if (path.empty()) {
+			return name;
+		}
+		return fmt::format("{}.{}", fmt::join(path, "::"), name);
+	}
 };
 
 [[nodiscard]] std::size_t hash_value(TypeName const& v);

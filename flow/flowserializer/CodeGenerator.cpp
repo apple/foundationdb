@@ -137,12 +137,168 @@ void emitIncludes(Streams& out, std::vector<std::string> const& includes) {
 	EMIT(out.header, "#include \"flow/serialize.h\"");
 	EMIT(out.header, "#include \"FlatbuffersTypes.h\"");
 	for (auto const& p : includes) {
-		EMIT(out.header, "#include \"{}.h\"", p.substr(0, p.size() - ".fbs"s.size()));
+		out.header << fmt::format("#include \"{}.h\"\n", p.substr(0, p.size() - ".fbs"s.size()));
 	}
 	EMIT(out.header, "");
 }
 
-std::vector<std::string> oldReaders = { "BinaryReader"s, "ArenaReader" };
+void emitDeserializeField(StaticContext* context,
+                          Streams& out,
+                          std::string qualifiedName,
+                          expression::Field const& field) {
+	auto fieldType = assertTrue(context->resolve(field.type));
+	EMIT(out.source, "\tif (idx >= vsize) {{");
+	EMIT(out.source, "\t\t// Some fields are not present, we'll leave them default-initialized");
+	EMIT(out.source, "\t\tgoto END;");
+	EMIT(out.source, "\t}}");
+	EMIT(out.source, "\tif (vtable[idx] != 0) {{");
+	EMIT(out.source, "\t\t// field is present");
+	if (field.isArrayType) {
+		// TODO: handle array types properly
+		EMIT(out.source, "}} // ERROR: deserializing arrays not yet supported");
+		return;
+	}
+	switch (fieldType->second->typeType()) {
+	case expression::TypeType::Primitive: {
+		auto t = dynamic_cast<const expression::PrimitiveType*>(fieldType->second);
+		EMIT(out.source, "\t\tmemcpy(&{}, data + tableOffset + vtable[idx], {});", qualifiedName, t->size());
+		break;
+	}
+	case expression::TypeType::Enum: {
+		auto enumType = dynamic_cast<const expression::Enum&>(*fieldType->second);
+		auto eType = assertTrue(context->resolve(enumType.type));
+		if (eType->second->typeType() != expression::TypeType::Primitive) {
+			throw Error(fmt::format(
+			    "Underlying type {} of enum {} is not a primitive type", eType->second->name, qualifiedName));
+		}
+		auto t = dynamic_cast<const expression::PrimitiveType*>(eType->second);
+		EMIT(out.source, "\t\tmemcpy(&value.{}, data + tableOffset + vtable[idx], {});", qualifiedName, t->size());
+		break;
+	}
+	case expression::TypeType::Union: {
+		auto fieldType = assertTrue(context->resolve(field.type));
+		auto const& utype = dynamic_cast<expression::Union const&>(*fieldType->second);
+		EMIT(out.source, "\t\t// a union is a 1-byte integer followed by a type reference");
+		EMIT(out.source, "\t\tuint8_t utype;");
+		EMIT(out.source, "\t\tmemcpy(&utype, data + tableOffset + vtable[idx++], 1);");
+		EMIT(out.source, "\t\tswitch (utype) {{");
+		for (int i = 0; i < utype.types.size(); ++i) {
+			auto variantType = assertTrue(context->resolve(utype.types[1]));
+			EMIT(out.source, "\t\tcase {}: {{", i);
+			// TODO: Add support for structs in unions
+			if (variantType->second->typeType() != expression::TypeType::Table) {
+				throw Error(fmt::format("We currently only support unions of table, but {} in {} is a {}",
+				                        variantType->first.fullyQualifiedCppName(),
+				                        fieldType->first.fullyQualifiedCppName(),
+				                        expression::toString(variantType->second->typeType())));
+			}
+			EMIT(out.source, "\t\t\t{} varValue;", variantType->first.fullyQualifiedCppName());
+			EMIT(out.source, "\t\t\tuint32_t varTableOffset;");
+			EMIT(out.source, "\t\tmemcpy(&varTableOffset, data + tableOffset + vtable[idx], sizeof(uint32_t));");
+			EMIT(out.source, "varValue._loadFromOffset(reader, varTableOffset);");
+			EMIT(out.source, "\t\t\tbreak;");
+			EMIT(out.source, "\t\t}}");
+		}
+		EMIT(out.source, "\t\tdefault:");
+		EMIT(out.source, "\t\t\t// not set or unknown, keep default initialized");
+		EMIT(out.source, "\t\t}}");
+		EMIT(out.source, "\t\t");
+		break;
+	}
+	case expression::TypeType::Struct: {
+		// structs are inlined
+		EMIT(out.source,
+		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx])>);",
+		     qualifiedName);
+		break;
+	}
+	case expression::TypeType::Table: {
+		auto qualifiedTypeName = fieldType->first.fullyQualifiedCppName();
+		EMIT(out.source, "\t\t// table {} of field {}", qualifiedTypeName, field.name);
+		EMIT(out.source,
+		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx])>);",
+		     qualifiedName);
+		break;
+	}
+	}
+	EMIT(out.source, "\t}}");
+}
+
+void emitDeserialize(StaticContext* context, Streams& out, expression::Table const& table) {
+	EMIT(out.header, "\t[[nodiscard]] static {} read(ObjectReader& reader);", table.name);
+	EMIT(out.header, "\t[[nodiscard]] static {} read(ArenaObjectReader& reader);", table.name);
+	EMIT(out.header, "\t// These two methods are intended to be used by flowserializer exclusively");
+	EMIT(out.header, "\tvoid _loadFromOffset(ObjectReader& reader, uint32_t tableOffset);");
+	EMIT(out.header, "\tvoid _loadFromOffset(ArenaObjectReader& reader, uint32_t tableOffset);");
+	EMIT(out.header, "");
+
+	EMIT(out.source, "namespace {{");
+
+	EMIT(out.source, "template <class Ar>");
+	EMIT(out.source, "inline void read{0}(Ar& reader, {0}& value, uoffset_t tableOffset) {{", table.name);
+	EMIT(out.source, "\tconst uint8_t* data = reader.data();");
+	EMIT(out.source, "\tauto vtableOffset = *reinterpret_cast<const soffset_t*>(data + tableOffset);");
+	EMIT(out.source,
+	     "\tconst voffset_t* vtable = reinterpret_cast<const voffset_t*>(data + tableOffset - vtableOffset);");
+	EMIT(out.source, "\tvoffset_t vsize = vtable[0] / sizeof(voffset_t);");
+	EMIT(out.source, "\tunsigned idx = 1;");
+	for (const auto& f : table.fields) {
+		emitDeserializeField(context, out, fmt::format("value.{}", f.name), f);
+		EMIT(out.source, "\t++idx;");
+	}
+	// we use a goto to make sure we have the option to add post-deserialization functionality. But we still need the
+	// option to abort early. A do-while loop would be the alternative to a goto.
+	EMIT(out.source, "END:");
+	// label with no statement afterwards is an error. So we just have a return statement here for now
+	EMIT(out.source, "\treturn;");
+	EMIT(out.source, "}}");
+	EMIT(out.source, "");
+
+	EMIT(out.source, "template <class Ar>");
+	EMIT(out.source, "{0} read{0}(Ar& reader) {{", table.name);
+	EMIT(out.source, "\t{} res;", table.name);
+	EMIT(out.source, "\tuoffset_t tableOffset = *reinterpret_cast<const uoffset_t*>(reader.data());");
+	EMIT(out.source, "\tread{}(reader, res, tableOffset);", table.name);
+	EMIT(out.source, "\treturn res;");
+	EMIT(out.source, "}}");
+	EMIT(out.source, "}} // namespace");
+	EMIT(out.source, "");
+
+	EMIT(out.source, "{0} {0}::read(ObjectReader& reader) {{", table.name);
+	EMIT(out.source, "\treturn read{}(reader);", table.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "{0} {0}::read(ArenaObjectReader& reader) {{", table.name);
+	EMIT(out.source, "\treturn read{}(reader);", table.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "void {}::_loadFromOffset(ObjectReader& reader, uint32_t tableOffset) {{", table.name);
+	EMIT(out.source, "\tread{}(reader, *this, tableOffset);", table.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "void {}::_loadFromOffset(ArenaObjectReader& reader, uint32_t tableOffset) {{", table.name);
+	EMIT(out.source, "\tread{}(reader, *this, tableOffset);", table.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "");
+}
+
+void emitDeserialize(StaticContext* context, Streams& out, expression::Struct const& st) {
+	EMIT(out.header, "\t// These two methods are intended to be used by flowserializer exclusively");
+	EMIT(out.header, "\tvoid _loadFromOffset(ObjectReader& reader, uint32_t tableOffset);");
+	EMIT(out.header, "\tvoid _loadFromOffset(ArenaObjectReader& reader, uint32_t tableOffset);");
+
+	EMIT(out.source, "namespace {{");
+	EMIT(out.source, "template<class Ar>");
+	EMIT(out.source, "void read{0}(Ar& reader, {0}& value, uint32_t structOffset) {{", st.name);
+	// TODO: Add code to deserialize inline struct here
+	EMIT(out.source, "}}");
+	EMIT(out.source, "}} // namespace");
+
+	EMIT(out.source, "void {}::_loadFromOffset(ObjectReader& reader, uint32_t structOffset) {{", st.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "void {}::_loadFromOffset(ArenaObjectReader& reader, uint32_t structOffset) {{", st.name);
+	EMIT(out.source, "}}");
+	EMIT(out.source, "");
+}
+
+std::vector<std::string> oldReaders = { "BinaryReader"s, "ArenaReader"s };
 std::vector<std::string> oldWriters = { "BinaryWriter"s, "PacketWriter"s };
 
 } // namespace
@@ -297,15 +453,17 @@ void CodeGenerator::emit(Streams& out, expression::Field const& f) const {
 }
 
 void CodeGenerator::emit(Streams& out, expression::Struct const& st) const {
-	Defer defer;
-	out.header << fmt::format("struct {} {{\n", st.name);
-	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
-	                          "flowserializer::Type::Struct; }};\n\n");
+	EMIT(out.header, "struct {} {{", st.name);
+	EMIT(out.header, "\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{");
+	EMIT(out.header, "\t\treturn flowserializer::Type::Struct;");
+	EMIT(out.header, "\t}}\n");
+	emitDeserialize(context, out, st);
 	for (auto const& f : st.fields) {
 		emit(out, f);
 	}
-	out.header << "};\n";
+	EMIT(out.header, "}};");
 	emit(out, OldSerializers{ st });
+	EMIT(out.header, "");
 }
 
 void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
@@ -353,6 +511,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
 	                          "flowserializer::Type::Table; }};\n\n");
 	out.header << fmt::format("\tstd::pair<uint8_t*, int> write(flowserializer::Writer& w) const;\n");
+	//emitDeserialize(context, out, table);
 
 	for (auto const& f : table.fields) {
 		emit(out, f);
@@ -362,8 +521,8 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	     "std::pair<uint8_t*, int> {}::{}::write(flowserializer::Writer& w) const {{",
 	     fmt::join(tableTypeName.path, "::"),
 	     table.name);
-	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
-	// known data
+	// the code to allocate the memory has to be called first, but we can already generate code to write the
+	// statically known data
 	// TODO: Only generate serialization for root_type
 	std::stringstream writer;
 	auto serMap = context->serializationInformation(table.name);
@@ -413,7 +572,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		}
 		switch (fieldType->second->typeType()) {
 		case expression::TypeType::Primitive: {
-		    if (field.isArrayType) {
+			if (field.isArrayType) {
 				// TODO: Implement
 			} else if (field.type == "int" || field.type == "short" || field.type == "long") {
 				EMIT(writer,
