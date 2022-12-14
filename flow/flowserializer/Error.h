@@ -14,8 +14,6 @@ class Error : std::exception {
 
 public:
 	explicit Error(std::string msg);
-
-private:
 	[[nodiscard]] const char* what() const noexcept override;
 };
 
