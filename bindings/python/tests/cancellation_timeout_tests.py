@@ -518,7 +518,7 @@ def test_timeouts(db):
         for i in range(2):
             tr.options.set_timeout(1500)
             tr.set_read_version(0x7ffffffffffffff0)
-            x = tr[b'foo']
+            _ = tr[b'foo']
             try:
                 tr.commit().wait()
                 tr.reset()
@@ -557,7 +557,7 @@ def test_db_timeouts(db):
         tr[b'foo'] = b'bar'
         tr.on_error(err).wait()  # should not throw
         time.sleep(1)
-        tr[b'foo']
+        _ = tr[b'foo']
         try:
             tr.commit().wait()  # should throw
             raise TestError("(2) Timeout didn't fire.")
@@ -574,7 +574,7 @@ def test_db_timeouts(db):
         time.sleep(0.75)
         tr[b'foo'] = b'bar'
         tr.on_error(err).wait()  # should not throw
-        tr[b'foo']
+        _ = tr[b'foo']
         time.sleep(0.75)
         try:
             tr.commit().wait()  # should throw
@@ -615,7 +615,7 @@ def test_db_timeouts(db):
         tr.reset()
         tr[b'foo'] = b'bar'
         time.sleep(0.2)
-        tr.on_error(err).wait()  #should not throw
+        tr.on_error(err).wait()  # should not throw
         tr[b'foo'] = b'bar'
         time.sleep(0.8)
         try:

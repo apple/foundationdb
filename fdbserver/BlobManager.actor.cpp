@@ -2104,7 +2104,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 			for (; i < blobGranuleMapping.size() - 1; i++) {
 				if (!blobGranuleMapping[i].value.size()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: No valid granule data for range [{1} - {2}) \n",
+						fmt::print("ERROR: No valid granule data for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
@@ -2115,7 +2115,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 				state UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
 				if (workerId == UID()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: Invalid Blob Worker ID for range [{1} - {2}) \n",
+						fmt::print("ERROR: Invalid Blob Worker ID for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
@@ -2331,7 +2331,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Merge finish stopped because of force purge");
+				CODE_PROBE(true, "Merge finish stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);
@@ -3547,10 +3547,16 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
+		BlobRestoreStatus initStatus(BlobRestorePhase::LOAD_MANIFEST);
+		wait(updateRestoreStatus(bmData->db, normalKeys, initStatus));
+
 		wait(loadManifest(bmData->db, bmData->bstore));
 
 		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
 		wait(updateEpoch(bmData, epoc + 1));
+
+		BlobRestoreStatus completedStatus(BlobRestorePhase::MANIFEST_DONE);
+		wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus));
 	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -4029,7 +4035,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 
 	// wait until existing blob workers have been acknowledged so we don't break recruitment invariants
 	loop choose {
-		when(wait(self->startRecruiting.onTrigger())) { break; }
+		when(wait(self->startRecruiting.onTrigger())) {
+			break;
+		}
 	}
 
 	loop {
@@ -4066,7 +4074,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				}
 
 				// when the CC changes, so does the request stream so we need to restart recruiting here
-				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
+				when(wait(recruitBlobWorker->onChange())) {
+					fCandidateWorker = Future<RecruitBlobWorkerReply>();
+				}
 
 				// signal used to restart the loop and try to recruit the next blob worker
 				when(wait(self->restartRecruiting.onTrigger())) {}

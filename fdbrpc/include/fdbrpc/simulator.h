@@ -56,7 +56,7 @@ public:
 		FailDisk,
 		RebootAndDelete,
 		RebootProcessAndDelete,
-		RebootProcessAndSwitch,
+		RebootProcessAndSwitch, // Reboot and switch cluster file
 		Reboot,
 		RebootProcess,
 		None
@@ -99,6 +99,7 @@ public:
 		LocalityData locality;
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
+		MetricCollection metrics;
 		ChaosMetrics chaosMetrics;
 		HistogramRegistry histograms;
 		std::map<NetworkAddress, Reference<IListener>> listenerMap;

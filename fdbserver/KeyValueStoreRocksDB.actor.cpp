@@ -310,7 +310,7 @@ const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = "RocksDBReadPrefixGet"_sr;
 
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
-	if (checkpoint.getFormat() != RocksDBColumnFamily) {
+	if (checkpoint.getFormat() != DataMoveRocksCF) {
 		return metaData;
 	}
 
@@ -372,7 +372,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		liveFileMetaData.level = fileMetaData.level;
 		rocksCF.sstFiles.push_back(liveFileMetaData);
 	}
-	checkpoint->setFormat(RocksDBColumnFamily);
+	checkpoint->setFormat(DataMoveRocksCF);
 	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
 }
 
@@ -435,7 +435,7 @@ gets deleted as the ref count becomes 0.
 class ReadIteratorPool {
 public:
 	ReadIteratorPool(UID id, DB& db, CF& cf, const rocksdb::ReadOptions readOptions)
-	  : db(db), cf(cf), index(0), iteratorsReuseCount(0), readRangeOptions(readOptions) {
+	  : db(db), cf(cf), index(0), deletedUptoIndex(0), iteratorsReuseCount(0), readRangeOptions(readOptions) {
 		readRangeOptions.background_purge_on_iterator_cleanup = true;
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 		TraceEvent("ReadIteratorPool", id)
@@ -455,8 +455,12 @@ public:
 	void update() {
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
 		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
-			std::lock_guard<std::mutex> lock(mutex);
-			iteratorsMap.clear();
+			mutex.lock();
+			// The latest index might contain the current iterator which is getting created.
+			// But, that should be ok to avoid adding more code complexity.
+			deletedUptoIndex = index;
+			mutex.unlock();
+			deleteIteratorsPromise.send(Void());
 		}
 	}
 
@@ -465,7 +469,7 @@ public:
 		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
-				if (!it->second.inUse) {
+				if (!it->second.inUse && it->second.index > deletedUptoIndex) {
 					it->second.inUse = true;
 					iteratorsReuseCount++;
 					ReadIterator iter = it->second;
@@ -486,7 +490,8 @@ public:
 			// TODO: Based on the datasize in the keyrange, decide whether to store the iterator for reuse.
 			mutex.lock();
 			for (it = iteratorsMap.begin(); it != iteratorsMap.end(); it++) {
-				if (!it->second.inUse && it->second.keyRange.contains(keyRange)) {
+				if (!it->second.inUse && it->second.index > deletedUptoIndex &&
+				    it->second.keyRange.contains(keyRange)) {
 					it->second.inUse = true;
 					iteratorsReuseCount++;
 					ReadIterator iter = it->second;
@@ -533,8 +538,10 @@ public:
 	void refreshIterators() {
 		std::lock_guard<std::mutex> lock(mutex);
 		it = iteratorsMap.begin();
+		auto currTime = now();
 		while (it != iteratorsMap.end()) {
-			if (now() - it->second.creationTime > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME) {
+			if ((it->second.index <= deletedUptoIndex) ||
+			    ((currTime - it->second.creationTime) > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME)) {
 				it = iteratorsMap.erase(it);
 			} else {
 				it++;
@@ -546,6 +553,8 @@ public:
 
 	uint64_t numTimesReadIteratorsReused() { return iteratorsReuseCount; }
 
+	FutureStream<Void> getDeleteIteratorsFutureStream() { return deleteIteratorsPromise.getFuture(); }
+
 private:
 	std::unordered_map<int, ReadIterator> iteratorsMap;
 	std::unordered_map<int, ReadIterator>::iterator it;
@@ -555,7 +564,9 @@ private:
 	std::mutex mutex;
 	// incrementing counter for every new iterator creation, to uniquely identify the iterator in returnIterator().
 	uint64_t index;
+	uint64_t deletedUptoIndex;
 	uint64_t iteratorsReuseCount;
+	ThreadReturnPromiseStream<Void> deleteIteratorsPromise;
 };
 
 class PerfContextMetrics {
@@ -825,9 +836,19 @@ uint64_t PerfContextMetrics::getRocksdbPerfcontextMetric(int metric) {
 
 ACTOR Future<Void> refreshReadIteratorPool(std::shared_ptr<ReadIteratorPool> readIterPool) {
 	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS || SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
+		state FutureStream<Void> deleteIteratorsFutureStream = readIterPool->getDeleteIteratorsFutureStream();
 		loop {
-			wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
-			readIterPool->refreshIterators();
+			choose {
+				when(wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME))) {
+					readIterPool->refreshIterators();
+				}
+				when(waitNext(deleteIteratorsFutureStream)) {
+					// Add a delay(0.0) to ensure the rest of the caller code runs before refreshing iterators,
+					// i.e., making the refreshIterators() call here asynchronous.
+					wait(delay(0.0));
+					readIterPool->refreshIterators();
+				}
+			}
 		}
 	}
 	return Void();
@@ -898,6 +919,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 	};
 
 	// To control the rocksdb::StatsLevel, use ROCKSDB_STATS_LEVEL knob.
+	// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
 	state std::vector<std::pair<const char*, uint32_t>> histogramStats = {
 		{ "CompactionTime", rocksdb::COMPACTION_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
 		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME }, // enabled if rocksdb::StatsLevel > kExceptTimers(2)
@@ -967,6 +989,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		}
 
 		// None of the histogramStats are enabled unless the ROCKSDB_STATS_LEVEL > kExceptHistogramOrTimers(1)
+		// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
 		if (SERVER_KNOBS->ROCKSDB_STATS_LEVEL > rocksdb::kExceptHistogramOrTimers) {
 			for (auto& [name, histogram] : histogramStats) {
 				rocksdb::HistogramData histogram_data;
@@ -1028,7 +1051,10 @@ void logRocksDBError(UID id,
                      Optional<Severity> sev = Optional<Severity>()) {
 	Severity level = sev.present() ? sev.get() : (status.IsTimedOut() ? SevWarn : SevError);
 	TraceEvent e(level, "RocksDBError", id);
-	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
+	e.setMaxFieldLength(10000)
+	    .detail("Error", status.ToString())
+	    .detail("Method", method)
+	    .detail("RocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
 		e.detail("SubCode", status.subcode());
 	}
@@ -1250,15 +1276,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    std::make_pair(ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM.toString(), commitBeginTime - a.startTime));
 			}
 			Standalone<VectorRef<KeyRangeRef>> deletes;
-			DeleteVisitor dv(deletes, deletes.arena());
-			rocksdb::Status s = a.batchToCommit->Iterate(&dv);
-			if (!s.ok()) {
-				logRocksDBError(id, s, "CommitDeleteVisitor");
-				a.done.sendError(statusToError(s));
-				return;
+			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+				DeleteVisitor dv(deletes, deletes.arena());
+				rocksdb::Status s = a.batchToCommit->Iterate(&dv);
+				if (!s.ok()) {
+					logRocksDBError(id, s, "CommitDeleteVisitor");
+					a.done.sendError(statusToError(s));
+					return;
+				}
+				// If there are any range deletes, we should have added them to be deleted.
+				ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			}
-			// If there are any range deletes, we should have added them to be deleted.
-			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
+
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			if (SERVER_KNOBS->ROCKSDB_DISABLE_WAL_EXPERIMENTAL) {
@@ -1272,7 +1301,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// Request for batchToCommit bytes. If this request cannot be satisfied, the call is blocked.
 				rateLimiter->Request(a.batchToCommit->GetDataSize() /* bytes */, rocksdb::Env::IO_HIGH);
 			}
-			s = db->Write(options, a.batchToCommit.get());
+			rocksdb::Status s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			double currTime = timer_monotonic();
 			sharedState->dbWriteLatency.addMeasurement(currTime - writeBeginTime);
@@ -1783,39 +1812,39 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	ACTOR Future<Void> updateHistogram(FutureStream<std::pair<std::string, double>> metricFutureStream) {
 		state Reference<Histogram> commitLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_LATENCY_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> commitActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_ACTION_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> commitQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> writeHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_WRITE_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_WRITE_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> deleteCompactRangeHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readRangeLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_LATENCY_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readValueLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_LATENCY_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readPrefixLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_LATENCY_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readRangeActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_ACTION_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readValueActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_ACTION_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readPrefixActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_ACTION_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readRangeQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readValueQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readPrefixQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readRangeNewIteratorHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readValueGetHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_GET_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_GET_HISTOGRAM, Histogram::Unit::milliseconds);
 		state Reference<Histogram> readPrefixGetHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_GET_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_GET_HISTOGRAM, Histogram::Unit::milliseconds);
 		loop {
 			choose {
 				when(std::pair<std::string, double> measure = waitNext(metricFutureStream)) {
@@ -2155,7 +2184,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	// Delete a checkpoint.
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) override {
-		if (checkpoint.format == RocksDBColumnFamily) {
+		if (checkpoint.format == DataMoveRocksCF) {
 			RocksDBColumnFamilyCheckpoint rocksCF;
 			ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
 			reader.deserialize(rocksCF);
@@ -2245,7 +2274,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	res.ranges = a.request.ranges;
 	const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
-	if (a.request.format == RocksDBColumnFamily) {
+	if (a.request.format == DataMoveRocksCF) {
 		rocksdb::ExportImportFilesMetaData* pMetadata;
 		platform::eraseDirectoryRecursive(checkpointDir);
 		s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
@@ -2306,7 +2335,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 	}
 
 	rocksdb::Status status;
-	if (format == RocksDBColumnFamily) {
+	if (format == DataMoveRocksCF) {
 		ASSERT_EQ(a.checkpoints.size(), 1);
 		TraceEvent("RocksDBServeRestoreCF", id)
 		    .detail("Path", a.path)
@@ -2525,7 +2554,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	state std::string checkpointDir = cwd + "checkpoint";
 
 	CheckpointRequest request(
-	    latestVersion, { allKeys }, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
+	    latestVersion, { allKeys }, DataMoveRocksCF, deterministicRandom()->randomUniqueID(), checkpointDir);
 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	std::vector<CheckpointMetaData> checkpoints;

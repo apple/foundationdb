@@ -425,6 +425,22 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	return KeyRangeRef(b, e);
 }
 
+// Calculates the complement of `lhs` from `rhs`.
+inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+	if ((lhs & rhs).empty()) {
+		return { lhs };
+	}
+
+	std::vector<KeyRangeRef> result;
+	if (lhs.begin < rhs.begin) {
+		result.push_back(KeyRangeRef(lhs.begin, rhs.begin));
+	}
+	if (lhs.end > rhs.end) {
+		result.push_back(KeyRangeRef(rhs.end, lhs.end));
+	}
+	return result;
+}
+
 struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
@@ -814,18 +830,9 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
-	// boundary KVs are always returned so that caller can use it as a continuation,
-	// for non-boundary KV, it is always false.
-	// for boundary KV, it is true only when the secondary query succeeds(return non-empty).
-	// Note: only MATCH_INDEX_MATCHED_ONLY and MATCH_INDEX_UNMATCHED_ONLY modes can make use of it,
-	// to decide whether the boudnary is a match/unmatch.
-	// In the case of MATCH_INDEX_ALL and MATCH_INDEX_NONE, caller should not care if boundary has a match or not.
-	bool boundaryAndExist;
-
 	MappedKeyValueRef() = default;
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
-		boundaryAndExist = copyFrom.boundaryAndExist;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -839,7 +846,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRef& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult && boundaryAndExist == rhs.boundaryAndExist;
+		       reqAndResult == rhs.reqAndResult;
 	}
 	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
 
@@ -849,7 +856,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult, boundaryAndExist);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
 	}
 };
 
@@ -1464,7 +1471,7 @@ struct TenantMode {
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
-	enum Mode { DISABLED = 0, AES_256_CTR = 1, END = 2 };
+	enum Mode { DISABLED = 0, DOMAIN_AWARE = 1, CLUSTER_AWARE = 2, END = 3 };
 
 	EncryptionAtRestMode() : mode(DISABLED) {}
 	EncryptionAtRestMode(Mode mode) : mode(mode) {
@@ -1483,12 +1490,28 @@ struct EncryptionAtRestMode {
 		switch (mode) {
 		case DISABLED:
 			return "disabled";
-		case AES_256_CTR:
-			return "aes_256_ctr";
+		case DOMAIN_AWARE:
+			return "domain_aware";
+		case CLUSTER_AWARE:
+			return "cluster_aware";
 		default:
 			ASSERT(false);
 		}
 		return "";
+	}
+
+	static EncryptionAtRestMode fromString(std::string mode) {
+		if (mode == "disabled") {
+			return EncryptionAtRestMode::DISABLED;
+		} else if (mode == "cluster_aware") {
+			return EncryptionAtRestMode::CLUSTER_AWARE;
+		} else if (mode == "domain_aware") {
+			return EncryptionAtRestMode::DOMAIN_AWARE;
+		} else {
+			TraceEvent(SevError, "UnknownEncryptMode").detail("EncryptMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
 	}
 
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
@@ -1497,6 +1520,8 @@ struct EncryptionAtRestMode {
 
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+
+	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
 
 	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {

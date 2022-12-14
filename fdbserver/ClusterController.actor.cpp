@@ -26,6 +26,7 @@
 #include <tuple>
 #include <vector>
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
@@ -370,7 +371,9 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					req.reply.send(Void());
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
-				when(wait(collection)) { throw internal_error(); }
+				when(wait(collection)) {
+					throw internal_error();
+				}
 			}
 			// failed master (better master exists) could happen while change-coordinators request processing is
 			// in-progress
@@ -431,7 +434,9 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
 	while (db->serverInfo->get().id == knownServerInfoID) {
 		choose {
 			when(wait(yieldedFuture(db->serverInfo->onChange()))) {}
-			when(wait(delayJittered(300))) { break; } // The server might be long gone!
+			when(wait(delayJittered(300))) {
+				break;
+			} // The server might be long gone!
 		}
 	}
 	reply.send(db->serverInfo->get());
@@ -2565,8 +2570,8 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
 			if (blobRestoreCommand.present()) {
 				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
-				TraceEvent("WatchBlobRestoreCommand").detail("Progress", status.progress);
-				if (status.progress == 0) {
+				TraceEvent("WatchBlobRestoreCommand").detail("Progress", status.progress).detail("Phase", status.phase);
+				if (status.phase == BlobRestorePhase::INIT) {
 					self->db.blobRestoreEnabled.set(true);
 					if (self->db.blobGranulesEnabled.get()) {
 						const auto& blobManager = self->db.serverInfo->get().blobManager;
@@ -2808,7 +2813,9 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 						self->db.clearInterf(ProcessClass::BlobManagerClass);
 						break;
 					}
-					when(wait(self->recruitBlobManager.onChange())) { break; }
+					when(wait(self->recruitBlobManager.onChange())) {
+						break;
+					}
 					when(wait(self->db.blobGranulesEnabled.onChange())) {
 						// if there is a blob manager present but blob granules are now disabled, stop the BM
 						if (!self->db.blobGranulesEnabled.get()) {
@@ -2839,7 +2846,9 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
 	loop {
 		choose {
-			when(wait(updateDBInfo)) { wait(delay(SERVER_KNOBS->DBINFO_BATCH_DELAY) || dbInfoChange); }
+			when(wait(updateDBInfo)) {
+				wait(delay(SERVER_KNOBS->DBINFO_BATCH_DELAY) || dbInfoChange);
+			}
 			when(wait(dbInfoChange)) {}
 		}
 
@@ -3220,7 +3229,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			CODE_PROBE(true, "Leader replaced");
 			return Void();
 		}
-		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) { ping.send(Void()); }
+		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) {
+			ping.send(Void());
+		}
 	}
 }
 
@@ -3259,7 +3270,9 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 						ASSERT(false);
 						throw internal_error();
 					}
-					when(wait(shouldReplace)) { break; }
+					when(wait(shouldReplace)) {
+						break;
+					}
 				}
 			}
 			if (!shouldReplace.isReady()) {

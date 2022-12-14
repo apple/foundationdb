@@ -154,4 +154,26 @@ inline void serialize_map(const Map& map, MsgpackBuffer& buf) {
 		serialize_string(value.begin(), value.size(), buf);
 	}
 }
+
+// Serializes object T according to ext msgpack specification
+template <typename T, typename F>
+inline void serialize_ext(const T& t, MsgpackBuffer& buf, uint8_t type, F f) {
+	buf.write_byte(0xc9);
+	// We don't know for sure the amount of bytes we'll be writing.
+	// So for now we set the payload size as zero and then we take the difference in data size
+	// from now and after we invoke f to determine how many bytes were written
+	size_t byte_idx = buf.data_size;
+	for (int i = 0; i < 4; i++) {
+		buf.write_byte(0);
+	}
+	buf.write_byte(type);
+	size_t prev_size = buf.data_size;
+	f(t, buf);
+	size_t updated_size = static_cast<size_t>(buf.data_size - prev_size);
+	ASSERT_WE_THINK(updated_size <= std::numeric_limits<uint32_t>::max());
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[3], byte_idx);
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[2], byte_idx + 1);
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[1], byte_idx + 2);
+	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[0], byte_idx + 3);
+}
 #endif

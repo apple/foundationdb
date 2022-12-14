@@ -1027,7 +1027,10 @@ def tenant_get(logger):
     assert json_output["type"] == "success"
     assert len(json_output["tenant"]) == 4
     assert "id" in json_output["tenant"]
-    assert "encrypted" in json_output["tenant"]
+    assert "name" in json_output["tenant"]
+    assert len(json_output["tenant"]["name"]) == 2
+    assert "base64" in json_output["tenant"]["name"]
+    assert "printable" in json_output["tenant"]["name"]
     assert "prefix" in json_output["tenant"]
     assert len(json_output["tenant"]["prefix"]) == 2
     assert "base64" in json_output["tenant"]["prefix"]
@@ -1049,7 +1052,10 @@ def tenant_get(logger):
     assert json_output["type"] == "success"
     assert len(json_output["tenant"]) == 5
     assert "id" in json_output["tenant"]
-    assert "encrypted" in json_output["tenant"]
+    assert "name" in json_output["tenant"]
+    assert len(json_output["tenant"]["name"]) == 2
+    assert "base64" in json_output["tenant"]["name"]
+    assert "printable" in json_output["tenant"]["name"]
     assert "prefix" in json_output["tenant"]
     assert json_output["tenant"]["tenant_state"] == "ready"
     assert "tenant_group" in json_output["tenant"]

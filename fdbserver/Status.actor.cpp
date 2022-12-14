@@ -19,6 +19,8 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -291,10 +293,19 @@ namespace {
 
 void reportCgroupCpuStat(JsonBuilderObject& object, const TraceEventFields& eventFields) {
 	JsonBuilderObject cgroupCpuStatObj;
-	cgroupCpuStatObj.setKeyRawNumber("nr_periods", eventFields.getValue("NrPeriods"));
-	cgroupCpuStatObj.setKeyRawNumber("nr_throttled", eventFields.getValue("NrThrottled"));
-	cgroupCpuStatObj.setKeyRawNumber("throttled_time", eventFields.getValue("ThrottledTime"));
-	object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	std::string val;
+	if (eventFields.tryGetValue("NrPeriods", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_periods", val);
+	}
+	if (eventFields.tryGetValue("NrThrottled", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_throttled", val);
+	}
+	if (eventFields.tryGetValue("ThrottledTime", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("throttled_time", val);
+	}
+	if (!cgroupCpuStatObj.empty()) {
+		object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	}
 }
 
 JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
@@ -2443,6 +2454,47 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
+
+	state JsonBuilderObject statusObj;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
+
+	try {
+		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(db, normalKeys));
+		if (status.present()) {
+			switch (status.get().phase) {
+			case BlobRestorePhase::INIT:
+				statusObj["blob_full_restore_phase"] = "Initializing";
+				break;
+			case BlobRestorePhase::LOAD_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Loading manifest";
+				break;
+			case BlobRestorePhase::MANIFEST_DONE:
+				statusObj["blob_full_restore_phase"] = "Manifest loaded";
+				break;
+			case BlobRestorePhase::MIGRATE:
+				statusObj["blob_full_restore_phase"] = "Copying data";
+				statusObj["blob_full_restore_progress"] = status.get().progress;
+				break;
+			case BlobRestorePhase::APPLY_MLOGS:
+				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
+				statusObj["blob_full_restore_progress"] = status.get().progress;
+				break;
+			case BlobRestorePhase::DONE:
+				statusObj["blob_full_restore_phase"] = "Completed";
+				break;
+			default:
+				statusObj["blob_full_restore_phase"] = "Unexpected phase";
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incompleteReason->insert("Unable to query blob restore status");
+	}
+	return statusObj;
+}
+
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -3409,6 +3461,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			JsonBuilderObject blobGranuelsStatus =
 			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
 			statusObj["blob_granules"] = blobGranuelsStatus;
+			JsonBuilderObject blobRestoreStatus = wait(blobRestoreStatusFetcher(cx, &status_incomplete_reasons));
+			statusObj["blob_restore"] = blobRestoreStatus;
 		}
 
 		JsonBuilderArray incompatibleConnectionsArray;

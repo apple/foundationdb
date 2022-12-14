@@ -459,7 +459,13 @@ public:
 		// Since cursors can have async operations pending which modify their state they can't be copied cleanly
 		Cursor(const Cursor& other) = delete;
 
-		~Cursor() { writeOperations.cancel(); }
+		~Cursor() { cancel(); }
+
+		// Cancel outstanding operations.  Further use of cursor is not allowed.
+		void cancel() {
+			nextPageReader.cancel();
+			writeOperations.cancel();
+		}
 
 		// A read cursor can be initialized from a pop cursor
 		void initReadOnly(const Cursor& c, bool readExtents = false) {
@@ -921,7 +927,15 @@ public:
 public:
 	FIFOQueue() : pager(nullptr) {}
 
-	~FIFOQueue() { newTailPage.cancel(); }
+	~FIFOQueue() { cancel(); }
+
+	// Cancel outstanding operations.  Further use of queue is not allowed.
+	void cancel() {
+		headReader.cancel();
+		tailWriter.cancel();
+		headWriter.cancel();
+		newTailPage.cancel();
+	}
 
 	FIFOQueue(const FIFOQueue& other) = delete;
 	void operator=(const FIFOQueue& rhs) = delete;
@@ -2250,7 +2264,9 @@ public:
 							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
 						}
 					}
-					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
+					when(wait(remapRecoverActor)) {
+						remapRecoverActor = Never();
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream) {
@@ -3627,6 +3643,13 @@ public:
 		}
 		self->operations.clear();
 
+		debug_printf("DWALPager(%s) shutdown cancel queues\n", self->filename.c_str());
+		self->freeList.cancel();
+		self->delayedFreeList.cancel();
+		self->remapQueue.cancel();
+		self->extentFreeList.cancel();
+		self->extentUsedList.cancel();
+
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->extentCache.clear());
 		wait(self->pageCache.clear());
@@ -4697,21 +4720,15 @@ public:
 
 		if (domainId.present()) {
 			ASSERT(keyProvider && keyProvider->enableEncryptionDomain());
-			// Temporarily disabling the check, since if a tenant is removed, where the key provider
-			// would not find the domain, the data for the tenant may still be in Redwood and being read.
-			// TODO(yiwu): re-enable the check.
-			/*
-			if (domainId.get() != keyProvider->getDefaultEncryptionDomainId() &&
-			    !keyProvider->keyFitsInDomain(domainId.get(), lowerBound, false)) {
-			    fprintf(stderr,
-			            "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
-			            ::toString(id).c_str(),
-			            ::toString(v).c_str(),
-			            ::toString(domainId).c_str(),
-			            lowerBound.printable().c_str());
-			    return false;
+			if (!keyProvider->keyFitsInDomain(domainId.get(), lowerBound, true)) {
+				fprintf(stderr,
+				        "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
+				        ::toString(id).c_str(),
+				        ::toString(v).c_str(),
+				        ::toString(domainId).c_str(),
+				        lowerBound.printable().c_str());
+				return false;
 			}
-			*/
 		}
 
 		auto& b = boundariesByPageID[id.front()][v];
@@ -4759,45 +4776,27 @@ public:
 				        ::toString(b->second.domainId).c_str());
 				return false;
 			}
-			// Temporarily disabling the check, since if a tenant is removed, where the key provider
-			// would not find the domain, the data for the tenant may still be in Redwood and being read.
-			// TODO(yiwu): re-enable the check.
-			/*
 			ASSERT(domainId.present());
 			auto checkKeyFitsInDomain = [&]() -> bool {
-			    if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
-			        fprintf(stderr,
-			                "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
-			                ::toString(id).c_str(),
-			                ::toString(v).c_str(),
-			                ::toString(domainId).c_str(),
-			                cursor.get().key.printable().c_str());
-			        return false;
-			    }
-			    return true;
+				if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
+					fprintf(stderr,
+					        "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
+					        ::toString(id).c_str(),
+					        ::toString(v).c_str(),
+					        ::toString(domainId).c_str(),
+					        cursor.get().key.printable().c_str());
+					return false;
+				}
+				return true;
 			};
-			if (domainId.get() != keyProvider->getDefaultEncryptionDomainId()) {
-			    cursor.moveFirst();
-			    if (cursor.valid() && !checkKeyFitsInDomain()) {
-			        return false;
-			    }
-			    cursor.moveLast();
-			    if (cursor.valid() && !checkKeyFitsInDomain()) {
-			        return false;
-			    }
-			} else {
-			    if (deterministicRandom()->random01() < domainPrefixScanProbability) {
-			        cursor.moveFirst();
-			        while (cursor.valid()) {
-			            if (!checkKeyFitsInDomain()) {
-			                return false;
-			            }
-			            cursor.moveNext();
-			        }
-			        domainPrefixScanCount++;
-			    }
+			cursor.moveFirst();
+			if (cursor.valid() && !checkKeyFitsInDomain()) {
+				return false;
 			}
-			*/
+			cursor.moveLast();
+			if (cursor.valid() && !checkKeyFitsInDomain()) {
+				return false;
+			}
 		}
 
 		return true;
@@ -5674,8 +5673,8 @@ private:
 				int64_t defaultDomainId = keyProvider->getDefaultEncryptionDomainId();
 				int64_t currentDomainId;
 				size_t prefixLength;
-				if (count == 0 || (splitByDomain && count > 0)) {
-					std::tie(currentDomainId, prefixLength) = keyProvider->getEncryptionDomain(rec.key, domainId);
+				if (count == 0 || splitByDomain) {
+					std::tie(currentDomainId, prefixLength) = keyProvider->getEncryptionDomain(rec.key);
 				}
 				if (count == 0) {
 					domainId = currentDomainId;
@@ -5886,12 +5885,18 @@ private:
 		if (useEncryptionDomain) {
 			ASSERT(pagesToBuild[0].domainId.present());
 			int64_t domainId = pagesToBuild[0].domainId.get();
-			// We need to make sure we use the domain prefix as the page lower bound, for the first page
-			// of a non-default domain on a level. That way we ensure that pages for a domain form a full subtree
-			// (i.e. have a single root) in the B-tree.
-			if (domainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
-			    !self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, false)) {
-				pageLowerBound = RedwoodRecordRef(entries[0].key.substr(0, pagesToBuild[0].domainPrefixLength));
+			// We make sure the page lower bound fits in the domain of the page.
+			// If the page domain is the default domain, we make sure the page doesn't fall within a domain
+			// specific subtree.
+			// If the page domain is non-default, in addition, we make the first page of the domain on a level
+			// use the domain prefix as the lower bound. Such a lower bound will ensure that pages for a domain
+			// form a full subtree (i.e. have a single root) in the B-tree.
+			if (!self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, true)) {
+				if (domainId == self->m_keyProvider->getDefaultEncryptionDomainId()) {
+					pageLowerBound = RedwoodRecordRef(entries[0].key);
+				} else {
+					pageLowerBound = RedwoodRecordRef(entries[0].key.substr(0, pagesToBuild[0].domainPrefixLength));
+				}
 			}
 		}
 
@@ -6719,7 +6724,7 @@ private:
 		debug_print(addPrefix(context, update->toString()));
 
 		if (REDWOOD_DEBUG) {
-			int c = 0;
+			[[maybe_unused]] int c = 0;
 			auto i = mBegin;
 			while (1) {
 				debug_printf("%s Mutation %4d '%s':  %s\n",
@@ -10668,7 +10673,9 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 				if (entriesRead == m_extentQueue.numEntries)
 					break;
 			}
-			when(wait(queueRecoverActor)) { queueRecoverActor = Never(); }
+			when(wait(queueRecoverActor)) {
+				queueRecoverActor = Never();
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream) {

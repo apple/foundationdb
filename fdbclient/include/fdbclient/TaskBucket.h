@@ -274,6 +274,7 @@ public:
 	Database src;
 	Map<Key, Future<Reference<KeyRangeMap<Version>>>> key_version;
 
+	UID dbgid;
 	CounterCollection cc;
 
 	Counter dispatchSlotChecksStarted;
@@ -281,7 +282,6 @@ public:
 	Counter dispatchDoTasks;
 	Counter dispatchEmptyTasks;
 	Counter dispatchSlotChecksComplete;
-	UID dbgid;
 
 	double getTimeoutSeconds() const { return (double)timeout / CLIENT_KNOBS->CORE_VERSIONSPERSECOND; }
 

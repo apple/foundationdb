@@ -1,5 +1,6 @@
 [configuration]
 tenantModes = ['required']
+encryptModes = ['domain_aware']
 
 [[knobs]]
 enable_encryption = true
@@ -18,6 +19,7 @@ simBackupAgents = 'BackupToFile'
     maxNumTenants = 100
     minNumTenants = 0
     transactionsPerSecond = 2500.0
+    testDuration = 30.0
 
     [[test.workload]]
     testName = 'BackupAndRestoreCorrectness'

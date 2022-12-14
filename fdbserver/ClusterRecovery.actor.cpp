@@ -32,6 +32,13 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
+	TraceEvent(SevDebug, "CREncryptionAtRestMode").detail("Mode", config.encryptionAtRestMode.toString());
+	return config.encryptionAtRestMode;
+}
+} // namespace
+
 static std::set<int> const& normalClusterRecoveryErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -67,7 +74,9 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 			}
 			return Void();
 		}
-		when(wait(switchedState)) { return Void(); }
+		when(wait(switchedState)) {
+			return Void();
+		}
 	}
 }
 
@@ -191,9 +200,11 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
+		req.encryptMode = getEncryptionAtRest(self->configuration);
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
+		    .detail("EncryptMode", req.encryptMode.toString())
 		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
@@ -431,24 +442,13 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	}
 }
 
-namespace {
-EncryptionAtRestMode getEncryptionAtRest() {
-	// TODO: Use db-config encryption config to determine cluster encryption status
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		return EncryptionAtRestMode(EncryptionAtRestMode::Mode::AES_256_CTR);
-	} else {
-		return EncryptionAtRestMode();
-	}
-}
-} // namespace
-
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                      Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
-	state EncryptionAtRestMode encryptionAtRestMode = getEncryptionAtRest();
+	state EncryptionAtRestMode encryptionAtRestMode = getEncryptionAtRest(self->configuration);
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
@@ -921,8 +921,12 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
-		when(wait(waitCommitProxyFailure)) { throw worker_removed(); }
-		when(wait(waitGrvProxyFailure)) { throw worker_removed(); }
+		when(wait(waitCommitProxyFailure)) {
+			throw worker_removed();
+		}
+		when(wait(waitGrvProxyFailure)) {
+			throw worker_removed();
+		}
 	}
 }
 
@@ -966,7 +970,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 
 		// The cluster's EncryptionAtRest status is now readable.
 		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
-			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest());
+			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest(self->configuration));
 		}
 	}
 
@@ -1127,10 +1131,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
 			self->recoveryTransactionVersion = minRequiredCommitVersion;
-	}
 
-	if (BUGGIFY) {
-		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
+		// Test randomly increasing the recovery version by a large number.
+		// When the version epoch is enabled, versions stay in sync with time.
+		// An offline cluster could see a large version jump when it comes back
+		// online, so test this behavior in simulation.
+		if (BUGGIFY) {
+			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
+		}
 	}
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERING_EVENT_NAME).c_str(),
@@ -1577,8 +1585,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 				break;
 			}
 			when(wait(oldLogSystems->onChange())) {}
-			when(wait(reg)) { throw internal_error(); }
-			when(wait(recoverAndEndEpoch)) { throw internal_error(); }
+			when(wait(reg)) {
+				throw internal_error();
+			}
+			when(wait(recoverAndEndEpoch)) {
+				throw internal_error();
+			}
 		}
 	}
 

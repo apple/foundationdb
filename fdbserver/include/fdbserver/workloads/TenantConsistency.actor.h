@@ -126,7 +126,7 @@ private:
 		    std::map<TenantGroupName, TenantGroupEntry>(tenantGroupList.results.begin(), tenantGroupList.results.end());
 
 		for (auto t : tenantGroupTenantTuples.results) {
-			ASSERT(t.size() == 2);
+			ASSERT_EQ(t.size(), 2);
 			TenantGroupName tenantGroupName = t.getString(0);
 			TenantName tenantName = t.getString(1);
 			ASSERT(self->metadata.tenantGroupMap.count(tenantGroupName));
@@ -134,24 +134,24 @@ private:
 			self->metadata.tenantGroupIndex[tenantGroupName].insert(tenantName);
 			ASSERT(self->metadata.tenantsInTenantGroupIndex.insert(tenantName).second);
 		}
-		ASSERT(self->metadata.tenantGroupIndex.size() == self->metadata.tenantGroupMap.size());
+		ASSERT_EQ(self->metadata.tenantGroupIndex.size(), self->metadata.tenantGroupMap.size());
 
 		return Void();
 	}
 
 	void validateTenantMetadata() {
 		if (metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-			ASSERT(metadata.tenantMap.size() <= metaclusterMaxTenants);
+			ASSERT_LE(metadata.tenantMap.size(), metaclusterMaxTenants);
 		} else {
-			ASSERT(metadata.tenantMap.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+			ASSERT_LE(metadata.tenantMap.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		}
 
-		ASSERT(metadata.tenantMap.size() == metadata.tenantCount);
-		ASSERT(metadata.tenantIdIndex.size() == metadata.tenantCount);
+		ASSERT_EQ(metadata.tenantMap.size(), metadata.tenantCount);
+		ASSERT_EQ(metadata.tenantIdIndex.size(), metadata.tenantCount);
 
 		for (auto [tenantName, tenantMapEntry] : metadata.tenantMap) {
 			if (metadata.clusterType != ClusterType::METACLUSTER_DATA) {
-				ASSERT(tenantMapEntry.id <= metadata.lastTenantId);
+				ASSERT_LE(tenantMapEntry.id, metadata.lastTenantId);
 			}
 			ASSERT(metadata.tenantIdIndex[tenantMapEntry.id] == tenantName);
 
@@ -169,26 +169,25 @@ private:
 				// If the rename pair is present, it should be in the map and match our current entry
 				if (tenantMapEntry.renamePair.present()) {
 					auto pairMapEntry = metadata.tenantMap[tenantMapEntry.renamePair.get()];
-					ASSERT(pairMapEntry.id == tenantMapEntry.id);
+					ASSERT_EQ(pairMapEntry.id, tenantMapEntry.id);
 					ASSERT(pairMapEntry.prefix == tenantMapEntry.prefix);
-					ASSERT(pairMapEntry.encrypted == tenantMapEntry.encrypted);
-					ASSERT(pairMapEntry.configurationSequenceNum == tenantMapEntry.configurationSequenceNum);
+					ASSERT_EQ(pairMapEntry.configurationSequenceNum, tenantMapEntry.configurationSequenceNum);
 					ASSERT(pairMapEntry.assignedCluster.present());
 					ASSERT(pairMapEntry.assignedCluster.get() == tenantMapEntry.assignedCluster.get());
 					ASSERT(pairMapEntry.renamePair.present());
 					ASSERT(pairMapEntry.renamePair.get() == tenantName);
 					if (tenantMapEntry.tenantState == TenantState::RENAMING_FROM) {
-						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_TO);
+						ASSERT_EQ(pairMapEntry.tenantState, TenantState::RENAMING_TO);
 					} else if (tenantMapEntry.tenantState == TenantState::RENAMING_TO) {
-						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_FROM);
+						ASSERT_EQ(pairMapEntry.tenantState, TenantState::RENAMING_FROM);
 					} else if (tenantMapEntry.tenantState == TenantState::REMOVING) {
-						ASSERT(pairMapEntry.tenantState == TenantState::REMOVING);
+						ASSERT_EQ(pairMapEntry.tenantState, TenantState::REMOVING);
 					} else {
 						ASSERT(false); // Entry in an invalid state if we have a rename pair
 					}
 				}
 			} else {
-				ASSERT(tenantMapEntry.tenantState == TenantState::READY);
+				ASSERT_EQ(tenantMapEntry.tenantState, TenantState::READY);
 				ASSERT(!tenantMapEntry.assignedCluster.present());
 				ASSERT(!tenantMapEntry.renamePair.present());
 			}

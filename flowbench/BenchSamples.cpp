@@ -143,7 +143,7 @@ static void bench_histogramPct(benchmark::State& state) {
 BENCHMARK(bench_histogramPct)->ReportAggregatesOnly(true);
 
 static void bench_histogramTime(benchmark::State& state) {
-	Reference<Histogram> h = Histogram::getHistogram("histogramTest"_sr, "latency"_sr, Histogram::Unit::microseconds);
+	Reference<Histogram> h = Histogram::getHistogram("histogramTest"_sr, "latency"_sr, Histogram::Unit::milliseconds);
 	InputGenerator<double> data(1e6, []() { return deterministicRandom()->random01() * 5; });
 
 	for (auto _ : state) {

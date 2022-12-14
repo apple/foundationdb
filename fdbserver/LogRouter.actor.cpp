@@ -60,11 +60,8 @@ struct LogRouterData {
 		                                       TaskPriority taskID) {
 			while (!self->version_messages.empty() && self->version_messages.front().first < before) {
 				Version version = self->version_messages.front().first;
-				int64_t messagesErased = 0;
 
 				while (!self->version_messages.empty() && self->version_messages.front().first == version) {
-					++messagesErased;
-
 					self->version_messages.pop_front();
 				}
 
@@ -138,7 +135,7 @@ struct LogRouterData {
 	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion - 1), minPopped(0),
 	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
 	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
-	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::microseconds)),
+	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::milliseconds)),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc) {
 		// setup just enough of a logSet to be able to call getPushLocations
@@ -787,7 +784,9 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
 		    .detail("Locality", req.locality);
 		state Future<Void> core = logRouterCore(interf, req, db);
 		loop choose {
-			when(wait(core)) { return Void(); }
+			when(wait(core)) {
+				return Void();
+			}
 			when(wait(checkRemoved(db, req.recoveryCount, interf))) {}
 		}
 	} catch (Error& e) {

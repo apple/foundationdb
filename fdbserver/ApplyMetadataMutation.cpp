@@ -84,7 +84,7 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantIdIndex(&proxyCommitData_.tenantIdIndex), initialCommit(initialCommit_) {}
+	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -133,8 +133,8 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::unordered_map<int64_t, TenantNameUniqueSet>* tenantIdIndex = nullptr;
+	std::unordered_map<int64_t, TenantName>* tenantMap = nullptr;
+	std::map<TenantName, int64_t>* tenantNameIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -593,19 +593,21 @@ private:
 		}
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-			Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(checkpoint.ssID)).get().get());
-			MutationRef privatized = m;
-			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
-			    .detail("Original", m)
-			    .detail("Privatized", privatized)
-			    .detail("Server", checkpoint.ssID)
-			    .detail("TagKey", serverTagKeyFor(checkpoint.ssID))
-			    .detail("Tag", tag.toString())
-			    .detail("Checkpoint", checkpoint.toString());
+			for (const auto& ssID : checkpoint.src) {
+				Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
+				MutationRef privatized = m;
+				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+				    .detail("Original", m)
+				    .detail("Privatized", privatized)
+				    .detail("Server", ssID)
+				    .detail("TagKey", serverTagKeyFor(ssID))
+				    .detail("Tag", tag.toString())
+				    .detail("Checkpoint", checkpoint.toString());
 
-			toCommit->addTag(tag);
-			writeMutation(privatized);
+				toCommit->addTag(tag);
+				writeMutation(privatized);
+			}
 		}
 	}
 
@@ -671,9 +673,9 @@ private:
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
-				(*tenantMap)[tenantName] = tenantEntry;
-				if (tenantIdIndex) {
-					(*tenantIdIndex)[tenantEntry.id].insert(tenantName);
+				(*tenantMap)[tenantEntry.id] = tenantName;
+				if (tenantNameIndex) {
+					(*tenantNameIndex)[tenantName] = tenantEntry.id;
 				}
 			}
 
@@ -1080,7 +1082,7 @@ private:
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
 		if (subspace.intersects(range)) {
-			if (tenantMap) {
+			if (tenantMap && tenantNameIndex) {
 				ASSERT(version != invalidVersion);
 
 				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
@@ -1092,24 +1094,16 @@ private:
 				    .detail("EndTenant", endTenant)
 				    .detail("Version", version);
 
-				auto startItr = tenantMap->lower_bound(startTenant);
-				auto endItr = tenantMap->lower_bound(endTenant);
+				auto startItr = tenantNameIndex->lower_bound(startTenant);
+				auto endItr = tenantNameIndex->lower_bound(endTenant);
 
-				if (tenantIdIndex) {
-					// Iterate over iterator-range and remove entries from TenantIdName map
-					// TODO: O(n) operation, optimize cpu
-					auto itr = startItr;
-					while (itr != endItr) {
-						auto indexItr = tenantIdIndex->find(itr->second.id);
-						ASSERT(indexItr != tenantIdIndex->end());
-						if (indexItr->second.remove(itr->first)) {
-							tenantIdIndex->erase(indexItr);
-						}
-						itr++;
-					}
+				auto itr = startItr;
+				while (itr != endItr) {
+					tenantMap->erase(itr->second);
+					itr++;
 				}
 
-				tenantMap->erase(startItr, endItr);
+				tenantNameIndex->erase(startItr, endItr);
 			}
 
 			if (!initialCommit) {

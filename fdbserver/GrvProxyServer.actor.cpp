@@ -134,9 +134,9 @@ struct GrvProxyStats {
 	    recentRequests(0), lastBucketBegin(now()),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    grvConfirmEpochLiveDist(
-	        Histogram::getHistogram("GrvProxy"_sr, "GrvConfirmEpochLive"_sr, Histogram::Unit::microseconds)),
+	        Histogram::getHistogram("GrvProxy"_sr, "GrvConfirmEpochLive"_sr, Histogram::Unit::milliseconds)),
 	    grvGetCommittedVersionRpcDist(
-	        Histogram::getHistogram("GrvProxy"_sr, "GrvGetCommittedVersionRpc"_sr, Histogram::Unit::microseconds)) {
+	        Histogram::getHistogram("GrvProxy"_sr, "GrvGetCommittedVersionRpc"_sr, Histogram::Unit::milliseconds)) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
@@ -351,7 +351,9 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 				                        Void()) &&
 				                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 			}
-			when(wait(actors.getResult())) { ASSERT(false); }
+			when(wait(actors.getResult())) {
+				ASSERT(false);
+			}
 		}
 	}
 }

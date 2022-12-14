@@ -49,7 +49,7 @@ bool GrvProxyTagThrottler::TagQueue::isMaxThrottled(double maxThrottleDuration) 
 }
 
 void GrvProxyTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& latencyBandsMap) {
-	CODE_PROBE(true, "GrvProxyTagThrottler rejecting requests", probe::decoration::rare);
+	CODE_PROBE(true, "GrvProxyTagThrottler rejecting requests");
 	while (!requests.empty()) {
 		auto& delayedReq = requests.front();
 		delayedReq.updateProxyTagThrottledDuration(latencyBandsMap);

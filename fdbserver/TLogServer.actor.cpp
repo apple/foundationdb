@@ -375,7 +375,7 @@ struct TLogData : NonCopyable {
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
 	    degraded(degraded),
-	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::microseconds)) {
+	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
@@ -1098,7 +1098,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	}
 	// SOMEDAY: This seems to be running pretty often, should we slow it down???
 	// This needs a timeout since nothing prevents I/O operations from hanging indefinitely.
-	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration));
+	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration, "TLogCommit"));
 
 	wait(delay(0, TaskPriority::UpdateStorage));
 
@@ -1445,7 +1445,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(TLogData* self,
@@ -1606,7 +1608,9 @@ ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Ve
 			// we want the caller to finish first, otherwise the data structure it is building might not be complete
 			wait(delay(0.0));
 		}
-		when(wait(delay(timeout))) { self->blockingPeekTimeouts += 1; }
+		when(wait(delay(timeout))) {
+			self->blockingPeekTimeouts += 1;
+		}
 	}
 	return Void();
 }
@@ -2160,7 +2164,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	self->largeDiskQueueCommitBytes.set(false);
 
 	wait(ioDegradedOrTimeoutError(
-	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION));
+	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION, "TLogCommit"));
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
 		wait(delay(6.0));
 	}
@@ -2795,7 +2799,9 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+					break;
+				}
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -3276,7 +3282,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						} else {
@@ -3287,7 +3295,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -3464,7 +3474,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 
 			TraceEvent("TLogRecover", self->dbgid)
 			    .detail("LogId", logData->logId)
@@ -3529,7 +3540,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 		} else {
 			// Brand new tlog, initialization has already been done by caller
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();
@@ -3600,13 +3612,14 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 	TraceEvent("SharedTlog", tlogId);
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
 
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
 		} else {
 			wait(ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
-			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
+			                    "TLogInit"));
 		}
 
 		// Disk errors need a chance to kill this actor.
@@ -3633,7 +3646,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 						forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 					}
 				}
-				when(wait(error)) { throw internal_error(); }
+				when(wait(error)) {
+					throw internal_error();
+				}
 				when(wait(activeSharedChange)) {
 					if (activeSharedTLog->get() == tlogId) {
 						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
@@ -3690,11 +3705,11 @@ struct DequeAllocator : std::allocator<T> {
 	template <typename U>
 	DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}
 
-	T* allocate(std::size_t n, std::allocator<void>::const_pointer hint = 0) {
+	T* allocate(std::size_t n) {
 		DequeAllocatorStats::allocatedBytes += n * sizeof(T);
 		// fprintf(stderr, "Allocating %lld objects for %lld bytes (total allocated: %lld)\n", n, n * sizeof(T),
 		// DequeAllocatorStats::allocatedBytes);
-		return std::allocator<T>::allocate(n, hint);
+		return std::allocator<T>::allocate(n);
 	}
 	void deallocate(T* p, std::size_t n) {
 		DequeAllocatorStats::allocatedBytes -= n * sizeof(T);
