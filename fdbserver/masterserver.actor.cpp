@@ -118,8 +118,14 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
     }
     balancer = resolutionBalancer.resolutionBalancing();
     locality = tagLocalityInvalid;
-    // FIXME: can we make a cleaner init?
-    swiftImpl.reset(new fdbserver_swift::MasterDataActor((const fdbserver_swift::MasterDataActor&)fdbserver_swift::MasterDataActor::init()));
+
+	using namespace fdbserver_swift;
+	// FIXME(swift): can we make a cleaner init?
+	swiftImpl.reset(new MasterDataActor((const MasterDataActor&)MasterDataActor::init()));
+}
+
+void MasterData::setSwiftImpl(fdbserver_swift::MasterDataActor* impl) {
+	swiftImpl.reset(impl);
 }
 
 MasterData::~MasterData() {}
@@ -208,12 +214,13 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
-ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                ServerCoordinators coordinators,
-                                LifetimeToken lifetime,
-                                bool forceRecovery) {
+SWIFT_ACTOR Future<Void> masterServer(MasterInterface mi,
+									  Reference<AsyncVar<ServerDBInfo> const> db,
+ 									  Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+ 									  ServerCoordinators coordinators,
+ 									  LifetimeToken lifetime,
+									  bool forceRecovery) {
+
 	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
 		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
@@ -227,6 +234,49 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	}
 
 	state Future<Void> onDBChange = Void();
+	wait(onDBChange);
+	state PromiseStream<Future<Void>> addActor;
+	state Reference<MasterData> self(new MasterData(
+	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
+
+	// === ------
+
+	// state fdbserver_swift::MasterDataActor *swiftActor = self->swiftImpl.get();
+	auto promise = Promise<Void>();
+	fdbserver_swift::masterServerSwift(
+	    mi,
+	    const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
+	    const_cast<AsyncVar<Optional<ClusterControllerFullInterface>>*>(ccInterface.getPtr()),
+	    coordinators,
+	    lifetime,
+	    forceRecovery,
+	    self.getPtr(),
+	    /*result=*/promise);
+	Future<Void> f = promise.getFuture();
+	wait(f);
+	return Void();
+}
+
+ACTOR Future<Void> masterServerCxx(MasterInterface mi,
+                                   Reference<AsyncVar<ServerDBInfo> const> db,
+                                   Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                                   ServerCoordinators coordinators,
+                                   LifetimeToken lifetime,
+                                   bool forceRecovery) {
+	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
+	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
+		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
+		if (ccTimeout.isReady()) {
+			TraceEvent("MasterTerminated", mi.id())
+			    .detail("Reason", "Timeout")
+			    .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
+			    .detail("DBInfoInterface", db->get().clusterInterface.id());
+			return Void();
+		}
+	}
+
+	state Future<Void> onDBChange = Void();
+	wait(onDBChange);
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<MasterData> self(new MasterData(
 	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));

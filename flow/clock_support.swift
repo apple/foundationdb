@@ -32,8 +32,8 @@ public struct FlowClock {
 
     public init() {
     }
-}
 
+}
 
 extension Clock where Self == FlowClock {
     /// A clock that measures time that always increments but does not stop

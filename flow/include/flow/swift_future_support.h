@@ -46,6 +46,9 @@ using FutureStreamCInt = FutureStream<int>;
 using PromiseStreamVoid = PromiseStream<Void>;
 using FutureStreamVoid = FutureStream<Void>;
 
+using PromiseStreamFutureVoid = PromiseStream<Future<Void>>;
+using FutureStreamFutureVoid = FutureStream<Future<Void>>;
+
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 

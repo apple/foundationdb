@@ -105,7 +105,6 @@
 
 #if __has_include("SwiftModules/FDBServer")
 class MasterData;
-struct MasterDataSwiftReference; // FIXME(swift): remove once MasterDataSwiftReference is removed: rdar://101092361 (FRT type layout is broken for unimported fields/ base class members)
 #include "SwiftModules/FDBServer"
 #define SWIFT_REVERSE_INTEROP_SUPPORTED
 #endif

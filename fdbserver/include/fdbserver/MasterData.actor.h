@@ -43,7 +43,7 @@
 #define FDBSERVER_MASTERDATA_ACTOR_H
 #include "flow/actorcompiler.h" // This must be the last #include
 
-// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+// FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.
 #define SWIFT_CXX_REF_MASTERDATA   \
     __attribute__((swift_attr("import_as_ref")))   \
     __attribute__((swift_attr("retain:addrefMasterData")))   \
@@ -51,7 +51,7 @@
 
 // A type with Swift value semantics for working with `Counter` types.
 class CounterValue {
-// FIXME: Delete immortal annotation from `Counter`.
+// FIXME(swift): Delete immortal annotation from `Counter`.
 public:
     using Value = Counter::Value;
 
@@ -122,6 +122,10 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
     Future<Void> balancer;
     
     std::unique_ptr<fdbserver_swift::MasterDataActor> swiftImpl;
+	inline fdbserver_swift::MasterDataActor* getSwiftImpl() {
+		return swiftImpl.get();
+	}
+	void setSwiftImpl(fdbserver_swift::MasterDataActor* impl);
 
     MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                MasterInterface const& myInterface,

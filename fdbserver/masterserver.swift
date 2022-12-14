@@ -46,8 +46,8 @@ public func updateLiveCommittedVersion(myself: MasterData, req: ReportRawCommitt
            let writtenTags = Swift.Optional(cxxOptional: req.writtenTags) {
             let primaryLocality = getServerKnobs().ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ?
                     myself.locality : Int8(tagLocalityInvalid)
-            myself.ssVersionVector.setVersion(writtenTags, req.version, primaryLocality)
-            myself.versionVectorTagUpdates.addMeasurement(Double(writtenTags.size()))
+             myself.ssVersionVector.setVersion(writtenTags, req.version, primaryLocality)
+             myself.versionVectorTagUpdates.addMeasurement(Double(writtenTags.size()))
         }
 
         let curTime = now()
@@ -104,7 +104,7 @@ public actor MasterDataActor {
     func getVersion(myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
         myself.getCommitVersionRequests += 1
 
-        guard let lastVersionReplies = lastCommitProxyVersionReplies[req.requestingProxy] else {
+        guard let lastVersionReplies = self.lastCommitProxyVersionReplies[req.requestingProxy] else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             return nil
         }
@@ -180,9 +180,7 @@ public actor MasterDataActor {
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
     nonisolated public func getVersion(myself: MasterData, req: GetCommitVersionRequest,
                                        result promise: PromiseVoid) {
-        // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         Task {
-            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
             if var rep = await getVersion(myself: myself, req: req) {
                 req.reply.send(&rep)
             } else {
@@ -190,7 +188,6 @@ public actor MasterDataActor {
             }
             var result = Flow.Void()
             promise.send(&result)
-            // print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
         }
     }
 
@@ -239,7 +236,7 @@ public actor MasterDataActor {
         }
     }
 
-    nonisolated public func provideVersions(myself: MasterData, result promise: PromiseVoid) {
+    public func provideVersions(myself: MasterData) async throws -> Flow.Void {
         //  state ActorCollection versionActors(false);
         //
         //	loop choose {
@@ -248,19 +245,31 @@ public actor MasterDataActor {
         //		}
         //		when(wait(versionActors.getResult())) {}
         //	}
-        Task {
+        try await withThrowingTaskGroup(of: Swift.Void.self) { group in
+            // TODO(swift): the only throw here is from the Sequence, but can it actually ever happen...?
             for try await req in myself.myInterface.getCommitVersion.getFuture() {
-                Task {
+                _ = group.addTaskUnlessCancelled {
                     if var rep = await self.getVersion(myself: myself, req: req) {
                         req.reply.send(&rep)
                     } else {
                         req.reply.sendNever()
                     }
                 }
-            }
 
-            var result = Flow.Void()
-            promise.send(&result)
+                if Task.isCancelled {
+                    return Flow.Void()
+                }
+            }
+            return Flow.Void()
+        }
+
+    }
+
+    nonisolated public func provideVersions(myself: MasterData, result promise: PromiseVoid) {
+        Task {
+            // TODO(swift): handle the error
+            var void = try await self.provideVersions(myself: myself)
+            promise.send(&void)
         }
     }
 
@@ -310,28 +319,33 @@ public actor MasterDataActor {
         }
     }
 
-    nonisolated public func serveLiveCommittedVersion(myself: MasterData, result promise: PromiseVoid) {
-        Task {
-            await withThrowingTaskGroup(of: Swift.Void.self) { group in
-                // getLiveCommittedVersion
-                group.addTask {
-                    for try await req in myself.myInterface.getLiveCommittedVersion.getFuture() {
-                        var rep = await self.getLiveCommittedVersion(myself: myself, req)
-                        req.reply.send(&rep)
-                    }
-                }
-
-                // reportLiveCommittedVersion
-                group.addTask {
-                    for try await req in myself.myInterface.reportLiveCommittedVersion.getFuture() {
-                        var rep = await self.reportLiveCommittedVersion(myself: myself, req: req)
-                        req.reply.send(&rep)
-                    }
+    public func serveLiveCommittedVersion(myself: MasterData) async -> Flow.Void {
+        // TODO: use TaskPool
+        await withThrowingTaskGroup(of: Swift.Void.self) { group in
+            // getLiveCommittedVersion
+            group.addTask {
+                for try await req in myself.myInterface.getLiveCommittedVersion.getFuture() {
+                    var rep = await self.getLiveCommittedVersion(myself: myself, req)
+                    req.reply.send(&rep)
                 }
             }
 
-            var result = Flow.Void()
-            promise.send(&result)
+            // reportLiveCommittedVersion
+            group.addTask {
+                for try await req in myself.myInterface.reportLiveCommittedVersion.getFuture() {
+                    var rep = await self.reportLiveCommittedVersion(myself: myself, req: req)
+                    req.reply.send(&rep)
+                }
+            }
+        }
+
+        return Flow.Void()
+    }
+
+    nonisolated public func serveLiveCommittedVersion(myself: MasterData, result promise: PromiseVoid) {
+        Task {
+            var void = await self.serveLiveCommittedVersion(myself: myself)
+            promise.send(&void)
         }
     }
 
@@ -377,23 +391,95 @@ public actor MasterDataActor {
         return Void()
     }
 
+    public func serveUpdateRecoveryData(myself: MasterData) async throws -> Flow.Void {
+        try await withThrowingTaskGroup(of: Swift.Void.self) { group in
+            // Note: this is an example of one-by-one handling requests, notice the group.next() below.
+            for try await req in myself.myInterface.updateRecoveryData.getFuture() {
+                group.addTask {
+                    var rep = await self.updateRecoveryData(myself: myself, req: req)
+                    req.reply.send(&rep)
+                }
+
+                try await group.next()
+            }
+        }
+
+        return Flow.Void()
+    }
+
     nonisolated public func serveUpdateRecoveryData(myself: MasterData, promise: PromiseVoid) {
         Task {
-            try await withThrowingTaskGroup(of: Swift.Void.self) { group in
-                // Note: this is an example of one-by-one handling requests, notice the group.next() below.
-                for try await req in myself.myInterface.updateRecoveryData.getFuture() {
-                    group.addTask {
-                        var rep = await self.updateRecoveryData(myself: myself, req: req)
-                        req.reply.send(&rep)
-                    }
-
-                    try await group.next()
-                }
-            }
-
-            var void = Flow.Void()
+            // TODO(swift): handle the error
+            var void = try await self.serveUpdateRecoveryData(myself: myself)
             promise.send(&void)
         }
     }
 
 }
+
+extension MasterData {
+    var swiftActorImpl: MasterDataActor {
+        UnsafeRawPointer(self.getSwiftImpl()).load(as: MasterDataActor.self)
+    }
+}
+
+@_expose(Cxx)
+public func masterServerSwift(
+        mi: MasterInterface,
+        db: AsyncVar_ServerDBInfo,
+        ccInterface: AsyncVar_Optional_ClusterControllerFullInterface,
+        coordinators: ServerCoordinators,
+        lifetime: LifetimeToken,
+        forceRecovery: Bool,
+        masterData: MasterData,
+        promise: PromiseVoid) {
+    Task {
+        let myself = masterData.swiftActorImpl
+
+        do {
+            try await withThrowingTaskGroup(of: Swift.Void.self) { group in
+                group.addTask {
+                    var traceRoleFuture = traceRole(Role.MASTER, mi.id())
+                    try await traceRoleFuture.waitValue // TODO: make these not mutating
+                }
+                group.addTask {
+                    try await myself.provideVersions(myself: masterData)
+                }
+                group.addTask {
+                    await myself.serveLiveCommittedVersion(myself: masterData)
+                }
+                group.addTask {
+                    try await myself.serveUpdateRecoveryData(myself: masterData)
+                }
+
+//                CODE_PROBE(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id()),
+//                        "Master born doomed");
+//                TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
+
+                while true {
+                    var change = db.onChange()
+                    guard (try? await change.waitValue) != nil else {
+                        return
+                    }
+
+                    guard lifetime.isStillValid(db.get().pointee.masterLifetime, mi.id() == db.get().pointee.master.id()) else {
+                        // CODE_PROBE(true, "Master replaced, dying")
+                        if BUGGIFY() {
+                            try? await FlowClock.sleep(for: .seconds(5))
+                        }
+
+                        // throwing out of here, cancels all the other tasks in the group as well.
+                        throw WorkerRemovedError()
+                    }
+                }
+            }
+        } catch {
+            // TODO: WIP
+        }
+
+        var void = Void()
+        promise.send(&void)
+    }
+}
+
+struct WorkerRemovedError: Swift.Error {}
