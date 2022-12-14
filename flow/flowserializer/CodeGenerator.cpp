@@ -149,13 +149,13 @@ void emitDeserializeField(StaticContext* context,
 	auto fieldType = assertTrue(context->resolve(field.type));
 	EMIT(out.source, "\tif (idx >= vsize) {{");
 	EMIT(out.source, "\t\t// Some fields are not present, we'll leave them default-initialized");
-	EMIT(out.source, "\t\tgoto END;");
+	EMIT(out.source, "\t\tbreak;");
 	EMIT(out.source, "\t}}");
 	EMIT(out.source, "\tif (vtable[idx] != 0) {{");
 	EMIT(out.source, "\t\t// field is present");
 	if (field.isArrayType) {
 		// TODO: handle array types properly
-		EMIT(out.source, "}} // ERROR: deserializing arrays not yet supported");
+		EMIT(out.source, "\t}} // ERROR: deserializing arrays not yet supported");
 		return;
 	}
 	switch (fieldType->second->typeType()) {
@@ -182,8 +182,8 @@ void emitDeserializeField(StaticContext* context,
 		EMIT(out.source, "\t\tuint8_t utype;");
 		EMIT(out.source, "\t\tmemcpy(&utype, data + tableOffset + vtable[idx++], 1);");
 		EMIT(out.source, "\t\tswitch (utype) {{");
-		for (int i = 0; i < utype.types.size(); ++i) {
-			auto variantType = assertTrue(context->resolve(utype.types[1]));
+		for (int i = 1; i < utype.types.size(); ++i) {
+			auto variantType = assertTrue(context->resolve(utype.types[i]));
 			EMIT(out.source, "\t\tcase {}: {{", i);
 			// TODO: Add support for structs in unions
 			if (variantType->second->typeType() != expression::TypeType::Table) {
@@ -200,7 +200,7 @@ void emitDeserializeField(StaticContext* context,
 			EMIT(out.source, "\t\t}}");
 		}
 		EMIT(out.source, "\t\tdefault:");
-		EMIT(out.source, "\t\t\t// not set or unknown, keep default initialized");
+		EMIT(out.source, "\t\t\tbreak;// not set or unknown, keep default initialized");
 		EMIT(out.source, "\t\t}}");
 		EMIT(out.source, "\t\t");
 		break;
@@ -208,7 +208,7 @@ void emitDeserializeField(StaticContext* context,
 	case expression::TypeType::Struct: {
 		// structs are inlined
 		EMIT(out.source,
-		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx])>);",
+		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx]));",
 		     qualifiedName);
 		break;
 	}
@@ -216,7 +216,7 @@ void emitDeserializeField(StaticContext* context,
 		auto qualifiedTypeName = fieldType->first.fullyQualifiedCppName();
 		EMIT(out.source, "\t\t// table {} of field {}", qualifiedTypeName, field.name);
 		EMIT(out.source,
-		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx])>);",
+		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx]));",
 		     qualifiedName);
 		break;
 	}
@@ -236,21 +236,22 @@ void emitDeserialize(StaticContext* context, Streams& out, expression::Table con
 
 	EMIT(out.source, "template <class Ar>");
 	EMIT(out.source, "inline void read{0}(Ar& reader, {0}& value, uoffset_t tableOffset) {{", table.name);
-	EMIT(out.source, "\tconst uint8_t* data = reader.data();");
-	EMIT(out.source, "\tauto vtableOffset = *reinterpret_cast<const soffset_t*>(data + tableOffset);");
-	EMIT(out.source,
-	     "\tconst voffset_t* vtable = reinterpret_cast<const voffset_t*>(data + tableOffset - vtableOffset);");
-	EMIT(out.source, "\tvoffset_t vsize = vtable[0] / sizeof(voffset_t);");
-	EMIT(out.source, "\tunsigned idx = 1;");
-	for (const auto& f : table.fields) {
-		emitDeserializeField(context, out, fmt::format("value.{}", f.name), f);
-		EMIT(out.source, "\t++idx;");
+	if (table.fields.size() > 0) {
+		EMIT(out.source, "\tconst uint8_t* data = reader.data();");
+		EMIT(out.source, "\tauto vtableOffset = *reinterpret_cast<const soffset_t*>(data + tableOffset);");
+		EMIT(out.source,
+		     "\tconst voffset_t* vtable = reinterpret_cast<const voffset_t*>(data + tableOffset - vtableOffset);");
+		EMIT(out.source, "\tvoffset_t vsize = vtable[0] / sizeof(voffset_t);");
+		EMIT(out.source, "\tunsigned idx = 1;");
+		EMIT(out.source, "do {{");
+		for (const auto& f : table.fields) {
+			emitDeserializeField(context, out, fmt::format("value.{}", f.name), f);
+			EMIT(out.source, "\t++idx;");
+		}
+		// we use a goto to make sure we have the option to add post-deserialization functionality. But we still need
+		// the option to abort early. A do-while loop would be the alternative to a goto.
+		EMIT(out.source, "}} while (false);");
 	}
-	// we use a goto to make sure we have the option to add post-deserialization functionality. But we still need the
-	// option to abort early. A do-while loop would be the alternative to a goto.
-	EMIT(out.source, "END:");
-	// label with no statement afterwards is an error. So we just have a return statement here for now
-	EMIT(out.source, "\treturn;");
 	EMIT(out.source, "}}");
 	EMIT(out.source, "");
 
@@ -511,7 +512,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
 	                          "flowserializer::Type::Table; }};\n\n");
 	out.header << fmt::format("\tstd::pair<uint8_t*, int> write(flowserializer::Writer& w) const;\n");
-	//emitDeserialize(context, out, table);
+	emitDeserialize(context, out, table);
 
 	for (auto const& f : table.fields) {
 		emit(out, f);

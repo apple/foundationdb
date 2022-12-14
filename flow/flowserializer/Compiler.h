@@ -138,7 +138,7 @@ struct TypeName {
 		if (path.empty()) {
 			return name;
 		}
-		return fmt::format("{}.{}", fmt::join(path, "::"), name);
+		return fmt::format("{}::{}", fmt::join(path, "::"), name);
 	}
 };
 
