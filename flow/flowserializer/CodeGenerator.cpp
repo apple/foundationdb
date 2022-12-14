@@ -176,7 +176,7 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, fullName);
 		out.source << fmt::format("\t{} value;\n", underlying);
 		out.source << fmt::format("\tar >> value;\n");
-		out.source << fmt::format("\tout = static_cast<{}>({});\n", fullName, underlying);
+		out.source << fmt::format("\tout = static_cast<{}>(value);\n", fullName);
 		out.source << fmt::format("}}\n");
 	}
 	for (auto const& ar : oldWriters) {
@@ -209,7 +209,7 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 			for (auto const& [k, _] : f.values) {
 				out.source << fmt::format(
 				    "\t{0} (str == \"{1}\"{2}) {{\n", first ? "if" : "} else if", k, stringLiteral);
-				out.source << fmt::format("\t\treturn {}::{};\n", fullName, k);
+				out.source << fmt::format("\t\tout = {}::{};\n", fullName, k);
 				first = false;
 			}
 			out.source << "\t} else {\n";
@@ -356,7 +356,6 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 		emit(out, f);
 	}
 	auto tableTypeName = assertTrue(context->resolve(table.name))->first;
-	int totalBytes = 8;
 	// write serialization code
 	// TODO: Return pointer to buffer for testing
 	EMIT(out.source, "#include <FlatbuffersTypes.h>");
@@ -392,45 +391,84 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 			curr += 2;
 		}
 		vtableOffsets[typeName] = curr;
-		totalBytes += (*serInfo.vtable)[0];
-		totalBytes += (*serInfo.vtable)[1];
 	}
-	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{}];\n", totalBytes);
-	out.source << writer.str();
 
-	// 1. Iterate through all fields and generate all types simultaneously
-	EMIT(out.source, "\n\t// table (data or offsets to data)");
-	EMIT(out.source,
+	// 1.0. Determine size of all tables
+	auto vtable = serMap.at(tableTypeName).vtable;
+	int dataSize = curr;
+	if (!vtable->empty()) {
+		dataSize += vtable.value()[1];
+	}
+
+	// 1.5. Iterate through all fields and generate all types simultaneously
+	std::stringstream appendData;
+	EMIT(writer, "\n\t// table (data or offsets to data)");
+	EMIT(writer,
 	     "\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
 	     "(subtracted from current address to get vtable address)",
 	     curr,
 	     curr - 8);
 	for (int i = 0; i < table.fields.size(); ++i) {
 		const auto field = table.fields[i];
-		auto vtable = serMap.at(tableTypeName).vtable;
+		auto fieldType = assertTrue(context->resolve(field.type));
 		if (vtable->empty()) {
 			continue;
 		}
-		if (field.type == "int" || field.type == "short") {
-			EMIT(out.source,
-			     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
-			     curr + vtable.value()[i + 2],
-			     field.name,
-			     field.type);
-		} else if (field.type == "string") {
-			EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr + vtable.value()[i + 2], '?');
-			EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();", '?', field.name);
-			EMIT(out.source,
-			     "\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size();",
-			     '?',
-			     sizeof(uoffset_t),
-			     field.name);
-			EMIT(out.source,
-			     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;",
-			     '?',
-			     sizeof(uoffset_t),
-			     field.name);
+		switch (fieldType->second->typeType()) {
+		case expression::TypeType::Primitive: {
+			if (field.type == "int" || field.type == "short" || field.type == "long") {
+				EMIT(writer,
+				     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
+				     curr + vtable.value()[i + 2],
+				     field.name,
+				     field.type);
+			} else if (field.type == "string") {
+				auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType->second);
+				voffset_t offset = dataSize;
+				// Offset to string is the offset from where the address the offset is written at!
+				EMIT(writer,
+				     "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n",
+				     curr + vtable.value()[i + 2],
+				     offset - (curr + vtable.value()[i + 2]));
+				EMIT(appendData, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();", dataSize, field.name);
+				EMIT(appendData,
+				     "\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size());",
+				     dataSize,
+				     sizeof(uoffset_t),
+				     field.name);
+				EMIT(appendData,
+				     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;",
+				     offset,
+				     sizeof(uoffset_t),
+				     field.name);
+				dataSize += 4 + 1 + type->_size;
+			}
+			break;
 		}
+		case expression::TypeType::Enum: {
+			EMIT(writer,
+			     "\t*reinterpret_cast<unsigned char*>(buffer + {}) = static_cast<unsigned char>({});",
+			     curr + vtable.value()[i + 2],
+			     field.name);
+			break;
+		}
+		case expression::TypeType::Union: {
+			throw Error("NOT IMPLEMENTED");
+			break;
+		}
+		default: {
+			throw Error("NOT IMPLEMENTED");
+			break;
+		}
+		}
+	}
+
+	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{}];\n", dataSize);
+	out.source << writer.str();
+
+	std::string appendStr = appendData.str();
+	if (!appendStr.empty()) {
+		out.source << appendStr;
 	}
 
 	// 2. Write header
@@ -440,7 +478,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	EMIT(out.source, "\t// file identifier");
 	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};", 0);
 
-	EMIT(out.source, "\treturn std::make_pair(buffer, {});", totalBytes);
+	EMIT(out.source, "\treturn std::make_pair(buffer, {});", dataSize);
 
 	EMIT(out.source, "}}");
 	EMIT(out.header, "}};");
