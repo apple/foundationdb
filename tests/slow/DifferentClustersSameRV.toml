@@ -1,5 +1,7 @@
 [configuration]
 extraDatabaseMode = 'Single'
+# Temporarily disable default tenants in this test pending tenant implementation changes
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'DifferentClustersSameRV'
