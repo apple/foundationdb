@@ -2333,6 +2333,44 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			} else if (format == RocksDBKeyValues) {
 				// Make sure the files are complete for the desired ranges.
+				std::vector<KeyRange> fetchedRanges;
+				std::vector<KeyRange> intendedRanges(a.ranges.begin(), a.ranges.end());
+				std::vector<RocksDBCheckpointKeyValues> rkvs;
+				for (const auto& checkpoint : a.checkpoints) {
+					rkvs.push_back(getRocksKeyValuesCheckpoint(checkpoint));
+					for (const auto& file : rkvs.back().fetchedFiles) {
+						fetchedRanges.push_back(file.range);
+					}
+				}
+				std::sort(fetchedRanges.begin(), fetchedRanges.end(), KeyRangeRef::ArbitraryOrder());
+				std::sort(intendedRanges.begin(), intendedRanges.end(), KeyRangeRef::ArbitraryOrder());
+				int i = 0, j = 0;
+				while (i < fetchedRanges.size() && j < intendedRanges.size()) {
+					if (fetchedRanges[i].begin != intendedRanges[j].begin) {
+						break;
+					} else if (fetchedRanges[i] == intendedRanges[j]) {
+						++i;
+						++j;
+					} else if (fetchedRanges[i].contains(intendedRanges[j])) {
+						fetchedRanges[i] = KeyRangeRef(intendedRanges[j].end, fetchedRanges[i].end);
+						++j;
+					} else if (intendedRanges[j].contains(fetchedRanges[i])) {
+						intendedRanges[j] = KeyRangeRef(fetchedRanges[i].end, intendedRanges[j].end);
+						++i;
+					} else {
+						break;
+					}
+				}
+				if (i != fetchedRanges.size() || j != intendedRanges.size()) {
+					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
+					    .detail("Reason", "RestoreFilesRangesMismatch")
+					    .detail("Ranges", describe(a.ranges))
+					    .detail("FetchedFiles", describe(rkvs));
+					    // .detail("Checkpoints", describe(a.checkpoints));
+					a.done.sendError(failed_to_restore_checkpoint());
+					return;
+				}
+
 				if (!ps->initialized()) {
 					TraceEvent(SevDebug, "ShardedRocksRestoreInitPS", logId)
 					    .detail("Path", a.path)

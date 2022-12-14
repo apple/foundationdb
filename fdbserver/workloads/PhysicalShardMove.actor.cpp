@@ -150,12 +150,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		checkpointRanges.clear();
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
-		checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr));
+		checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
-		std::vector<KeyRange> restoreRanges;
-		restoreRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
-		restoreRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
-		wait(self->checkpointRestore(self, cx, checkpointRanges, restoreRanges, CheckpointAsKeyValues::False, &kvs));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False, &kvs));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());
@@ -181,7 +178,10 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		checkpointRanges.clear();
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		checkpointRanges.push_back(KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr));
-		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
+		std::vector<KeyRange> restoreRanges;
+		restoreRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+		restoreRanges.push_back(KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, restoreRanges, CheckpointAsKeyValues::True, &kvs));
 
 		state std::vector<UID> teamC = wait(self->moveShard(self,
 		                                                    cx,
@@ -275,7 +275,17 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				try {
 					state CheckpointMetaData record;
 					if (asKeyValues) {
-						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, records[i].ranges)));
+						std::vector<KeyRange> fetchRanges;
+						for (const auto& range : restoreRanges) {
+							for (const auto& cRange : records[i].ranges) {
+								if (cRange.contains(range)) {
+									fetchRanges.push_back(range);
+									break;
+								}
+							}
+						}
+						ASSERT(!fetchRanges.empty());
+						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, fetchRanges)));
 						ASSERT(record.getFormat() == RocksDBKeyValues);
 					} else {
 						wait(store(record, fetchCheckpoint(cx, records[i], checkpointDir)));
