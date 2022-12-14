@@ -229,38 +229,38 @@ ACTOR static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransacti
 }
 
 ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db) {
-       state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-       state int64_t size;
-       state IdempotencyIdsExpiredVersion expired;
-       state KeyBackedObjectProperty<IdempotencyIdsExpiredVersion, _Unversioned> expiredKey(idempotencyIdsExpiredVersion,
-                                                                                            Unversioned());
-       state int64_t oldestIdVersion = 0;
-       state int64_t oldestIdTime = 0;
-       loop {
-               try {
-                       tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-                       tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state int64_t size;
+	state IdempotencyIdsExpiredVersion expired;
+	state KeyBackedObjectProperty<IdempotencyIdsExpiredVersion, _Unversioned> expiredKey(idempotencyIdsExpiredVersion,
+	                                                                                     Unversioned());
+	state int64_t oldestIdVersion = 0;
+	state int64_t oldestIdTime = 0;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-                       wait(store(size, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)) &&
-                            store(expired, expiredKey.getD(tr)) &&
-                            success(getBoundary(tr, idempotencyIdKeys, Reverse::False, &oldestIdVersion, &oldestIdTime)));
-                       JsonBuilderObject result;
-                       result["size_bytes"] = size;
-                       if (expired.expired != 0) {
-                               result["expired_version"] = expired.expired;
-                       }
-                       if (expired.expiredTime != 0) {
-                               result["expired_age"] = int64_t(now()) - expired.expiredTime;
-                       }
-                       if (oldestIdVersion != 0) {
-                               result["oldest_id_version"] = oldestIdVersion;
-                       }
-                       if (oldestIdTime != 0) {
-                               result["oldest_id_age"] = int64_t(now()) - oldestIdTime;
-                       }
-                       return result;
-               } catch (Error& e) {
-                       wait(tr->onError(e));
-               }
-       }
+			wait(store(size, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)) &&
+			     store(expired, expiredKey.getD(tr)) &&
+			     success(getBoundary(tr, idempotencyIdKeys, Reverse::False, &oldestIdVersion, &oldestIdTime)));
+			JsonBuilderObject result;
+			result["size_bytes"] = size;
+			if (expired.expired != 0) {
+				result["expired_version"] = expired.expired;
+			}
+			if (expired.expiredTime != 0) {
+				result["expired_age"] = int64_t(now()) - expired.expiredTime;
+			}
+			if (oldestIdVersion != 0) {
+				result["oldest_id_version"] = oldestIdVersion;
+			}
+			if (oldestIdTime != 0) {
+				result["oldest_id_age"] = int64_t(now()) - oldestIdTime;
+			}
+			return result;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
 }
