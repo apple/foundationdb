@@ -14,6 +14,8 @@ using uoffset_t = uint32_t;
 using soffset_t = int32_t;
 using voffset_t = int16_t;
 
+class Writer {};
+
 } // namespace flowserializer
 
 #endif // FLOWSERIALIZER_FLATBUFFERS_TYPES_H
