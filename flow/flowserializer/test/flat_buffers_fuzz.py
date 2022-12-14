@@ -26,9 +26,10 @@ class Type:
 def choose_type(depth, allow_vector=True):
     choices = [Primitive]
     if depth > 0:
-        if allow_vector:
-            choices.append(Vector)
-        choices.extend([Struct, Table, Union])
+        #if allow_vector:
+        #    choices.append(Vector)
+        #choices.extend([Struct, Table, Union])
+        choices.extend([Table])
     return random.choice(choices).choose_type(depth)
 
 
