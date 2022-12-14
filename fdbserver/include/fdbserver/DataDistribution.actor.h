@@ -279,11 +279,12 @@ public:
 	struct PhysicalShard {
 		PhysicalShard() : id(UID().first()) {}
 
-		PhysicalShard(uint64_t id,
+		PhysicalShard(Reference<IDDTxnProcessor> txnProcessor,
+		              uint64_t id,
 		              StorageMetrics const& metrics,
 		              std::vector<ShardsAffectedByTeamFailure::Team> teams,
 		              PhysicalShardCreationTime whenCreated)
-		  : id(id), metrics(metrics), teams(teams), whenCreated(whenCreated) {}
+		  : txnProcessor(txnProcessor), id(id), metrics(metrics), teams(teams), whenCreated(whenCreated) {}
 
 		// Adds `newRange` to this physical shard and starts monitoring the shard.
 		void addRange(const KeyRange& newRange);
@@ -293,13 +294,14 @@ public:
 
 		std::string toString() const { return fmt::format("{}", std::to_string(id)); }
 
+		Reference<IDDTxnProcessor> txnProcessor;
 		uint64_t id; // physical shard id (never changed)
 		StorageMetrics metrics; // current metrics, updated by shardTracker
 		std::vector<ShardsAffectedByTeamFailure::Team> teams; // which team owns this physical shard (never changed)
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
 
 		struct RangeData {
-			Future<Void> trackMetrics; // TODO(zhewu): add shard tracking actor.
+			Future<Void> trackMetrics;
 			Reference<AsyncVar<Optional<ShardMetrics>>>
 			    stats; // TODO(zhewu): aggregate all metrics to a single physical shard metrics.
 		};
