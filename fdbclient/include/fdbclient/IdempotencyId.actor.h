@@ -29,6 +29,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/PImpl.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
@@ -44,10 +45,11 @@ struct CommitResult {
 struct IdempotencyIdsExpiredVersion {
 	static constexpr auto file_identifier = 3746945;
 	Version expired = 0;
+	int64_t expiredTime = 0;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, expired);
+		serializer(ar, expired, expiredTime);
 	}
 };
 
@@ -184,6 +186,8 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex);
 
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
+
+ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db);
 
 #include "flow/unactorcompiler.h"
 #endif
