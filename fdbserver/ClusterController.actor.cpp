@@ -130,7 +130,7 @@ public:
 				state Future<Void> collection;
 
 				TraceEvent("CCWDB", self->id).detail("Recruiting", "Master");
-				wait(self->recruitNewMaster(db, std::addressof(newMaster)));
+				wait(self->recruitNewMaster(db, &newMaster));
 
 				iMaster = newMaster;
 
@@ -3455,7 +3455,7 @@ void ClusterController::addWorkersByLowestZone(int desired,
 }
 
 // Log the reason why the worker is considered as unavailable.
-void ClusterController::logWorkerUnavailable(const Severity severity,
+void ClusterController::logWorkerUnavailable(Severity severity,
                                              const UID& id,
                                              const std::string& method,
                                              const std::string& reason,

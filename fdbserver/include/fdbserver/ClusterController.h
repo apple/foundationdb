@@ -135,7 +135,7 @@ class ClusterController {
 	                            std::set<WorkerDetails>& resultSet);
 
 	// Log the reason why the worker is considered as unavailable.
-	void logWorkerUnavailable(const Severity severity,
+	void logWorkerUnavailable(Severity severity,
 	                          const UID& id,
 	                          const std::string& method,
 	                          const std::string& reason,
