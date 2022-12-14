@@ -347,14 +347,18 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.header << fmt::format("struct {} {{\n", table.name);
 	out.header << fmt::format(
 	    "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Table; }};\n\n");
-	out.header << fmt::format("\tvoid write(flowflat::Writer& w) const;\n");
+	out.header << fmt::format("\tstd::pair<uint8_t*, int> write(flowflat::Writer& w) const;\n");
 
 	for (auto const& f : table.fields) {
 		emit(out, f);
 	}
-
+	int totalBytes = 8;
 	// write flatbuffers serialization code
-	out.source << fmt::format("void {}::write(flowflat::Writer& w) {{", table.name);
+	// TODO: Return pointer to buffer for testing
+	out.source << fmt::format("#include <FlatbuffersTypes.h>\n");
+	out.source << fmt::format("#include <utility>\n");
+	out.source << fmt::format("using namespace flowserializer;\n");
+	out.source << fmt::format("std::pair<uint8_t*, int> {}::{}::write(flowflat::Writer& w) const {{", "", table.name);
 	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
 	// known data
 	// TODO: Create buffer
@@ -377,8 +381,10 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 			curr += 2;
 		}
 		vtableOffsets[typeName] = curr;
-		// curr += serInfo.vtable->size() * 2;
+		totalBytes += (*serInfo.vtable)[0];
+		totalBytes += (*serInfo.vtable)[1];
 	}
+	out.source << fmt::format("\n\tuint8_t* buffer = new uint8_t[{}];\n", totalBytes);
 	out.source << writer.str();
 
 	// 1. Iterate through all fields and generate all types simultaneously
@@ -401,10 +407,18 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 				out.source << fmt::format(
 				    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
 			} else if (field.type == "string") {
-				// Need to write string at end, then add a pointer to it
+				out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr2, '?');
+				out.source << fmt::format(
+				    "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();\n", '?', field.name);
+				out.source << fmt::format(
+				    "\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size();\n", '?', sizeof(uoffset_t), field.name);
+				out.source << fmt::format(
+				    "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;\n",
+				    '?',
+				    sizeof(uoffset_t),
+				    field.name);
 			}
 			curr2 += type->_size;
-			int inlineSpace = 0;
 		}
 	}
 
@@ -414,6 +428,8 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer) = {};\n", curr);
 	out.source << fmt::format("\t// file identifier\n");
 	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};\n", 0);
+
+	out.source << fmt::format("\treturn std::make_pair(buffer, {});\n", totalBytes);
 
 	out.source << "}\n";
 	out.header << "};\n";
