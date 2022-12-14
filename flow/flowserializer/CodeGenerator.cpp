@@ -310,6 +310,8 @@ struct OldSerializers {
 CodeGenerator::CodeGenerator(StaticContext* context) : context(context) {}
 
 void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
+	auto tableTypeName = assertTrue(context->resolve(f.name))->first;
+	auto fullName = fmt::format("{}::{}", fmt::join(tableTypeName.path, "::"), tableTypeName.name);
 	auto underlying = convertType(f.type);
 	// 0. generate the enum
 	{
@@ -324,19 +326,19 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 	}
 	// 1. Generate code for old serializers
 	// 1.1. Readers
-	EMIT(out, "// {} functions for old serializer", f.name);
+	EMIT(out, "// {} functions for old serializer", fullName);
 	for (auto const& ar : oldReaders) {
-		out.header << fmt::format("void load({}& ar, {}& out);\n", ar, f.name);
+		out.header << fmt::format("void load({}& ar, {}& out);\n", ar, fullName);
 
-		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, f.name);
+		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, fullName);
 		out.source << fmt::format("\t{} value;\n", underlying);
 		out.source << fmt::format("\tar >> value;\n");
-		out.source << fmt::format("\tout = static_cast<{}>({});\n", f.name, underlying);
+		out.source << fmt::format("\tout = static_cast<{}>(value);\n", fullName);
 		out.source << fmt::format("}}\n");
 	}
 	for (auto const& ar : oldWriters) {
 		out.header << fmt::format("void save({}& ar, {} const& in);\n", ar, f.name);
-		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, f.name);
+		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, fullName);
 		out.source << fmt::format("\t{0} value = static_cast<{0}>(in);\n", underlying);
 		out.source << fmt::format("\tar << value;\n");
 		out.source << fmt::format("}}\n");
@@ -344,27 +346,27 @@ void CodeGenerator::emit(Streams& out, expression::Enum const& f) const {
 	// 2. Generate the helper functions
 	{
 		out.header << fmt::format("// {} helper functions\n", f.name);
-		out.source << fmt::format("// {} helper functions\n", f.name);
+		out.source << fmt::format("// {} helper functions\n", fullName);
 		// toString
 		out.header << fmt::format("{0} toString({1});\n", config::stringType, f.name);
-		out.source << fmt::format("{0} toString({1} e) {{\n", config::stringType, f.name);
+		out.source << fmt::format("{0} toString({1} e) {{\n", config::stringType, fullName);
 		out.source << "\tswitch (e) {\n";
 		for (auto const& [k, _] : f.values) {
-			out.source << fmt::format("\tcase {0}::{1}:\n", f.name, k);
+			out.source << fmt::format("\tcase {0}::{1}:\n", fullName, k);
 			out.source << fmt::format("\t\treturn \"{0}\"{1};\n", k, config::stringLiteral);
 		}
 		out.source << "\t}\n";
 		out.source << "}\n\n";
 		// fromString and fromStringView
 
-		auto fromString = [out, &f](auto stringType, auto stringLiteral) {
+		auto fromString = [out, fullName, &f](auto stringType, auto stringLiteral) {
 			out.header << fmt::format("void fromString({0}& out, {1} const& str);\n", f.name, stringType);
-			out.source << fmt::format("void fromString({0}& out, {1} const& str) {{\n", f.name, stringType);
+			out.source << fmt::format("void fromString({0}& out, {1} const& str) {{\n", fullName, stringType);
 			bool first = true;
 			for (auto const& [k, _] : f.values) {
 				out.source << fmt::format(
 				    "\t{0} (str == \"{1}\"{2}) {{\n", first ? "if" : "} else if", k, stringLiteral);
-				out.source << fmt::format("\t\treturn {}::{};\n", f.name, k);
+				out.source << fmt::format("\t\tout = {}::{};\n", fullName, k);
 				first = false;
 			}
 			out.source << "\t} else {\n";
@@ -390,7 +392,7 @@ void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
 	for (auto const& ar : oldReaders) {
 		out.header << fmt::format("void load({}& ar, {}& value);\n", ar, u.name);
 
-		out.header << fmt::format("void load({}& ar, {}& value) {{\n", ar, u.name);
+		out.source << fmt::format("void load({}& ar, {}& value) {{\n", ar, u.name);
 		out.source << fmt::format("\tint idx;\n");
 		out.source << fmt::format("\tar >> idx;\n");
 		out.source << fmt::format("\tswitch (idx) {{\n");
@@ -411,7 +413,7 @@ void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
 	for (auto const& ar : oldWriters) {
 		out.header << fmt::format("void save({}& ar, {} const& value);\n", ar, u.name);
 
-		out.header << fmt::format("void save({}& ar, {} const& value) {{\n", ar, u.name);
+		out.source << fmt::format("void save({}& ar, {} const& value) {{\n", ar, u.name);
 		out.source << fmt::format("\tint idx = value.index();\n");
 		out.source << fmt::format("\tar << idx;\n");
 		out.source << fmt::format("\tswitch (idx) {{\n");
@@ -433,7 +435,7 @@ void CodeGenerator::emit(Streams& out, expression::Field const& f) const {
 	std::string assignment;
 	auto type = std::string(convertType(f.type));
 	if (f.isArrayType) {
-		type = fmt::format("std::vector<{}>", type);
+		type = fmt::format("std::vector<{}>", type == "bool" ? "uint8_t" : type.c_str());
 	}
 	if (f.defaultValue) {
 		if (expression::primitiveTypes.count(type) > 0) {
@@ -464,6 +466,8 @@ void CodeGenerator::emit(Streams& out, expression::Struct const& st) const {
 }
 
 void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
+	auto tableTypeName = assertTrue(context->resolve(s.st.name))->first;
+	auto fullName = fmt::format("{}::{}", fmt::join(tableTypeName.path, "::"), tableTypeName.name);
 	for (auto const& w : oldWriters) {
 		out.header << fmt::format("void save({}& reader, {} const& in);\n", w, s.st.name);
 	}
@@ -474,13 +478,13 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 	// write serialization code for old serializers (load and save)
 	// 1. Implement the generic functions
 	out.source << fmt::format("template<class Ar>\n");
-	out.source << fmt::format("void loadImpl(Ar& ar, {}& in) {{\n", s.st.name);
+	out.source << fmt::format("void loadImpl(Ar& ar, {}& in) {{\n", fullName);
 	for (auto const& f : s.st.fields) {
 		out.source << fmt::format("\tar >> in.{};\n", f.name);
 	}
 	out.source << fmt::format("}}\n\n");
 	out.source << fmt::format("template<class Ar>\n");
-	out.source << fmt::format("void saveImpl(Ar& ar, {} const& out) {{\n", s.st.name);
+	out.source << fmt::format("void saveImpl(Ar& ar, {} const& out) {{\n", fullName);
 	for (auto const& f : s.st.fields) {
 		out.source << fmt::format("\tar << out.{};\n", f.name);
 	}
@@ -488,13 +492,13 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 	// 2. Implement the specializations -- this forces the compiler to instantiate all templates in the current
 	//    compilation unit. So we won't do this once per compilation unit
 	for (auto const& ar : oldReaders) {
-		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, s.st.name);
+		out.source << fmt::format("void load({}& ar, {}& out) {{\n", ar, fullName);
 		out.source << fmt::format("\tloadImpl(ar, out);\n");
 		out.source << fmt::format("}}\n");
 	}
 	out.source << fmt::format("\n");
 	for (auto const& ar : oldWriters) {
-		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, s.st.name);
+		out.source << fmt::format("void save({}& ar, {} const& in) {{\n", ar, fullName);
 		out.source << fmt::format("\tsaveImpl(ar, in);\n");
 		out.source << fmt::format("}}\n");
 	}
@@ -511,13 +515,13 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	for (auto const& f : table.fields) {
 		emit(out, f);
 	}
-	int totalBytes = 8;
-	// write flatbuffers serialization code
-	// TODO: Return pointer to buffer for testing
-	out.source << fmt::format("std::pair<uint8_t*, int> {}::write(flowserializer::Writer& w) const {{", table.name);
+	auto tableTypeName = assertTrue(context->resolve(table.name))->first;
+	EMIT(out.source,
+	     "std::pair<uint8_t*, int> {}::{}::write(flowserializer::Writer& w) const {{",
+	     fmt::join(tableTypeName.path, "::"),
+	     table.name);
 	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
 	// known data
-	// TODO: Create buffer
 	// TODO: Only generate serialization for root_type
 	std::stringstream writer;
 	auto serMap = context->serializationInformation(table.name);
@@ -525,10 +529,15 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	int curr = 8;
 	// 0. write all vtables
 	for (auto const& [typeName, serInfo] : serMap) {
+		fmt::print("serMapPath: {}, serMapTypeName: {}, serMapSize: {}, vtable empty: {}\n",
+		           fmt::join(typeName.path, "::"),
+		           typeName.name,
+		           serMap.size(),
+		           serInfo.vtable->empty());
 		if (serInfo.vtable->empty()) {
 			continue;
 		}
-		writer << fmt::format("\n\t// vtable for {}{}{}\n",
+		writer << fmt::format("\t// vtable for {}{}{}\n",
 		                      fmt::join(typeName.path, "::"),
 		                      typeName.path.empty() ? "" : "::",
 		                      typeName.name);
@@ -537,59 +546,99 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 			curr += 2;
 		}
 		vtableOffsets[typeName] = curr;
-		totalBytes += (*serInfo.vtable)[0];
-		totalBytes += (*serInfo.vtable)[1];
 	}
-	out.source << fmt::format("\n\tuint8_t* buffer = new uint8_t[{}];\n", totalBytes);
-	out.source << writer.str();
 
-	// 1. Iterate through all fields and generate all types simultaneously
-	int curr2 = curr;
-	out.source << fmt::format("\n\t// table (data or offsets to data)\n");
-	out.source << fmt::format("\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
-	                          "(subtracted from current address to get vtable address)\n",
-	                          curr2,
-	                          curr2 - 8);
-	curr2 += sizeof(soffset_t);
-	for (auto const& field : table.fields) {
-		auto fieldType = assertTrue(context->resolve(field.type))->second;
-		if (fieldType->typeType() == expression::TypeType::Primitive) {
-			auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType);
-			fmt::print("FieldType: {}, typeSize={}\n", field.type, type->_size);
-			if (field.type == "int") {
-				out.source << fmt::format(
-				    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
-			} else if (field.type == "short") {
-				out.source << fmt::format(
-				    "\t*reinterpret_cast<{}*>(buffer + {}) = {};\n", field.type, curr2, field.name);
+	// 1.0. Determine size of all tables
+	auto vtable = serMap.at(tableTypeName).vtable;
+	int dataSize = curr;
+	if (!vtable->empty()) {
+		dataSize += vtable.value()[1];
+	}
+
+	// 1.5. Iterate through all fields and generate all types simultaneously
+	std::stringstream appendData;
+	EMIT(writer, "\n\t// table (data or offsets to data)");
+	EMIT(writer,
+	     "\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
+	     "(subtracted from current address to get vtable address)",
+	     curr,
+	     curr - 8);
+	for (int i = 0; i < table.fields.size(); ++i) {
+		const auto field = table.fields[i];
+		auto fieldType = assertTrue(context->resolve(field.type));
+		if (vtable->empty()) {
+			continue;
+		}
+		switch (fieldType->second->typeType()) {
+		case expression::TypeType::Primitive: {
+		    if (field.isArrayType) {
+				// TODO: Implement
+			} else if (field.type == "int" || field.type == "short" || field.type == "long") {
+				EMIT(writer,
+				     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
+				     curr + vtable.value()[i + 2],
+				     field.name,
+				     field.type);
 			} else if (field.type == "string") {
-				out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n", curr2, '?');
-				out.source << fmt::format(
-				    "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();\n", '?', field.name);
-				out.source << fmt::format(
-				    "\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size();\n", '?', sizeof(uoffset_t), field.name);
-				out.source << fmt::format(
-				    "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;\n",
-				    '?',
-				    sizeof(uoffset_t),
-				    field.name);
+				auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType->second);
+				voffset_t offset = dataSize;
+				// Offset to string is the offset from where the address the offset is written at!
+				EMIT(writer,
+				     "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {};\n",
+				     curr + vtable.value()[i + 2],
+				     offset - (curr + vtable.value()[i + 2]));
+				EMIT(appendData, "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {}.size();", dataSize, field.name);
+				EMIT(appendData,
+				     "\tstd::memcpy(buffer + {0} + {1}, {2}.data(), {2}.size());",
+				     dataSize,
+				     sizeof(uoffset_t),
+				     field.name);
+				EMIT(appendData,
+				     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1) = 0;",
+				     offset,
+				     sizeof(uoffset_t),
+				     field.name);
+				dataSize += 4 + 1 + type->_size;
 			}
-			curr2 += type->_size;
-			int inlineSpace = 0;
+			break;
+		}
+		case expression::TypeType::Enum: {
+			EMIT(writer,
+			     "\t*reinterpret_cast<unsigned char*>(buffer + {}) = static_cast<unsigned char>({});",
+			     curr + vtable.value()[i + 2],
+			     field.name);
+			break;
+		}
+		case expression::TypeType::Union: {
+			// throw Error("NOT IMPLEMENTED");
+			break;
+		}
+		default: {
+			// throw Error("NOT IMPLEMENTED");
+			break;
+		}
 		}
 	}
 
+	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{}];\n", dataSize);
+	out.source << writer.str();
+
+	std::string appendStr = appendData.str();
+	if (!appendStr.empty()) {
+		out.source << appendStr;
+	}
+
 	// 2. Write header
-	out.source << fmt::format("\n\t// header\n");
-	out.source << fmt::format("\t// offset to root table\n");
-	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer) = {};\n", curr);
-	out.source << fmt::format("\t// file identifier\n");
-	out.source << fmt::format("\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};\n", 0);
+	EMIT(out.source, "\n\t// header");
+	EMIT(out.source, "\t// offset to root table");
+	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer) = {};", curr);
+	EMIT(out.source, "\t// file identifier");
+	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};", 0);
 
-	out.source << fmt::format("\treturn std::make_pair(buffer, {});\n", totalBytes);
+	EMIT(out.source, "\treturn std::make_pair(buffer, {});", dataSize);
 
-	out.source << "}\n";
-	out.header << "};\n";
+	EMIT(out.source, "}}");
+	EMIT(out.header, "}};");
 	emit(out, OldSerializers{ table });
 }
 

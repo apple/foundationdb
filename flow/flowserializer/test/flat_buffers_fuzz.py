@@ -273,7 +273,7 @@ class CollectIdlTables:
 
     def new_union(self, name, fields):
         union = 'union %s {\n' % name
-        union += '\n'.join('    %s,' % t.to_fbidl(self) for (
+        union += ',\n'.join('    %s' % t.to_fbidl(self) for (
             f, t) in fields)
         union += '\n}\n'
         self.tables.append(union)
