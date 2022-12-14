@@ -1433,27 +1433,27 @@ if __name__ == "__main__":
     test_available()
     if args.process_number == 1:
         # TODO: disable for now, the change can cause the database unavailable
-        # advanceversion()
-        # cache_range()
-        # consistencycheck()
-        # datadistribution()
-        # kill()
-        # lockAndUnlock()
-        # maintenance()
-        # profile()
-        # # TODO: reenable it until it's stable
-        # # suspend()
-        # transaction()
-        # # this is replaced by the "quota" command
-        # #throttle()
-        # triggerddteaminfolog()
-        # tenants()
-        # versionepoch()
-        # integer_options()
-        # tls_address_suffix()
-        # knobmanagement()
-        # # TODO: fix the issue when running through the external client
-        # #quota()
+        advanceversion()
+        cache_range()
+        consistencycheck()
+        datadistribution()
+        kill()
+        lockAndUnlock()
+        maintenance()
+        profile()
+        # TODO: reenable it until it's stable
+        # suspend()
+        transaction()
+        # this is replaced by the "quota" command
+        # throttle()
+        triggerddteaminfolog()
+        tenants()
+        versionepoch()
+        integer_options()
+        tls_address_suffix()
+        knobmanagement()
+        # TODO: fix the issue when running through the external client
+        # quota()
         idempotency_ids()
     else:
         assert args.process_number > 1, "Process number should be positive"

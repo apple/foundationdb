@@ -693,9 +693,7 @@ ACTOR template <class T>
 Future<T> makeInterruptable(Future<T> f) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
-		when(T t = wait(f)) {
-			return t;
-		}
+		when(T t = wait(f)) { return t; }
 		when(wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
