@@ -323,7 +323,9 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 						break;
 					}
 				}
-				when(wait(actors.getResult())) { ASSERT(false); }
+				when(wait(actors.getResult())) {
+					ASSERT(false);
+				}
 			}
 		}
 		return Void();

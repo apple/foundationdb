@@ -1018,8 +1018,8 @@ public:
 
 	// Idempotency ids
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
- 	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
- 	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
+	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
+	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
