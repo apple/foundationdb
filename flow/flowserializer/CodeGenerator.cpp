@@ -135,8 +135,9 @@ std::string headerGuard(std::string const& stem) {
 
 void emitIncludes(Streams& out, std::vector<std::string> const& includes) {
 	EMIT(out.header, "#include \"flow/serialize.h\"");
+	EMIT(out.header, "#include \"FlatbuffersTypes.h\"");
 	for (auto const& p : includes) {
-		out.header << fmt::format("#include \"{}.h\"\n", p.substr(0, p.size() - ".fbs"s.size()));
+		EMIT(out.header, "#include \"{}.h\"", p.substr(0, p.size() - ".fbs"s.size()));
 	}
 	EMIT(out.header, "");
 }
@@ -235,7 +236,7 @@ void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
 	for (auto const& ar : oldReaders) {
 		out.header << fmt::format("void load({}& ar, {}& value);\n", ar, u.name);
 
-		out.header << fmt::format("void load({}& ar, {}& value) {{\n", ar, u.name);
+		out.source << fmt::format("void load({}& ar, {}& value) {{\n", ar, u.name);
 		out.source << fmt::format("\tint idx;\n");
 		out.source << fmt::format("\tar >> idx;\n");
 		out.source << fmt::format("\tswitch (idx) {{\n");
@@ -256,7 +257,7 @@ void CodeGenerator::emit(Streams& out, expression::Union const& u) const {
 	for (auto const& ar : oldWriters) {
 		out.header << fmt::format("void save({}& ar, {} const& value);\n", ar, u.name);
 
-		out.header << fmt::format("void save({}& ar, {} const& value) {{\n", ar, u.name);
+		out.source << fmt::format("void save({}& ar, {} const& value) {{\n", ar, u.name);
 		out.source << fmt::format("\tint idx = value.index();\n");
 		out.source << fmt::format("\tar << idx;\n");
 		out.source << fmt::format("\tswitch (idx) {{\n");
@@ -298,8 +299,8 @@ void CodeGenerator::emit(Streams& out, expression::Field const& f) const {
 void CodeGenerator::emit(Streams& out, expression::Struct const& st) const {
 	Defer defer;
 	out.header << fmt::format("struct {} {{\n", st.name);
-	out.header << fmt::format(
-	    "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Struct; }};\n\n");
+	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
+	                          "flowserializer::Type::Struct; }};\n\n");
 	for (auto const& f : st.fields) {
 		emit(out, f);
 	}
@@ -311,10 +312,10 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 	auto tableTypeName = assertTrue(context->resolve(s.st.name))->first;
 	auto fullName = fmt::format("{}::{}", fmt::join(tableTypeName.path, "::"), tableTypeName.name);
 	for (auto const& w : oldWriters) {
-		out.header << fmt::format("\tvoid save({}& reader, {} const& in);\n", w, s.st.name);
+		out.header << fmt::format("void save({}& reader, {} const& in);\n", w, s.st.name);
 	}
 	for (auto const& r : oldReaders) {
-		out.header << fmt::format("\tvoid load({}& reader, {}& out);\n", r, s.st.name);
+		out.header << fmt::format("void load({}& reader, {}& out);\n", r, s.st.name);
 	}
 
 	// write serialization code for old serializers (load and save)
@@ -348,21 +349,17 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 }
 
 void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
-	EMIT(out.header, "struct {} {{", table.name);
-	EMIT(out.header, "\t[[nodiscard]] flowflat::Type flowFlatType() const {{ return flowflat::Type::Table; }};\n");
-	EMIT(out.header, "\tstd::pair<uint8_t*, int> write(flowflat::Writer& w) const;");
+	out.header << fmt::format("struct {} {{\n", table.name);
+	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
+	                          "flowserializer::Type::Table; }};\n\n");
+	out.header << fmt::format("\tstd::pair<uint8_t*, int> write(flowserializer::Writer& w) const;\n");
 
 	for (auto const& f : table.fields) {
 		emit(out, f);
 	}
 	auto tableTypeName = assertTrue(context->resolve(table.name))->first;
-	// write serialization code
-	// TODO: Return pointer to buffer for testing
-	EMIT(out.source, "#include <FlatbuffersTypes.h>");
-	EMIT(out.source, "#include <utility>");
-	EMIT(out.source, "using namespace flowserializer;");
 	EMIT(out.source,
-	     "std::pair<uint8_t*, int> {}::{}::write(flowflat::Writer& w) const {{",
+	     "std::pair<uint8_t*, int> {}::{}::write(flowserializer::Writer& w) const {{",
 	     fmt::join(tableTypeName.path, "::"),
 	     table.name);
 	// the code to allocate the memory has to be called first, but we can already generate code to write the statically
@@ -492,6 +489,10 @@ void CodeGenerator::emit(Streams& out, expression::ExpressionTree const& tree) c
 		defer([&out, &tree]() {
 			out.header << fmt::format("}} // namespace {}\n", fmt::join(tree.namespacePath.value(), "::"));
 		});
+		out.source << fmt::format("namespace {} {{\n", fmt::join(tree.namespacePath.value(), "::"));
+		defer([&out, &tree]() {
+			out.source << fmt::format("}} // namespace {}\n", fmt::join(tree.namespacePath.value(), "::"));
+		});
 	}
 	// enums have no dependencies, so we will emit them first
 	for (auto const& [_, e] : tree.enums) {
@@ -528,14 +529,20 @@ void CodeGenerator::emit(std::string const& stem,
                          const boost::filesystem::path& source) const {
 	std::ofstream headerStream(header.c_str(), std::ios_base::out | std::ios_base::trunc);
 	std::ofstream sourceStream(source.c_str(), std::ios_base::out | std::ios_base::trunc);
-	auto guard = headerGuard(stem);
-	headerStream << "// THIS FILE WAS GENERATED BY FLOWFLATC, DO NOT EDIT!\n";
-	headerStream << fmt::format("#ifndef {0}\n#define {0}\n#include <flowflat/flowflat.h>\n\n", guard);
-	sourceStream << fmt::format("#include \"{}.h\"\n", stem);
 	Streams streams{ headerStream, sourceStream };
+
+	auto guard = headerGuard(stem);
+	EMIT(headerStream, "// THIS FILE WAS GENERATED BY FLOWFLATC, DO NOT EDIT!");
+	EMIT(headerStream, "#ifndef {0}\n#define {0}", guard);
 	emitIncludes(streams, context->currentFile->includes);
 	Defer defer;
-	defer([&headerStream, &guard]() { headerStream << fmt::format("\n#endif // #ifndef {}\n", guard); });
+	defer([&headerStream, &guard]() { EMIT(headerStream, "\n#endif // #ifndef {}", guard); });
+
+	EMIT(sourceStream, "// THIS FILE WAS GENERATED BY FLOWFLATC, DO NOT EDIT!");
+	EMIT(sourceStream, "#include \"{}\"", header.filename().c_str());
+	EMIT(sourceStream, "#include <utility>");
+	EMIT(sourceStream, "using namespace flowserializer;");
+
 	emit(streams, *context->currentFile);
 }
 
