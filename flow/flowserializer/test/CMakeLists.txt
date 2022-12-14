@@ -1,6 +1,6 @@
 #string(RANDOM LENGTH 8 ALPHABET "0123456789abcdef" SEED_)
 #set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
-set(SEED "2")
+set(SEED "8")
 FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/seed "${SEED}")
 
 add_custom_command(
@@ -35,7 +35,10 @@ add_executable(flat_buffers_fuzz
     ${CMAKE_CURRENT_SOURCE_DIR}/flat_buffers_fuzz.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/table.cpp)
 target_link_libraries(flat_buffers_fuzz flow boost_target Threads::Threads doctest)
-target_include_directories(flat_buffers_fuzz PRIVATE ${FLATBUFFERS_INCLUDE} ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(flat_buffers_fuzz PRIVATE
+    ${FLATBUFFERS_INCLUDE}
+    ${CMAKE_SOURCE_DIR}/flow/flowserializer
+    ${CMAKE_CURRENT_BINARY_DIR})
 add_dependencies(flat_buffers_fuzz flatbuffers)
 add_dependencies(flat_buffers_fuzz table_fdbflatbuffers)
 add_dependencies(flat_buffers_fuzz table_flatbuffers)

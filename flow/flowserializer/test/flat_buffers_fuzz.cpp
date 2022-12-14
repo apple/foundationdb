@@ -18,7 +18,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
-using namespace flatbuffers;
+// Flowbuffers serializer
+#include "table.h"
 
 namespace theirs {
 #include "table_generated.h"
@@ -188,10 +189,6 @@ void Randomize(std::mt19937_64& r, std::variant<T...>& x) {
 
 } // namespace ours
 
-// namespace flowbuffers {
-//#include "table.h"
-// }
-
 using namespace std;
 
 namespace {
@@ -255,7 +252,7 @@ void doFuzz() {
 		// Randomly generate instance of our type, serialize, verify, convert to
 		// their type and compare.
 		ours::Table0 ours;
-		Randomize(r, ours);
+		ours::Randomize(r, ours);
 		Arena arena;
 		TestContext context{ arena };
 		auto* serialized = detail::save(context, ours, FileIdentifier{});
@@ -272,6 +269,9 @@ void doFuzz() {
 		ours = {};
 		detail::load(ours, fbb.GetBufferPointer(), context);
 		Verify(ours, theirs::testfb::GetTable0(fbb.GetBufferPointer()), "LoadPath[" + std::to_string(i) + "]: ");
+
+		// Testing flowbuffers
+		testfb::Table0 ours_new;
 	}
 }
 } // namespace
