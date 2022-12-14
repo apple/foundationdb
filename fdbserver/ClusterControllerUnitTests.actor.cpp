@@ -1,5 +1,5 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbserver/ClusterController.actor.h"
+#include "fdbserver/ClusterController.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include

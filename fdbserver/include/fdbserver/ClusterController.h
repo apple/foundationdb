@@ -1,5 +1,5 @@
 /*
- * ClusterController.actor.h
+ * ClusterController.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,12 +26,6 @@
 #include "fdbserver/BlobMigratorInterface.h"
 #include <utility>
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
-#define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
-#include "fdbserver/ClusterController.actor.g.h"
-#elif !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_H)
-#define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
-
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Metacluster.h"
 #include "fdbrpc/Locality.h"
@@ -44,8 +38,6 @@
 #include "fdbserver/WorkerInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/SystemMonitor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class ClusterController {
 	friend class ClusterControllerImpl;
@@ -245,7 +237,9 @@ class ClusterController {
 	    bool checkStable = false);
 
 	Future<Optional<Value>> getPreviousCoordinators();
-	Future<Void> clusterWatchDatabase(ClusterControllerDBInfo* db, ServerCoordinators coordinators, Future<Void> recoveredDiskFiles);
+	Future<Void> clusterWatchDatabase(ClusterControllerDBInfo* db,
+	                                  ServerCoordinators coordinators,
+	                                  Future<Void> recoveredDiskFiles);
 	void checkOutstandingRecruitmentRequests();
 	void checkOutstandingRemoteRecruitmentRequests();
 	void checkOutstandingStorageRequests();
@@ -526,7 +520,3 @@ public:
 	// encryption status.
 	Promise<EncryptionAtRestMode> encryptionAtRestMode;
 };
-
-#include "flow/unactorcompiler.h"
-
-#endif
