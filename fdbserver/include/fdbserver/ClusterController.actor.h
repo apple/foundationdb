@@ -116,7 +116,6 @@ class ClusterController {
 
 	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
 
-public:
 	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const;
 	bool isLongLivedStateless(Optional<Key> const& processId) const;
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req);
@@ -310,10 +309,6 @@ public:
 	Future<Void> updateClusterId();
 	Future<Void> handleGetEncryptionAtRestMode(ClusterControllerFullInterface ccInterf);
 	Future<Void> recruitNewMaster(ClusterControllerDBInfo* db, MasterInterface* newMaster);
-	Future<Void> clusterRecruitFromConfiguration(Reference<RecruitWorkersInfo> req);
-	Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
-	    Reference<RecruitRemoteWorkersInfo> req);
-
 	std::set<Optional<Standalone<StringRef>>> getDatacenters(DatabaseConfiguration const& conf,
 	                                                         bool checkStable = false);
 	void updateKnownIds(std::map<Optional<Standalone<StringRef>>, int>* id_used);
@@ -398,14 +393,6 @@ public:
 	int recentRecoveryCountDueToHealth();
 	bool isExcludedDegradedServer(const NetworkAddressList& a) const;
 
-	static Future<Void> run(ClusterControllerFullInterface interf,
-	                        Future<Void> leaderFail,
-	                        ServerCoordinators coordinators,
-	                        LocalityData locality,
-	                        ConfigDBType configDBType,
-	                        Future<Void> recoveredDiskFiles,
-	                        Reference<AsyncVar<Optional<UID>>> clusterId);
-
 	// Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
 	// or, halts the existing singleton in favour of the requesting one
 	template <class SingletonClass>
@@ -445,74 +432,6 @@ public:
 			}
 		}
 	}
-
-	ClusterController(ClusterControllerFullInterface const& ccInterface,
-	                  LocalityData const& locality,
-	                  ServerCoordinators const& coordinators,
-	                  Reference<AsyncVar<Optional<UID>>> clusterId)
-	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
-	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
-	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
-	    datacenterVersionDifference(0), versionDifferenceUpdated(false), remoteDCMonitorStarted(false),
-	    remoteTransactionSystemDegraded(false), recruitDistributor(false), recruitRatekeeper(false),
-	    recruitBlobManager(false), recruitBlobMigrator(false), recruitEncryptKeyProxy(false),
-	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
-	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
-	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
-	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
-	    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
-	    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
-	    statusRequests("StatusRequests", clusterControllerMetrics),
-	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
-		auto serverInfo = ServerDBInfo();
-		serverInfo.id = deterministicRandom()->randomUniqueID();
-		serverInfo.infoGeneration = db.incrementAndGetDbInfoCount();
-		serverInfo.masterLifetime.ccID = id;
-		serverInfo.clusterInterface = ccInterface;
-		serverInfo.myLocality = locality;
-		serverInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
-		db.serverInfo->set(serverInfo);
-		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
-
-		specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.getClientCount(); });
-	}
-
-	~ClusterController() {
-		ac.clear(false);
-		id_worker.clear();
-	}
-
-	UID getId() const { return id; }
-
-	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
-
-	// recruitX is used to signal when role X needs to be (re)recruited.
-	// recruitingXID is used to track the ID of X's interface which is being recruited.
-	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
-	double lastRecruitTime = 0;
-	AsyncVar<bool> recruitDistributor;
-	Optional<UID> recruitingDistributorID;
-	AsyncVar<bool> recruitRatekeeper;
-	Optional<UID> recruitingRatekeeperID;
-	AsyncVar<bool> recruitBlobManager;
-	Optional<UID> recruitingBlobManagerID;
-	AsyncVar<bool> recruitBlobMigrator;
-	Optional<UID> recruitingBlobMigratorID;
-	AsyncVar<bool> recruitEncryptKeyProxy;
-	Optional<UID> recruitingEncryptKeyProxyID;
-	AsyncVar<bool> recruitConsistencyScan;
-	Optional<UID> recruitingConsistencyScanID;
-
-	bool shouldCommitSuicide;
-	Optional<Standalone<StringRef>> clusterControllerDcId;
-	ClusterControllerDBInfo db;
-
-	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
-	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
-	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
-	// encryption status.
-	Promise<EncryptionAtRestMode> encryptionAtRestMode;
 
 	// Returns true iff the singleton is healthy. "Healthy" here means that
 	// the singleton is stable (see below) and doesn't need to be rerecruited.
@@ -557,6 +476,55 @@ public:
 			return true; // healthy because doesn't need to be rerecruited
 		}
 	}
+
+public:
+	static Future<Void> run(ClusterControllerFullInterface interf,
+	                        Future<Void> leaderFail,
+	                        ServerCoordinators coordinators,
+	                        LocalityData locality,
+	                        ConfigDBType configDBType,
+	                        Future<Void> recoveredDiskFiles,
+	                        Reference<AsyncVar<Optional<UID>>> clusterId);
+
+	Future<Void> clusterRecruitFromConfiguration(Reference<RecruitWorkersInfo> req);
+	Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
+	    Reference<RecruitRemoteWorkersInfo> req);
+
+	ClusterController(ClusterControllerFullInterface const& ccInterface,
+	                  LocalityData const& locality,
+	                  ServerCoordinators const& coordinators,
+	                  Reference<AsyncVar<Optional<UID>>> clusterId);
+	~ClusterController();
+	UID getId() const { return id; }
+
+	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
+
+	// recruitX is used to signal when role X needs to be (re)recruited.
+	// recruitingXID is used to track the ID of X's interface which is being recruited.
+	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
+	double lastRecruitTime = 0;
+	AsyncVar<bool> recruitDistributor;
+	Optional<UID> recruitingDistributorID;
+	AsyncVar<bool> recruitRatekeeper;
+	Optional<UID> recruitingRatekeeperID;
+	AsyncVar<bool> recruitBlobManager;
+	Optional<UID> recruitingBlobManagerID;
+	AsyncVar<bool> recruitBlobMigrator;
+	Optional<UID> recruitingBlobMigratorID;
+	AsyncVar<bool> recruitEncryptKeyProxy;
+	Optional<UID> recruitingEncryptKeyProxyID;
+	AsyncVar<bool> recruitConsistencyScan;
+	Optional<UID> recruitingConsistencyScanID;
+
+	bool shouldCommitSuicide;
+	Optional<Standalone<StringRef>> clusterControllerDcId;
+	ClusterControllerDBInfo db;
+
+	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
+	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
+	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
+	// encryption status.
+	Promise<EncryptionAtRestMode> encryptionAtRestMode;
 };
 
 #include "flow/unactorcompiler.h"
