@@ -656,7 +656,7 @@ void emitSerializeField(StaticContext* context,
 		for (int i = 0; i < s->fields.size(); ++i) {
 			fmt::print("struct field: {}\n", s->fields[i].name);
 			emitSerializeField(
-			    context, out, writer, fieldIndex + i, s->fields[i], vtable, tableOffset, dataSize, fieldName + ".");
+			    context, out, writer, fieldIndex + i, s->fields[i], alignment, vtable, tableOffset, dataSize, fieldName + ".");
 		}
 		break;
 	}
