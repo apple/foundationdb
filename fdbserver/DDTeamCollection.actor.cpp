@@ -1980,8 +1980,8 @@ public:
 		state bool takeRest = true;
 		state Promise<int64_t> avgShardBytes;
 		while (takeRest) {
-			// avoid busy spinning
-			wait(waitPerpetualWiggleDelay(self));
+			// a minimal delay to avoid excluding and including SS too fast
+			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
 
 			avgShardBytes.reset();
 			self->getAverageShardBytes.send(avgShardBytes);
@@ -1994,14 +1994,17 @@ public:
 			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
 			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance;
 
-			self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
-			if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-				TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
-				    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-				    .detail("BytesBalanceRatio", ratio)
-				    .detail("ServerSize", self->server_info.size())
-				    .detail("MachineSize", self->machine_info.size())
-				    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+			// log the extra delay and change the wiggler state
+			if (takeRest) {
+				self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
+				if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+					TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
+					    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+					    .detail("BytesBalanceRatio", ratio)
+					    .detail("ServerSize", self->server_info.size())
+					    .detail("MachineSize", self->machine_info.size())
+					    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+				}
 			}
 		}
 		return Void();
