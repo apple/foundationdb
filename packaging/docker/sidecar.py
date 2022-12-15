@@ -374,8 +374,6 @@ class Config(object):
 
         client=k8s_client.CoreV1Api()
 
-        # RBAC configuration may be required to access node resources.
-        # ref: https://github.com/kubernetes-client/python/blob/master/examples/in_cluster_config.py
         api_response = client.read_node(hostname)
 
         labels = api_response.metadata.labels
