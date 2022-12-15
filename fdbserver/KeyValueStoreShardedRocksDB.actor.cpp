@@ -2366,7 +2366,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Reason", "RestoreFilesRangesMismatch")
 					    .detail("Ranges", describe(a.ranges))
 					    .detail("FetchedFiles", describe(rkvs));
-					    // .detail("Checkpoints", describe(a.checkpoints));
 					a.done.sendError(failed_to_restore_checkpoint());
 					return;
 				}

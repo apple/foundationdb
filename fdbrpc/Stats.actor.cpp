@@ -259,16 +259,23 @@ void LatencySample::logSample() {
 		std::string port_str = std::to_string(addr.port);
 		switch (model) {
 		case MetricsDataModel::OTLP: {
-			if (metrics->histMap.find(IMetric::id) != metrics->histMap.end()) {
-				metrics->histMap[IMetric::id].points.emplace_back(
-				    sketch.getErrorGuarantee(), sketch.getSamples(), sketch.min(), sketch.max(), sketch.getSum());
-			} else {
-				metrics->histMap[IMetric::id] = OTEL::OTELHistogram(
-				    name, sketch.getErrorGuarantee(), sketch.getSamples(), sketch.min(), sketch.max(), sketch.getSum());
+			// We only want to emit the entire DDSketch if the knob is set
+			if (FLOW_KNOBS->METRICS_EMIT_DDSKETCH) {
+				if (metrics->histMap.find(IMetric::id) != metrics->histMap.end()) {
+					metrics->histMap[IMetric::id].points.emplace_back(
+					    sketch.getErrorGuarantee(), sketch.getSamples(), sketch.min(), sketch.max(), sketch.getSum());
+				} else {
+					metrics->histMap[IMetric::id] = OTEL::OTELHistogram(name,
+					                                                    sketch.getErrorGuarantee(),
+					                                                    sketch.getSamples(),
+					                                                    sketch.min(),
+					                                                    sketch.max(),
+					                                                    sketch.getSum());
+				}
+				metrics->histMap[IMetric::id].points.back().addAttribute("ip", ip_str);
+				metrics->histMap[IMetric::id].points.back().addAttribute("port", port_str);
+				metrics->histMap[IMetric::id].points.back().startTime = sampleEmit;
 			}
-			metrics->histMap[IMetric::id].points.back().addAttribute("ip", ip_str);
-			metrics->histMap[IMetric::id].points.back().addAttribute("port", port_str);
-			metrics->histMap[IMetric::id].points.back().startTime = sampleEmit;
 			createOtelGauge(p50id, name + "p50", p50);
 			createOtelGauge(p90id, name + "p90", p90);
 			createOtelGauge(p95id, name + "p95", p95);

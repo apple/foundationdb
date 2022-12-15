@@ -66,7 +66,7 @@ enum DataPointFlags { FLAG_NONE = 0, FLAG_NO_RECORDED_VALUE };
 
 class NumberDataPoint {
 public:
-	double startTime; // 9 bytes in msgpack
+	double startTime = -1; // 9 bytes in msgpack
 	double recordTime; // 9 bytes in msgpack
 	std::vector<Attribute> attributes; // Variable size: assume to be 23 bytes
 	std::variant<int64_t, double> val; // 9 bytes in msgpack

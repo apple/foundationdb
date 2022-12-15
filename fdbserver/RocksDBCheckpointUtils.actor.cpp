@@ -425,7 +425,6 @@ rocksdb::Status RocksDBCheckpointReader::Reader::tryOpenForRead(const std::strin
 			return status;
 		} else {
 			delete db;
-			ASSERT(db == nullptr);
 			TraceEvent(SevDebug, "RocksDBCheckpointReaderTryOpenError").detail("Path", path);
 			return rocksdb::Status::Aborted();
 		}
