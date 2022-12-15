@@ -601,7 +601,7 @@ void emitSerializeField(StaticContext* context,
 			     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
 			     tableOffset + vtable[fieldIndex + 2],
 			     field.name,
-			     field.type);
+			     convertType(field.type));
 			break;
 		case expression::PrimitiveTypeClass::StringType: {
 			voffset_t offset = dataSize;
