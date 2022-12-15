@@ -251,7 +251,7 @@ void emitDeserializeUnion(StaticContext* context,
 	auto const& utype = dynamic_cast<expression::Union const&>(type);
 	EMIT(out.source, "\t\t// a union is a 1-byte integer followed by a type reference");
 	EMIT(out.source, "\t\tuint8_t utype;");
-	EMIT(out.source, "\t\tmemcpy(&utype, data + tableOffset + vtable[idx++], 1);");
+	EMIT(out.source, "\t\tmemcpy(&utype, data + vtable[idx++], 1);");
 	EMIT(out.source, "\t\tswitch (utype) {{");
 	for (int i = 1; i < utype.types.size(); ++i) {
 		auto variantType = assertTrue(context->resolve(utype.types[i]));
@@ -264,7 +264,7 @@ void emitDeserializeUnion(StaticContext* context,
 		}
 		EMIT(out.source, "\t\t\t{} varValue;", variantType->first.fullyQualifiedCppName(*variantType->second));
 		EMIT(out.source, "\t\t\tuint32_t varTableOffset;");
-		EMIT(out.source, "\t\t\tmemcpy(&varTableOffset, data + tableOffset + vtable[idx], sizeof(uint32_t));");
+		EMIT(out.source, "\t\t\tmemcpy(&varTableOffset, data + vtable[idx], sizeof(uint32_t));");
 		EMIT(out.source, "\t\t\tvarValue._loadFromOffset(reader, varTableOffset);");
 		EMIT(out.source, "\t\t\t{} = varValue;", qualifiedName);
 		EMIT(out.source, "\t\t\tbreak;");
@@ -287,15 +287,17 @@ void emitDeserializeMember(StaticContext* context,
 	EMIT(out.source, "\t}}");
 	EMIT(out.source, "\tif (vtable[idx] != 0) {{");
 	EMIT(out.source, "\t\t// field is present");
+	EMIT(out.source, "\t\tauto dataCopy = data;");
 	if (fieldType->second->typeType() == expression::TypeType::Union) {
 		emitDeserializeUnion(context, out, qualifiedName, fieldType->first, *fieldType->second);
 	} else if (field.isArrayType) {
-		EMIT(out.source, "\t\tdata = data + tableOffset + vtable[idx];");
+		EMIT(out.source, "\t\tdata = data + vtable[idx];");
 		emitDeserializeArray(context, out, qualifiedName, fieldType->first, *fieldType->second);
 	} else {
-		EMIT(out.source, "\t\tdata = data + tableOffset + vtable[idx];");
+		EMIT(out.source, "\t\tdata = data + vtable[idx];");
 		emitDeserializeField(context, out, qualifiedName, fieldType->first, *fieldType->second);
 	}
+	EMIT(out.source, "\t\tdata = dataCopy;");
 	EMIT(out.source, "\t}}");
 }
 
@@ -310,14 +312,13 @@ void emitDeserialize(StaticContext* context, Streams& out, expression::Table con
 	EMIT(out.source, "namespace {{");
 
 	EMIT(out.source, "template <class Ar>");
-	EMIT(out.source, "inline void read{0}(Ar& reader, {0}& value, uoffset_t tableOffset) {{", table.name);
+	EMIT(out.source, "inline void read{0}(Ar& reader, {0}& value, uint32_t tableOffset) {{", table.name);
 	if (table.fields.size() > 0) {
-		EMIT(out.source, "\tconst uint8_t* data = reader.data();");
-		EMIT(out.source, "\tauto vtableOffset = *reinterpret_cast<const soffset_t*>(data + tableOffset);");
-		EMIT(out.source,
-		     "\tconst voffset_t* vtable = reinterpret_cast<const voffset_t*>(data + tableOffset - vtableOffset);");
+		EMIT(out.source, "\tconst uint8_t* data = reader.data() + tableOffset;");
+		EMIT(out.source, "\tauto vtableOffset = *reinterpret_cast<const int32_t*>(data);");
+		EMIT(out.source, "\tconst voffset_t* vtable = reinterpret_cast<const voffset_t*>(data - vtableOffset);");
 		EMIT(out.source, "\tvoffset_t vsize = vtable[0] / sizeof(voffset_t);");
-		EMIT(out.source, "\tunsigned idx = 1;");
+		EMIT(out.source, "\tunsigned idx = 2;");
 		EMIT(out.source, "do {{");
 		for (const auto& f : table.fields) {
 			emitDeserializeMember(context, out, fmt::format("value.{}", f.name), f);
@@ -333,7 +334,7 @@ void emitDeserialize(StaticContext* context, Streams& out, expression::Table con
 	EMIT(out.source, "template <class Ar>");
 	EMIT(out.source, "{0} read{0}(Ar& reader) {{", table.name);
 	EMIT(out.source, "\t{} res;", table.name);
-	EMIT(out.source, "\tuoffset_t tableOffset = *reinterpret_cast<const uoffset_t*>(reader.data());");
+	EMIT(out.source, "\tuint32_t tableOffset = *reinterpret_cast<const uint32_t*>(reader.data());");
 	EMIT(out.source, "\tread{}(reader, res, tableOffset);", table.name);
 	EMIT(out.source, "\treturn res;");
 	EMIT(out.source, "}}");
