@@ -1,7 +1,4 @@
-import json
-import math
 import random
-import struct
 from collections import OrderedDict
 from itertools import chain
 
@@ -17,7 +14,10 @@ Long = 9
 ULong = 10
 Double = 11
 
-# TODO(anoyes): This is becoming unwieldly.
+ENABLE_TABLES=True
+ENABLE_STRUCTS=False
+ENABLE_UNIONS=False
+ENABLE_VECTORS=False
 
 class Type:
     pass
@@ -26,10 +26,14 @@ class Type:
 def choose_type(depth, allow_vector=True):
     choices = [Primitive]
     if depth > 0:
-        #if allow_vector:
-        #    choices.append(Vector)
-        #choices.extend([Struct, Table, Union])
-        choices.extend([Table])
+        if allow_vector and ENABLE_VECTORS:
+            choices.append(Vector)
+        if ENABLE_STRUCTS:
+            choices.append(Struct)
+        if ENABLE_TABLES:
+            choices.append(Table)
+        if ENABLE_UNIONS:
+            choices.append(Union)
     return random.choice(choices).choose_type(depth)
 
 
@@ -309,13 +313,14 @@ class CollectCppTables:
             return result;
         return '    {1} {0}; Randomize(r, {0}, fbb);'.format(k, v.to_fb_cpp())
 
-    def verify_field(self, args):
+    def verify_field(self, new_type, args):
         (k, v) = args
         if isinstance(v, Union):
             verifier = '    Verify(lhs.{0}.index(), (size_t)(rhs->{0}_type() - 1), context + ".{0}_type");\n'.format(k)
             for i, (alternative_name, alternative_type) in enumerate(v.fields_and_types):
-                verifier += '    if (lhs.{0}.index() == {1} && rhs->{0}_type() - 1 == {1}) Verify(std::get<{3}>(lhs.{0}), rhs->{0}_as_{3}(), context + ".{0}.{2}");\n'.format(
-                        k, i, alternative_name, alternative_type.to_cpp(self))
+                qual_alt_type = "testfb::{}".format(alternative_type.to_cpp(self)) if new_type else alternative_type.to_cpp(self);
+                verifier += '    if (lhs.{0}.index() == {1} && rhs->{0}_type() - 1 == {1}) Verify(std::get<{4}>(lhs.{0}), rhs->{0}_as_{3}(), context + ".{0}.{2}");\n'.format(
+                        k, i, alternative_name, alternative_type.to_cpp(self), qual_alt_type)
             return verifier.rstrip();
         if isinstance(v, Vector) and isinstance(v.elem, Union):
             verifier = '    CHECK_MESSAGE(lhs.{0}.size() == rhs->{0}()->size(), context);\n'.format(k)
@@ -324,11 +329,18 @@ class CollectCppTables:
             verifier += '        Verify(lhs.{0}[i].index(), (size_t)(rhs->{0}_type()->Get(i) - 1), context + "[" + std::to_string(i) + "].{0}_type");\n'.format(k)
             verifier += '        Verify(lhs.{0}[i].index(), (size_t)(rhs->{0}_type()->Get(i) - 1), context + "[" + std::to_string(i) + "].{0}_type");\n'.format(k)
             for i, (alternative_name, alternative_type) in enumerate(v.elem.fields_and_types):
+                qual_alt_type = "testfb::{}".format(alternative_type.to_cpp(self)) if new_type else alternative_type.to_cpp(self);
                 verifier += '        if (lhs.{0}[i].index() == {1} && rhs->{0}_type()->Get(i) - 1 == {1})'.format(k, i, alternative_name, alternative_type.to_cpp(self))
-                verifier += '            Verify(std::get<{3}>(lhs.{0}[i]), rhs->{0}()->GetAs<theirs::testfb::{3}>(i), context + "[" + std::to_string(i) + "].{0}.{2}");\n'.format(k, i, alternative_name, alternative_type.to_cpp(self))
+                verifier += '            Verify(std::get<{4}>(lhs.{0}[i]), rhs->{0}()->GetAs<theirs::testfb::{3}>(i), context + "[" + std::to_string(i) + "].{0}.{2}");\n'.format(k, i, alternative_name, alternative_type.to_cpp(self), qual_alt_type)
             verifier += '    }\n'
             return verifier.rstrip();
         return '    Verify(lhs.{0}, rhs->{0}(), context + ".{0}");'.format(k)
+
+    def verify_field_old(self, args):
+        return self.verify_field(False, args)
+
+    def verify_field_new(self, args):
+        return self.verify_field(True, args)
 
     def new_table(self, name, fields):
         if name in self.names:
@@ -357,10 +369,10 @@ class CollectCppTables:
         table += '{0}\n'.format('\n'.join(('    Randomize(r, x.{0});'.format(k) for (k, _) in fields)))
         table += '}\n'
         table += 'void Verify(const ours::' + name + '& lhs, const theirs::testfb::' + name + '* rhs, std::string context) {\n'
-        table += '{0}\n'.format('\n'.join(map(self.verify_field, fields)))
+        table += '{0}\n'.format('\n'.join(map(self.verify_field_old, fields)))
         table += '}\n'
         table += 'void Verify(const testfb::' + name + '& lhs, const theirs::testfb::' + name + '* rhs, std::string context) {\n'
-        table += '{0}\n'.format('\n'.join(map(self.verify_field, fields)))
+        table += '{0}\n'.format('\n'.join(map(self.verify_field_new, fields)))
         table += '}\n'
         table += 'void Randomize(std::mt19937_64& r, flatbuffers::Offset<theirs::testfb::{0}>& result, flatbuffers::FlatBufferBuilder& fbb) {{\n'.format(name)
         table += '{0}\n'.format('\n'.join(map(self._get_random, fields)))
@@ -388,8 +400,8 @@ class CollectCppTables:
         table = 'void Verify(const {0}& lhs, const theirs::testfb::{1}* rhs, std::string context) {{\n'.format(t, name)
         table += '{0}\n'.format('\n'.join(('    Verify(std::get<{0}>(lhs), rhs->{1}(), context + ".{1}");'.format(i, k) for (i, (k, _)) in enumerate(fields))))
         table += '}\n'
-        table = 'void Verify(const testfb::{0}& lhs, const theirs::testfb::{0}* rhs, std::string context) {{\n'.format(name)
-        table += '{0}\n'.format('\n'.join(map(self.verify_field, fields)))
+        table += 'void Verify(const testfb::{0}& lhs, const theirs::testfb::{0}* rhs, std::string context) {{\n'.format(name)
+        table += '{0}\n'.format('\n'.join(map(self.verify_field_new, fields)))
         table += '}\n'
         table += 'void Randomize(std::mt19937_64& r, theirs::testfb::{0}& result, flatbuffers::FlatBufferBuilder& fbb) {{\n'.format(name)
         table += '{0}\n'.format('\n'.join(map(self._get_random, fields)))
