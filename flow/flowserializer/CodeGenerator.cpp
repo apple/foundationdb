@@ -562,6 +562,106 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 	out.source << fmt::format("\n");
 }
 
+void emitSerializeField(StaticContext* context,
+                        Streams& out,
+                        std::ostream& writer,
+                        size_t fieldIndex,
+                        expression::Field const& field,
+                        std::vector<voffset_t> vtable,
+                        voffset_t tableOffset,
+                        int& dataSize) {
+	if (vtable.empty()) {
+		return;
+	}
+	EMIT(writer, "\t// {} ({})", field.name, field.type);
+	auto type = assertTrue(context->resolve(field.type))->second;
+	switch (type->typeType()) {
+	case expression::TypeType::Primitive: {
+		auto it = std::find_if(field.metadata.begin(), field.metadata.end(), [](expression::MetadataEntry entry) {
+			return entry.type == expression::MetadataType::deprecated;
+		});
+		if (it != field.metadata.end()) {
+			EMIT(writer, "\t// deprecated");
+			return;
+		}
+
+		if (field.isArrayType) {
+			// TODO: Implement
+			EMIT(writer, "\t// array serialization not yet supported for field {}", field.name);
+			return;
+		}
+
+		auto t = dynamic_cast<expression::PrimitiveType const*>(type);
+		switch (t->typeClass) {
+		case expression::PrimitiveTypeClass::BoolType:
+		case expression::PrimitiveTypeClass::CharType:
+		case expression::PrimitiveTypeClass::IntType:
+		case expression::PrimitiveTypeClass::FloatType:
+			EMIT(writer,
+			     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
+			     tableOffset + vtable[fieldIndex + 2],
+			     field.name,
+			     field.type);
+			break;
+		case expression::PrimitiveTypeClass::StringType: {
+			voffset_t offset = dataSize;
+			// Offset to string is the offset from where the address the offset is written at!
+			EMIT(writer,
+			     "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {} + dynamicOffset;\n",
+			     tableOffset + vtable[fieldIndex + 2],
+			     offset - (tableOffset + vtable[fieldIndex + 2]));
+			EMIT(writer,
+			     "\t*reinterpret_cast<uoffset_t*>(buffer + {} + dynamicOffset) = {}.size();",
+			     dataSize,
+			     field.name);
+			EMIT(writer,
+			     "\tstd::memcpy(buffer + {0} + {1} + dynamicOffset, {2}.data(), {2}.size());",
+			     dataSize,
+			     sizeof(uoffset_t),
+			     field.name);
+			EMIT(writer,
+			     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1 + dynamicOffset) = 0;",
+			     offset,
+			     sizeof(uoffset_t),
+			     field.name);
+			dataSize += 4 + 1;
+			EMIT(writer, "\tdynamicOffset += {}.size();", field.name);
+			EMIT(out.source, "\tbufferSize += {}.size();", field.name);
+			break;
+		}
+		default:
+			throw Error("Type not supported");
+		}
+		break;
+	}
+	case expression::TypeType::Enum: {
+		EMIT(writer,
+		     "\t*reinterpret_cast<unsigned char*>(buffer + {}) = static_cast<unsigned char>({});",
+		     tableOffset + vtable[fieldIndex + 2],
+		     field.name);
+		break;
+	}
+	case expression::TypeType::Union: {
+		// throw Error("NOT IMPLEMENTED");
+		break;
+	}
+	default: {
+		// throw Error("NOT IMPLEMENTED");
+		break;
+	}
+	}
+}
+
+void emitSerializeHeader(Streams& out, int rootTableOffset, int staticDataSize) {
+	EMIT(out.source, "\n\t// header");
+	EMIT(out.source, "\t// offset to root table");
+	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer) = {};", rootTableOffset);
+	EMIT(out.source, "\t// file identifier");
+	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};", 0);
+
+	EMIT(out.source, "\treturn std::make_pair(buffer, {} + bufferSize);", staticDataSize);
+}
+
 void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	out.header << fmt::format("struct {} {{\n", table.name);
 	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
@@ -582,8 +682,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	// TODO: Only generate serialization for root_type
 	std::stringstream writer;
 	auto serMap = context->serializationInformation(table.name);
-	boost::unordered_map<TypeName, int> vtableOffsets;
-	int curr = 8;
+	int curr = 8; // first eight bytes used by header
 	// 0. write all vtables
 	for (auto const& [typeName, serInfo] : serMap) {
 		fmt::print("serMapPath: {}, serMapTypeName: {}, serMapSize: {}, vtable empty: {}\n",
@@ -602,7 +701,6 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 			writer << fmt::format("\t*reinterpret_cast<voffset_t*>(buffer + {}) = {};\n", curr, o);
 			curr += 2;
 		}
-		vtableOffsets[typeName] = curr;
 	}
 
 	// 1.0. Determine size of all tables
@@ -614,8 +712,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 
 	// 1.5. Iterate through all fields and generate all types simultaneously
 	EMIT(out.source, "\tint bufferSize = 0;");
-	EMIT(out.source, "\tvoffset_t dynamicOffset = 0;");
-	EMIT(out.source, "\tvoffset_t dynamicOffset2 = 0;");
+	EMIT(out.source, "\tint dynamicOffset = 0;");
 	std::stringstream appendData;
 	EMIT(writer, "\n\t// table (data or offsets to data)");
 	EMIT(writer,
@@ -624,74 +721,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	     curr,
 	     curr - 8);
 	for (int i = 0; i < table.fields.size(); ++i) {
-		const auto field = table.fields[i];
-		auto fieldType = assertTrue(context->resolve(field.type));
-		if (vtable->empty()) {
-			continue;
-		}
-		switch (fieldType->second->typeType()) {
-		case expression::TypeType::Primitive: {
-			auto it = std::find_if(field.metadata.begin(), field.metadata.end(), [](expression::MetadataEntry entry) {
-				return entry.type == expression::MetadataType::deprecated;
-			});
-			if (it != field.metadata.end()) {
-				// Deprecated
-				continue;
-			}
-
-			if (field.isArrayType) {
-				// TODO: Implement
-			} else if (field.type == "string") {
-				voffset_t offset = dataSize;
-				// Offset to string is the offset from where the address the offset is written at!
-				EMIT(writer,
-				     "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {} + dynamicOffset2;\n",
-				     curr + vtable.value()[i + 2],
-				     offset - (curr + vtable.value()[i + 2]));
-				EMIT(appendData,
-				     "\t*reinterpret_cast<uoffset_t*>(buffer + {} + dynamicOffset) = {}.size();",
-				     dataSize,
-				     field.name);
-				EMIT(appendData,
-				     "\tstd::memcpy(buffer + {0} + {1} + dynamicOffset, {2}.data(), {2}.size());",
-				     dataSize,
-				     sizeof(uoffset_t),
-				     field.name);
-				EMIT(appendData,
-				     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1 + dynamicOffset) = 0;",
-				     offset,
-				     sizeof(uoffset_t),
-				     field.name);
-				dataSize += 4 + 1;
-				EMIT(appendData, "\tdynamicOffset += {}.size();", field.name);
-				EMIT(writer, "\tdynamicOffset2 += {}.size();", field.name);
-				EMIT(out.source, "\tbufferSize += {}.size();", field.name);
-			} else {
-				// Binary-serialize all remaining primitive types
-				EMIT(writer,
-				     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
-				     curr + vtable.value()[i + 2],
-				     field.name,
-				     field.name);
-			}
-			break;
-		}
-		case expression::TypeType::Enum: {
-			EMIT(writer,
-			     "\t*reinterpret_cast<unsigned char*>(buffer + {}) = static_cast<unsigned char>({});",
-			     curr + vtable.value()[i + 2],
-			     field.name);
-			break;
-		}
-		case expression::TypeType::Union: {
-			// throw Error("NOT IMPLEMENTED");
-			break;
-		}
-		default: {
-			// throw Error("NOT IMPLEMENTED");
-			break;
-		}
-		}
+		emitSerializeField(context, out, writer, i, table.fields[i], vtable.value(), curr, dataSize);
 	}
 
 	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{} + bufferSize];\n", dataSize);
@@ -703,13 +733,9 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	}
 
 	// 2. Write header
-	EMIT(out.source, "\n\t// header");
-	EMIT(out.source, "\t// offset to root table");
-	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer) = {};", curr);
-	EMIT(out.source, "\t// file identifier");
-	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};", 0);
-
-	EMIT(out.source, "\treturn std::make_pair(buffer, {} + bufferSize);", dataSize);
+	// This needs to be called at the end, after `curr` and `dataSize` have
+	// been calculated correctly.
+	emitSerializeHeader(out, curr, dataSize);
 
 	EMIT(out.source, "}}");
 	EMIT(out.header, "}};");
@@ -766,6 +792,8 @@ void CodeGenerator::emit(std::string const& stem,
 	EMIT(sourceStream, "#include \"{}\"", header.filename().c_str());
 	EMIT(sourceStream, "#include <utility>");
 	EMIT(sourceStream, "using namespace flowserializer;");
+	EMIT(sourceStream, "using namespace std::literals::string_literals;");
+	EMIT(sourceStream, "using namespace std::literals::string_view_literals;");
 
 	emit(streams, *context->currentFile);
 }
