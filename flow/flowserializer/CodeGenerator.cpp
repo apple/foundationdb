@@ -553,13 +553,16 @@ void emitSerializeField(StaticContext* context,
                         std::ostream& writer,
                         size_t fieldIndex,
                         expression::Field const& field,
+                        unsigned alignment,
                         std::vector<voffset_t> vtable,
                         voffset_t tableOffset,
-                        int& dataSize) {
+                        int& dataSize,
+                        std::string fieldPrefix) {
 	if (vtable.empty()) {
 		return;
 	}
-	EMIT(writer, "\t// {} ({})", field.name, field.type);
+	std::string fieldName = fieldPrefix + field.name;
+	EMIT(writer, "\t// {} ({})", fieldName, field.type);
 	auto type = assertTrue(context->resolve(field.type))->second;
 	switch (type->typeType()) {
 	case expression::TypeType::Primitive: {
@@ -586,10 +589,11 @@ void emitSerializeField(StaticContext* context,
 			EMIT(writer,
 			     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
 			     tableOffset + vtable[fieldIndex + 2],
-			     field.name,
+			     fieldName,
 			     convertType(field.type));
 			break;
 		case expression::PrimitiveTypeClass::StringType: {
+			// TODO: Make sure values are aligned
 			voffset_t offset = dataSize;
 			// Offset to string is the offset from where the address the offset is written at!
 			EMIT(writer,
@@ -599,20 +603,20 @@ void emitSerializeField(StaticContext* context,
 			EMIT(writer,
 			     "\t*reinterpret_cast<uoffset_t*>(buffer + {} + dynamicOffset) = {}.size();",
 			     dataSize,
-			     field.name);
+			     fieldName);
 			EMIT(writer,
 			     "\tstd::memcpy(buffer + {0} + {1} + dynamicOffset, {2}.data(), {2}.size());",
 			     dataSize,
 			     sizeof(uoffset_t),
-			     field.name);
+			     fieldName);
 			EMIT(writer,
 			     "\t*reinterpret_cast<unsigned char*>(buffer + {} + {} + {}.size() + 1 + dynamicOffset) = 0;",
 			     offset,
 			     sizeof(uoffset_t),
-			     field.name);
+			     fieldName);
 			dataSize += 4 + 1;
-			EMIT(writer, "\tdynamicOffset += {}.size();", field.name);
-			EMIT(out.source, "\tbufferSize += {}.size();", field.name);
+			EMIT(writer, "\tdynamicOffset += {}.size();", fieldName);
+			EMIT(out.source, "\tbufferSize += {}.size();", fieldName);
 			break;
 		}
 		default:
@@ -624,11 +628,22 @@ void emitSerializeField(StaticContext* context,
 		EMIT(writer,
 		     "\t*reinterpret_cast<unsigned char*>(buffer + {}) = static_cast<unsigned char>({});",
 		     tableOffset + vtable[fieldIndex + 2],
-		     field.name);
+		     fieldName);
 		break;
 	}
 	case expression::TypeType::Union: {
 		// throw Error("NOT IMPLEMENTED");
+		break;
+	}
+	case expression::TypeType::Struct: {
+		// throw Error("NOT IMPLEMENTED");
+		auto const s = dynamic_cast<expression::Struct const*>(type);
+		// TODO: Support nested structs, arrays, etc...
+		for (int i = 0; i < s->fields.size(); ++i) {
+			fmt::print("struct field: {}\n", s->fields[i].name);
+			emitSerializeField(
+			    context, out, writer, fieldIndex + i, s->fields[i], alignment, vtable, tableOffset, dataSize, fieldName + ".");
+		}
 		break;
 	}
 	default: {
@@ -690,7 +705,14 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	}
 
 	// 1.0. Determine size of all tables
-	auto vtable = serMap.at(tableTypeName).vtable;
+	auto serInfo = serMap.at(tableTypeName);
+
+	unsigned alignment = serInfo.alignment;
+	if (curr % alignment != 0) {
+		curr += (curr - alignment);
+	}
+
+	auto vtable = serInfo.vtable;
 	int dataSize = curr;
 	if (!vtable->empty()) {
 		dataSize += vtable.value()[1];
@@ -707,7 +729,7 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	     curr,
 	     curr - 8);
 	for (int i = 0; i < table.fields.size(); ++i) {
-		emitSerializeField(context, out, writer, i, table.fields[i], vtable.value(), curr, dataSize);
+		emitSerializeField(context, out, writer, i, table.fields[i], alignment, vtable.value(), curr, dataSize, "");
 	}
 
 	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{} + bufferSize];\n", dataSize);
