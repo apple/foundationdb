@@ -234,7 +234,7 @@ class Config(object):
             self.substitutions["FDB_MACHINE_ID"] = os.getenv("HOSTNAME", "")
 
         if self.substitutions["FDB_ZONE_ID"] == "":
-            self.substitutions["FDB_ZONE_ID"] = self.read_node_zone_topology_label(self.substitutions["FDB_MACHINE_ID"]) if self.read_zone_topology_labels else self.substitutions["FDB_MACHINE_ID"]
+            self.substitutions["FDB_ZONE_ID"] = self.read_node_zone_topology_label(self,self.substitutions["FDB_MACHINE_ID"])
         if self.substitutions["FDB_PUBLIC_IP"] == "":
             # As long as the public IP is not set fallback to the
             # Pod IP address.
@@ -380,7 +380,7 @@ class Config(object):
 
         labels = api_response.metadata.labels
 
-        return self.get_topology_label(labels,hostname)
+        return self.get_topology_label(labels,hostname) if self.read_zone_topology_labels else self.substitutions["FDB_MACHINE_ID"]
 
 class ThreadingHTTPServerV6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
