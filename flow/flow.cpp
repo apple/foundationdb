@@ -543,80 +543,176 @@ TEST_CASE("noSim/noopTest") {
 	return Void();
 }
 
-struct TestErrorOrMapClass : ReferenceCounted<TestErrorOrMapClass> {
+struct TestErrorOrMapClass {
 	StringRef value;
-	const StringRef constValue;
-	StringRef getValue() const { return value; }
-	StringRef const& getValueRef() const { return value; }
-	StringRef sub(int x) const { return value.substr(x); }
+	ErrorOr<StringRef> errorOrValue;
 
-	TestErrorOrMapClass(StringRef value) : value(value), constValue(value) {}
+	const StringRef constValue;
+	const ErrorOr<StringRef> constErrorOrValue;
+
+	StringRef getValue() const { return value; }
+	ErrorOr<StringRef> getErrorOrValue() const { return errorOrValue; }
+
+	StringRef const& getValueRef() const { return value; }
+	ErrorOr<StringRef> const& getErrorOrValueRef() const { return errorOrValue; }
+
+	StringRef sub(int x) const { return value.substr(x); }
+	ErrorOr<StringRef> errorOrSub(int x) const { return errorOrValue.map<StringRef>(&StringRef::substr, (int)x); }
+
+	TestErrorOrMapClass(StringRef value, Optional<Error> optionalValueError)
+	  : value(value), constValue(value),
+	    errorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
+	                                               : ErrorOr<StringRef>(optionalValueError.get())),
+	    constErrorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
+	                                                    : ErrorOr<StringRef>(optionalValueError.get())) {}
 };
+
+struct TestErrorOrMapClassRef : public TestErrorOrMapClass, public ReferenceCounted<TestErrorOrMapClassRef> {
+	TestErrorOrMapClassRef(StringRef value, Optional<Error> optionalValueError)
+	  : TestErrorOrMapClass(value, optionalValueError) {}
+};
+
+void checkResults(std::vector<ErrorOr<StringRef>> const& results,
+                  StringRef value,
+                  Optional<Error> expectedError,
+                  std::string context) {
+	if (expectedError.present()) {
+		for (int i = 0; i < results.size(); ++i) {
+			if (results[i].present() || results[i].getError().code() != expectedError.get().code()) {
+				fmt::print("Unexpected result at index {} in {}\n", i, context);
+				ASSERT(false);
+			}
+		}
+	} else {
+		for (int i = 0; i < results.size(); ++i) {
+			if (!results[i].present()) {
+				fmt::print("Missing result {} at index {} in {}\n", value.printable(), i, context);
+				ASSERT(false);
+			}
+
+			if (i < results.size() - 1) {
+				if (results[i].get() != value) {
+					fmt::print("Incorrect result {} at index {} in {}: expected {}\n",
+					           results[i].get().printable(),
+					           i,
+					           context,
+					           value.printable());
+					ASSERT(false);
+				}
+			} else {
+				if (results[i].get() != value.substr(5)) {
+					fmt::print("Incorrect result {} at index {} in {}: expected {}\n",
+					           results[i].get().printable(),
+					           i,
+					           context,
+					           value.substr(5).printable());
+					ASSERT(false);
+				}
+			}
+		}
+	}
+}
 
 template <bool IsRef, class T>
 void checkErrorOr(ErrorOr<T> val) {
 	StringRef value;
 	bool isError = !val.present();
-	Error expectedError = isError ? val.getError() : success();
-	ErrorOr<StringRef> v1, v2, v3, v4, v5;
+	bool isFlatMapError = isError;
+	Optional<Error> expectedError;
+	std::vector<ErrorOr<StringRef>> mapResults;
+	std::vector<ErrorOr<StringRef>> flatMapResults;
+
+	if (isError) {
+		expectedError = val.getError();
+	}
 
 	if constexpr (IsRef) {
 		if (!isError && !val.get()) {
-			isError = true;
+			isError = isFlatMapError = true;
 			expectedError = default_error_or();
 		}
 		if (!isError) {
 			value = val.get()->value;
+			isFlatMapError = !val.get()->errorOrValue.present();
+			if (isFlatMapError) {
+				expectedError = val.get()->errorOrValue.getError();
+			}
 		}
-		v1 = val.mapRef(&TestErrorOrMapClass::value);
-		v2 = val.mapRef(&TestErrorOrMapClass::constValue);
-		v3 = val.mapRef(&TestErrorOrMapClass::getValue);
-		v4 = val.mapRef(&TestErrorOrMapClass::getValueRef);
-		v5 = val.mapRef(&TestErrorOrMapClass::sub, 5);
+		mapResults.push_back(val.mapRef(&TestErrorOrMapClass::value));
+		mapResults.push_back(val.mapRef(&TestErrorOrMapClass::constValue));
+		mapResults.push_back(val.mapRef(&TestErrorOrMapClass::getValue));
+		mapResults.push_back(val.mapRef(&TestErrorOrMapClass::getValueRef));
+		mapResults.push_back(val.mapRef(&TestErrorOrMapClass::sub, 5));
+
+		flatMapResults.push_back(val.flatMap([](auto t) { return t ? t->errorOrValue : ErrorOr<StringRef>(); }));
+		flatMapResults.push_back(val.flatMapRef(&TestErrorOrMapClass::errorOrValue));
+		flatMapResults.push_back(val.flatMapRef(&TestErrorOrMapClass::constErrorOrValue));
+		flatMapResults.push_back(val.flatMapRef(&TestErrorOrMapClass::getErrorOrValue));
+		flatMapResults.push_back(val.flatMapRef(&TestErrorOrMapClass::getErrorOrValueRef));
+		flatMapResults.push_back(val.flatMapRef(&TestErrorOrMapClass::errorOrSub, 5));
 	} else {
 		if (!isError) {
 			value = val.get().value;
+			isFlatMapError = !val.get().errorOrValue.present();
+			if (isFlatMapError) {
+				expectedError = val.get().errorOrValue.getError();
+			}
 		}
-		v1 = val.map(&TestErrorOrMapClass::value);
-		v2 = val.map(&TestErrorOrMapClass::constValue);
-		v3 = val.map(&TestErrorOrMapClass::getValue);
-		v4 = val.map(&TestErrorOrMapClass::getValueRef);
-		v5 = val.map(&TestErrorOrMapClass::sub, 5);
+		mapResults.push_back(val.map([](auto t) { return t.value; }));
+		mapResults.push_back(val.map(&TestErrorOrMapClass::value));
+		mapResults.push_back(val.map(&TestErrorOrMapClass::constValue));
+		mapResults.push_back(val.map(&TestErrorOrMapClass::getValue));
+		mapResults.push_back(val.map(&TestErrorOrMapClass::getValueRef));
+		mapResults.push_back(val.map(&TestErrorOrMapClass::sub, 5));
+
+		flatMapResults.push_back(val.flatMap([](auto t) { return t.errorOrValue; }));
+		flatMapResults.push_back(val.flatMap(&TestErrorOrMapClass::errorOrValue));
+		flatMapResults.push_back(val.flatMap(&TestErrorOrMapClass::constErrorOrValue));
+		flatMapResults.push_back(val.flatMap(&TestErrorOrMapClass::getErrorOrValue));
+		flatMapResults.push_back(val.flatMap(&TestErrorOrMapClass::getErrorOrValueRef));
+		flatMapResults.push_back(val.flatMap(&TestErrorOrMapClass::errorOrSub, 5));
 	}
 
-	if (isError) {
-		ASSERT(!v1.present() && v1.getError().code() == expectedError.code());
-		ASSERT(!v2.present() && v2.getError().code() == expectedError.code());
-		ASSERT(!v3.present() && v3.getError().code() == expectedError.code());
-		ASSERT(!v4.present() && v4.getError().code() == expectedError.code());
-		ASSERT(!v5.present() && v5.getError().code() == expectedError.code());
-	} else {
-		ASSERT(v1.present() && v1.get() == value);
-		ASSERT(v2.present() && v2.get() == value);
-		ASSERT(v3.present() && v3.get() == value);
-		ASSERT(v4.present() && v4.get() == value);
-		ASSERT(v5.present() && v5.get() == value.substr(5));
-	}
+	checkResults(mapResults, value, isError ? expectedError : Optional<Error>(), IsRef ? "ref map" : "non-ref map");
+	checkResults(flatMapResults,
+	             value,
+	             isFlatMapError ? expectedError : Optional<Error>(),
+	             IsRef ? "ref flat map" : "non-ref flat map");
 }
 
 TEST_CASE("/flow/ErrorOr/Map") {
 	// ErrorOr<T>
 	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>());
 	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>(transaction_too_old()));
-	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>("test_string"_sr));
+	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>(TestErrorOrMapClass("test_string"_sr, {})));
+	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>(TestErrorOrMapClass("test_string"_sr, default_error_or())));
+	checkErrorOr<false>(ErrorOr<TestErrorOrMapClass>(TestErrorOrMapClass("test_string"_sr, transaction_too_old())));
 
 	// ErrorOr<Reference<T>>
-	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>());
-	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(Reference<TestErrorOrMapClass>()));
-	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(transaction_too_old()));
-	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(makeReference<TestErrorOrMapClass>("test_string"_sr)));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClassRef>>());
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClassRef>>(Reference<TestErrorOrMapClassRef>()));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClassRef>>(transaction_too_old()));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClassRef>>(
+	    makeReference<TestErrorOrMapClassRef>("test_string"_sr, Optional<Error>())));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClassRef>>(
+	    makeReference<TestErrorOrMapClassRef>("test_string"_sr, Optional<Error>(default_error_or()))));
+	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClassRef>>(
+	    makeReference<TestErrorOrMapClassRef>("test_string"_sr, Optional<Error>(transaction_too_old()))));
 
 	// ErrorOr<T*>
 	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>());
 	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>(nullptr));
-	checkErrorOr<true>(ErrorOr<Reference<TestErrorOrMapClass>>(transaction_too_old()));
+	checkErrorOr<true>(ErrorOr<TestErrorOrMapClassRef*>(transaction_too_old()));
 
-	auto ptr = new TestErrorOrMapClass("test_string"_sr);
+	auto ptr = new TestErrorOrMapClass("test_string"_sr, Optional<Error>());
+	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>(ptr));
+	delete ptr;
+
+	ptr = new TestErrorOrMapClass("test_string"_sr, default_error_or());
+	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>(ptr));
+	delete ptr;
+
+	ptr = new TestErrorOrMapClass("test_string"_sr, transaction_too_old());
 	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>(ptr));
 	delete ptr;
 

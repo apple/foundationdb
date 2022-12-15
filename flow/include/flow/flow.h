@@ -141,6 +141,8 @@ class ErrorOr : public ComposedIdentifier<T, 2> {
 	std::variant<Error, T> value;
 
 public:
+	using ValueType = T;
+
 	ErrorOr() : ErrorOr(default_error_or()) {}
 	ErrorOr(Error const& error) : value(std::in_place_type<Error>, error) {}
 
@@ -161,13 +163,24 @@ public:
 		return map<R>([](const T& v) { return (R)v; });
 	}
 
-	template <class R>
-	ErrorOr<R> map(std::function<R(T)> f) const& {
-		return present() ? ErrorOr<R>(f(get())) : ErrorOr<R>(getError());
+private:
+	template <class F>
+	using MapRet = std::remove_reference_t<std::remove_const_t<std::invoke_result_t<F, T>>>;
+
+	template <class F>
+	using EnableIfNotMemberPointer =
+	    std::enable_if_t<!std::is_member_object_pointer_v<F> && !std::is_member_function_pointer_v<F>>;
+
+public:
+	// If the ErrorOr is set, calls the function f on the value and returns the value. Otherwise, returns an ErrorOr
+	// with the same error value as this ErrorOr.
+	template <class F, typename = EnableIfNotMemberPointer<F>>
+	ErrorOr<MapRet<F>> map(F f) const& {
+		return present() ? ErrorOr<MapRet<F>>(f(get())) : ErrorOr<MapRet<F>>(getError());
 	}
-	template <class R>
-	ErrorOr<R> map(std::function<R(T)> f) && {
-		return present() ? ErrorOr<R>(f(std::move(*this).get())) : ErrorOr<R>(getError());
+	template <class F, typename = EnableIfNotMemberPointer<F>>
+	ErrorOr<MapRet<F>> map(F f) && {
+		return present() ? ErrorOr<MapRet<F>>(f(std::move(*this).get())) : ErrorOr<MapRet<F>>(getError());
 	}
 
 	// Converts an ErrorOr<T> to an ErrorOr<R> of one of its value's members
@@ -177,6 +190,11 @@ public:
 	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
 	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
 		return present() ? ErrorOr<Rp>(get().*member) : ErrorOr<Rp>(getError());
+	}
+	template <class R, class Rp = std::remove_const_t<R>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
+		return present() ? ErrorOr<Rp>(std::move(*this).get().*member) : ErrorOr<Rp>(getError());
 	}
 
 	// Converts an ErrorOr<T> to an ErrorOr<R> of a value returned by a member function of T
@@ -188,6 +206,13 @@ public:
 	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
 	    Args&&... args) const& {
 		return present() ? ErrorOr<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : ErrorOr<Rp>(getError());
+	}
+	template <class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
+	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	    Args&&... args) && {
+		return present() ? ErrorOr<Rp>((std::move(*this).get().*memberFunc)(std::forward<Args>(args)...))
+		                 : ErrorOr<Rp>(getError());
 	}
 
 	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an ErrorOr<T>
@@ -225,6 +250,56 @@ public:
 
 		P& p = *get();
 		return (p.*memberFunc)(std::forward<Args>(args)...);
+	}
+
+	// Similar to map with a mapped type of ErrorOr<R>, but flattens the result. For example, if the mapped result is of
+	// type ErrorOr<R>, map will return ErrorOr<ErrorOr<R>> while flatMap will return ErrorOr<R>
+	template <class... Args>
+	auto flatMap(Args&&... args) const& {
+		auto val = map(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
+	}
+	template <class... Args>
+	auto flatMap(Args&&... args) && {
+		auto val = std::move(*this).map(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
+	}
+
+	// Similar to mapRef with a mapped type of ErrorOr<R>, but flattens the result. For example, if the mapped result is
+	// of type ErrorOr<R>, mapRef will return ErrorOr<ErrorOr<R>> while flatMapRef will return ErrorOr<R>
+	template <class... Args>
+	auto flatMapRef(Args&&... args) const& {
+		auto val = mapRef(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
+	}
+	template <class... Args>
+	auto flatMapRef(Args&&... args) && {
+		auto val = std::move(*this).mapRef(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return ErrorOr<R>(val.getError());
+		}
 	}
 
 	bool present() const { return std::holds_alternative<T>(value); }

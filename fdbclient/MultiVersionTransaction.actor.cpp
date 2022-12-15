@@ -683,8 +683,7 @@ double DLDatabase::getMainThreadBusyness() {
 ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	ASSERT(api->databaseGetServerProtocol != nullptr);
 
-	uint64_t expected =
-	    expectedVersion.map<uint64_t>([](const ProtocolVersion& v) { return v.version(); }).orDefault(0);
+	uint64_t expected = expectedVersion.map(&ProtocolVersion::version).orDefault(0);
 	FdbCApi::FDBFuture* f = api->databaseGetServerProtocol(db, expected);
 	return toThreadFuture<ProtocolVersion>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		uint64_t pv;
@@ -2363,7 +2362,7 @@ void MultiVersionDatabase::LegacyVersionMonitor::runGrvProbe(Reference<MultiVers
 			});
 		}
 
-		return v.map<Void>([](Version v) { return Void(); });
+		return v.map([](Version v) { return Void(); });
 	});
 }
 
