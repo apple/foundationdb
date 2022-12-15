@@ -109,7 +109,6 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 		unsigned alignment = 4;
 		// for tables, we need to store the alignment and the size of each object
 		std::vector<std::pair<unsigned, unsigned>> alignmentAndSize;
-		bool hasDynamicSize = false;
 		std::vector<StaticContext::TypeDescr> fieldTypes;
 		fieldTypes.reserve(type->fields.size());
 		for (auto const& field : type->fields) {
@@ -120,7 +119,6 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 			}
 			if (field.isArrayType) {
 				alignmentAndSize.emplace_back(4u, 4u);
-				hasDynamicSize = true;
 			} else {
 				auto serInfo = state[fieldType.first];
 				auto sz = serInfo.staticSize;
@@ -255,6 +253,39 @@ unsigned StaticContext::inlinedSizeOf(const expression::Type& type) {
 		unsigned res = 0u;
 		for (auto const& f : s.fields) {
 			res += inlinedSizeOf(*assertTrue(resolve(f.type))->second);
+		}
+		return res;
+	}
+	case expression::TypeType::Table:
+		return 4u;
+	}
+}
+
+unsigned StaticContext::alignmentOf(const expression::Type& type) {
+	switch (type.typeType()) {
+	case expression::TypeType::Primitive: {
+		auto p = dynamic_cast<const expression::PrimitiveType&>(type);
+
+		if (p.typeClass == expression::PrimitiveTypeClass::StringType) {
+			return 4u;
+		} else {
+			return p.size();
+		}
+	}
+	case expression::TypeType::Enum: {
+		auto const& e = dynamic_cast<expression::Enum const&>(type);
+		return alignmentOf(*assertTrue(resolve(e.type))->second);
+	}
+	case expression::TypeType::Union: {
+		// A union value is always an offset to an independent memory block
+		return 4u;
+	}
+	case expression::TypeType::Struct: {
+		auto const& s = dynamic_cast<expression::Struct const&>(type);
+		// the size of a struct is the sum of the size of all its members
+		unsigned res = 1u;
+		for (auto const& f : s.fields) {
+			res = std::max(res, alignmentOf(*assertTrue(resolve(f.type))->second));
 		}
 		return res;
 	}

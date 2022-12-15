@@ -187,14 +187,23 @@ void emitDeserializeStruct(StaticContext* context,
                            std::string qualifiedName,
                            expression::Struct const& s) {
 	// we need to back up the current data pointer since the caller won't expect it to change
+	EMIT(out.source, "\t\t// Deserialize inline struct {}", s.name);
 	EMIT(out.source, "\t\tauto oldData = data;");
 	for (auto const& f : s.fields) {
 		if (f.isArrayType) {
 			throw Error("Arrays in structs not supported");
 		}
 		auto fType = assertTrue(context->resolve(f.type));
+		auto alignment = context->alignmentOf(*fType->second);
+		auto dataInt = "reinterpret_cast<const uintptr_t>(data)";
+		if (alignment > 1) {
+			EMIT(out.source, "\t\t// align to {} bytes", alignment);
+			EMIT(out.source, "\t\tif ({0} % {1} != 0) {{", dataInt, alignment);
+			EMIT(out.source, "\t\t\tdata += {0} - ({1} % {0});", alignment, dataInt);
+			EMIT(out.source, "\t\t}}");
+		}
 		emitDeserializeField(context, out, fmt::format("{}.{}", qualifiedName, f.name), fType->first, *fType->second);
-		EMIT(out.source, "data += {};", context->inlinedSizeOf(*fType->second));
+		EMIT(out.source, "\t\tdata += {};", context->inlinedSizeOf(*fType->second));
 	}
 	EMIT(out.source, "\t\tdata = oldData;");
 }
