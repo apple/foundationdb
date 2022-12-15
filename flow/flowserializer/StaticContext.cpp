@@ -29,7 +29,7 @@ std::vector<flowserializer::voffset_t> generateVTable(
 	for (auto p : alignmentAndSize) {
 		map[p.first].emplace(p.second, ++idx);
 	}
-	std::vector<flowserializer::voffset_t> result(alignmentAndSize.size() + 2, flowserializer::voffset_t(0));
+	std::vector<voffset_t> result(alignmentAndSize.size() + 2, voffset_t(0));
 	result[0] = 2 * (result.size());
 	// order the elements by size
 	flowserializer::voffset_t curr = 4;
@@ -38,6 +38,9 @@ std::vector<flowserializer::voffset_t> generateVTable(
 			auto padding = (a - (curr % a)) % a;
 			curr += padding;
 			result[i] = curr;
+			if (s == 0) {
+				result[i] = 0;
+			}
 			curr += s;
 		}
 	}
@@ -121,6 +124,14 @@ void StaticContext::serializationInformation(boost::unordered_map<TypeName, Seri
 			} else {
 				auto serInfo = state[fieldType.first];
 				auto sz = serInfo.staticSize;
+				auto it =
+				    std::find_if(field.metadata.begin(), field.metadata.end(), [](expression::MetadataEntry entry) {
+					    return entry.type == expression::MetadataType::deprecated;
+				    });
+				if (it != field.metadata.end()) {
+					// Deprecated
+					sz = 0;
+				}
 				alignmentAndSize.emplace_back(serInfo.alignment, sz);
 				alignment = std::max(alignment, serInfo.alignment);
 			}
