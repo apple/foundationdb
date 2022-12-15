@@ -237,7 +237,7 @@ void emitDeserializeField(StaticContext* context,
 	case expression::TypeType::Table: {
 		auto qualifiedTypeName = typeName.fullyQualifiedCppName(type);
 		EMIT(out.source, "\t\t// table {} of field {}", qualifiedTypeName, qualifiedName);
-		EMIT(out.source, "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data));", qualifiedName);
+		EMIT(out.source, "\t\t{}._load(data + *reinterpret_cast<const int32_t*>(data));", qualifiedName);
 		break;
 	}
 	}
@@ -265,7 +265,7 @@ void emitDeserializeUnion(StaticContext* context,
 		EMIT(out.source, "\t\t\t{} varValue;", variantType->first.fullyQualifiedCppName(*variantType->second));
 		EMIT(out.source, "\t\t\tuint32_t varTableOffset;");
 		EMIT(out.source, "\t\t\tmemcpy(&varTableOffset, data + vtable[idx], sizeof(uint32_t));");
-		EMIT(out.source, "\t\t\tvarValue._loadFromOffset(reader, varTableOffset);");
+		EMIT(out.source, "\t\t\tvarValue._load(reader + varTableOffset);");
 		EMIT(out.source, "\t\t\t{} = varValue;", qualifiedName);
 		EMIT(out.source, "\t\t\tbreak;");
 		EMIT(out.source, "\t\t}}");
@@ -305,53 +305,38 @@ void emitDeserialize(StaticContext* context, Streams& out, expression::Table con
 	EMIT(out.header, "\t[[nodiscard]] static {} read(ObjectReader& reader);", table.name);
 	EMIT(out.header, "\t[[nodiscard]] static {} read(ArenaObjectReader& reader);", table.name);
 	EMIT(out.header, "\t// These two methods are intended to be used by flowserializer exclusively");
-	EMIT(out.header, "\tvoid _loadFromOffset(ObjectReader& reader, uint32_t tableOffset);");
-	EMIT(out.header, "\tvoid _loadFromOffset(ArenaObjectReader& reader, uint32_t tableOffset);");
+	EMIT(out.header, "\tvoid _load(const uint8_t* reader);");
 	EMIT(out.header, "");
 
-	EMIT(out.source, "namespace {{");
+	auto emitReadBody = [&]() {
+		EMIT(out.source, "\tconst uint8_t* data = reader.data();");
+		EMIT(out.source, "\tauto tableOffset = *reinterpret_cast<const uint32_t*>(data);");
+		EMIT(out.source, "\t{} res;", table.name);
+		EMIT(out.source, "\tres._load(data + tableOffset);");
+		EMIT(out.source, "\treturn res;");
+	};
 
-	EMIT(out.source, "template <class Ar>");
-	EMIT(out.source, "inline void read{0}(Ar& reader, {0}& value, uint32_t tableOffset) {{", table.name);
+	EMIT(out.source, "{0} {0}::read(ObjectReader& reader) {{", table.name);
+	emitReadBody();
+	EMIT(out.source, "}}");
+	EMIT(out.source, "{0} {0}::read(ArenaObjectReader& reader) {{", table.name);
+	emitReadBody();
+	EMIT(out.source, "}}");
+	EMIT(out.source, "void {}::_load(const uint8_t* data) {{", table.name);
 	if (table.fields.size() > 0) {
-		EMIT(out.source, "\tconst uint8_t* data = reader.data() + tableOffset;");
 		EMIT(out.source, "\tauto vtableOffset = *reinterpret_cast<const int32_t*>(data);");
 		EMIT(out.source, "\tconst voffset_t* vtable = reinterpret_cast<const voffset_t*>(data - vtableOffset);");
 		EMIT(out.source, "\tvoffset_t vsize = vtable[0] / sizeof(voffset_t);");
 		EMIT(out.source, "\tunsigned idx = 2;");
 		EMIT(out.source, "do {{");
 		for (const auto& f : table.fields) {
-			emitDeserializeMember(context, out, fmt::format("value.{}", f.name), f);
+			emitDeserializeMember(context, out, fmt::format("this->{}", f.name), f);
 			EMIT(out.source, "\t++idx;");
 		}
 		// we use a goto to make sure we have the option to add post-deserialization functionality. But we still need
 		// the option to abort early. A do-while loop would be the alternative to a goto.
 		EMIT(out.source, "}} while (false);");
 	}
-	EMIT(out.source, "}}");
-	EMIT(out.source, "");
-
-	EMIT(out.source, "template <class Ar>");
-	EMIT(out.source, "{0} read{0}(Ar& reader) {{", table.name);
-	EMIT(out.source, "\t{} res;", table.name);
-	EMIT(out.source, "\tuint32_t tableOffset = *reinterpret_cast<const uint32_t*>(reader.data());");
-	EMIT(out.source, "\tread{}(reader, res, tableOffset);", table.name);
-	EMIT(out.source, "\treturn res;");
-	EMIT(out.source, "}}");
-	EMIT(out.source, "}} // namespace");
-	EMIT(out.source, "");
-
-	EMIT(out.source, "{0} {0}::read(ObjectReader& reader) {{", table.name);
-	EMIT(out.source, "\treturn read{}(reader);", table.name);
-	EMIT(out.source, "}}");
-	EMIT(out.source, "{0} {0}::read(ArenaObjectReader& reader) {{", table.name);
-	EMIT(out.source, "\treturn read{}(reader);", table.name);
-	EMIT(out.source, "}}");
-	EMIT(out.source, "void {}::_loadFromOffset(ObjectReader& reader, uint32_t tableOffset) {{", table.name);
-	EMIT(out.source, "\tread{}(reader, *this, tableOffset);", table.name);
-	EMIT(out.source, "}}");
-	EMIT(out.source, "void {}::_loadFromOffset(ArenaObjectReader& reader, uint32_t tableOffset) {{", table.name);
-	EMIT(out.source, "\tread{}(reader, *this, tableOffset);", table.name);
 	EMIT(out.source, "}}");
 	EMIT(out.source, "");
 }
