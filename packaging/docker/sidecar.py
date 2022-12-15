@@ -343,8 +343,30 @@ class Config(object):
         if version == 6:
             ip = f"[{ip}]"
         return ip
+ 
+    def get_topology_label(labels, hostname):
+        # failure-domain.beta is deprecated, with topology being the new value. This can vary between clusters/versions.
+        # https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints
+        FAILURE_DOMAIN_LABEL = 'failure-domain.beta.kubernetes.io/zone'
+        TOPOLOGY_LABEL = 'topology.kubernetes.io/zone'
 
-    def read_node_zone_topology_label(hostname):
+        tl = None
+
+        if not labels:
+            tl = hostname
+            log.error("The node does not have any labels")
+            return tl
+        if FAILURE_DOMAIN_LABEL in labels:
+            tl = labels[FAILURE_DOMAIN_LABEL]
+        if TOPOLOGY_LABEL in labels:
+            tl = labels[TOPOLOGY_LABEL]
+        if not tl:
+            tl = hostname
+            log.error("The node does not have zone topology labels")
+        
+        return tl
+
+    def read_node_zone_topology_label(self,hostname):
         try:
             k8s_config.load_incluster_config()
         except k8s_config.ConfigException:
@@ -358,21 +380,7 @@ class Config(object):
 
         labels = api_response.metadata.labels
 
-        if not labels:
-            log.error("The node does not have any labels")
-
-        # failure-domain.beta is deprecated, with topology being the new value. This can vary between clusters/versions.
-        # https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints
-        if 'failure-domain.beta.kubernetes.io/zone' in labels:
-            topology_label = labels['failure-domain.beta.kubernetes.io/zone']
-        if 'topology.kubernetes.io/zone' in labels:
-            topology_label = labels['topology.kubernetes.io/zone']
-        if not topology_label:
-            topology_label = hostname
-            log.error("The node does not have zone topology labels")
-
-        return topology_label
-
+        return self.get_topology_label(labels,hostname)
 
 class ThreadingHTTPServerV6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
