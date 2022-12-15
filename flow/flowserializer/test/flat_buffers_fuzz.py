@@ -14,7 +14,10 @@ Long = 9
 ULong = 10
 Double = 11
 
-# TODO(anoyes): This is becoming unwieldly.
+ENABLE_TABLES=True
+ENABLE_STRUCTS=False
+ENABLE_UNIONS=False
+ENABLE_VECTORS=False
 
 class Type:
     pass
@@ -23,10 +26,14 @@ class Type:
 def choose_type(depth, allow_vector=True):
     choices = [Primitive]
     if depth > 0:
-        #if allow_vector:
-        #    choices.append(Vector)
-        #choices.extend([Struct, Table, Union])
-        choices.extend([Table, Union])
+        if allow_vector and ENABLE_VECTORS:
+            choices.append(Vector)
+        if ENABLE_STRUCTS:
+            choices.append(Struct)
+        if ENABLE_TABLES:
+            choices.append(Table)
+        if ENABLE_UNIONS:
+            choices.append(Union)
     return random.choice(choices).choose_type(depth)
 
 
@@ -393,7 +400,7 @@ class CollectCppTables:
         table = 'void Verify(const {0}& lhs, const theirs::testfb::{1}* rhs, std::string context) {{\n'.format(t, name)
         table += '{0}\n'.format('\n'.join(('    Verify(std::get<{0}>(lhs), rhs->{1}(), context + ".{1}");'.format(i, k) for (i, (k, _)) in enumerate(fields))))
         table += '}\n'
-        table = 'void Verify(const testfb::{0}& lhs, const theirs::testfb::{0}* rhs, std::string context) {{\n'.format(name)
+        table += 'void Verify(const testfb::{0}& lhs, const theirs::testfb::{0}* rhs, std::string context) {{\n'.format(name)
         table += '{0}\n'.format('\n'.join(map(self.verify_field_new, fields)))
         table += '}\n'
         table += 'void Randomize(std::mt19937_64& r, theirs::testfb::{0}& result, flatbuffers::FlatBufferBuilder& fbb) {{\n'.format(name)
