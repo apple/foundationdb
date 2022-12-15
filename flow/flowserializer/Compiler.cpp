@@ -363,6 +363,7 @@ void ExpressionTree::verify(StaticContext const& context) const {
 		}
 	}
 }
+
 std::optional<Type const*> ExpressionTree::findType(const std::string& name) const {
 	std::optional<const Type*> res;
 	if (auto eIter = enums.find(name); eIter != enums.end()) {
