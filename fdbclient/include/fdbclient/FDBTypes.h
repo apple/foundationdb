@@ -336,12 +336,13 @@ struct KeyRangeRef {
 	bool isCovered(std::vector<KeyRangeRef>& ranges) {
 		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		KeyRangeRef clone(begin, end);
+
 		for (auto r : ranges) {
-			if (begin < r.begin)
+			if (clone.begin < r.begin)
 				return false; // uncovered gap between clone.begin and r.begin
-			if (end <= r.end)
+			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (end > r.begin)
+			if (clone.end > r.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
@@ -422,6 +423,22 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	if (e < b)
 		return KeyRangeRef();
 	return KeyRangeRef(b, e);
+}
+
+// Calculates the complement of `lhs` from `rhs`.
+inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+	if ((lhs & rhs).empty()) {
+		return { lhs };
+	}
+
+	std::vector<KeyRangeRef> result;
+	if (lhs.begin < rhs.begin) {
+		result.push_back(KeyRangeRef(lhs.begin, rhs.begin));
+	}
+	if (lhs.end > rhs.end) {
+		result.push_back(KeyRangeRef(rhs.end, lhs.end));
+	}
+	return result;
 }
 
 struct KeyValueRef {
@@ -545,35 +562,36 @@ struct hash<KeyRange> {
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
-inline Key keyAfter(const KeyRef& key) {
-	if (key == "\xff\xff"_sr)
-		return key;
-
-	Standalone<StringRef> r;
-	uint8_t* s = new (r.arena()) uint8_t[key.size() + 1];
-	if (key.size() > 0) {
-		memcpy(s, key.begin(), key.size());
-	}
-	s[key.size()] = 0;
-	((StringRef&)r) = StringRef(s, key.size() + 1);
-	return r;
-}
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == "\xff\xff"_sr)
-		return key;
+	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
+	static const auto allKeysEnd = "\xff\xff"_sr;
+	if (key == allKeysEnd) {
+		return allKeysEnd;
+	}
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRef(t, key.size() + 1);
 }
-inline KeyRange singleKeyRange(const KeyRef& a) {
-	return KeyRangeRef(a, keyAfter(a));
+inline Key keyAfter(const KeyRef& key) {
+	Key result;
+	result.contents() = keyAfter(key, result.arena());
+	return result;
 }
 inline KeyRangeRef singleKeyRange(KeyRef const& key, Arena& arena) {
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
-	memcpy(t, key.begin(), key.size());
+	if (!key.empty()) {
+		memcpy(t, key.begin(), key.size());
+	}
 	t[key.size()] = 0;
 	return KeyRangeRef(KeyRef(t, key.size()), KeyRef(t, key.size() + 1));
+}
+inline KeyRange singleKeyRange(const KeyRef& a) {
+	KeyRange result;
+	result.contents() = singleKeyRange(a, result.arena());
+	return result;
 }
 inline KeyRange prefixRange(KeyRef prefix) {
 	Standalone<KeyRangeRef> range;
@@ -588,6 +606,11 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // the shortest key exceeds that limit, then the end key is returned.
 // The returned reference is valid as long as keys is valid.
 KeyRef keyBetween(const KeyRangeRef& keys);
+
+// Returns a randomKey between keys. If it's impossible, return keys.end.
+Key randomKeyBetween(const KeyRangeRef& keys);
+
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
 
 struct KeySelectorRef {
 private:
@@ -702,15 +725,15 @@ struct GetRangeLimits {
 	void decrement(MappedKeyValueRef const& data);
 
 	// True if either the row or byte limit has been reached
-	bool isReached();
+	bool isReached() const;
 
 	// True if data would cause the row or byte limit to be reached
-	bool reachedBy(VectorRef<KeyValueRef> const& data);
+	bool reachedBy(VectorRef<KeyValueRef> const& data) const;
 
-	bool hasByteLimit();
-	bool hasRowLimit();
+	bool hasByteLimit() const;
+	bool hasRowLimit() const;
 
-	bool hasSatisfiedMinRows();
+	bool hasSatisfiedMinRows() const;
 	bool isValid() const {
 		return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED) && (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED) &&
 		       minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED);
@@ -807,18 +830,9 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
-	// boundary KVs are always returned so that caller can use it as a continuation,
-	// for non-boundary KV, it is always false.
-	// for boundary KV, it is true only when the secondary query succeeds(return non-empty).
-	// Note: only MATCH_INDEX_MATCHED_ONLY and MATCH_INDEX_UNMATCHED_ONLY modes can make use of it,
-	// to decide whether the boudnary is a match/unmatch.
-	// In the case of MATCH_INDEX_ALL and MATCH_INDEX_NONE, caller should not care if boundary has a match or not.
-	bool boundaryAndExist;
-
 	MappedKeyValueRef() = default;
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
-		boundaryAndExist = copyFrom.boundaryAndExist;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -832,7 +846,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRef& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult && boundaryAndExist == rhs.boundaryAndExist;
+		       reqAndResult == rhs.reqAndResult;
 	}
 	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
 
@@ -842,7 +856,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult, boundaryAndExist);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
 	}
 };
 
@@ -1402,6 +1416,25 @@ struct TenantMode {
 		serializer(ar, mode);
 	}
 
+	// This does not go back-and-forth cleanly with toString
+	// The '_experimental' suffix, if present, needs to be removed in order to be parsed.
+	static TenantMode fromString(std::string mode) {
+		if (mode.find("_experimental") != std::string::npos) {
+			mode.replace(mode.find("_experimental"), std::string::npos, "");
+		}
+		if (mode == "disabled") {
+			return TenantMode::DISABLED;
+		} else if (mode == "optional") {
+			return TenantMode::OPTIONAL_TENANT;
+		} else if (mode == "required") {
+			return TenantMode::REQUIRED;
+		} else {
+			TraceEvent(SevError, "UnknownTenantMode").detail("TenantMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
 	std::string toString() const {
 		switch (mode) {
 		case DISABLED:
@@ -1438,7 +1471,7 @@ struct TenantMode {
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
-	enum Mode { DISABLED = 0, AES_256_CTR = 1, END = 2 };
+	enum Mode { DISABLED = 0, DOMAIN_AWARE = 1, CLUSTER_AWARE = 2, END = 3 };
 
 	EncryptionAtRestMode() : mode(DISABLED) {}
 	EncryptionAtRestMode(Mode mode) : mode(mode) {
@@ -1457,12 +1490,28 @@ struct EncryptionAtRestMode {
 		switch (mode) {
 		case DISABLED:
 			return "disabled";
-		case AES_256_CTR:
-			return "aes_256_ctr";
+		case DOMAIN_AWARE:
+			return "domain_aware";
+		case CLUSTER_AWARE:
+			return "cluster_aware";
 		default:
 			ASSERT(false);
 		}
 		return "";
+	}
+
+	static EncryptionAtRestMode fromString(std::string mode) {
+		if (mode == "disabled") {
+			return EncryptionAtRestMode::DISABLED;
+		} else if (mode == "cluster_aware") {
+			return EncryptionAtRestMode::CLUSTER_AWARE;
+		} else if (mode == "domain_aware") {
+			return EncryptionAtRestMode::DOMAIN_AWARE;
+		} else {
+			TraceEvent(SevError, "UnknownEncryptMode").detail("EncryptMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
 	}
 
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
@@ -1472,7 +1521,9 @@ struct EncryptionAtRestMode {
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
 
-	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
+
+	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
 		}
@@ -1484,6 +1535,14 @@ struct EncryptionAtRestMode {
 		}
 
 		return static_cast<Mode>(num);
+	}
+
+	static EncryptionAtRestMode fromValue(Optional<Value> val) {
+		if (!val.present()) {
+			return EncryptionAtRestMode();
+		}
+
+		return EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(val.get().contents()));
 	}
 
 	uint32_t mode;
@@ -1613,13 +1672,7 @@ struct StorageWiggleValue {
 	}
 };
 
-enum class ReadType {
-	EAGER,
-	FETCH,
-	LOW,
-	NORMAL,
-	HIGH,
-};
+enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
 
 FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
 
@@ -1635,13 +1688,13 @@ struct ReadOptions {
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
-
-	ReadOptions(Optional<UID> debugID,
+	ReadOptions(Optional<UID> debugID = Optional<UID>(),
 	            ReadType type = ReadType::NORMAL,
-	            CacheResult cache = CacheResult::False,
+	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
 	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1675,8 +1728,8 @@ struct Versionstamp {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		uint64_t beVersion;
-		uint16_t beBatch;
+		int64_t beVersion;
+		int16_t beBatch;
 
 		if constexpr (!Ar::isDeserializing) {
 			beVersion = bigEndian64(version);
@@ -1686,7 +1739,7 @@ struct Versionstamp {
 		serializer(ar, beVersion, beBatch);
 
 		if constexpr (Ar::isDeserializing) {
-			version = bigEndian64(version);
+			version = bigEndian64(beVersion);
 			batchNumber = bigEndian16(beBatch);
 		}
 	}

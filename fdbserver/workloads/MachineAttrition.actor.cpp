@@ -74,6 +74,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool killProcess = false;
 	bool killZone = false;
 	bool killSelf = false;
+	bool killAll = false;
 	std::vector<std::string> targetIds;
 	bool replacement = false;
 	bool waitForVersion = false;
@@ -107,6 +108,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		killProcess = getOption(options, "killProcess"_sr, killProcess);
 		killZone = getOption(options, "killZone"_sr, killZone);
 		killSelf = getOption(options, "killSelf"_sr, killSelf);
+		killAll =
+		    getOption(options,
+		              "killAll"_sr,
+		              g_network->isSimulated() && !g_simulator->extraDatabases.empty() && BUGGIFY_WITH_PROB(0.01));
 		targetIds = getOption(options, "targetIds"_sr, std::vector<std::string>());
 		replacement = getOption(options, "replacement"_sr, reboot && deterministicRandom()->random01() < 0.5);
 		waitForVersion = getOption(options, "waitForVersion"_sr, waitForVersion);
@@ -116,6 +121,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool shouldInject(DeterministicRandom& random,
 	                  const WorkloadRequest& work,
 	                  const unsigned alreadyAdded) const override {
+		if (g_network->isSimulated() && !g_simulator->extraDatabases.empty()) {
+			// Remove this as soon as we track extra databases properly
+			return false;
+		}
 		return work.useDatabase && random.random01() < 1.0 / (2.0 + alreadyAdded);
 	}
 
@@ -357,6 +366,14 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
 
 				g_simulator->killDataHall(target, kt);
+			} else if (self->killAll) {
+				state ISimulator::KillType kt = ISimulator::RebootProcessAndSwitch;
+				TraceEvent("Assassination").detail("KillType", kt);
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
+				wait(delay(self->testDuration / 2));
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
 			} else {
 				state int killedMachines = 0;
 				while (killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
@@ -469,5 +486,4 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 };
 
 WorkloadFactory<MachineAttritionWorkload> MachineAttritionWorkloadFactory;
-// TODO: Enable MachineAttritionWorkload injection once this is bug-free
-// FailureInjectorFactory<MachineAttritionWorkload> MachineAttritionFailureWorkloadFactory;
+FailureInjectorFactory<MachineAttritionWorkload> MachineAttritionFailureWorkloadFactory;

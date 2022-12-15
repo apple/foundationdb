@@ -122,23 +122,58 @@ public:
 	ACTOR static Future<Void> monitorStorageUsage(TenantCache* tenantCache) {
 		TraceEvent(SevInfo, "StartingTenantCacheStorageUsageMonitor", tenantCache->id()).log();
 
-		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_REFRESH_INTERVAL;
+		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL;
 		state double lastTenantListFetchTime = now();
+		state double lastTraceTime = 0;
 
 		loop {
 			state double fetchStartTime = now();
-			state std::vector<std::pair<KeyRef, TenantName>> tenantList = tenantCache->getTenantList();
+
+			state bool toTrace = false;
+			if (fetchStartTime - lastTraceTime > SERVER_KNOBS->TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL) {
+				toTrace = true;
+				lastTraceTime = fetchStartTime;
+			}
+
+			state std::vector<TenantGroupName> groups;
+			for (const auto& [group, storage] : tenantCache->tenantStorageMap) {
+				groups.push_back(group);
+			}
 			state int i;
-			for (i = 0; i < tenantList.size(); i++) {
-				state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenantList[i].second);
-				loop {
-					try {
-						state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-						tenantCache->updateStorageUsage(tenantList[i].first, size);
-					} catch (Error& e) {
-						TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
-						wait(tr.onError(e));
+			for (i = 0; i < groups.size(); i++) {
+				state TenantGroupName group = groups[i];
+				state int64_t usage = 0;
+				// `tenants` needs to be a copy so that the erase (below) or inserts/erases from other
+				// functions (when this actor yields) do not interfere with the iteration
+				state std::unordered_set<TenantName> tenants = tenantCache->tenantStorageMap[group].tenants;
+				state std::unordered_set<TenantName>::iterator iter = tenants.begin();
+				for (; iter != tenants.end(); iter++) {
+					state TenantName tenant = *iter;
+					state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenant);
+					loop {
+						try {
+							state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
+							usage += size;
+							break;
+						} catch (Error& e) {
+							if (e.code() == error_code_tenant_not_found) {
+								tenantCache->tenantStorageMap[group].tenants.erase(tenant);
+								break;
+							} else {
+								TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id()).error(e);
+								wait(tr.onError(e));
+							}
+						}
 					}
+				}
+				tenantCache->tenantStorageMap[group].usage = usage;
+
+				if (toTrace) {
+					// Trace the storage used by all tenant groups for visibility.
+					TraceEvent(SevInfo, "StorageUsageUpdated", tenantCache->id())
+					    .detail("TenantGroup", group)
+					    .detail("Quota", tenantCache->tenantStorageMap[group].quota)
+					    .detail("Usage", tenantCache->tenantStorageMap[group].usage);
 				}
 			}
 
@@ -147,6 +182,33 @@ public:
 				TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshSlow", tenantCache->id()).log();
 			}
 			wait(delay(refreshInterval));
+		}
+	}
+
+	ACTOR static Future<Void> monitorStorageQuota(TenantCache* tenantCache) {
+		TraceEvent(SevInfo, "StartingTenantCacheStorageQuotaMonitor", tenantCache->id()).log();
+
+		state Transaction tr(tenantCache->dbcx());
+
+		loop {
+			try {
+				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+				// Reset the quota for all groups; this essentially sets the quota to `max` for groups where the
+				// quota might have been cleared (i.e., groups that will not be returned in `getRange` request above).
+				for (auto& [group, storage] : tenantCache->tenantStorageMap) {
+					storage.quota = std::numeric_limits<int64_t>::max();
+				}
+				for (const auto kv : currentQuotas) {
+					const TenantGroupName group = kv.key.removePrefix(storageQuotaPrefix);
+					const int64_t quota = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+					tenantCache->tenantStorageMap[group].quota = quota;
+				}
+				tr.reset();
+				wait(delay(SERVER_KNOBS->TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL));
+			} catch (Error& e) {
+				TraceEvent("TenantCacheGetStorageQuotaError", tenantCache->id()).error(e);
+				wait(tr.onError(e));
+			}
 		}
 	}
 };
@@ -158,6 +220,10 @@ void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	TenantInfo tenantInfo(tenantName, Optional<Standalone<StringRef>>(), tenant.id);
 	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix);
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
+
+	if (tenant.tenantGroup.present()) {
+		tenantStorageMap[tenant.tenantGroup.get()].tenants.insert(tenantName);
+	}
 }
 
 void TenantCache::startRefresh() {
@@ -203,19 +269,12 @@ int TenantCache::cleanup() {
 	return tenantsRemoved;
 }
 
-std::vector<std::pair<KeyRef, TenantName>> TenantCache::getTenantList() const {
-	std::vector<std::pair<KeyRef, TenantName>> tenants;
+std::vector<TenantName> TenantCache::getTenantList() const {
+	std::vector<TenantName> tenants;
 	for (const auto& [prefix, entry] : tenantCache) {
-		tenants.push_back({ prefix, entry->name() });
+		tenants.push_back(entry->name());
 	}
 	return tenants;
-}
-
-void TenantCache::updateStorageUsage(KeyRef prefix, int64_t size) {
-	auto it = tenantCache.find(prefix);
-	if (it != tenantCache.end()) {
-		it->value->updateStorageUsage(size);
-	}
 }
 
 std::string TenantCache::desc() const {
@@ -264,12 +323,26 @@ Optional<Reference<TCTenantInfo>> TenantCache::tenantOwning(KeyRef key) const {
 	return it->value;
 }
 
+std::unordered_set<TenantName> TenantCache::getTenantsOverQuota() const {
+	std::unordered_set<TenantName> tenantsOverQuota;
+	for (const auto& [tenantGroup, storage] : tenantStorageMap) {
+		if (storage.usage > storage.quota) {
+			tenantsOverQuota.insert(storage.tenants.begin(), storage.tenants.end());
+		}
+	}
+	return tenantsOverQuota;
+}
+
 Future<Void> TenantCache::monitorTenantMap() {
 	return TenantCacheImpl::monitorTenantMap(this);
 }
 
 Future<Void> TenantCache::monitorStorageUsage() {
 	return TenantCacheImpl::monitorStorageUsage(this);
+}
+
+Future<Void> TenantCache::monitorStorageQuota() {
+	return TenantCacheImpl::monitorStorageQuota(this);
 }
 
 class TenantCacheUnitTest {
@@ -287,14 +360,14 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION);
+			TenantMapEntry tenant(tenantNumber + i, tenantName, TenantState::READY);
 
 			tenantCache.insert(tenantName, tenant);
 		}
 
 		for (int i = 0; i < tenantLimit; i++) {
 			Key k(format("%d", i));
-			ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantNumber + (i % tenantCount)))));
+			ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantAPI::idToPrefix(tenantNumber + (i % tenantCount)))));
 			ASSERT(!tenantCache.isTenantKey(k.withPrefix(allKeys.begin)));
 			ASSERT(!tenantCache.isTenantKey(k));
 		}
@@ -315,7 +388,7 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION);
+			TenantMapEntry tenant(tenantNumber + i, tenantName, TenantState::READY);
 
 			tenantCache.insert(tenantName, tenant);
 		}
@@ -329,7 +402,7 @@ public:
 
 			if (tenantOrdinal % staleTenantFraction != 0) {
 				TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantOrdinal));
-				TenantMapEntry tenant(tenantOrdinal, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION);
+				TenantMapEntry tenant(tenantOrdinal, tenantName, TenantState::READY);
 				bool newTenant = tenantCache.update(tenantName, tenant);
 				ASSERT(!newTenant);
 				keepCount++;
@@ -345,10 +418,10 @@ public:
 			uint16_t tenantOrdinal = tenantNumber + i;
 			Key k(format("%d", i));
 			if (tenantOrdinal % staleTenantFraction != 0) {
-				ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantOrdinal))));
+				ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantAPI::idToPrefix(tenantOrdinal))));
 				keptCount++;
 			} else {
-				ASSERT(!tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantOrdinal))));
+				ASSERT(!tenantCache.isTenantKey(k.withPrefix(TenantAPI::idToPrefix(tenantOrdinal))));
 				removedCount++;
 			}
 		}

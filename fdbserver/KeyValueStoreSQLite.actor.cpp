@@ -149,7 +149,22 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				auto firstBlock = pageNumber == 1 ? 0 : ((pageNumber - 1) * pageLen) / 4096,
+				     lastBlock = (pageNumber * pageLen) / 4096;
+				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, firstBlock));
+				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename && iter->second < lastBlock) {
+					severity = SevWarnAlways;
+				}
+				TraceEvent("CheckCorruption")
+				    .detail("Filename", filename)
+				    .detail("NextFile", iter->first)
+				    .detail("FirstBlock", firstBlock)
+				    .detail("LastBlock", lastBlock)
+				    .detail("NextBlock", iter->second);
+			}
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)
@@ -706,7 +721,7 @@ struct IntKeyCursor {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 };
@@ -744,7 +759,7 @@ struct RawCursor {
 			} catch (...) {
 				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 	void moveFirst() {
@@ -1596,7 +1611,9 @@ public:
 	StorageBytes getStorageBytes() const override;
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
-	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
+	void clear(KeyRangeRef range,
+	           const StorageServerMetrics* storageMetrics = nullptr,
+	           const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> optionss) override;
@@ -1895,14 +1912,11 @@ private:
 				readThreads[i].clear();
 		}
 		void checkFreePages() {
-			int iterations = 0;
-
 			int64_t freeListSize = freeListPages;
 			while (!freeTableEmpty && freeListSize < SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT) {
 				int deletedPages = cursor->lazyDelete(SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				freeTableEmpty = (deletedPages != SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				springCleaningStats.lazyDeletePages += deletedPages;
-				++iterations;
 
 				freeListSize = conn.freePages();
 			}
@@ -2215,7 +2229,7 @@ void KeyValueStoreSQLite::set(KeyValueRef keyValue, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::SetAction(keyValue));
 }
-void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
+void KeyValueStoreSQLite::clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }

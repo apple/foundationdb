@@ -24,7 +24,7 @@
 
 #include <algorithm>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
@@ -159,7 +159,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int64_t bytesSent;
 	double lastDataPacketSentTime;
 	int outstandingReplies;
-	ContinuousSample<double> pingLatencies;
+	DDSketch<double> pingLatencies;
 	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
@@ -171,7 +171,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int connectOutgoingCount;
 	int connectIncomingCount;
 	int connectFailedCount;
-	ContinuousSample<double> connectLatencies;
+	DDSketch<double> connectLatencies;
 	Promise<Void> disconnect;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
@@ -239,7 +239,7 @@ public:
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 	void addEndpoint(Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID);
 
-	void addEndpoints(std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams);
+	void addEndpoints(std::vector<std::pair<class FlowReceiver*, TaskPriority>> const& streams);
 
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
 	void removeEndpoint(const Endpoint&, NetworkMessageReceiver*);

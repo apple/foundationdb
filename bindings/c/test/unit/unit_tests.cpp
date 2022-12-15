@@ -21,7 +21,7 @@
 // Unit tests for the FoundationDB C API.
 
 #include "fdb_c_options.g.h"
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -182,17 +182,14 @@ struct GetMappedRangeResult {
 		         const std::string& value,
 		         const std::string& begin,
 		         const std::string& end,
-		         const std::vector<std::pair<std::string, std::string>>& range_results,
-		         fdb_bool_t boundaryAndExist)
-		  : key(key), value(value), begin(begin), end(end), range_results(range_results),
-		    boundaryAndExist(boundaryAndExist) {}
+		         const std::vector<std::pair<std::string, std::string>>& range_results)
+		  : key(key), value(value), begin(begin), end(end), range_results(range_results) {}
 
 		std::string key;
 		std::string value;
 		std::string begin;
 		std::string end;
 		std::vector<std::pair<std::string, std::string>> range_results;
-		fdb_bool_t boundaryAndExist;
 	};
 	std::vector<MappedKV> mkvs;
 	// True if values remain in the key range requested.
@@ -317,7 +314,6 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 		auto value = extractString(mkv.value);
 		auto begin = extractString(mkv.getRange.begin.key);
 		auto end = extractString(mkv.getRange.end.key);
-		bool boundaryAndExist = mkv.boundaryAndExist;
 		//		std::cout << "key:" << key << " value:" << value << " begin:" << begin << " end:" << end << std::endl;
 
 		std::vector<std::pair<std::string, std::string>> range_results;
@@ -328,7 +324,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 			range_results.emplace_back(k, v);
 			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
-		result.mkvs.emplace_back(key, value, begin, end, range_results, boundaryAndExist);
+		result.mkvs.emplace_back(key, value, begin, end, range_results);
 	}
 	return result;
 }
@@ -1096,9 +1092,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		CHECK(!result.more);
 
 		int id = beginId;
-		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
-			boundary = i == 0 || i == expectSize - 1;
 			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
 				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
@@ -1109,8 +1103,6 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 			} else {
 				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = mkv.range_results.empty();
-			CHECK(mkv.boundaryAndExist == (boundary && !empty));
 			CHECK(EMPTY.compare(mkv.value) == 0);
 			CHECK(mkv.range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
@@ -1154,9 +1146,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		CHECK(!result.more);
 
 		int id = beginId;
-		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
-			boundary = i == 0 || i == expectSize - 1;
 			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
 				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
@@ -1167,8 +1157,6 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 			} else {
 				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = mkv.range_results.empty();
-			CHECK(mkv.boundaryAndExist == (boundary && !empty));
 			CHECK(EMPTY.compare(mkv.value) == 0);
 		}
 		break;
@@ -1941,6 +1929,30 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 		int64_t out_version;
 		fdb_check(tr.get_committed_version(&out_version));
 		CHECK(out_version >= 0);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_total_cost") {
+	fdb::Transaction tr(db);
+	while (1) {
+		fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
+		fdb_error_t err = wait_future(f1);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		fdb::Int64Future f2 = tr.get_total_cost();
+		err = wait_future(f2);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		int64_t cost;
+		fdb_check(f2.get(&cost));
+		CHECK(cost > 0);
 		break;
 	}
 }
@@ -2998,7 +3010,7 @@ int main(int argc, char** argv) {
 	context.applyCommandLine(argc, argv);
 
 	fdb_check(fdb_setup_network());
-	std::thread network_thread{ &fdb_run_network };
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	db = fdb_open_database(argv[1]);
 	clusterFilePath = std::string(argv[1]);

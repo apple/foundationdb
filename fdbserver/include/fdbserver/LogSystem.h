@@ -163,7 +163,7 @@ struct ILogSystem {
 		virtual Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) = 0;
 
 		// returns when the failure monitor detects that the servers associated with the cursor are failed
-		virtual Future<Void> onFailed() = 0;
+		virtual Future<Void> onFailed() const = 0;
 
 		// returns false if:
 		// (1) the failure monitor detects that the servers associated with the cursor is failed
@@ -251,7 +251,7 @@ struct ILogSystem {
 		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-		Future<Void> onFailed() override;
+		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
 		const LogMessageVersion& version() const override;
@@ -313,7 +313,7 @@ struct ILogSystem {
 		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-		Future<Void> onFailed() override;
+		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
 		const LogMessageVersion& version() const override;
@@ -369,7 +369,7 @@ struct ILogSystem {
 		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-		Future<Void> onFailed() override;
+		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
 		const LogMessageVersion& version() const override;
@@ -401,7 +401,7 @@ struct ILogSystem {
 		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-		Future<Void> onFailed() override;
+		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
 		const LogMessageVersion& version() const override;
@@ -480,7 +480,7 @@ struct ILogSystem {
 		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
-		Future<Void> onFailed() override;
+		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
 		const LogMessageVersion& version() const override;
@@ -500,18 +500,18 @@ struct ILogSystem {
 	virtual std::string describe() const = 0;
 	virtual UID getDebugID() const = 0;
 
-	virtual void toCoreState(DBCoreState&) = 0;
+	virtual void toCoreState(DBCoreState&) const = 0;
 
-	virtual bool remoteStorageRecovered() = 0;
+	virtual bool remoteStorageRecovered() const = 0;
 
-	virtual Future<Void> onCoreStateChanged() = 0;
+	virtual Future<Void> onCoreStateChanged() const = 0;
 	// Returns if and when the output of toCoreState() would change (for example, when older logs can be discarded from
 	// the state)
 
 	virtual void coreStateWritten(DBCoreState const& newState) = 0;
 	// Called when a core state has been written to the coordinators
 
-	virtual Future<Void> onError() = 0;
+	virtual Future<Void> onError() const = 0;
 	// Never returns normally, but throws an error if the subsystem stops working
 
 	// Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
@@ -641,7 +641,6 @@ struct ILogSystem {
 	virtual Future<Reference<ILogSystem>> newEpoch(
 	    RecruitFromConfigurationReply const& recr,
 	    Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
-	    UID clusterId,
 	    DatabaseConfiguration const& config,
 	    LogEpoch recoveryCount,
 	    Version recoveryTransactionVersion,
@@ -792,10 +791,10 @@ struct LogPushData : NonCopyable {
 	template <class T>
 	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false);
 
-	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
+	Standalone<StringRef> getMessages(int loc) const { return messagesWriter[loc].toValue(); }
 
 	// Returns all locations' messages, including empty ones.
-	std::vector<Standalone<StringRef>> getAllMessages();
+	std::vector<Standalone<StringRef>> getAllMessages() const;
 
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.

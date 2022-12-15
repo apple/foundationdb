@@ -19,7 +19,7 @@
  */
 
 #include "flow/UnitTest.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {
@@ -75,8 +75,8 @@ KeyRef StorageMetricSample::splitEstimate(KeyRangeRef range, int64_t offset, boo
 StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 	StorageMetrics result;
 	result.bytes = byteSample.getEstimate(keys);
-	result.bytesPerKSecond =
-	    bandwidthSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	result.bytesWrittenPerKSecond =
+	    bytesWriteSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.iosPerKSecond = iopsSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.bytesReadPerKSecond =
 	    bytesReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -88,7 +88,7 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 	ASSERT(metrics.bytes == 0); // ShardNotifyMetrics
 	if (g_network->isSimulated()) {
-		CODE_PROBE(metrics.bytesPerKSecond != 0, "ShardNotifyMetrics bytes");
+		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
 		CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
 		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead", probe::decoration::rare);
 	}
@@ -97,9 +97,10 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 
 	StorageMetrics notifyMetrics;
 
-	if (metrics.bytesPerKSecond)
-		notifyMetrics.bytesPerKSecond = bandwidthSample.addAndExpire(key, metrics.bytesPerKSecond, expire) *
-		                                SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	if (metrics.bytesWrittenPerKSecond)
+		notifyMetrics.bytesWrittenPerKSecond =
+		    bytesWriteSample.addAndExpire(key, metrics.bytesWrittenPerKSecond, expire) *
+		    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	if (metrics.iosPerKSecond)
 		notifyMetrics.iosPerKSecond = iopsSample.addAndExpire(key, metrics.iosPerKSecond, expire) *
 		                              SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -177,8 +178,8 @@ void StorageServerMetrics::notifyNotReadable(KeyRangeRef keys) {
 void StorageServerMetrics::poll() {
 	{
 		StorageMetrics m;
-		m.bytesPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
-		bandwidthSample.poll(waitMetricsMap, m);
+		m.bytesWrittenPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		bytesWriteSample.poll(waitMetricsMap, m);
 	}
 	{
 		StorageMetrics m;
@@ -250,7 +251,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			if (remaining.bytes < 2 * minSplitBytes)
 				break;
 			KeyRef key = req.keys.end;
-			bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
+			bool hasUsed = used.bytes != 0 || used.bytesWrittenPerKSecond != 0 || used.iosPerKSecond != 0;
 			key = getSplitKey(remaining.bytes,
 			                  estimated.bytes,
 			                  req.limits.bytes,
@@ -276,13 +277,13 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			                  lastKey,
 			                  key,
 			                  hasUsed);
-			key = getSplitKey(remaining.bytesPerKSecond,
-			                  estimated.bytesPerKSecond,
-			                  req.limits.bytesPerKSecond,
-			                  used.bytesPerKSecond,
+			key = getSplitKey(remaining.bytesWrittenPerKSecond,
+			                  estimated.bytesWrittenPerKSecond,
+			                  req.limits.bytesWrittenPerKSecond,
+			                  used.bytesWrittenPerKSecond,
 			                  req.limits.infinity,
 			                  req.isLastShard,
-			                  bandwidthSample,
+			                  bytesWriteSample,
 			                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
 			                  lastKey,
 			                  key,
@@ -328,12 +329,12 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 
 	rep.available.bytes = sb.available;
 	rep.available.iosPerKSecond = 10e6;
-	rep.available.bytesPerKSecond = 100e9;
+	rep.available.bytesWrittenPerKSecond = 100e9;
 	rep.available.bytesReadPerKSecond = 100e9;
 
 	rep.capacity.bytes = sb.total;
 	rep.capacity.iosPerKSecond = 10e6;
-	rep.capacity.bytesPerKSecond = 100e9;
+	rep.capacity.bytesWrittenPerKSecond = 100e9;
 	rep.capacity.bytesReadPerKSecond = 100e9;
 
 	rep.bytesInputRate = bytesInputRate;
@@ -414,7 +415,7 @@ void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	req.reply.send(reply);
 }
 
-void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) const {
+void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const {
 	SplitRangeReply reply;
 	KeyRangeRef range = req.keys;
 	if (prefix.present()) {
@@ -428,7 +429,7 @@ void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<Key> p
 
 std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range,
                                                          int64_t chunkSize,
-                                                         Optional<Key> prefixToRemove) const {
+                                                         Optional<KeyRef> prefixToRemove) const {
 	std::vector<KeyRef> toReturn;
 	KeyRef beginKey = range.begin;
 	IndexedSet<Key, int64_t>::const_iterator endKey =
@@ -585,7 +586,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
 	ssm.byteSample.sample.insert("But"_sr, 100 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 2000 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 2000 * sampleUnit, {});
 
 	ASSERT(t.size() == 1 && t[0] == "Bah"_sr);
 
@@ -606,7 +607,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/multipleReturnedPoint
 	ssm.byteSample.sample.insert("But"_sr, 100 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, {});
 
 	ASSERT(t.size() == 3 && t[0] == "Absolute"_sr && t[1] == "Apple"_sr && t[2] == "Bah"_sr);
 
@@ -627,7 +628,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/noneSplitable") {
 	ssm.byteSample.sample.insert("But"_sr, 100 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 10000 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 10000 * sampleUnit, {});
 
 	ASSERT(t.size() == 0);
 
@@ -648,7 +649,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
 	ssm.byteSample.sample.insert("But"_sr, 10 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 30 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 1000 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 1000 * sampleUnit, {});
 
 	ASSERT(t.size() == 0);
 

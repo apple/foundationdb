@@ -159,13 +159,20 @@ class Parser:
         pass
 
 
-class XmlParser(Parser, xml.sax.handler.ContentHandler):
+class XmlParser(Parser, xml.sax.handler.ContentHandler, xml.sax.handler.ErrorHandler):
     def __init__(self):
         super().__init__()
         self.handler: ParseHandler | None = None
 
     def parse(self, file: TextIO, handler: ParseHandler) -> None:
-        xml.sax.parse(file, self)
+        self.handler = handler
+        xml.sax.parse(file, self, errorHandler=self)
+
+    def error(self, exception):
+        pass
+
+    def fatalError(self, exception):
+        pass
 
     def startElement(self, name, attrs) -> None:
         attributes: Dict[str, str] = {}
@@ -186,16 +193,17 @@ class JsonParser(Parser):
 
 
 class Coverage:
-    def __init__(self, file: str, line: str | int, comment: str | None = None):
+    def __init__(self, file: str, line: str | int, comment: str | None = None, rare: bool = False):
         self.file = file
         self.line = int(line)
         self.comment = comment
+        self.rare = rare
 
     def to_tuple(self) -> Tuple[str, int, str | None]:
-        return self.file, self.line, self.comment
+        return self.file, self.line, self.comment, self.rare
 
     def __eq__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() == other
         elif isinstance(other, Coverage):
             return self.to_tuple() == other.to_tuple()
@@ -203,7 +211,7 @@ class Coverage:
             return False
 
     def __lt__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() < other
         elif isinstance(other, Coverage):
             return self.to_tuple() < other.to_tuple()
@@ -211,7 +219,7 @@ class Coverage:
             return False
 
     def __le__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() <= other
         elif isinstance(other, Coverage):
             return self.to_tuple() <= other.to_tuple()
@@ -219,7 +227,7 @@ class Coverage:
             return False
 
     def __gt__(self, other: Coverage) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() > other
         elif isinstance(other, Coverage):
             return self.to_tuple() > other.to_tuple()
@@ -227,7 +235,7 @@ class Coverage:
             return False
 
     def __ge__(self, other):
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() >= other
         elif isinstance(other, Coverage):
             return self.to_tuple() >= other.to_tuple()
@@ -235,7 +243,7 @@ class Coverage:
             return False
 
     def __hash__(self):
-        return hash((self.file, self.line, self.comment))
+        return hash((self.file, self.line, self.comment, self.rare))
 
 
 class TraceFiles:
@@ -276,6 +284,7 @@ class TraceFiles:
                     raise StopIteration
                 self.current += 1
                 return self.trace_files[self.current - 1]
+
         return TraceFilesIterator(self)
 
 
@@ -283,11 +292,12 @@ class Summary:
     def __init__(self, binary: Path, runtime: float = 0, max_rss: int | None = None,
                  was_killed: bool = False, uid: uuid.UUID | None = None, expected_unseed: int | None = None,
                  exit_code: int = 0, valgrind_out_file: Path | None = None, stats: str | None = None,
-                 error_out: str = None, will_restart: bool = False):
+                 error_out: str = None, will_restart: bool = False, long_running: bool = False):
         self.binary = binary
         self.runtime: float = runtime
         self.max_rss: int | None = max_rss
         self.was_killed: bool = was_killed
+        self.long_running = long_running
         self.expected_unseed: int | None = expected_unseed
         self.exit_code: int = exit_code
         self.out: SummaryTree = SummaryTree('Test')
@@ -369,6 +379,7 @@ class Summary:
                 child = SummaryTree('CodeCoverage')
                 child.attributes['File'] = k.file
                 child.attributes['Line'] = str(k.line)
+                child.attributes['Rare'] = k.rare
                 if not v:
                     child.attributes['Covered'] = '0'
                 if k.comment is not None and len(k.comment):
@@ -384,9 +395,14 @@ class Summary:
             child.attributes['Severity'] = '40'
             child.attributes['ErrorCount'] = str(self.errors)
             self.out.append(child)
+            self.error = True
         if self.was_killed:
             child = SummaryTree('ExternalTimeout')
             child.attributes['Severity'] = '40'
+            if self.long_running:
+                # debugging info for long-running tests
+                child.attributes['LongRunning'] = '1'
+                child.attributes['Runtime'] = str(self.runtime)
             self.out.append(child)
             self.error = True
         if self.max_rss is not None:
@@ -420,11 +436,13 @@ class Summary:
             child = SummaryTree('TestUnexpectedlyNotFinished')
             child.attributes['Severity'] = '40'
             self.out.append(child)
+            self.error = True
         if self.error_out is not None and len(self.error_out) > 0:
             lines = self.error_out.splitlines()
             stderr_bytes = 0
             for line in lines:
-                if line.endswith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
+                if line.endswith(
+                        "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
                     # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
                     continue
                 if line.endswith("Warning: unimplemented fcntl command: 1036"):
@@ -558,6 +576,9 @@ class Summary:
         self.handler.add_handler(('Severity', '30'), parse_warning)
 
         def parse_error(attrs: Dict[str, str]):
+            if 'ErrorIsInjectedFault' in attrs and attrs['ErrorIsInjectedFault'].lower() in ['1', 'true']:
+                # ignore injected errors. In newer fdb versions these will have a lower severity
+                return
             self.errors += 1
             self.error = True
             if self.errors > config.max_errors:
@@ -576,7 +597,10 @@ class Summary:
             comment = ''
             if 'Comment' in attrs:
                 comment = attrs['Comment']
-            c = Coverage(attrs['File'], attrs['Line'], comment)
+            rare = False
+            if 'Rare' in attrs:
+                rare = bool(int(attrs['Rare']))
+            c = Coverage(attrs['File'], attrs['Line'], comment, rare)
             if covered or c not in self.coverage:
                 self.coverage[c] = covered
 
@@ -604,6 +628,7 @@ class Summary:
                 child.attributes['File'] = attrs['File']
                 child.attributes['Line'] = attrs['Line']
                 self.out.append(child)
+
         self.handler.add_handler(('Type', 'BuggifySection'), buggify_section)
         self.handler.add_handler(('Type', 'FaultInjected'), buggify_section)
 
@@ -612,9 +637,11 @@ class Summary:
             child.attributes['Name'] = attrs['Name']
             child.attributes['File'] = attrs['File']
             child.attributes['Line'] = attrs['Line']
+
         self.handler.add_handler(('Type', 'RunningUnitTest'), running_unit_test)
 
         def stderr_severity(attrs: Dict[str, str]):
             if 'NewSeverity' in attrs:
                 self.stderr_severity = attrs['NewSeverity']
+
         self.handler.add_handler(('Type', 'StderrSeverity'), stderr_severity)

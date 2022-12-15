@@ -25,6 +25,7 @@
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
+#include <exception>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <cctype>
@@ -514,25 +515,29 @@ public:
 
 	void close() {
 		if (opened) {
-			MutexHolder hold(mutex);
+			try {
+				MutexHolder hold(mutex);
 
-			// Write remaining contents
-			auto a = new WriterThread::WriteBuffer(std::move(eventBuffer));
-			loggedLength += bufferLength;
-			eventBuffer = std::vector<TraceEventFields>();
-			bufferLength = 0;
-			writer->post(a);
+				// Write remaining contents
+				auto a = new WriterThread::WriteBuffer(std::move(eventBuffer));
+				loggedLength += bufferLength;
+				eventBuffer = std::vector<TraceEventFields>();
+				bufferLength = 0;
+				writer->post(a);
 
-			auto c = new WriterThread::Close();
-			writer->post(c);
+				auto c = new WriterThread::Close();
+				writer->post(c);
 
-			ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
-			barriers->push(f);
-			writer->post(new WriterThread::Barrier);
+				ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
+				barriers->push(f);
+				writer->post(new WriterThread::Barrier);
 
-			f.getBlocking();
+				f.getBlocking();
 
-			opened = false;
+				opened = false;
+			} catch (const std::exception& e) {
+				fprintf(stderr, "Error closing trace file: %s\n", e.what());
+			}
 		}
 	}
 
@@ -1607,44 +1612,75 @@ void parseNumericValue(std::string const& s, uint64_t& outValue, bool permissive
 	throw attribute_not_found();
 }
 
-template <class T>
-T getNumericValue(TraceEventFields const& fields, std::string key, bool permissive) {
+template <class T, bool tryError>
+bool getNumericValue(TraceEventFields const& fields, std::string key, T& outValue, bool permissive) {
 	std::string field = fields.getValue(key);
 
 	try {
-		T value;
-		parseNumericValue(field, value, permissive);
-		return value;
+		parseNumericValue(field, outValue, permissive);
+		return true;
 	} catch (Error& e) {
-		std::string type;
+		if (tryError) {
+			std::string type;
 
-		TraceEvent ev(SevWarn, "ErrorParsingNumericTraceEventField");
-		ev.error(e);
-		if (fields.tryGetValue("Type", type)) {
-			ev.detail("Event", type);
+			TraceEvent ev(SevWarn, "ErrorParsingNumericTraceEventField");
+			ev.error(e);
+			if (fields.tryGetValue("Type", type)) {
+				ev.detail("Event", type);
+			}
+			ev.detail("FieldName", key);
+			ev.detail("FieldValue", field);
+
+			throw;
+		} else {
+			return false;
 		}
-		ev.detail("FieldName", key);
-		ev.detail("FieldValue", field);
-
-		throw;
 	}
 }
 } // namespace
 
+bool TraceEventFields::tryGetInt(std::string key, int& outVal, bool permissive) const {
+	bool success = getNumericValue<int, false>(*this, key, outVal, permissive);
+	return success;
+}
+
 int TraceEventFields::getInt(std::string key, bool permissive) const {
-	return getNumericValue<int>(*this, key, permissive);
+	int outVal;
+	getNumericValue<int, true>(*this, key, outVal, permissive);
+	return outVal;
+}
+
+bool TraceEventFields::tryGetInt64(std::string key, int64_t& outVal, bool permissive) const {
+	bool success = getNumericValue<int64_t, false>(*this, key, outVal, permissive);
+	return success;
 }
 
 int64_t TraceEventFields::getInt64(std::string key, bool permissive) const {
-	return getNumericValue<int64_t>(*this, key, permissive);
+	int64_t outVal;
+	getNumericValue<int64_t, true>(*this, key, outVal, permissive);
+	return outVal;
+}
+
+bool TraceEventFields::tryGetUint64(std::string key, uint64_t& outVal, bool permissive) const {
+	bool success = getNumericValue<uint64_t, false>(*this, key, outVal, permissive);
+	return success;
 }
 
 uint64_t TraceEventFields::getUint64(std::string key, bool permissive) const {
-	return getNumericValue<uint64_t>(*this, key, permissive);
+	uint64_t outVal;
+	getNumericValue<uint64_t, true>(*this, key, outVal, permissive);
+	return outVal;
+}
+
+bool TraceEventFields::tryGetDouble(std::string key, double& outVal, bool permissive) const {
+	bool success = getNumericValue<double, false>(*this, key, outVal, permissive);
+	return success;
 }
 
 double TraceEventFields::getDouble(std::string key, bool permissive) const {
-	return getNumericValue<double>(*this, key, permissive);
+	double outVal;
+	getNumericValue<double, true>(*this, key, outVal, permissive);
+	return outVal;
 }
 
 std::string TraceEventFields::toString() const {

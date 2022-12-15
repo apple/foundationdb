@@ -327,8 +327,12 @@ class LocalConfigurationImpl {
 	ACTOR static Future<Void> consume(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
 		loop {
 			choose {
-				when(wait(consumeInternal(self, broadcaster))) { ASSERT(false); }
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(consumeInternal(self, broadcaster))) {
+					ASSERT(false);
+				}
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}
@@ -347,8 +351,8 @@ public:
 			                            Randomize::False,
 			                            g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		}
-		logger = traceCounters(
-		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
+		logger = cc.traceCounters(
+		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "LocalConfigurationMetrics");
 	}
 
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,

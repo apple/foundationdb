@@ -140,13 +140,32 @@ private:
 	Future<Void> collection;
 };
 
+// Defines granule info that interests full restore
+struct BlobGranuleRestoreVersion {
+	// Two constructors required by VectorRef
+	BlobGranuleRestoreVersion() {}
+	BlobGranuleRestoreVersion(Arena& a, const BlobGranuleRestoreVersion& copyFrom)
+	  : granuleID(copyFrom.granuleID), keyRange(a, copyFrom.keyRange), version(copyFrom.version),
+	    sizeInBytes(copyFrom.sizeInBytes) {}
+
+	UID granuleID;
+	KeyRangeRef keyRange;
+	Version version;
+	int64_t sizeInBytes;
+};
+
+// Defines a vector for BlobGranuleVersion
+typedef Standalone<VectorRef<BlobGranuleRestoreVersion>> BlobGranuleRestoreVersionVector;
+
 ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo);
 ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
-inline bool isFullRestoreMode() {
-	return SERVER_KNOBS->BLOB_FULL_RESTORE_MODE;
-};
-
+ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef range);
+ACTOR Future<Void> updateRestoreStatus(Database db, KeyRangeRef range, BlobRestoreStatus status);
+ACTOR Future<KeyRange> getRestoringRange(Database db, KeyRangeRef keys);
+ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range);
 #include "flow/unactorcompiler.h"
 
 #endif

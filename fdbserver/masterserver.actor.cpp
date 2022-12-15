@@ -102,19 +102,19 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    versionVectorTagUpdates("VersionVectorTagUpdates",
 	                            dbgid,
 	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
 	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
 	                               dbgid,
 	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    waitForPrevLatencies("WaitForPrevLatencies",
 	                         dbgid,
 	                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    addActor(addActor) {
-		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
+		logger = cc.traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;

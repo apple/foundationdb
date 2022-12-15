@@ -35,7 +35,7 @@
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -188,7 +188,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
 
-		logger = traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ResolverMetrics");
+		logger = cc.traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ResolverMetrics");
 	}
 	~Resolver() { destroyConflictSet(conflictSet); }
 };
@@ -204,6 +204,15 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	state NetworkAddress proxyAddress =
 	    req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo& proxyInfo = self->proxyInfoMap[proxyAddress];
+
+	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+		    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
+		cipherKeys = cks;
+	}
 
 	++self->resolveBatchIn;
 
@@ -242,7 +251,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		}
 
 		choose {
-			when(wait(self->version.whenAtLeast(req.prevVersion))) { break; }
+			when(wait(self->version.whenAtLeast(req.prevVersion))) {
+				break;
+			}
 			when(wait(self->checkNeededVersion.onTrigger())) {}
 		}
 	}
@@ -351,7 +362,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
-				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
+				applyMetadataMutations(spanContext,
+				                       *resolverData,
+				                       req.transactions[t].mutations,
+				                       isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys
+				                                                                                      : nullptr);
 			}
 			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
@@ -460,7 +475,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			CODE_PROBE(true, "No outstanding batches for version on proxy");
+			CODE_PROBE(true, "No outstanding batches for version on proxy", probe::decoration::rare);
 			req.reply.send(Never());
 		}
 	} else {
@@ -506,8 +521,10 @@ struct TransactionStateResolveContext {
 	}
 };
 
-ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext,
-                                                          Reference<AsyncVar<ServerDBInfo> const> db) {
+ACTOR Future<Void> processCompleteTransactionStateRequest(
+    TransactionStateResolveContext* pContext,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;
 
@@ -574,7 +591,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		bool confChanges; // Ignore configuration changes for initial commits.
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
-		applyMetadataMutations(SpanContext(), resolverData, mutations);
+		applyMetadataMutations(SpanContext(), resolverData, mutations, cipherKeys);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
@@ -615,7 +632,17 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(pContext, db));
+		state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+		if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+			static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = {
+				SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, ENCRYPT_HEADER_DOMAIN_ID
+			};
+			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+			    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
+			cipherKeys = cks;
+		}
+		wait(processCompleteTransactionStateRequest(
+		    pContext, db, isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ? &cipherKeys : nullptr));
 		pContext->processed = true;
 	}
 
@@ -725,7 +752,9 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 	try {
 		state Future<Void> core = resolverCore(resolver, initReq, db);
 		loop choose {
-			when(wait(core)) { return Void(); }
+			when(wait(core)) {
+				return Void();
+			}
 			when(wait(checkRemoved(db, initReq.recoveryCount, resolver))) {}
 		}
 	} catch (Error& e) {

@@ -248,9 +248,9 @@ public:
 	    lastTLogVersion(0), lastVersionWithData(0), peekVersion(0), compactionInProgress(Void()),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), debug_inApplyUpdate(false),
 	    debug_lastValidateTime(0), versionLag(0), behind(false), counters(this) {
-		version.initMetric("StorageCacheData.Version"_sr, counters.cc.id);
-		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.id);
-		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.id);
+		version.initMetric("StorageCacheData.Version"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.getId());
+		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -456,7 +456,9 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageCacheData* data, Version ver
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "CacheServerFutureVersion1000x", data->thisServerID)
@@ -1188,7 +1190,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
-	state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
+	state ReadOptions options = ReadOptions(ReadType::FETCH, CacheResult::False);
 
 	if (*isTooOld)
 		throw transaction_too_old();
@@ -1848,7 +1850,9 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 
 	loop {
 		loop choose {
-			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) {
+				break;
+			}
 			when(wait(dbInfoChange)) {
 				dbInfoChange = data->db->onChange();
 				if (data->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -2224,11 +2228,10 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 	self.ck = cacheKeysPrefixFor(id).withPrefix(systemKeys.begin); // FFFF/02cacheKeys/[this server]/
 
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
-	actors.add(traceCounters("CacheMetrics",
-	                         self.thisServerID,
-	                         SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                         &self.counters.cc,
-	                         self.thisServerID.toString() + "/CacheMetrics"));
+	actors.add(self.counters.cc.traceCounters("CacheMetrics",
+	                                          self.thisServerID,
+	                                          SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                          self.thisServerID.toString() + "/CacheMetrics"));
 
 	// fetch already cached ranges from the database and apply them before proceeding
 	wait(storageCacheStartUpWarmup(&self));
@@ -2251,13 +2254,21 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 				// actors.add(self->readGuard(req , getValueQ));
 				actors.add(getValueQ(&self, req));
 			}
-			when(WatchValueRequest req = waitNext(ssi.watchValue.getFuture())) { ASSERT(false); }
-			when(GetKeyRequest req = waitNext(ssi.getKey.getFuture())) { actors.add(getKey(&self, req)); }
+			when(WatchValueRequest req = waitNext(ssi.watchValue.getFuture())) {
+				ASSERT(false);
+			}
+			when(GetKeyRequest req = waitNext(ssi.getKey.getFuture())) {
+				actors.add(getKey(&self, req));
+			}
 			when(GetKeyValuesRequest req = waitNext(ssi.getKeyValues.getFuture())) {
 				actors.add(getKeyValues(&self, req));
 			}
-			when(GetShardStateRequest req = waitNext(ssi.getShardState.getFuture())) { ASSERT(false); }
-			when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) { ASSERT(false); }
+			when(GetShardStateRequest req = waitNext(ssi.getShardState.getFuture())) {
+				ASSERT(false);
+			}
+			when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
+				ASSERT(false);
+			}
 			// when( ReplyPromise<Version> reply = waitNext(ssi.getVersion.getFuture()) ) {
 			//	ASSERT(false);
 			//}
@@ -2265,21 +2276,39 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 				ASSERT(false);
 			}
 
-			when(GetMappedKeyValuesRequest req = waitNext(ssi.getMappedKeyValues.getFuture())) { ASSERT(false); }
-			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) { ASSERT(false); }
-			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) { ASSERT(false); }
-			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) { ASSERT(false); }
-			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) { ASSERT(false); }
-			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) { ASSERT(false); }
-			when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) { ASSERT(false); }
-			when(ChangeFeedStreamRequest req = waitNext(ssi.changeFeedStream.getFuture())) { ASSERT(false); }
+			when(GetMappedKeyValuesRequest req = waitNext(ssi.getMappedKeyValues.getFuture())) {
+				ASSERT(false);
+			}
+			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
+				ASSERT(false);
+			}
+			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
+				ASSERT(false);
+			}
+			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
+				ASSERT(false);
+			}
+			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
+				ASSERT(false);
+			}
+			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
+				ASSERT(false);
+			}
+			when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) {
+				ASSERT(false);
+			}
+			when(ChangeFeedStreamRequest req = waitNext(ssi.changeFeedStream.getFuture())) {
+				ASSERT(false);
+			}
 			when(OverlappingChangeFeedsRequest req = waitNext(ssi.overlappingChangeFeeds.getFuture())) {
 				// Simulate endpoint not found so that the requester will try another endpoint
 				// This is a workaround to the fact that storage servers do not have an easy way to enforce this
 				// request goes only to other storage servers, and in simulation we manage to trigger this behavior
 				req.reply.sendError(broken_promise());
 			}
-			when(ChangeFeedPopRequest req = waitNext(ssi.changeFeedPop.getFuture())) { ASSERT(false); }
+			when(ChangeFeedPopRequest req = waitNext(ssi.changeFeedPop.getFuture())) {
+				ASSERT(false);
+			}
 			when(ChangeFeedVersionUpdateRequest req = waitNext(ssi.changeFeedVersionUpdate.getFuture())) {
 				ASSERT(false);
 			}

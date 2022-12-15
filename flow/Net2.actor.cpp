@@ -232,6 +232,7 @@ public:
 	double taskBegin;
 	TaskPriority currentTaskID;
 	TDMetricCollection tdmetrics;
+	MetricCollection metrics;
 	ChaosMetrics chaosMetrics;
 	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
 	// not. For portability this should be atomic
@@ -341,7 +342,7 @@ public:
 	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
 	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
-	Future<Void> getFuture() { return p.getFuture(); }
+	Future<Void> getFuture() const { return p.getFuture(); }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
@@ -881,8 +882,8 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [self = self](bool verifyOk) {
-				self->has_trusted_peer = verifyOk;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
+				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
@@ -933,8 +934,12 @@ public:
 		doAcceptHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -959,8 +964,8 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [self = self](bool verifyOk) {
-				self->has_trusted_peer = verifyOk;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
+				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
@@ -993,8 +998,12 @@ public:
 		doConnectHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
@@ -1219,6 +1228,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		setGlobal(INetwork::enChaosMetrics, (flowGlobalType)&chaosMetrics);
 	}
+	setGlobal(INetwork::enMetrics, (flowGlobalType)&metrics);
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType)network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType)&reactor.ios);
 	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);

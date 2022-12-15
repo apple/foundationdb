@@ -29,20 +29,21 @@
 #include "fdbserver/IClosable.h"
 #include "fdbserver/IPageEncryptionKeyProvider.actor.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/StorageMetrics.actor.h"
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
-	const KeyRange range; // Keyrange this checkpoint must contain.
+	const std::vector<KeyRange> ranges; // Keyranges this checkpoint must contain.
 	const CheckpointFormat format;
 	const UID checkpointID;
 	const std::string checkpointDir; // The local directory where the checkpoint file will be created.
 
 	CheckpointRequest(const Version version,
-	                  const KeyRange& range,
+	                  const std::vector<KeyRange>& ranges,
 	                  const CheckpointFormat format,
 	                  const UID& id,
 	                  const std::string& checkpointDir)
-	  : version(version), range(range), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
+	  : version(version), ranges(ranges), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
 };
 
 class IKeyValueStore : public IClosable {
@@ -52,7 +53,9 @@ public:
 	// persistRangeMapping().
 	virtual bool shardAware() const { return false; }
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
-	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
+	virtual void clear(KeyRangeRef range,
+	                   const StorageServerMetrics* storageMetrics = nullptr,
+	                   const Arena* arena = nullptr) = 0;
 	virtual Future<Void> canCommit() { return Void(); }
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
@@ -81,9 +84,6 @@ public:
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
 
-	// Destroys the physical shards if they're empty.
-	virtual Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) { return Void(); };
-
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes
@@ -101,6 +101,14 @@ public:
 
 	// Restore from a checkpoint.
 	virtual Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { throw not_implemented(); }
+
+	// Same as above, with a target shardId, and a list of target ranges, ranges must be a subset of the checkpoint
+	// ranges.
+	virtual Future<Void> restore(const std::string& shardId,
+	                             const std::vector<KeyRange>& ranges,
+	                             const std::vector<CheckpointMetaData>& checkpoints) {
+		throw not_implemented();
+	}
 
 	// Delete a checkpoint.
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }

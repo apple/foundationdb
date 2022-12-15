@@ -1,11 +1,12 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = ['optional', 'required']
 injectTargetedSSRestart = true
 injectSSDelay = true
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4, 5]
+encryptModes = ['domain_aware', 'cluster_aware']
 
 [[knobs]]
 bg_metadata_source = "tenant"

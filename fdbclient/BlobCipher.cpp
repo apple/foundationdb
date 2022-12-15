@@ -57,11 +57,11 @@ BlobCipherMetrics::CounterSet::CounterSet(CounterCollection& cc, std::string nam
     getCipherKeysLatency(name + "GetCipherKeysLatency",
                          UID(),
                          FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
     getLatestCipherKeysLatency(name + "GetLatestCipherKeysLatency",
                                UID(),
                                FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE) {}
+                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY) {}
 
 BlobCipherMetrics::BlobCipherMetrics()
   : cc("BlobCipher"), cipherKeyCacheHit("CipherKeyCacheHit", cc), cipherKeyCacheMiss("CipherKeyCacheMiss", cc),
@@ -71,11 +71,15 @@ BlobCipherMetrics::BlobCipherMetrics()
     getCipherKeysLatency("GetCipherKeysLatency",
                          UID(),
                          FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
     getLatestCipherKeysLatency("GetLatestCipherKeysLatency",
                                UID(),
                                FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
+    getBlobMetadataLatency("GetBlobMetadataLatency",
+                           UID(),
+                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
     counterSets({ CounterSet(cc, "TLog"),
                   CounterSet(cc, "KVMemory"),
                   CounterSet(cc, "KVRedwood"),
@@ -83,7 +87,7 @@ BlobCipherMetrics::BlobCipherMetrics()
                   CounterSet(cc, "Backup"),
                   CounterSet(cc, "Test") }) {
 	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
-	traceFuture = traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL, &cc);
+	traceFuture = cc.traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL);
 }
 
 std::string toString(BlobCipherMetrics::UsageType type) {

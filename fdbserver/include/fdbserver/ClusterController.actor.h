@@ -144,6 +144,7 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		AsyncVar<bool> blobGranulesEnabled;
+		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
@@ -159,7 +160,7 @@ public:
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
 		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
-		    blobGranulesEnabled(config.blobGranulesEnabled) {
+		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
 			clientCounter = countClients(this);
 		}
 
@@ -919,7 +920,7 @@ public:
 			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				    SevDebug, id, "simple", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
@@ -1071,7 +1072,7 @@ public:
 			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				    SevDebug, id, "deprecated", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
@@ -3082,18 +3083,23 @@ public:
 			}
 		}
 
+		auto deterministicDecendingOrder = [](const std::pair<int, NetworkAddress>& a,
+		                                      const std::pair<int, NetworkAddress>& b) -> bool {
+			return a.first > b.first || (a.first == b.first && a.second < b.second);
+		};
+
 		// Sort degraded peers based on the number of workers complaining about it.
 		std::vector<std::pair<int, NetworkAddress>> count2DegradedPeer;
 		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
-		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), std::greater<>());
+		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), deterministicDecendingOrder);
 
 		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
 		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
 			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
 		}
-		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), std::greater<>());
+		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), deterministicDecendingOrder);
 
 		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
 		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded
@@ -3341,6 +3347,7 @@ public:
 	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
 	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
 	UID id;
+	Reference<AsyncVar<Optional<UID>>> clusterId;
 	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
 	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
@@ -3399,6 +3406,12 @@ public:
 	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
 	std::queue<double> recentHealthTriggeredRecoveryTime;
 
+	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
+	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
+	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
+	// encryption status.
+	Promise<EncryptionAtRestMode> encryptionAtRestMode;
+
 	CounterCollection clusterControllerMetrics;
 
 	Counter openDatabaseRequests;
@@ -3412,15 +3425,16 @@ public:
 
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
-	                      ServerCoordinators const& coordinators)
+	                      ServerCoordinators const& coordinators,
+	                      Reference<AsyncVar<Optional<UID>>> clusterId)
 	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
-	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
-	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitBlobMigrator(false),
-	    recruitEncryptKeyProxy(false), recruitConsistencyScan(false),
-	    clusterControllerMetrics("ClusterController", id.toString()),
+	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
+	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
+	    datacenterVersionDifference(0), versionDifferenceUpdated(false), remoteDCMonitorStarted(false),
+	    remoteTransactionSystemDegraded(false), recruitDistributor(false), recruitRatekeeper(false),
+	    recruitBlobManager(false), recruitBlobMigrator(false), recruitEncryptKeyProxy(false),
+	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),

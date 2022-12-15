@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 #pragma once
+#include "flow/EncryptUtils.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H)
 #define FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H
 #include "fdbclient/GetEncryptCipherKeys.actor.g.h"
@@ -91,7 +92,7 @@ Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Refer
 ACTOR template <class T>
 Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
-    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains,
+    std::unordered_set<EncryptCipherDomainId> domainIds,
     BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
@@ -103,16 +104,15 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 	}
 
 	// Collect cached cipher keys.
-	for (auto& domain : domains) {
-		Reference<BlobCipherKey> cachedCipherKey = cipherKeyCache->getLatestCipherKey(domain.first /*domainId*/);
+	for (auto& domainId : domainIds) {
+		Reference<BlobCipherKey> cachedCipherKey = cipherKeyCache->getLatestCipherKey(domainId);
 		if (cachedCipherKey.isValid()) {
-			cipherKeys[domain.first] = cachedCipherKey;
+			cipherKeys[domainId] = cachedCipherKey;
 		} else {
-			request.encryptDomainInfos.emplace_back(
-			    request.arena, domain.first /*domainId*/, domain.second /*domainName*/);
+			request.encryptDomainIds.emplace_back(domainId);
 		}
 	}
-	if (request.encryptDomainInfos.empty()) {
+	if (request.encryptDomainIds.empty()) {
 		return cipherKeys;
 	}
 	// Fetch any uncached cipher keys.
@@ -122,7 +122,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 			// Insert base cipher keys into cache and construct result.
 			for (const EKPBaseCipherDetails& details : reply.baseCipherDetails) {
 				EncryptCipherDomainId domainId = details.encryptDomainId;
-				if (domains.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
+				if (domainIds.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
 					Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(domainId,
 					                                                                     details.baseCipherId,
 					                                                                     details.baseCipherKey.begin(),
@@ -134,9 +134,9 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 				}
 			}
 			// Check for any missing cipher keys.
-			for (auto& domain : request.encryptDomainInfos) {
-				if (cipherKeys.count(domain.domainId) == 0) {
-					TraceEvent(SevWarn, "GetLatestEncryptCipherKeys_KeyMissing").detail("DomainId", domain.domainId);
+			for (auto domainId : request.encryptDomainIds) {
+				if (cipherKeys.count(domainId) == 0) {
+					TraceEvent(SevWarn, "GetLatestEncryptCipherKeys_KeyMissing").detail("DomainId", domainId);
 					throw encrypt_key_not_found();
 				}
 			}
@@ -157,11 +157,10 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 ACTOR template <class T>
 Future<Reference<BlobCipherKey>> getLatestEncryptCipherKey(Reference<AsyncVar<T> const> db,
                                                            EncryptCipherDomainId domainId,
-                                                           EncryptCipherDomainName domainName,
                                                            BlobCipherMetrics::UsageType usageType) {
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains({ { domainId, domainName } });
+	std::unordered_set<EncryptCipherDomainId> domainIds{ domainId };
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKey =
-	    wait(getLatestEncryptCipherKeys(db, domains, usageType));
+	    wait(getLatestEncryptCipherKeys(db, domainIds, usageType));
 
 	return cipherKey.at(domainId);
 }
@@ -228,8 +227,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 		return cipherKeys;
 	}
 	for (const BaseCipherIndex& id : uncachedBaseCipherIds) {
-		request.baseCipherInfos.emplace_back(
-		    id.first /*domainId*/, id.second /*baseCipherId*/, StringRef() /*domainName*/, request.arena);
+		request.baseCipherInfos.emplace_back(id.first /*domainId*/, id.second /*baseCipherId*/);
 	}
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
@@ -282,13 +280,10 @@ struct TextAndHeaderCipherKeys {
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
-                                                                    EncryptCipherDomainName domainName,
                                                                     BlobCipherMetrics::UsageType usageType) {
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
-	domains[domainId] = domainName;
-	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_ENCRYPT_HEADER_DOMAIN_NAME;
+	std::unordered_set<EncryptCipherDomainId> domainIds = { domainId, ENCRYPT_HEADER_DOMAIN_ID };
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
-	    wait(getLatestEncryptCipherKeys(db, domains, usageType));
+	    wait(getLatestEncryptCipherKeys(db, domainIds, usageType));
 	ASSERT(cipherKeys.count(domainId) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
 	TextAndHeaderCipherKeys result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
@@ -300,8 +295,7 @@ Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<As
 template <class T>
 Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
                                                                  BlobCipherMetrics::UsageType usageType) {
-	return getLatestEncryptCipherKeysForDomain(
-	    db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME, usageType);
+	return getLatestEncryptCipherKeysForDomain(db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, usageType);
 }
 
 ACTOR template <class T>

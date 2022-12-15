@@ -74,7 +74,8 @@ class WorkloadProcessState {
 		                                             ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
 		                                             dataFolder.c_str(),
 		                                             parent->coordinationFolder.c_str(),
-		                                             parent->protocolVersion);
+		                                             parent->protocolVersion,
+		                                             false);
 		self->childProcess->excludeFromRestarts = true;
 		wait(g_simulator->onProcess(self->childProcess, TaskPriority::DefaultYield));
 		try {
@@ -167,7 +168,7 @@ struct WorkloadProcess {
 
 	WorkloadProcess(ClientWorkload::CreateWorkload const& childCreator, WorkloadContext const& wcx)
 	  : processState(WorkloadProcessState::instance(wcx.clientId)) {
-		TraceEvent("StartingClinetWorkload", id).detail("OnClientProcess", processState->id);
+		TraceEvent("StartingClientWorkload", id).detail("OnClientProcess", processState->id);
 		childWorkloadContext.clientCount = wcx.clientCount;
 		childWorkloadContext.clientId = wcx.clientId;
 		childWorkloadContext.ccr = wcx.ccr;

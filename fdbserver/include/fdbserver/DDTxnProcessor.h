@@ -117,6 +117,7 @@ public:
 
 	virtual Future<Void> moveKeys(const MoveKeysParams& params) = 0;
 
+	// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
 	virtual Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
 	                                                                            StorageMetrics const& min,
 	                                                                            StorageMetrics const& max,
@@ -135,8 +136,6 @@ public:
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
 	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
-
-	virtual Future<UID> getClusterId() const { return {}; }
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
@@ -221,16 +220,15 @@ public:
 
 	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
 
-	Future<UID> getClusterId() const override;
-
 	Future<Void> waitDDTeamInfoPrintSignal() const override;
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
 protected:
-	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
-	Future<Void> rawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawFinishMovement(const MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping);
 };
 
 struct DDMockTxnProcessorImpl;
@@ -240,6 +238,7 @@ struct DDMockTxnProcessorImpl;
 class DDMockTxnProcessor : public IDDTxnProcessor {
 	friend struct DDMockTxnProcessorImpl;
 
+protected:
 	std::shared_ptr<MockGlobalState> mgs;
 
 	std::vector<DDShardInfo> getDDShardInfos() const;
@@ -295,9 +294,10 @@ public:
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
 protected:
-	void rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
-	void rawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawFinishMovement(const MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping);
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

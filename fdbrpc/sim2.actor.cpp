@@ -63,7 +63,8 @@ ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
     allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
     lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
+    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false),
+    blobGranulesEnabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -139,6 +140,26 @@ void ISimulator::displayWorkers() const {
 	}
 
 	return;
+}
+
+Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow) {
+	ASSERT_GT(authKeys.size(), 0);
+	auto tokenSpec = authz::jwt::TokenRef{};
+	auto [keyName, key] = *authKeys.begin();
+	tokenSpec.algorithm = key.algorithm() == PKeyAlgorithm::EC ? authz::Algorithm::ES256 : authz::Algorithm::RS256;
+	tokenSpec.keyId = keyName;
+	tokenSpec.issuer = "sim2_issuer"_sr;
+	tokenSpec.subject = "sim2_testing"_sr;
+	auto const now = static_cast<uint64_t>(g_network->timer());
+	tokenSpec.notBeforeUnixTime = now - 1;
+	tokenSpec.issuedAtUnixTime = now;
+	tokenSpec.expiresAtUnixTime = now + ttlSecondsFromNow;
+	auto const tokenId = deterministicRandom()->randomAlphaNumeric(10);
+	tokenSpec.tokenId = StringRef(tokenId);
+	tokenSpec.tenants = VectorRef<StringRef>(&tenantName, 1);
+	auto ret = Standalone<StringRef>();
+	ret.contents() = authz::jwt::signToken(ret.arena(), tokenSpec, key);
+	return ret;
 }
 
 int openCount = 0;
@@ -784,11 +805,25 @@ private:
 			std::string sourceFilename = self->filename + ".part";
 
 			if (machineCache.count(sourceFilename)) {
+				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
+				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
 				TraceEvent("SimpleFileRename")
 				    .detail("From", sourceFilename)
 				    .detail("To", self->filename)
 				    .detail("SourceCount", machineCache.count(sourceFilename))
 				    .detail("FileCount", machineCache.count(self->filename));
+				auto maxBlockValue = std::numeric_limits<block_value_type>::max();
+				g_simulator->corruptedBlocks.erase(
+				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(self->filename, maxBlockValue)));
+				// next we need to rename all files. In practice, the number of corruptions for a given file should be
+				// very small
+				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
+				for (auto iter = begin; iter != end; ++iter) {
+					g_simulator->corruptedBlocks.emplace(self->filename, iter->second);
+				}
+				g_simulator->corruptedBlocks.erase(begin, end);
 				renameFile(sourceFilename.c_str(), self->filename.c_str());
 
 				machineCache[self->filename] = machineCache[sourceFilename];
@@ -1219,13 +1254,15 @@ public:
 
 	static void runLoop(Sim2* self) {
 		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+		int lastPrintTime = 0;
 		while (!self->isStopped) {
 			if (self->taskQueue.canSleep()) {
 				double sleepTime = self->taskQueue.getSleepTime(self->time);
 				self->time +=
 				    sleepTime + FLOW_KNOBS->MAX_RUNLOOP_SLEEP_DELAY * pow(deterministicRandom()->random01(), 1000.0);
-				if (self->printSimTime) {
+				if (self->printSimTime && (int)self->time > lastPrintTime) {
 					printf("Time: %d\n", (int)self->time);
+					lastPrintTime = (int)self->time;
 				}
 				self->timerTime = std::max(self->timerTime, self->time);
 			}
@@ -1240,6 +1277,7 @@ public:
 				PromiseTask* task = self->taskQueue.getReadyTask();
 				self->taskQueue.popReadyTask();
 				self->execTask(*task);
+				delete task;
 				self->yielded = false;
 			}
 		}
@@ -1260,7 +1298,8 @@ public:
 	                        ProcessClass startingClass,
 	                        const char* dataFolder,
 	                        const char* coordinationFolder,
-	                        ProtocolVersion protocol) override {
+	                        ProtocolVersion protocol,
+	                        bool drProcess) override {
 		ASSERT(locality.machineId().present());
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
@@ -1310,6 +1349,7 @@ public:
 		m->excluded = g_simulator->isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator->isCleared(addresses.address);
 		m->protocolVersion = protocol;
+		m->drProcess = drProcess;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType)&m->tdmetrics);
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
@@ -1317,13 +1357,15 @@ public:
 		}
 		m->setGlobal(enNetworkConnections, (flowGlobalType)m->network);
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
+		m->setGlobal(INetwork::enMetrics, (flowGlobalType)&m->metrics);
 
 		TraceEvent("NewMachine")
 		    .detail("Name", name)
 		    .detail("Address", m->address)
 		    .detail("MachineId", m->locality.machineId())
 		    .detail("Excluded", m->excluded)
-		    .detail("Cleared", m->cleared);
+		    .detail("Cleared", m->cleared)
+		    .detail("DrProcess", m->drProcess);
 
 		if (std::string(name) == "remote flow process") {
 			protectedAddresses.insert(m->address);
@@ -1406,6 +1448,7 @@ public:
 		for (auto processInfo : getAllProcesses()) {
 			if (currentDcId != processInfo->locality.dcId() || // skip other dc
 			    processInfo->startingClass != ProcessClass::BlobWorkerClass || // skip non blob workers
+			    processInfo->failed || // if process was killed but has not yet been removed from the process list
 			    processInfo->locality.machineId() == machineId) { // skip current machine
 				continue;
 			}
@@ -1793,6 +1836,15 @@ public:
 		}
 		return result;
 	}
+	bool killAll(KillType kt, bool forceKill, KillType* ktFinal) override {
+		bool result = false;
+		for (auto& machine : machines) {
+			if (killMachine(machine.second.machineId, kt, forceKill, ktFinal)) {
+				result = true;
+			}
+		}
+		return result;
+	}
 	bool killMachine(Optional<Standalone<StringRef>> machineId,
 	                 KillType kt,
 	                 bool forceKill,
@@ -1815,6 +1867,7 @@ public:
 		}
 
 		int processesOnMachine = 0;
+		bool isMainCluster = true; // false for machines running DR processes
 
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
@@ -1823,6 +1876,9 @@ public:
 				kt = Reboot;
 			if (!process->rebooting)
 				processesOnMachine++;
+			if (process->drProcess) {
+				isMainCluster = false;
+			}
 		}
 
 		// Do nothing, if no processes to kill
@@ -1949,28 +2005,15 @@ public:
 		           probe::context::sim2,
 		           probe::assert::simOnly);
 
-		// Check if any processes on machine are rebooting
-		if (processesOnMachine != processesPerMachine && kt >= RebootAndDelete) {
+		if (isMainCluster && originalKt == RebootProcessAndSwitch) {
+			// When killing processes with the RebootProcessAndSwitch kill
+			// type, processes in the original cluster should be rebooted in
+			// order to kill any zombie processes.
+			kt = KillType::Reboot;
+		} else if (processesOnMachine != processesPerMachine && kt != RebootProcessAndSwitch) {
+			// Check if any processes on machine are rebooting
 			CODE_PROBE(true,
 			           "Attempted reboot, but the target did not have all of its processes running",
-			           probe::context::sim2,
-			           probe::assert::simOnly);
-			TraceEvent(SevWarn, "AbortedKill")
-			    .detail("KillType", kt)
-			    .detail("MachineId", machineId)
-			    .detail("Reason", "Machine processes does not match number of processes per machine")
-			    .detail("Processes", processesOnMachine)
-			    .detail("ProcessesPerMachine", processesPerMachine)
-			    .backtrace();
-			if (ktFinal)
-				*ktFinal = None;
-			return false;
-		}
-
-		// Check if any processes on machine are rebooting
-		if (processesOnMachine != processesPerMachine) {
-			CODE_PROBE(true,
-			           "Attempted reboot and kill, but the target did not have all of its processes running",
 			           probe::context::sim2,
 			           probe::assert::simOnly);
 			TraceEvent(SevWarn, "AbortedKill")
@@ -2007,7 +2050,7 @@ public:
 				if (process->startingClass != ProcessClass::TesterClass)
 					killProcess_internal(process, kt);
 			}
-		} else if (kt == Reboot || kt == RebootAndDelete) {
+		} else if (kt == Reboot || kt == RebootAndDelete || kt == RebootProcessAndSwitch) {
 			for (auto& process : machines[machineId].processes) {
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
@@ -2261,7 +2304,7 @@ public:
 	}
 
 	// Implementation
-	struct PromiseTask final {
+	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
 		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
@@ -2356,7 +2399,7 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	NetworkAddress _localAddress;
 	bool randomDropPacket() {
 		auto res = deterministicRandom()->random01() < .000001;
-		CODE_PROBE(res, "UDP packet drop", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(res, "UDP packet drop", probe::context::sim2, probe::assert::simOnly, probe::decoration::rare);
 		return res;
 	}
 
@@ -2563,7 +2606,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 
 	try {
 		ASSERT(kt == ISimulator::RebootProcess || kt == ISimulator::Reboot || kt == ISimulator::RebootAndDelete ||
-		       kt == ISimulator::RebootProcessAndDelete);
+		       kt == ISimulator::RebootProcessAndDelete || kt == ISimulator::RebootProcessAndSwitch);
 
 		CODE_PROBE(kt == ISimulator::RebootProcess,
 		           "Simulated process rebooted",
@@ -2577,6 +2620,10 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		           probe::context::sim2);
 		CODE_PROBE(kt == ISimulator::RebootProcessAndDelete,
 		           "Simulated process rebooted with data and coordination state deletion",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
+		CODE_PROBE(kt == ISimulator::RebootProcessAndSwitch,
+		           "Simulated process rebooted with different cluster file",
 		           probe::assert::simOnly,
 		           probe::context::sim2);
 
@@ -2607,6 +2654,8 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		if ((kt == ISimulator::RebootAndDelete) || (kt == ISimulator::RebootProcessAndDelete)) {
 			p->cleared = true;
 			g_simulator->clearAddress(p->address);
+		} else if (kt == ISimulator::RebootProcessAndSwitch) {
+			g_simulator->switchCluster(p->address);
 		}
 		p->shutdownSignal.send(kt);
 	} catch (Error& e) {
@@ -2733,6 +2782,22 @@ Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBe
 
 ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
 	wait(delay(0.5 * deterministicRandom()->random01()));
+	// rename all keys in the corrupted list
+	// first we have to delete all corruption of the destination, since this file will be unlinked if it exists
+	TraceEvent("RenamingFile").detail("From", from).detail("To", to).log();
+	// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
+	using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
+	auto maxBlockValue = std::numeric_limits<block_value_type>::max();
+	g_simulator->corruptedBlocks.erase(g_simulator->corruptedBlocks.lower_bound(std::make_pair(to, 0u)),
+	                                   g_simulator->corruptedBlocks.upper_bound(std::make_pair(to, maxBlockValue)));
+	// next we need to rename all files. In practice, the number of corruptions for a given file should be very small
+	auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(from, 0u)),
+	     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(from, maxBlockValue));
+	for (auto iter = begin; iter != end; ++iter) {
+		g_simulator->corruptedBlocks.emplace(to, iter->second);
+	}
+	g_simulator->corruptedBlocks.erase(begin, end);
+	// do the rename
 	::renameFile(from, to);
 	wait(delay(0.5 * deterministicRandom()->random01()));
 	return Void();

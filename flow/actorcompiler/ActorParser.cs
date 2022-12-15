@@ -483,6 +483,12 @@ namespace actorcompiler
                     initializer = 
                         range(paren.Position + 1, tokens.End)
                             .TakeWhile(t => t.ParenDepth > paren.ParenDepth);
+                } else {
+                    Token brace = AngleBracketParser.NotInsideAngleBrackets(tokens).FirstOrDefault(t => t.Value == "{");
+                    if (brace != null) {
+                        // type name{initializer};
+                        throw new Error(brace.SourceLine, "Uniform initialization syntax is not currently supported for state variables (use '(' instead of '}}' ?)");
+                    }
                 }
             }
             name = beforeInitializer.Last(NonWhitespace);

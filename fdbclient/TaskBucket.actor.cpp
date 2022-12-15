@@ -579,8 +579,8 @@ public:
 	                              int maxConcurrentTasks) {
 		state Reference<AsyncVar<bool>> paused = makeReference<AsyncVar<bool>>(true);
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
-		taskBucket->metricLogger = traceCounters(
-		    "TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY, &taskBucket->cc);
+		taskBucket->metricLogger = taskBucket->cc.traceCounters(
+		    "TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY);
 		loop {
 			while (paused->get()) {
 				wait(paused->onChange() || watchPausedFuture);
@@ -870,13 +870,13 @@ TaskBucket::TaskBucket(const Subspace& subspace,
                        AccessSystemKeys sysAccess,
                        PriorityBatch priorityBatch,
                        LockAware lockAware)
-  : cc("TaskBucket"), dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc), dispatchErrors("DispatchErrors", cc),
+  : dbgid(deterministicRandom()->randomUniqueID()), cc("TaskBucket", dbgid.toString()),
+    dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc), dispatchErrors("DispatchErrors", cc),
     dispatchDoTasks("DispatchDoTasks", cc), dispatchEmptyTasks("DispatchEmptyTasks", cc),
-    dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc), dbgid(deterministicRandom()->randomUniqueID()),
-    prefix(subspace), active(prefix.get("ac"_sr)), pauseKey(prefix.pack("pause"_sr)), available(prefix.get("av"_sr)),
-    available_prioritized(prefix.get("avp"_sr)), timeouts(prefix.get("to"_sr)),
-    timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS), system_access(sysAccess), priority_batch(priorityBatch),
-    lockAware(lockAware) {}
+    dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc), prefix(subspace), active(prefix.get("ac"_sr)),
+    pauseKey(prefix.pack("pause"_sr)), available(prefix.get("av"_sr)), available_prioritized(prefix.get("avp"_sr)),
+    timeouts(prefix.get("to"_sr)), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS), system_access(sysAccess),
+    priority_batch(priorityBatch), lockAware(lockAware) {}
 
 TaskBucket::~TaskBucket() {}
 

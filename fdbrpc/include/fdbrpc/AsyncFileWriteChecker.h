@@ -32,14 +32,18 @@ public:
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	Future<int> read(void* data, int length, int64_t offset) override {
-		return map(m_f->read(data, length, offset), [=](int r) {
-			updateChecksumHistory(false, offset, r, (uint8_t*)data);
+		// Lambda must hold a reference to this to keep it alive until after the read
+		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
+		return map(m_f->read(data, length, offset), [self, data, offset](int r) {
+			self->updateChecksumHistory(false, offset, r, (uint8_t*)data);
 			return r;
 		});
 	}
 	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override {
-		return map(m_f->readZeroCopy(data, length, offset), [=](Void r) {
-			updateChecksumHistory(false, offset, *length, (uint8_t*)data);
+		// Lambda must hold a reference to this to keep it alive until after the read
+		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
+		return map(m_f->readZeroCopy(data, length, offset), [self, data, length, offset](Void r) {
+			self->updateChecksumHistory(false, offset, *length, (uint8_t*)data);
 			return r;
 		});
 	}
@@ -50,12 +54,14 @@ public:
 	}
 
 	Future<Void> truncate(int64_t size) override {
-		return map(m_f->truncate(size), [=](Void r) {
+		// Lambda must hold a reference to this to keep it alive until after the read
+		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
+		return map(m_f->truncate(size), [self, size](Void r) {
 			// Truncate the page checksum history if it is in use
-			if ((size / checksumHistoryPageSize) < checksumHistory.size()) {
-				int oldCapacity = checksumHistory.capacity();
-				checksumHistory.resize(size / checksumHistoryPageSize);
-				checksumHistoryBudget.get() -= (checksumHistory.capacity() - oldCapacity);
+			if ((size / checksumHistoryPageSize) < self->checksumHistory.size()) {
+				int oldCapacity = self->checksumHistory.capacity();
+				self->checksumHistory.resize(size / checksumHistoryPageSize);
+				checksumHistoryBudget.get() -= (self->checksumHistory.capacity() - oldCapacity);
 			}
 			return r;
 		});

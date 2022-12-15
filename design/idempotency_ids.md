@@ -34,20 +34,25 @@ Commit proxies would combine idempotency IDs for transactions within a batch. Th
 
 ## Value format
 ```
-${protocol_version}(${n (1 byte)}${idempotency_id (n bytes)}${low_order_byte_of_batch_index})*
+${protocol_version}${timestamp}(${n (1 byte)}${idempotency_id (n bytes)}${low_order_byte_of_batch_index})*
 ```
 
 The batch index for each idempotency id can be reconstructed from the high order byte and low order bytes stored in the key and value, respectively. This is necessary for an "unknown_committed" transaction to recover their full version stamp. Batch index is a `short int`, i.e. 2 bytes.
+
+The timestamp is the unix epoch stored as a little-endian signed 64-bit integer.
 
 # Cleaning up old idempotency ids
 
 After learning the result of an attempt to commit a transaction with an
 idempotency id, the client may inform the cluster that it's no longer interested
 in that id and the cluster can reclaim the space used to store the idempotency
-id. The happy-path reply to a CommitTransactionRequest will say which proxy this
-request should be sent to, and all idempotency ids for a database key will be
-sent to the same proxy so that it can clear the key once it receives all of
-them. The first proxy will also periodically clean up the oldest idempotency ids, based on a policy determined by two knobs. One knob will control the minimum lifetime of an idempotency id (i.e. don't delete anything younger than 1 day), and the other will control the target byte size of the idempotency keys (e.g. keep 100 MB of idempotency keys around).
+id. The commit proxy that committed a batch is responsible for cleaning all
+idempotency kv pairs from that batch, so clients must tell that specific proxy
+that they're done with the id. The first proxy will also periodically clean up
+the oldest idempotency ids, based on a policy determined by two knobs.  One knob
+will control the minimum lifetime of an idempotency id (i.e. don't delete
+anything younger than 1 day), and the other will control the target byte size of
+the idempotency keys (e.g. keep 100 MB of idempotency keys around).
 
 # Commit protocol
 

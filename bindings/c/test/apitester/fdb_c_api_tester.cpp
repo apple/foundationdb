@@ -61,6 +61,7 @@ enum TesterOptionId {
 	OPT_TLS_CERT_FILE,
 	OPT_TLS_KEY_FILE,
 	OPT_TLS_CA_FILE,
+	OPT_RETAIN_CLIENT_LIB_COPIES,
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -89,6 +90,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TLS_CERT_FILE, "--tls-cert-file", SO_REQ_SEP },
 	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
 	  { OPT_TLS_CA_FILE, "--tls-ca-file", SO_REQ_SEP },
+	  { OPT_RETAIN_CLIENT_LIB_COPIES, "--retain-client-lib-copies", SO_NONE },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -140,6 +142,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to file containing client's TLS private key\n"
 	       "  --tls-ca-file FILE\n"
 	       "                 Path to file containing TLS CA certificate\n"
+	       "  --retain-client-lib-copies\n"
+	       "                 Retain temporary external client library copies\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -251,6 +255,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_TLS_CA_FILE:
 		options.tlsCaFile.assign(args.OptionArg());
 		break;
+	case OPT_RETAIN_CLIENT_LIB_COPIES:
+		options.retainClientLibCopies = true;
+		break;
 	}
 	return true;
 }
@@ -279,9 +286,9 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 	return true;
 }
 
-void fdb_check(fdb::Error e) {
-	if (e) {
-		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e.code(), e.what());
+void fdb_check(fdb::Error e, std::string_view msg, fdb::Error::CodeType expectedError = error_code_success) {
+	if (e.code()) {
+		fmt::print(stderr, "{}, Error: {}({})\n", msg, e.code(), e.what());
 		std::abort();
 	}
 }
@@ -347,6 +354,10 @@ void applyNetworkOptions(TesterOptions& options) {
 
 	if (!options.tlsCaFile.empty()) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CA_PATH, options.tlsCaFile);
+	}
+
+	if (options.retainClientLibCopies) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_RETAIN_CLIENT_LIBRARY_COPIES);
 	}
 }
 
@@ -453,14 +464,16 @@ int main(int argc, char** argv) {
 		applyNetworkOptions(options);
 		fdb::network::setup();
 
-		std::thread network_thread{ &fdb::network::run };
+		std::thread network_thread{ [] { fdb_check(fdb::network::run(), "FDB network thread failed"); } };
 
 		if (!runWorkloads(options)) {
 			retCode = 1;
 		}
 
-		fdb_check(fdb::network::stop());
+		fprintf(stderr, "Stopping FDB network thread\n");
+		fdb_check(fdb::network::stop(), "Failed to stop FDB thread");
 		network_thread.join();
+		fprintf(stderr, "FDB network thread successfully stopped\n");
 	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		retCode = 1;

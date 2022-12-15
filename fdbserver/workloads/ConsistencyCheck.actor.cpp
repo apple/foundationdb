@@ -30,7 +30,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
@@ -131,6 +131,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			try {
 				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
 				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
+				if (g_network->isSimulated()) {
+					g_simulator->quiesced = true;
+					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", g_simulator->quiesced);
+				}
 			} catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
 				self->testFailure("Unable to achieve a quiet database");
@@ -200,6 +204,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 				when(wait(self->suspendConsistencyCheck.onChange())) {}
 			}
+		}
+		if (self->firstClient && g_network->isSimulated() && self->performQuiescentChecks) {
+			g_simulator->quiesced = false;
+			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", g_simulator->quiesced);
 		}
 		return Void();
 	}
@@ -394,6 +402,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyValueRef>>
 		    serverList; // "\xff/serverList/[[serverID]]" := "[[StorageServerInterface]]"
 		state Standalone<VectorRef<KeyValueRef>> serverTag; // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
+		state bool testResult = true;
 
 		std::vector<Future<bool>> cacheResultsPromise;
 		cacheResultsPromise.push_back(self->fetchKeyValuesFromSS(cx, self, storageCacheKeys, cacheKeyPromise, true));
@@ -557,6 +566,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 					req.version = version;
 					req.tags = TagSet();
+					req.options = ReadOptions(debugRandom()->randomUniqueID());
+					DisabledTraceEvent("CCD", req.options.get().debugID.get()).detail("Version", version);
 
 					// Try getting the entries in the specified range
 					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -581,7 +592,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					for (j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 						// if (rangeResult.isError()) {
-						// 	throw rangeResult.getError();
+						//	throw rangeResult.getError();
 						// }
 
 						// Compare the results with other storage servers
@@ -709,7 +720,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									    .detail("MatchingKVPairs", matchingKVPairs);
 
 									self->testFailure("Data inconsistent", true);
-									return false;
+									testResult = false;
 								}
 							}
 						}
@@ -755,7 +766,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
-		return true;
+		return testResult;
 	}
 
 	// Directly fetch key/values from storage servers through GetKeyValuesRequest

@@ -172,6 +172,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			}
 		}
 	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -305,6 +306,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state Version prevPurgeVersion = -1;
 		state UID dbgId = debugRandom()->randomUniqueID();
 		state Version newPurgeVersion = 0;
+		// usually we want randomness to verify maximum data, but sometimes hotspotting a subset is good too
+		state bool pickGranuleUniform = deterministicRandom()->random01() < 0.1;
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
@@ -458,7 +461,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				}
 
 				// pick a random range
-				int rIndex = deterministicRandom()->randomInt(0, self->granuleRanges.get().size());
+				size_t granuleCount = self->granuleRanges.get().size();
+				size_t rIndex;
+				if (pickGranuleUniform) {
+					rIndex = deterministicRandom()->randomInt(0, granuleCount);
+				} else {
+					rIndex = deterministicRandom()->randomSkewedUInt32(0, granuleCount);
+				}
 				state KeyRange range = self->granuleRanges.get()[rIndex];
 
 				state std::pair<RangeResult, Version> fdb = wait(readFromFDB(cx, range));

@@ -20,7 +20,7 @@
 
 // Unit tests that test the timeouts for a disconnected cluster
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #include <foundationdb/fdb_c.h>
 
 #include <chrono>
@@ -271,7 +271,7 @@ int main(int argc, char** argv) {
 	context.applyCommandLine(argc, argv);
 
 	fdb_check(fdb_setup_network());
-	std::thread network_thread{ &fdb_run_network };
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	db = fdb_open_database(argv[1]);
 	timeoutDb = fdb_open_database(argv[1]);

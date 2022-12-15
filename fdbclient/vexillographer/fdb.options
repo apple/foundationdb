@@ -120,6 +120,12 @@ description is not currently required but encouraged.
     <Option name="future_version_client_library" code="66"
             paramType="String" paramDescription="path to client library"
             description="Adds an external client library to be used with a future version protocol. This option can be used testing purposes only!" />
+    <Option name="retain_client_library_copies" code="67"
+            description="Retain temporary external client library copies that are created for enabling multi-threading." />
+    <Option name="ignore_external_client_failures" code="68"
+            description="Ignore the failure to initialize some of the external clients" />
+    <Option name="fail_incompatible_client" code="69"
+            description="Fail with an error if there is no client matching the server version the client is connecting to" />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
@@ -202,8 +208,9 @@ description is not currently required but encouraged.
             description="Deprecated. Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
     <Option name="transaction_automatic_idempotency" code="506"
-            description="Set a random idempotency id for all transactions. See the transaction option description for more information." 
-            defaultFor="505"/>
+            description="Set a random idempotency id for all transactions. See the transaction option description for more information. This feature is in development and not ready for general use." 
+            defaultFor="505"
+            hidden="true"/>
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
             defaultFor="1100"/>
@@ -248,6 +255,8 @@ description is not currently required but encouraged.
             description="Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access."/>
     <Option name="raw_access" code="303"
             description="Allows this transaction to access the raw key-space when tenant mode is on."/>
+    <Option name="bypass_storage_quota" code="304"
+            description="Allows this transaction to bypass storage quota enforcement. Should only be used for transactions that directly or indirectly decrease the size of the tenant group's data."/>
     <Option name="debug_dump" code="400" 
             hidden="true" />
     <Option name="debug_retry_logging" code="401" paramType="String" paramDescription="Optional transaction name" />
@@ -278,9 +287,11 @@ description is not currently required but encouraged.
             description="Set the transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster's performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit." />
     <Option name="idempotency_id" code="504"
             paramType="String" paramDescription="Unique ID"
-            description="Associate this transaction with this ID for the purpose of checking whether or not this transaction has already committed. Must be at least 16 bytes and less than 256 bytes." />
+            description="Associate this transaction with this ID for the purpose of checking whether or not this transaction has already committed. Must be at least 16 bytes and less than 256 bytes. This feature is in development and not ready for general use. Unless the automatic_idempotency option is set after this option, the client will not automatically attempt to remove this id from the cluster after a successful commit."
+            hidden="true" />
     <Option name="automatic_idempotency" code="505"
-            description="Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future." />
+            description="Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future. This feature is in development and not ready for general use."
+            hidden="true" />
     <Option name="snapshot_ryw_enable" code="600"
             description="Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior." />
     <Option name="snapshot_ryw_disable" code="601"

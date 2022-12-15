@@ -175,6 +175,7 @@ struct ClusterControllerFullInterface {
 	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
+	RequestStream<struct GetEncryptionAtRestModeRequest> getEncryptionAtRestMode;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -189,7 +190,7 @@ struct ClusterControllerFullInterface {
 		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
 		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
 		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-		       changeCoordinators.getFuture().isReady();
+		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -206,6 +207,7 @@ struct ClusterControllerFullInterface {
 		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
 		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
 		changeCoordinators.getEndpoint(TaskPriority::DefaultEndpoint);
+		getEncryptionAtRestMode.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -226,7 +228,8 @@ struct ClusterControllerFullInterface {
 		           updateWorkerHealth,
 		           tlogRejoin,
 		           notifyBackupWorkerDone,
-		           changeCoordinators);
+		           changeCoordinators,
+		           getEncryptionAtRestMode);
 	}
 };
 
@@ -260,7 +263,6 @@ struct RegisterMasterRequest {
 	std::vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
 	bool recoveryStalled;
-	UID clusterId;
 
 	ReplyPromise<Void> reply;
 
@@ -284,7 +286,6 @@ struct RegisterMasterRequest {
 		           priorCommittedLogServers,
 		           recoveryState,
 		           recoveryStalled,
-		           clusterId,
 		           reply);
 	}
 };
@@ -445,6 +446,7 @@ struct RegisterWorkerRequest {
 	bool requestDbInfo;
 	bool recoveredDiskFiles;
 	ConfigBroadcastInterface configBroadcastInterface;
+	Optional<UID> clusterId;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -463,13 +465,14 @@ struct RegisterWorkerRequest {
 	                      Optional<Version> lastSeenKnobVersion,
 	                      Optional<ConfigClassSet> knobConfigClassSet,
 	                      bool recoveredDiskFiles,
-	                      ConfigBroadcastInterface configBroadcastInterface)
+	                      ConfigBroadcastInterface configBroadcastInterface,
+	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
 	    blobMigratorInterf(mgInterf), encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf),
 	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet),
 	    requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
-	    configBroadcastInterface(configBroadcastInterface) {}
+	    configBroadcastInterface(configBroadcastInterface), clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -493,7 +496,8 @@ struct RegisterWorkerRequest {
 		           knobConfigClassSet,
 		           requestDbInfo,
 		           recoveredDiskFiles,
-		           configBroadcastInterface);
+		           configBroadcastInterface,
+		           clusterId);
 	}
 };
 
@@ -571,6 +575,33 @@ struct BackupWorkerDoneRequest {
 	}
 };
 
+struct GetEncryptionAtRestModeResponse {
+	constexpr static FileIdentifier file_identifier = 2932156;
+	uint32_t mode;
+
+	GetEncryptionAtRestModeResponse() : mode(EncryptionAtRestMode::Mode::DISABLED) {}
+	GetEncryptionAtRestModeResponse(uint32_t m) : mode(m) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+};
+
+struct GetEncryptionAtRestModeRequest {
+	constexpr static FileIdentifier file_identifier = 2670826;
+	UID tlogId;
+	ReplyPromise<GetEncryptionAtRestModeResponse> reply;
+
+	GetEncryptionAtRestModeRequest() {}
+	GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tlogId, reply);
+	}
+};
+
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
@@ -589,7 +620,6 @@ struct InitializeTLogRequest {
 	Version startVersion;
 	int logRouterTags;
 	int txsTags;
-	UID clusterId;
 	Version recoveryTransactionVersion;
 
 	ReplyPromise<struct TLogInterface> reply;
@@ -616,7 +646,6 @@ struct InitializeTLogRequest {
 		           logVersion,
 		           spillType,
 		           txsTags,
-		           clusterId,
 		           recoveryTransactionVersion);
 	}
 };
@@ -696,10 +725,12 @@ struct InitializeCommitProxyRequest {
 	Version recoveryTransactionVersion;
 	bool firstProxy;
 	ReplyPromise<CommitProxyInterface> reply;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
+		serializer(
+		    ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply, encryptMode);
 	}
 };
 
@@ -816,14 +847,12 @@ struct InitializeStorageRequest {
 	KeyValueStoreType storeType;
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
-	UID clusterId; // Unique cluster identifier. Only needed at recruitment, will be read from txnStateStore on recovery
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, clusterId, initialClusterVersion);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
 	}
 };
 
@@ -1129,7 +1158,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     ConfigDBType configDBType);
+                                     ConfigDBType configDBType,
+                                     Reference<AsyncVar<Optional<UID>>> clusterId);
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
@@ -1144,7 +1174,6 @@ class IPageEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
-                                 UID clusterId,
                                  Version startVersion,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
@@ -1257,7 +1286,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 typedef decltype(&tLog) TLogFn;
 
 ACTOR template <class T>
-Future<T> ioTimeoutError(Future<T> what, double time) {
+Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
@@ -1265,13 +1294,20 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 	}
 	Future<Void> end = lowPriorityDelay(time);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
-			TraceEvent(SevError, "IoTimeoutError").error(err);
+			TraceEvent e(SevError, "IoTimeoutError");
+			e.error(err);
+			if (context != nullptr) {
+				e.detail("Context", context);
+			}
+			e.log();
 			throw err;
 		}
 	}
@@ -1281,7 +1317,8 @@ ACTOR template <class T>
 Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double errTime,
                                    Reference<AsyncVar<bool>> degraded,
-                                   double degradedTime) {
+                                   double degradedTime,
+                                   const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
@@ -1293,7 +1330,9 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	if (degradedTime < errTime) {
 		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
 		choose {
-			when(T t = wait(what)) { return t; }
+			when(T t = wait(what)) {
+				return t;
+			}
 			when(wait(degradedEnd)) {
 				CODE_PROBE(true, "TLog degraded", probe::func::deduplicate);
 				TraceEvent(SevWarnAlways, "IoDegraded").log();
@@ -1304,13 +1343,20 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 
 	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
-			TraceEvent(SevError, "IoTimeoutError").error(err);
+			TraceEvent e(SevError, "IoTimeoutError");
+			e.error(err);
+			if (context != nullptr) {
+				e.detail("Context", context);
+			}
+			e.log();
 			throw err;
 		}
 	}

@@ -27,6 +27,7 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/Error.h"
@@ -83,13 +84,14 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantIdIndex(&proxyCommitData_.tenantIdIndex), initialCommit(initialCommit_) {}
+	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
-	                           const VectorRef<MutationRef>& mutations_)
+	                           const VectorRef<MutationRef>& mutations_,
+	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
+	    cipherKeys(cipherKeys_), txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
 	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
@@ -131,8 +133,8 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::unordered_map<int64_t, TenantName>* tenantIdIndex = nullptr;
+	std::unordered_map<int64_t, TenantName>* tenantMap = nullptr;
+	std::map<TenantName, int64_t>* tenantNameIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -160,11 +162,13 @@ private:
 
 private:
 	void writeMutation(const MutationRef& m) {
-		if (forResolver || !isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+		if (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
 			toCommit->writeTypedMessage(m);
 		} else {
 			ASSERT(cipherKeys != nullptr);
 			Arena arena;
+			CODE_PROBE(!forResolver, "encrypting metadata mutations");
+			CODE_PROBE(forResolver, "encrypting resolver mutations");
 			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
 	}
@@ -589,19 +593,21 @@ private:
 		}
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-			Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(checkpoint.ssID)).get().get());
-			MutationRef privatized = m;
-			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
-			    .detail("Original", m)
-			    .detail("Privatized", privatized)
-			    .detail("Server", checkpoint.ssID)
-			    .detail("TagKey", serverTagKeyFor(checkpoint.ssID))
-			    .detail("Tag", tag.toString())
-			    .detail("Checkpoint", checkpoint.toString());
+			for (const auto& ssID : checkpoint.src) {
+				Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
+				MutationRef privatized = m;
+				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+				    .detail("Original", m)
+				    .detail("Privatized", privatized)
+				    .detail("Server", ssID)
+				    .detail("TagKey", serverTagKeyFor(ssID))
+				    .detail("Tag", tag.toString())
+				    .detail("Checkpoint", checkpoint.toString());
 
-			toCommit->addTag(tag);
-			writeMutation(privatized);
+				toCommit->addTag(tag);
+				writeMutation(privatized);
+			}
 		}
 	}
 
@@ -613,7 +619,7 @@ private:
 		    m.param1.startsWith(applyMutationsAddPrefixRange.begin) ||
 		    m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) ||
 		    m.param1.startsWith(serverTagHistoryPrefix) ||
-		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin) || m.param1 == clusterIdKey) {
+		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin)) {
 
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
@@ -650,7 +656,7 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore", probe::decoration::rare);
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
@@ -667,9 +673,9 @@ private:
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
-				(*tenantMap)[tenantName] = tenantEntry;
-				if (tenantIdIndex) {
-					(*tenantIdIndex)[tenantEntry.id] = tenantName;
+				(*tenantMap)[tenantEntry.id] = tenantName;
+				if (tenantNameIndex) {
+					(*tenantNameIndex)[tenantName] = tenantEntry.id;
 				}
 			}
 
@@ -799,7 +805,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
+					logSystem->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -807,11 +813,11 @@ private:
 				if (toCommit) {
 					MutationRef privatized = m;
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
-					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
+					privatized.param2 = keyAfter(privatized.param1, arena);
 
 					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
-					toCommit->addTag(decodeServerTagValue(kv.value));
+					toCommit->addTag(tag);
 					writeMutation(privatized);
 				}
 			}
@@ -1076,7 +1082,7 @@ private:
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
 		if (subspace.intersects(range)) {
-			if (tenantMap) {
+			if (tenantMap && tenantNameIndex) {
 				ASSERT(version != invalidVersion);
 
 				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
@@ -1088,20 +1094,16 @@ private:
 				    .detail("EndTenant", endTenant)
 				    .detail("Version", version);
 
-				auto startItr = tenantMap->lower_bound(startTenant);
-				auto endItr = tenantMap->lower_bound(endTenant);
+				auto startItr = tenantNameIndex->lower_bound(startTenant);
+				auto endItr = tenantNameIndex->lower_bound(endTenant);
 
-				if (tenantIdIndex) {
-					// Iterate over iterator-range and remove entries from TenantIdName map
-					// TODO: O(n) operation, optimize cpu
-					auto itr = startItr;
-					while (itr != endItr) {
-						tenantIdIndex->erase(itr->second.id);
-						itr++;
-					}
+				auto itr = startItr;
+				while (itr != endItr) {
+					tenantMap->erase(itr->second);
+					itr++;
 				}
 
-				tenantMap->erase(startItr, endItr);
+				tenantNameIndex->erase(startItr, endItr);
 			}
 
 			if (!initialCommit) {
@@ -1343,8 +1345,9 @@ void applyMetadataMutations(SpanContext const& spanContext,
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations) {
-	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
+                            const VectorRef<MutationRef>& mutations,
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys) {
+	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, pCipherKeys).apply();
 }
 
 void applyMetadataMutations(SpanContext const& spanContext,

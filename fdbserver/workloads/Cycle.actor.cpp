@@ -39,8 +39,7 @@ template <>
 struct CycleMembers<true> {
 	Arena arena;
 	TenantName tenant;
-	authz::jwt::TokenRef token;
-	StringRef signedToken;
+	Standalone<StringRef> signedToken;
 	bool useToken;
 };
 
@@ -68,21 +67,10 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
-			auto k = g_simulator->authKeys.begin();
 			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
 			// make it comfortably longer than the timeout of the workload
-			auto currentTime = uint64_t(lround(g_network->timer()));
-			this->token.algorithm = authz::Algorithm::ES256;
-			this->token.issuedAtUnixTime = currentTime;
-			this->token.expiresAtUnixTime =
-			    currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100;
-			this->token.keyId = k->first;
-			this->token.notBeforeUnixTime = currentTime - 10;
-			VectorRef<StringRef> tenants;
-			tenants.push_back_deep(this->arena, this->tenant);
-			this->token.tenants = tenants;
-			// we currently don't support this workload to be run outside of simulation
-			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
+			this->signedToken = g_simulator->makeToken(
+			    this->tenant, uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
 		}
 	}
 

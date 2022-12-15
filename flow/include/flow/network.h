@@ -29,7 +29,7 @@
 #include <stdint.h>
 #include <variant>
 #include <atomic>
-#include "boost/asio.hpp"
+#include <boost/asio.hpp>
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
 #include "flow/IRandom.h"
@@ -101,6 +101,7 @@ enum class TaskPriority {
 	UpdateStorage = 3000,
 	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
+	SSSpilledChangeFeedReply = 2730,
 	BlobWorkerReadChangeFeed = 2720,
 	BlobWorkerUpdateFDB = 2710,
 	BlobWorkerUpdateStorage = 2700,
@@ -531,6 +532,7 @@ public:
 		enBitFlipper = 17,
 		enHistogram = 18,
 		enTokenCache = 19,
+		enMetrics = 20,
 		COUNT // Add new fields before this enumerator
 	};
 

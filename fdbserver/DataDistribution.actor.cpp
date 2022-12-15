@@ -53,6 +53,20 @@
 #include "fdbserver/DDSharedContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
+	return ShardSizeBounds{
+		.max = StorageMetrics{ .bytes = -1,
+		                       .bytesWrittenPerKSecond = StorageMetrics::infinity,
+		                       .iosPerKSecond = StorageMetrics::infinity,
+		                       .bytesReadPerKSecond = StorageMetrics::infinity },
+		.min = StorageMetrics{ .bytes = -1, .bytesWrittenPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
+		.permittedError = StorageMetrics{ .bytes = -1,
+		                                  .bytesWrittenPerKSecond = StorageMetrics::infinity,
+		                                  .iosPerKSecond = StorageMetrics::infinity,
+		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
+	};
+}
+
 struct DDAudit {
 	DDAudit(UID id, KeyRange range, AuditType type)
 	  : id(id), range(range), type(type), auditMap(AuditPhase::Invalid, allKeys.end), actors(true) {}
@@ -76,7 +90,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 		return;
 	}
 
-	ASSERT(this->meta.range.contains(range));
+	ASSERT(!this->meta.ranges.empty() && this->meta.ranges.front().contains(range));
 
 	if (!shard.hasDest) {
 		TraceEvent(SevError, "DataMoveValidationError")
@@ -165,30 +179,38 @@ Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
 }
 
 Future<Void> StorageWiggler::resetStats() {
-	auto newMetrics = StorageWiggleMetrics();
-	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
-	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
-	return StorageWiggleMetrics::runSetTransaction(
-	    teamCollection->dbContext(), teamCollection->isPrimary(), newMetrics);
+	metrics.reset();
+	return runRYWTransaction(
+	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		    return resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
+	    });
 }
 
 Future<Void> StorageWiggler::restoreStats() {
 	auto& metricsRef = metrics;
-	auto assignFunc = [&metricsRef](Optional<Value> v) {
+	auto assignFunc = [&metricsRef](Optional<StorageWiggleMetrics> v) {
 		if (v.present()) {
-			metricsRef = BinaryReader::fromStringRef<StorageWiggleMetrics>(v.get(), IncludeVersion());
+			metricsRef = v.get();
 		}
 		return Void();
 	};
-	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->dbContext(), teamCollection->isPrimary());
+	auto readFuture =
+	    runRYWTransaction(teamCollection->dbContext(),
+	                      [this](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<StorageWiggleMetrics>> {
+		                      return loadStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()));
+	                      });
 	return map(readFuture, assignFunc);
 }
+
 Future<Void> StorageWiggler::startWiggle() {
 	metrics.last_wiggle_start = StorageMetadataType::currentTime();
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->dbContext(), teamCollection->isPrimary(), metrics);
+	return runRYWTransaction(
+	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	    });
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -203,7 +225,10 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->dbContext(), teamCollection->isPrimary(), metrics);
+	return runRYWTransaction(
+	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	    });
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -286,11 +311,11 @@ public:
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 	Reference<PhysicalShardCollection> physicalShardCollection;
 
-	StorageQuotaInfo storageQuotaInfo;
-
 	Promise<Void> initialized;
 
 	std::unordered_map<AuditType, std::vector<std::shared_ptr<DDAudit>>> audits;
+
+	Optional<Reference<TenantCache>> ddTenantCache;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr),
@@ -336,9 +361,9 @@ public:
 		return txnProcessor->waitForDataDistributionEnabled(context->ddEnabledState.get());
 	}
 
-	// Initialize the required internal states of DataDistributor. It's necessary before DataDistributor start working.
-	// Doesn't include initialization of optional components, like TenantCache, DDQueue, Tracker, TeamCollection. The
-	// components should call its own ::init methods.
+	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
+	// DataDistributor start working. Doesn't include initialization of optional components, like TenantCache, DDQueue,
+	// Tracker, TeamCollection. The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
@@ -424,9 +449,9 @@ public:
 				const DDShardInfo& iShard = self->initData->shards[i];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, self->initData->shards[i + 1].key);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
-				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
+				teams.emplace_back(iShard.primarySrc, /*primary=*/true);
 				if (self->configuration.usableRegions > 1) {
-					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
+					teams.emplace_back(iShard.remoteSrc, /*primary=*/false);
 				}
 				self->physicalShardCollection->initPhysicalShardCollection(keys, teams, iShard.srcId.first(), 0);
 			}
@@ -482,17 +507,21 @@ public:
 
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
+			if (meta.ranges.empty()) {
+				TraceEvent(SevWarn, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
+				continue;
+			}
 			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
-				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
-				ASSERT(meta.range == it.range());
+				ASSERT(meta.ranges.front() == it.range());
 				// TODO: Persist priority in DataMoveMetaData.
-				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.dataMove = it.value();
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
@@ -517,9 +546,9 @@ public:
 	}
 
 	// Resume inflight relocations from the previous DD
-	// TODO: The initialDataDistribution is unused once resumeRelocations and
-	// DataDistributionTracker::trackInitialShards are done. In the future, we can release the object to save memory
-	// usage if it turns out to be a problem.
+	// TODO: The initialDataDistribution is unused once resumeRelocations,
+	// DataDistributionTracker::trackInitialShards, and DDTeamCollection::init are done. In the future, we can release
+	// the object to save memory usage if it turns out to be a problem.
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
 		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
@@ -541,27 +570,6 @@ public:
 		return txnProcessor->removeStorageServer(serverID, tssPairID, lock, context->ddEnabledState.get());
 	}
 };
-
-ACTOR Future<Void> storageQuotaTracker(Database cx, StorageQuotaInfo* storageQuotaInfo) {
-	loop {
-		state Transaction tr(cx);
-		loop {
-			try {
-				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-				TraceEvent("StorageQuota_ReadCurrentQuotas").detail("Size", currentQuotas.size());
-				for (auto const kv : currentQuotas) {
-					Key const key = kv.key.removePrefix(storageQuotaPrefix);
-					uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
-					storageQuotaInfo->quotaMap[key] = quota;
-				}
-				wait(delay(5.0));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-}
 
 // Periodically check and log the physicalShard status; clean up empty physicalShard;
 ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection> self) {
@@ -591,7 +599,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
-	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
 		trackerCancelled = false;
 		self->initialized = Promise<Void>();
@@ -613,14 +620,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
-			state Optional<Reference<TenantCache>> ddTenantCache;
-			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(ddTenantCache.get()->build());
+			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED || SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
+				self->ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
+				wait(self->ddTenantCache.get()->build());
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
-			self->physicalShardCollection = makeReference<PhysicalShardCollection>();
+			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
 			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
@@ -629,12 +635,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
-			int storageTeamSize = self->configuration.storageTeamSize;
+			int replicaSize = self->configuration.storageTeamSize;
 
 			std::vector<Future<Void>> actors; // the container of ACTORs
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
-				storageTeamSize = 2 * self->configuration.storageTeamSize;
+				replicaSize = 2 * self->configuration.storageTeamSize;
 
 				zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 				anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(true);
@@ -658,7 +664,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            self->ddId,
 			                                                            &shards,
 			                                                            &trackerCancelled,
-			                                                            ddTenantCache),
+			                                                            self->ddTenantCache),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -676,31 +682,32 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                          getAverageShardBytes,
 			                                                          getUnhealthyRelocationCount.getFuture(),
 			                                                          self->ddId,
-			                                                          storageTeamSize,
+			                                                          replicaSize,
 			                                                          self->configuration.storageTeamSize,
 			                                                          self->context->ddEnabledState.get()),
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			actors.push_back(reportErrorsExcept(storageQuotaTracker(cx, &self->storageQuotaInfo),
-			                                    "StorageQuotaTracker",
-			                                    self->ddId,
-			                                    &normalDDQueueErrors()));
-
-			if (ddIsTenantAware) {
-				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
+			if (self->ddTenantCache.present()) {
+				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorTenantMap(),
 				                                    "DDTenantCacheMonitor",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
-				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorStorageUsage(),
+			}
+			if (self->ddTenantCache.present() && SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
+				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorStorageQuota(),
+				                                    "StorageQuotaTracker",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorStorageUsage(),
 				                                    "StorageUsageTracker",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
 			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
-			primaryTeamCollection = makeReference<DDTeamCollection>(
+			primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
 			    self->txnProcessor,
 			    self->ddId,
 			    self->lock,
@@ -716,28 +723,28 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
-			    getUnhealthyRelocationCount);
+			    getUnhealthyRelocationCount });
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
-				remoteTeamCollection =
-				    makeReference<DDTeamCollection>(self->txnProcessor,
-				                                    self->ddId,
-				                                    self->lock,
-				                                    self->relocationProducer,
-				                                    self->shardsAffectedByTeamFailure,
-				                                    self->configuration,
-				                                    self->remoteDcIds,
-				                                    Optional<std::vector<Optional<Key>>>(),
-				                                    self->initialized.getFuture() && remoteRecovered(self->dbInfo),
-				                                    zeroHealthyTeams[1],
-				                                    IsPrimary::False,
-				                                    processingUnhealthy,
-				                                    processingWiggle,
-				                                    getShardMetrics,
-				                                    removeFailedServer,
-				                                    getUnhealthyRelocationCount);
+				remoteTeamCollection = makeReference<DDTeamCollection>(
+				    DDTeamCollectionInitParams{ self->txnProcessor,
+				                                self->ddId,
+				                                self->lock,
+				                                self->relocationProducer,
+				                                self->shardsAffectedByTeamFailure,
+				                                self->configuration,
+				                                self->remoteDcIds,
+				                                Optional<std::vector<Optional<Key>>>(),
+				                                self->initialized.getFuture() && remoteRecovered(self->dbInfo),
+				                                zeroHealthyTeams[1],
+				                                IsPrimary::False,
+				                                processingUnhealthy,
+				                                processingWiggle,
+				                                getShardMetrics,
+				                                removeFailedServer,
+				                                getUnhealthyRelocationCount });
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(remoteTeamCollection,
@@ -1323,6 +1330,14 @@ GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributor> s
 	return reply;
 }
 
+TenantsOverStorageQuotaReply getTenantsOverStorageQuota(Reference<DataDistributor> self) {
+	TenantsOverStorageQuotaReply reply;
+	if (self->ddTenantCache.present() && SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
+		reply.tenants = self->ddTenantCache.get()->getTenantsOverQuota();
+	}
+	return reply;
+}
+
 ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
                                 PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
@@ -1534,7 +1549,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.count(snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate finished snapshot request");
+					CODE_PROBE(true,
+					           "Data distributor received a duplicate finished snapshot request",
+					           probe::decoration::rare);
 					auto result = ddSnapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedDistributorSnapRequest")
@@ -1567,6 +1584,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			}
 			when(TriggerAuditRequest req = waitNext(di.triggerAudit.getFuture())) {
 				actors.add(auditStorage(self, req));
+			}
+			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
+				req.reply.send(getTenantsOverStorageQuota(self));
 			}
 		}
 	} catch (Error& err) {

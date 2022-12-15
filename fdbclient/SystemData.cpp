@@ -284,8 +284,6 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transaction/write_conflict_range/"_sr,
                                                             "\xff\xff/transaction/write_conflict_range/\xff\xff"_sr);
 
-const KeyRef clusterIdKey = "\xff/clusterId"_sr;
-
 const KeyRangeRef auditRange = KeyRangeRef("\xff/audit/"_sr, "\xff/audit0"_sr);
 const KeyRef auditPrefix = auditRange.begin;
 
@@ -878,6 +876,7 @@ const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 const KeyRef consistencyScanInfoKey = "\xff/consistencyScanInfo"_sr;
 
 const KeyRef encryptionAtRestModeConfKey("\xff/conf/encryption_at_rest_mode"_sr);
+const KeyRef tenantModeConfKey("\xff/conf/tenant_mode"_sr);
 
 const KeyRangeRef excludedServersKeys("\xff/conf/excluded/"_sr, "\xff/conf/excluded0"_sr);
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
@@ -1073,6 +1072,11 @@ const KeyRef latencyBandConfigKey = "\xff\x02/latencyBandConfig"_sr;
 const KeyRangeRef timeKeeperPrefixRange("\xff\x02/timeKeeper/map/"_sr, "\xff\x02/timeKeeper/map0"_sr);
 const KeyRef timeKeeperVersionKey = "\xff\x02/timeKeeper/version"_sr;
 const KeyRef timeKeeperDisableKey = "\xff\x02/timeKeeper/disable"_sr;
+
+// Durable cluster ID key. Added "Key" to the end to differentiate from the key
+// "\xff/clusterId" which was stored in the txnStateStore in FDB 7.1, whereas
+// this key is stored in the database in 7.2+.
+const KeyRef clusterIdKey = "\xff/clusterIdKey"_sr;
 
 // Backup Log Mutation constant variables
 const KeyRef backupEnabledKey = "\xff/backupEnabled"_sr;
@@ -1657,11 +1661,41 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
+const KeyRangeRef blobRestoreCommandKeys("\xff\x02/blobRestoreCommand/"_sr, "\xff\x02/blobRestoreCommand0"_sr);
+
+const Value blobRestoreCommandKeyFor(const KeyRangeRef range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobRestoreCommandKeys.begin);
+	wr << range;
+	return wr.toValue();
+}
+
+const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key) {
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(blobRestoreCommandKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> range;
+	return range;
+}
+
+const Value blobRestoreCommandValueFor(BlobRestoreStatus status) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << status;
+	return wr.toValue();
+}
+
+Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value) {
+	Standalone<BlobRestoreStatus> status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
+}
+
 const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 
-Key storageQuotaKey(StringRef tenantName) {
-	return tenantName.withPrefix(storageQuotaPrefix);
+Key storageQuotaKey(StringRef tenantGroupName) {
+	return tenantGroupName.withPrefix(storageQuotaPrefix);
 }
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);

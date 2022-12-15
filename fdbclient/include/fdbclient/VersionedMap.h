@@ -77,6 +77,7 @@ template <class T>
 class PTreeFinger {
 	using PTreeFingerEntry = PTree<T> const*;
 	// This finger size supports trees with up to exp(96/4.3) ~= 4,964,514,749 entries.
+	// The number 4.3 comes from here: https://en.wikipedia.org/wiki/Random_binary_tree#The_longest_path
 	// see also: check().
 	static constexpr size_t N = 96;
 	PTreeFingerEntry entries_[N];
@@ -684,7 +685,7 @@ public:
 	}
 
 	Future<Void> forgetVersionsBeforeAsync(Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield) {
-		ASSERT(newOldestVersion <= latestVersion);
+		ASSERT_LE(newOldestVersion, latestVersion);
 		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
 		auto upper = r;
 		--r;

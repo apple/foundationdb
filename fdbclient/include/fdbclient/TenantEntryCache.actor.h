@@ -68,6 +68,10 @@ using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(con
 // 1. Lookup by 'TenantId'
 // 2. Lookup by 'TenantPrefix'
 // 3. Lookup by 'TenantName'
+// TODO: Currently this cache performs poorly if there are tenant access happening to unknown tenants which happens most
+// frequently in optional tenant mode but can also happen in required mode if there are alot of tenants created. Further
+// as a consequence of the design we cannot be sure that the state of a given tenant is accurate even if its present in
+// the cache.
 
 template <class T>
 class TenantEntryCache : public ReferenceCounted<TenantEntryCache<T>>, NonCopyable {
@@ -394,7 +398,7 @@ private:
 			ASSERT(tenantId.present() != tenantPrefix.present());
 			ASSERT(!tenantName.present());
 
-			int64_t tId = tenantId.present() ? tenantId.get() : TenantMapEntry::prefixToId(tenantPrefix.get());
+			int64_t tId = tenantId.present() ? tenantId.get() : TenantAPI::prefixToId(tenantPrefix.get());
 			TraceEvent("TenantEntryCacheRemoveEntry").detail("Id", tId);
 			itrId = mapByTenantId.find(tId);
 			if (itrId == mapByTenantId.end()) {
@@ -535,28 +539,33 @@ public:
 	}
 
 	void put(const TenantNameEntryPair& pair) {
-		TenantEntryCachePayload<T> payload = createPayloadFunc(pair.first, pair.second);
-		auto idItr = mapByTenantId.find(pair.second.id);
-		auto nameItr = mapByTenantName.find(pair.first);
+		const auto& [name, entry] = pair;
+		TenantEntryCachePayload<T> payload = createPayloadFunc(name, entry);
+		auto idItr = mapByTenantId.find(entry.id);
+		auto nameItr = mapByTenantName.find(name);
 
 		Optional<TenantName> existingName;
 		Optional<int64_t> existingId;
 		if (nameItr != mapByTenantName.end()) {
 			existingId = nameItr->value.entry.id;
-			mapByTenantId.erase(nameItr->value.entry.id);
 		}
 		if (idItr != mapByTenantId.end()) {
 			existingName = idItr->value.name;
-			mapByTenantName.erase(idItr->value.name);
+		}
+		if (existingId.present()) {
+			mapByTenantId.erase(existingId.get());
+		}
+		if (existingName.present()) {
+			mapByTenantName.erase(existingName.get());
 		}
 
-		mapByTenantId[pair.second.id] = payload;
-		mapByTenantName[pair.first] = payload;
+		mapByTenantId[entry.id] = payload;
+		mapByTenantName[name] = payload;
 
 		TraceEvent("TenantEntryCachePut")
-		    .detail("TenantName", pair.first)
+		    .detail("TenantName", name)
 		    .detail("TenantNameExisting", existingName)
-		    .detail("TenantID", pair.second.id)
+		    .detail("TenantID", entry.id)
 		    .detail("TenantIDExisting", existingId)
 		    .detail("TenantPrefix", pair.second.prefix);
 
@@ -569,7 +578,7 @@ public:
 
 	Future<Optional<TenantEntryCachePayload<T>>> getById(int64_t tenantId) { return getByIdImpl(this, tenantId); }
 	Future<Optional<TenantEntryCachePayload<T>>> getByPrefix(KeyRef prefix) {
-		int64_t id = TenantMapEntry::prefixToId(prefix);
+		int64_t id = TenantAPI::prefixToId(prefix);
 		return getByIdImpl(this, id);
 	}
 	Future<Optional<TenantEntryCachePayload<T>>> getByName(TenantName name) { return getByNameImpl(this, name); }

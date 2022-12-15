@@ -38,7 +38,7 @@ Arguments
   | - ``build``:  Populate data
   | - ``run``:  Run the benchmark
 
-- | ``-c | --cluster <cluster file>``
+- | ``-c | --cluster <cluster_file>``
   | FDB cluster files (Required, comma-separated)
 
 - | ``-d | --num_databases <num_databases>``
@@ -125,9 +125,27 @@ Arguments
   | Disable snapshot read-your-writes
 
 - | ``--json_report`` defaults to ``mako.json``
-  | ``--json_report=PATH``
+  | ``--json_report <path>``
   | Output stats to the specified json file
 
+- | ``--tls_certificate_file <path>``
+  | Use TLS certificate located in ``<path>``
+
+- | ``--tls_key_file <path>``
+  | Use TLS key file located in ``<path>``
+
+- | ``--tls_ca_file <path>``
+  | Use TLS CA file located in ``<path>``
+
+- | ``--authorization_token_file <path>``
+  | Use authorization token JSON file located in ``<path>``
+  | Expected content is a JSON object where each key is a tenant name and the mapped value is a token string
+
+- | ``--transaction_timeout_tx <duration>``
+  | Duration in milliseconds after which a transaction times out in run mode. Set as transaction option.
+
+- | ``--transaction_timeout_db <duration>``
+  | Duration in milliseconds after which a transaction times out in run mode. Set as database option.
 
 Transaction Specification
 =========================

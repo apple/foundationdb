@@ -28,9 +28,14 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
 
-struct FlowReceiver : public NetworkMessageReceiver {
-	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
+// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
+class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
+	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
+	Endpoint endpoint;
+	bool m_isLocalEndpoint;
+	bool m_stream;
 
+protected:
 	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {}
 
 	FlowReceiver(Endpoint const& remoteEndpoint, bool stream)
@@ -46,8 +51,17 @@ struct FlowReceiver : public NetworkMessageReceiver {
 		}
 	}
 
-	bool isLocalEndpoint() { return m_isLocalEndpoint; }
-	bool isRemoteEndpoint() { return endpoint.isValid() && !m_isLocalEndpoint; }
+public:
+	bool isLocalEndpoint() const { return m_isLocalEndpoint; }
+	bool isRemoteEndpoint() const { return endpoint.isValid() && !m_isLocalEndpoint; }
+
+	void setRemoteEndpoint(Endpoint const& remoteEndpoint, bool stream) {
+		ASSERT(!m_isLocalEndpoint);
+		ASSERT(!endpoint.isValid());
+		endpoint = remoteEndpoint;
+		m_stream = stream;
+		FlowTransport::transport().addPeerReference(endpoint, m_stream);
+	}
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
 	//   a local endpoint and returns that.
@@ -80,12 +94,6 @@ struct FlowReceiver : public NetworkMessageReceiver {
 	}
 
 	const Endpoint& getRawEndpoint() { return endpoint; }
-
-private:
-	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
-	Endpoint endpoint;
-	bool m_isLocalEndpoint;
-	bool m_stream;
 };
 
 template <class T>
@@ -132,7 +140,7 @@ public:
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
-	bool isSet() { return sav->isSet(); }
+	bool isSet() const { return sav->isSet(); }
 	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
@@ -363,8 +371,9 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 			this->sendError(message.getError());
 		} else {
 			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
-				acknowledgements = AcknowledgementReceiver(
-				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
+				acknowledgements.setRemoteEndpoint(
+				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()),
+				    false);
 				if (onConnect.isValid() && onConnect.canBeSet()) {
 					onConnect.send(Void());
 				}
@@ -506,7 +515,7 @@ public:
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
-	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+	bool connected() const { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
 
 	Future<Void> onConnected() {
 		if (connected()) {
@@ -725,6 +734,7 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) const {
+		// Ensure the same request isn't used multiple times
 		ASSERT(!getReplyPromise(value).getFuture().isReady());
 		if (queue->isRemoteEndpoint()) {
 			return sendCanceler(getReplyPromise(value),
