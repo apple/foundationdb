@@ -704,7 +704,14 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	}
 
 	// 1.0. Determine size of all tables
-	auto vtable = serMap.at(tableTypeName).vtable;
+	auto serInfo = serMap.at(tableTypeName);
+
+	auto alignment = serInfo.alignment;
+	if (curr % alignment != 0) {
+		curr += (curr - alignment);
+	}
+
+	auto vtable = serInfo.vtable;
 	int dataSize = curr;
 	if (!vtable->empty()) {
 		dataSize += vtable.value()[1];
