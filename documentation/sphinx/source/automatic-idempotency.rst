@@ -50,7 +50,7 @@ For example::
                 tr.add(key, struct.pack("<q", 1))
         do_it(db)
         # Clean up unique state
-        del tr[b"ids/" + tr_id]
+        del db[b"ids/" + tr_id]
 
 This approach has several problems
 
