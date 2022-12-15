@@ -27,13 +27,18 @@ namespace theirs {
 
 namespace ours {
 
-template <class T>
-std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T>> Verify(T lhs, T rhs, std::string context);
+template <class T, class U>
+std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T> || std::is_integral_v<U> ||
+                 std::is_floating_point_v<U>>
+Verify(T lhs, U rhs, std::string context);
 
 void Randomize(std::mt19937_64& r, bool& x);
+void Randomize(std::mt19937_64& r, char& x);
 
 template <class T>
-std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>> Randomize(std::mt19937_64& r, T& x);
+std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>> Randomize(
+    std::mt19937_64& r,
+    T& x);
 
 template <class T>
 std::enable_if_t<std::is_floating_point_v<T>> Randomize(std::mt19937_64& r, T& x);
@@ -76,8 +81,10 @@ void Randomize(std::mt19937_64& r, std::variant<T...>& x);
 
 #include "table_fdbflatbuffers.h"
 
-template <class T>
-std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T>> Verify(T lhs, T rhs, std::string context) {
+template <class T, class U>
+std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T> || std::is_integral_v<U> ||
+                 std::is_floating_point_v<U>>
+Verify(T lhs, U rhs, std::string context) {
 	CHECK_MESSAGE(lhs == rhs, context);
 }
 
@@ -86,10 +93,18 @@ void Randomize(std::mt19937_64& r, bool& x) {
 }
 
 template <class T>
-std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>> Randomize(std::mt19937_64& r, T& x) {
+std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>> Randomize(
+    std::mt19937_64& r,
+    T& x) {
 	// Divide by 3 to fix ubsan complaint in uniform_int_distribution
 	std::uniform_int_distribution<T> dist(std::numeric_limits<T>::min() / 3, std::numeric_limits<T>::max() / 3);
 	x = dist(r);
+}
+
+void Randomize(std::mt19937_64& r, char& x) {
+	int8_t i;
+	Randomize(r, i);
+	x = static_cast<char>(i);
 }
 
 template <class T>
@@ -256,7 +271,7 @@ void testOursToTheirs(std::mt19937_64& r, int i) {
 	flatbuffers::Verifier verifier(serialized, arena.get_size(serialized));
 	auto result = theirs::testfb::VerifyTable0Buffer(verifier);
 	CHECK(result);
-	Verify(ours, theirs::testfb::GetTable0(serialized), "SavePath[" + std::to_string(i) + "]: ");
+	ours::Verify(ours, theirs::testfb::GetTable0(serialized), "SavePath[" + std::to_string(i) + "]: ");
 }
 
 // Randomly generate instance of their type, serialize, verify, convert to
@@ -271,49 +286,83 @@ void testTheirsToOurs(std::mt19937_64& r, int i) {
 	Arena arena;
 	TestContext context{ arena };
 	detail::load(ours, fbb.GetBufferPointer(), context);
-	Verify(ours, theirs::testfb::GetTable0(fbb.GetBufferPointer()), "LoadPath[" + std::to_string(i) + "]: ");
+	ours::Verify(ours, theirs::testfb::GetTable0(fbb.GetBufferPointer()), "LoadPath[" + std::to_string(i) + "]: ");
 }
 
-// Randomly generate instance of their type, serialize, verify, convert to
-// flowbuffers type, serialize it again and deserialize it with our old serializer
-void testTheirsToOurNewToOurOld(std::mt19937_64& r, int i) {
-	// Generate random a random instance and serialize using theirs serializer
-	flatbuffers::FlatBufferBuilder fbb;
-	flatbuffers::Offset<theirs::testfb::Table0> theirs;
-	ours::Randomize(r, theirs, fbb);
-	fbb.Finish(theirs);
+void testOurNewSerialize(std::mt19937_64& r, int i) {
+	// Generate a random instance
+	testfb::Table0 ours_new;
+	ours::Randomize(r, ours_new);
 
-	// Deserialize using our new serializer
-	ObjectReader reader(fbb.GetBufferPointer(), Unversioned());
-	testfb::Table0 ours_new = testfb::Table0::read(reader);
-
-	// Serialize again using our new serializer
+	// Serialize using our new serializer
 	flowserializer::Writer w;
 	auto [bufPtr, bufSize] = ours_new.write(w);
 
-	// Deserialize using our old serializer
-	ours::Table0 ours_old;
-	Arena arena;
-	TestContext context{ arena };
-	detail::load(ours_old, bufPtr, context);
-	Verify(ours_old, theirs::testfb::GetTable0(bufPtr), "LoadPath[" + std::to_string(i) + "]: ");
+	// Deserialize using flat buffers and verify
+	flatbuffers::Verifier verifier(bufPtr, bufSize);
+	auto result = theirs::testfb::VerifyTable0Buffer(verifier);
+	CHECK(result);
+	ours::Verify(ours_new, theirs::testfb::GetTable0(bufPtr), "NewSavePath[" + std::to_string(i) + "]: ");
 }
 
-void doFuzz() {
+void testOurNewDeserialize(std::mt19937_64& r, int i) {
+	// Generate a random instance and serialize using
+	// the old serializer
+	ours::Table0 ours_old;
+	ours::Randomize(r, ours_old);
+	Arena arena;
+	TestContext context{ arena };
+	auto* serialized = detail::save(context, ours_old, FileIdentifier{});
+
+	// Deserialize using our new serializer
+	ObjectReader reader(serialized, Unversioned());
+	testfb::Table0 ours_new = testfb::Table0::read(reader);
+
+	// Convert to the old format and verify
+	ours::Verify(ours_new, theirs::testfb::GetTable0(serialized), "NewLoadPath[" + std::to_string(i) + "]: ");
+}
+
+void doFuzzOld() {
 	std::mt19937_64 r(ours::kSeed);
 
 	// Fuzz
 	for (int i = 0; i < 100; ++i) {
 		testOursToTheirs(r, i);
 		testTheirsToOurs(r, i);
-		testTheirsToOurNewToOurOld(r, i);
+	}
+}
+
+void doFuzzNew() {
+	std::mt19937_64 r(ours::kSeed);
+
+	// Fuzz
+	for (int i = 0; i < 100; ++i) {
+		testOurNewSerialize(r, i);
+		testOurNewDeserialize(r, i);
 	}
 }
 } // namespace
 
-TEST_CASE("Fuzz") {
-	std::thread t1{ doFuzz };
-	std::thread t2{ doFuzz };
+TEST_CASE("Serialize") {
+	std::mt19937_64 r(ours::kSeed);
+	testOurNewSerialize(r, 0);
+}
+
+TEST_CASE("Deserialize") {
+	std::mt19937_64 r(ours::kSeed);
+	testOurNewDeserialize(r, 0);
+}
+
+TEST_CASE("FuzzOld") {
+	std::thread t1{ doFuzzOld };
+	std::thread t2{ doFuzzOld };
+	t1.join();
+	t2.join();
+}
+
+TEST_CASE("FuzzNew") {
+	std::thread t1{ doFuzzNew };
+	std::thread t2{ doFuzzNew };
 	t1.join();
 	t2.join();
 }

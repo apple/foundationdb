@@ -1,7 +1,11 @@
 #string(RANDOM LENGTH 8 ALPHABET "0123456789abcdef" SEED_)
 #set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 set(SEED "1")
-FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/seed "${SEED}")
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/seed
+    COMMAND echo "${SEED}" > ${CMAKE_CURRENT_BINARY_DIR}/seed
+    COMMENT "Writing flatbuffers serialization test seed")
 
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/table_fdbflatbuffers.h
