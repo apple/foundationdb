@@ -344,7 +344,7 @@ struct feed_cmp_f {
 };
 
 ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getActiveFeeds(Transaction* tr) {
-	RangeResult feedResult = wait(tr->getRange(changeFeedKeys, 10000));
+	RangeResult feedResult = wait(tr->getRange(changeFeedKeys, CLIENT_KNOBS->BG_TOO_MANY_GRANULES));
 	ASSERT(!feedResult.more);
 	std::vector<std::pair<Key, KeyRange>> results;
 	for (auto& it : feedResult) {
