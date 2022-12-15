@@ -208,6 +208,7 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
+// Returns the shard size bounds as well as whether `keys` a read hot shard.
 std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
     const KeyRange& keys,
     const Reference<AsyncVar<Optional<ShardMetrics>>>& shardMetrics,
@@ -1552,7 +1553,7 @@ FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
-// Tracks storage metrics fir `keys`. This function is similar to `trackShardMetrics()` and altered for physical shard.
+// Tracks storage metrics for `keys`. This function is similar to `trackShardMetrics()` and altered for physical shard.
 // This meant to be temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
 ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(Reference<IDDTxnProcessor> db,
                                                        KeyRange keys,
