@@ -589,7 +589,7 @@ struct PhysicalShard {
 			throw not_implemented();
 		}
 
-		if (status.ok()) {
+		if (status.ok() && !this->isInitialized) {
 			readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 			this->isInitialized.store(true);
 		}
@@ -3634,6 +3634,7 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	state std::string checkpointDir = "checkpoint";
 	platform::eraseDirectoryRecursive(checkpointDir);
 
+	// Checkpoint iterator returns only the desired keyrange, i.e., ["ab", "b"].
 	CheckpointRequest request(latestVersion,
 	                          { KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("h"_sr, "k"_sr) },
 	                          DataMoveRocksCF,

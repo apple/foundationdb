@@ -8942,9 +8942,6 @@ static Future<Void> createCheckpointImpl(T tr,
 	ASSERT(actionId.present());
 	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Ranges", describe(ranges));
 
-	// Only the first range is used to look up the location, since we assume all ranges are hosted by a single shard.
-	// The operation will fail on the storage server otherwise.
-
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -8966,7 +8963,6 @@ static Future<Void> createCheckpointImpl(T tr,
 	}
 
 	if (format == DataMoveRocksCF) {
-
 		for (const auto& [srcId, ranges] : rangeMap) {
 			// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
 			// An alternative is to choose a healthy replica.
@@ -8978,7 +8974,6 @@ static Future<Void> createCheckpointImpl(T tr,
 			TraceEvent(SevDebug, "CreateCheckpointTransactionShard")
 			    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
 			    .detail("CheckpointMetaData", checkpoint.toString());
-			// .detail("ReadVersion", tr->getReadVersion().get());
 		}
 	} else {
 		throw not_implemented();
