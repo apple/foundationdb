@@ -68,7 +68,7 @@ struct TenantManagementWorkload : TestWorkload {
 	int64_t maxId = -1;
 
 	const Key keyName = "key"_sr;
-	const Key testParametersKey = "test_parameters"_sr;
+	const Key testParametersKey = nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	const ClusterName dataClusterName = "cluster1"_sr;
@@ -225,7 +225,7 @@ struct TenantManagementWorkload : TestWorkload {
 			self->dataDb = cx;
 		}
 
-		if (self->clientId == 0) {
+		if (self->clientId == 0 && self->dataDb->getTenantMode()) {
 			// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
 			state Transaction dataTr(self->dataDb);
 			loop {
@@ -1810,6 +1810,27 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> _check(Database cx, TenantManagementWorkload* self) {
+		wait(checkNonTenantKey(self));
+		wait(compareTenants(self) && compareTenantGroups(self));
+
+		if (self->useMetacluster) {
+			// The metacluster consistency check runs the tenant consistency check for each cluster
+			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
+			    self->mvDb, AllowPartialMetaclusterOperations::False);
+			wait(metaclusterConsistencyCheck.run());
+			wait(checkTombstoneCleanup(self));
+		} else {
+			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
+			wait(tenantConsistencyCheck.run());
+		}
+
+		return true;
+	}
+
+	ACTOR static Future<Void> checkNonTenantKey(const TenantManagementWorkload* self) {
+		if (self->dataDb->getTenantMode() == TenantMode::REQUIRED)
+			return Void();
+
 		state Transaction tr(self->dataDb);
 
 		// Check that the key we set outside of the tenant is present and has the correct value
@@ -1825,21 +1846,7 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-
-		wait(compareTenants(self) && compareTenantGroups(self));
-
-		if (self->useMetacluster) {
-			// The metacluster consistency check runs the tenant consistency check for each cluster
-			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-			    self->mvDb, AllowPartialMetaclusterOperations::False);
-			wait(metaclusterConsistencyCheck.run());
-			wait(checkTombstoneCleanup(self));
-		} else {
-			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
-			wait(tenantConsistencyCheck.run());
-		}
-
-		return true;
+		return Void();
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

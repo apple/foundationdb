@@ -1218,9 +1218,21 @@ ErrorOr<Void> checkTenantModeAccess(MutationRef m) {
 	return Void();
 }
 
-// Return true if all the mutations in txn only write to valid tenant and system keys.
-// Otherwise, return false and send error back
-bool validTenantModeAccess(const CommitTransactionRequest& tr) {
+// Return true if all tenant check pass. Otherwise, return false and send error back
+bool validTenantModeAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
+	ErrorOr<Optional<TenantMapEntry>> result =
+	    getTenantEntry(pProxyCommitData, tr.tenantInfo.name.castTo<TenantNameRef>(), tr.tenantInfo.tenantId, true);
+
+	if (result.isError()) {
+		tr.reply.sendError(result.getError());
+		return false;
+	}
+
+	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
+	if (result.get().present() || pProxyCommitData->getTenantMode() != TenantMode::REQUIRED) {
+		return true;
+	}
+
 	for (auto& mutation : tr.transaction.mutations) {
 		ErrorOr<Void> checkRes = checkTenantModeAccess(mutation);
 		if (checkRes.isError()) {
@@ -1240,34 +1252,26 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(
-			    pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), trs[t].tenantInfo.tenantId, true);
 
-			if (result.isError()) {
+			if (!validTenantModeAccess(trs[t], pProxyCommitData)) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
-				trs[t].reply.sendError(result.getError());
-			} else {
-				// raw access transactions don't have TenantMapEntry, in this case the writes have to be made only to
-				// keys within existing tenants or system keys
-				if (!result.get().present() && self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED &&
-				    !(validTenantModeAccess(trs[t]))) {
-					continue;
-				}
-
-				self->commitCount++;
-				applyMetadataMutations(trs[t].spanContext,
-				                       *pProxyCommitData,
-				                       self->arena,
-				                       pProxyCommitData->logSystem,
-				                       trs[t].transaction.mutations,
-				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
-				                       self->forceRecovery,
-				                       self->commitVersion,
-				                       self->commitVersion + 1,
-				                       /* initialCommit= */ false);
+				continue;
 			}
+
+			self->commitCount++;
+			applyMetadataMutations(trs[t].spanContext,
+			                       *pProxyCommitData,
+			                       self->arena,
+			                       pProxyCommitData->logSystem,
+			                       trs[t].transaction.mutations,
+			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+			                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
+			                       self->forceRecovery,
+			                       self->commitVersion,
+			                       self->commitVersion + 1,
+			                       /* initialCommit= */ false);
 		}
+
 		if (self->firstStateMutations) {
 			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
 			self->firstStateMutations = false;

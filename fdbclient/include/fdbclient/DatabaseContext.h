@@ -712,6 +712,8 @@ public:
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
+	TenantMode getTenantMode() const { return clientInfo->get().tenantMode; }
+
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
