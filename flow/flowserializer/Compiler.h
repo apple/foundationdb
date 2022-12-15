@@ -134,7 +134,10 @@ struct TypeName {
 	[[nodiscard]] inline bool operator==(TypeName const& rhs) const { return name == rhs.name && path == rhs.path; }
 	[[nodiscard]] bool operator!=(TypeName const& rhs) const { return !(*this == rhs); }
 
-	std::string fullyQualifiedCppName() const {
+	std::string fullyQualifiedCppName(flowserializer::expression::Type const& t) const {
+		if (t.typeType() == flowserializer::expression::TypeType::Primitive) {
+			return std::string(dynamic_cast<flowserializer::expression::PrimitiveType const&>(t).nativeName);
+		}
 		if (path.empty()) {
 			return name;
 		}

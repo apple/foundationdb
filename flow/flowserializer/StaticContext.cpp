@@ -236,6 +236,33 @@ std::optional<std::pair<TypeName, const expression::Type*>> StaticContext::resol
 	return {};
 }
 
+unsigned StaticContext::inlinedSizeOf(const expression::Type& type) {
+	switch (type.typeType()) {
+	case expression::TypeType::Primitive: {
+		return dynamic_cast<expression::PrimitiveType const&>(type).size();
+	}
+	case expression::TypeType::Enum: {
+		auto const& e = dynamic_cast<expression::Enum const&>(type);
+		return inlinedSizeOf(*assertTrue(resolve(e.type))->second);
+	}
+	case expression::TypeType::Union: {
+		// A union value is always an offset to an independent memory block
+		return 4u;
+	}
+	case expression::TypeType::Struct: {
+		auto const& s = dynamic_cast<expression::Struct const&>(type);
+		// the size of a struct is the sum of the size of all its members
+		unsigned res = 0u;
+		for (auto const& f : s.fields) {
+			res += inlinedSizeOf(*assertTrue(resolve(f.type))->second);
+		}
+		return res;
+	}
+	case expression::TypeType::Table:
+		return 4u;
+	}
+}
+
 std::string multiplyChar(int lhs, char rhs) {
 	std::string res;
 	res.reserve(lhs);

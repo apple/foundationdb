@@ -145,7 +145,141 @@ void emitIncludes(Streams& out, std::vector<std::string> const& includes) {
 void emitDeserializeField(StaticContext* context,
                           Streams& out,
                           std::string qualifiedName,
-                          expression::Field const& field) {
+                          TypeName typeName,
+                          expression::Type const& type);
+
+void emitDeserializeArray(StaticContext* context,
+                          Streams& out,
+                          std::string qualifiedName,
+                          TypeName typeName,
+                          expression::Type const& type) {
+	EMIT(out.source, "\t\tauto offset = *reinterpret_cast<const int32_t*>(data + tableOffset + vtable[idx]);");
+	EMIT(out.source, "\t\t// concert offset to offset starting from 0");
+	EMIT(out.source, "\t\toffset += tableOffset + vtable[idx];");
+	EMIT(out.source, "\t\tauto sz = *reinterpret_cast<const uint32_t*>(data + offset);");
+	EMIT(out.source, "\t\t{}.reserve(sz);", qualifiedName);
+	EMIT(out.source, "\t\tdata += sizeof(uint32_t);");
+	EMIT(out.source, "\t\tfor (uint32_t i = 0; i < sz; ++i) {{");
+	EMIT(out.source, "\t\t{} value;", typeName.fullyQualifiedCppName(type));
+	emitDeserializeField(context, out, "value", typeName, type);
+	EMIT(out.source, "\t\t\tdata += {};", context->inlinedSizeOf(type));
+	EMIT(out.source, "\t\t}}");
+}
+
+void emitDeserializeString(Streams& out, std::string qualifiedName) {
+	EMIT(out.source, "\t\tauto offset = *reinterpret_cast<const int32_t*>(data + tableOffset + vtable[idx]);");
+	EMIT(out.source, "\t\t// concert offset to offset starting from 0");
+	EMIT(out.source, "\t\toffset += tableOffset + vtable[idx];");
+	EMIT(out.source, "\t\tauto sz = *reinterpret_cast<const uint32_t*>(data + offset);");
+	EMIT(out.source,
+	     "\t\t{} = std::string(reinterpret_cast<const char*>(data + offset + sizeof(uint32_t)), sz);",
+	     qualifiedName);
+}
+
+void emitDeserializeField(StaticContext* context,
+                          Streams& out,
+                          std::string qualifiedName,
+                          TypeName typeName,
+                          expression::Type const& type);
+
+void emitDeserializeStruct(StaticContext* context,
+                           Streams& out,
+                           std::string qualifiedName,
+                           expression::Struct const& s) {
+	// we need to back up the current data pointer since the caller won't expect it to change
+	EMIT(out.source, "\t\tauto oldData = data;");
+	for (auto const& f : s.fields) {
+		if (f.isArrayType) {
+			throw Error("Arrays in structs not supported");
+		}
+		auto fType = assertTrue(context->resolve(f.type));
+		emitDeserializeField(context, out, fmt::format("{}.{}", qualifiedName, f.name), fType->first, *fType->second);
+		EMIT(out.source, "data += {};", context->inlinedSizeOf(*fType->second));
+	}
+	EMIT(out.source, "\t\tdata = oldData;");
+}
+
+void emitDeserializeField(StaticContext* context,
+                          Streams& out,
+                          std::string qualifiedName,
+                          TypeName typeName,
+                          expression::Type const& type) {
+	switch (type.typeType()) {
+	case expression::TypeType::Primitive: {
+		auto t = dynamic_cast<const expression::PrimitiveType&>(type);
+		if (t.typeClass == expression::PrimitiveTypeClass::StringType) {
+			emitDeserializeString(out, qualifiedName);
+		} else {
+			EMIT(out.source, "\t\tmemcpy(&{}, data, {});", qualifiedName, t.size());
+		}
+		break;
+	}
+	case expression::TypeType::Enum: {
+		auto enumType = dynamic_cast<const expression::Enum&>(type);
+		auto eType = assertTrue(context->resolve(enumType.type));
+		if (eType->second->typeType() != expression::TypeType::Primitive) {
+			throw Error(fmt::format(
+			    "Underlying type {} of enum {} is not a primitive type", eType->second->name, qualifiedName));
+		}
+		auto t = dynamic_cast<const expression::PrimitiveType*>(eType->second);
+		EMIT(out.source, "\t\tmemcpy(&value.{}, data, {});", qualifiedName, t->size());
+		break;
+	}
+	case expression::TypeType::Union: {
+		throw Error("Unexpected Union");
+	}
+	case expression::TypeType::Struct: {
+		// structs are inlined
+		auto const& s = dynamic_cast<expression::Struct const&>(type);
+		emitDeserializeStruct(context, out, qualifiedName, s);
+		break;
+	}
+	case expression::TypeType::Table: {
+		auto qualifiedTypeName = typeName.fullyQualifiedCppName(type);
+		EMIT(out.source, "\t\t// table {} of field {}", qualifiedTypeName, qualifiedName);
+		EMIT(out.source, "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data));", qualifiedName);
+		break;
+	}
+	}
+}
+
+void emitDeserializeUnion(StaticContext* context,
+                          Streams& out,
+                          std::string qualifiedName,
+                          TypeName typeName,
+                          expression::Type const& type) {
+	auto const& utype = dynamic_cast<expression::Union const&>(type);
+	EMIT(out.source, "\t\t// a union is a 1-byte integer followed by a type reference");
+	EMIT(out.source, "\t\tuint8_t utype;");
+	EMIT(out.source, "\t\tmemcpy(&utype, data + tableOffset + vtable[idx++], 1);");
+	EMIT(out.source, "\t\tswitch (utype) {{");
+	for (int i = 1; i < utype.types.size(); ++i) {
+		auto variantType = assertTrue(context->resolve(utype.types[i]));
+		EMIT(out.source, "\t\tcase {}: {{", i);
+		if (variantType->second->typeType() != expression::TypeType::Table) {
+			throw Error(fmt::format("We currently only support unions of table, but {} in {} is a {}",
+			                        variantType->first.fullyQualifiedCppName(*variantType->second),
+			                        typeName.fullyQualifiedCppName(type),
+			                        expression::toString(variantType->second->typeType())));
+		}
+		EMIT(out.source, "\t\t\t{} varValue;", variantType->first.fullyQualifiedCppName(*variantType->second));
+		EMIT(out.source, "\t\t\tuint32_t varTableOffset;");
+		EMIT(out.source, "\t\t\tmemcpy(&varTableOffset, data + tableOffset + vtable[idx], sizeof(uint32_t));");
+		EMIT(out.source, "\t\t\tvarValue._loadFromOffset(reader, varTableOffset);");
+		EMIT(out.source, "\t\t\t{} = varValue;", qualifiedName);
+		EMIT(out.source, "\t\t\tbreak;");
+		EMIT(out.source, "\t\t}}");
+	}
+	EMIT(out.source, "\t\tdefault:");
+	EMIT(out.source, "\t\t\tbreak;// not set or unknown, keep default initialized");
+	EMIT(out.source, "\t\t}}");
+	EMIT(out.source, "\t\t");
+}
+
+void emitDeserializeMember(StaticContext* context,
+                           Streams& out,
+                           std::string qualifiedName,
+                           expression::Field const& field) {
 	auto fieldType = assertTrue(context->resolve(field.type));
 	EMIT(out.source, "\tif (idx >= vsize) {{");
 	EMIT(out.source, "\t\t// Some fields are not present, we'll leave them default-initialized");
@@ -153,73 +287,14 @@ void emitDeserializeField(StaticContext* context,
 	EMIT(out.source, "\t}}");
 	EMIT(out.source, "\tif (vtable[idx] != 0) {{");
 	EMIT(out.source, "\t\t// field is present");
-	if (field.isArrayType) {
-		// TODO: handle array types properly
-		EMIT(out.source, "\t}} // ERROR: deserializing arrays not yet supported");
-		return;
-	}
-	switch (fieldType->second->typeType()) {
-	case expression::TypeType::Primitive: {
-		auto t = dynamic_cast<const expression::PrimitiveType*>(fieldType->second);
-		EMIT(out.source, "\t\tmemcpy(&{}, data + tableOffset + vtable[idx], {});", qualifiedName, t->size());
-		break;
-	}
-	case expression::TypeType::Enum: {
-		auto enumType = dynamic_cast<const expression::Enum&>(*fieldType->second);
-		auto eType = assertTrue(context->resolve(enumType.type));
-		if (eType->second->typeType() != expression::TypeType::Primitive) {
-			throw Error(fmt::format(
-			    "Underlying type {} of enum {} is not a primitive type", eType->second->name, qualifiedName));
-		}
-		auto t = dynamic_cast<const expression::PrimitiveType*>(eType->second);
-		EMIT(out.source, "\t\tmemcpy(&value.{}, data + tableOffset + vtable[idx], {});", qualifiedName, t->size());
-		break;
-	}
-	case expression::TypeType::Union: {
-		auto fieldType = assertTrue(context->resolve(field.type));
-		auto const& utype = dynamic_cast<expression::Union const&>(*fieldType->second);
-		EMIT(out.source, "\t\t// a union is a 1-byte integer followed by a type reference");
-		EMIT(out.source, "\t\tuint8_t utype;");
-		EMIT(out.source, "\t\tmemcpy(&utype, data + tableOffset + vtable[idx++], 1);");
-		EMIT(out.source, "\t\tswitch (utype) {{");
-		for (int i = 1; i < utype.types.size(); ++i) {
-			auto variantType = assertTrue(context->resolve(utype.types[i]));
-			EMIT(out.source, "\t\tcase {}: {{", i);
-			// TODO: Add support for structs in unions
-			if (variantType->second->typeType() != expression::TypeType::Table) {
-				throw Error(fmt::format("We currently only support unions of table, but {} in {} is a {}",
-				                        variantType->first.fullyQualifiedCppName(),
-				                        fieldType->first.fullyQualifiedCppName(),
-				                        expression::toString(variantType->second->typeType())));
-			}
-			EMIT(out.source, "\t\t\t{} varValue;", variantType->first.fullyQualifiedCppName());
-			EMIT(out.source, "\t\t\tuint32_t varTableOffset;");
-			EMIT(out.source, "\t\tmemcpy(&varTableOffset, data + tableOffset + vtable[idx], sizeof(uint32_t));");
-			EMIT(out.source, "varValue._loadFromOffset(reader, varTableOffset);");
-			EMIT(out.source, "\t\t\tbreak;");
-			EMIT(out.source, "\t\t}}");
-		}
-		EMIT(out.source, "\t\tdefault:");
-		EMIT(out.source, "\t\t\tbreak;// not set or unknown, keep default initialized");
-		EMIT(out.source, "\t\t}}");
-		EMIT(out.source, "\t\t");
-		break;
-	}
-	case expression::TypeType::Struct: {
-		// structs are inlined
-		EMIT(out.source,
-		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx]));",
-		     qualifiedName);
-		break;
-	}
-	case expression::TypeType::Table: {
-		auto qualifiedTypeName = fieldType->first.fullyQualifiedCppName();
-		EMIT(out.source, "\t\t// table {} of field {}", qualifiedTypeName, field.name);
-		EMIT(out.source,
-		     "\t\t{}._loadFromOffset(reader, *reinterpret_cast<const uint32_t*>(data + tableOffset + vtable[idx]));",
-		     qualifiedName);
-		break;
-	}
+	if (fieldType->second->typeType() == expression::TypeType::Union) {
+		emitDeserializeUnion(context, out, qualifiedName, fieldType->first, *fieldType->second);
+	} else if (field.isArrayType) {
+		EMIT(out.source, "\t\tdata = data + tableOffset + vtable[idx];");
+		emitDeserializeArray(context, out, qualifiedName, fieldType->first, *fieldType->second);
+	} else {
+		EMIT(out.source, "\t\tdata = data + tableOffset + vtable[idx];");
+		emitDeserializeField(context, out, qualifiedName, fieldType->first, *fieldType->second);
 	}
 	EMIT(out.source, "\t}}");
 }
@@ -245,7 +320,7 @@ void emitDeserialize(StaticContext* context, Streams& out, expression::Table con
 		EMIT(out.source, "\tunsigned idx = 1;");
 		EMIT(out.source, "do {{");
 		for (const auto& f : table.fields) {
-			emitDeserializeField(context, out, fmt::format("value.{}", f.name), f);
+			emitDeserializeMember(context, out, fmt::format("value.{}", f.name), f);
 			EMIT(out.source, "\t++idx;");
 		}
 		// we use a goto to make sure we have the option to add post-deserialization functionality. But we still need
@@ -276,25 +351,6 @@ void emitDeserialize(StaticContext* context, Streams& out, expression::Table con
 	EMIT(out.source, "}}");
 	EMIT(out.source, "void {}::_loadFromOffset(ArenaObjectReader& reader, uint32_t tableOffset) {{", table.name);
 	EMIT(out.source, "\tread{}(reader, *this, tableOffset);", table.name);
-	EMIT(out.source, "}}");
-	EMIT(out.source, "");
-}
-
-void emitDeserialize(StaticContext* context, Streams& out, expression::Struct const& st) {
-	EMIT(out.header, "\t// These two methods are intended to be used by flowserializer exclusively");
-	EMIT(out.header, "\tvoid _loadFromOffset(ObjectReader& reader, uint32_t tableOffset);");
-	EMIT(out.header, "\tvoid _loadFromOffset(ArenaObjectReader& reader, uint32_t tableOffset);");
-
-	EMIT(out.source, "namespace {{");
-	EMIT(out.source, "template<class Ar>");
-	EMIT(out.source, "void read{0}(Ar& reader, {0}& value, uint32_t structOffset) {{", st.name);
-	// TODO: Add code to deserialize inline struct here
-	EMIT(out.source, "}}");
-	EMIT(out.source, "}} // namespace");
-
-	EMIT(out.source, "void {}::_loadFromOffset(ObjectReader& reader, uint32_t structOffset) {{", st.name);
-	EMIT(out.source, "}}");
-	EMIT(out.source, "void {}::_loadFromOffset(ArenaObjectReader& reader, uint32_t structOffset) {{", st.name);
 	EMIT(out.source, "}}");
 	EMIT(out.source, "");
 }
@@ -458,7 +514,6 @@ void CodeGenerator::emit(Streams& out, expression::Struct const& st) const {
 	EMIT(out.header, "\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{");
 	EMIT(out.header, "\t\treturn flowserializer::Type::Struct;");
 	EMIT(out.header, "\t}}\n");
-	emitDeserialize(context, out, st);
 	for (auto const& f : st.fields) {
 		emit(out, f);
 	}
@@ -688,16 +743,6 @@ void CodeGenerator::emit(Streams& out, expression::ExpressionTree const& tree) c
 		}
 		out.header << "\n";
 	}
-}
-
-void CodeGenerator::forwardDeclarations(struct Streams& out) const {
-	for (auto const& s : oldReaders) {
-		out.header << fmt::format("class {};\n", s);
-	}
-	for (auto const& s : oldWriters) {
-		out.header << fmt::format("class {};\n", s);
-	}
-	out.header << "\n";
 }
 
 void CodeGenerator::emit(std::string const& stem,
