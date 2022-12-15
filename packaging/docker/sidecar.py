@@ -234,7 +234,7 @@ class Config(object):
             self.substitutions["FDB_MACHINE_ID"] = os.getenv("HOSTNAME", "")
 
         if self.substitutions["FDB_ZONE_ID"] == "":
-            self.substitutions["FDB_ZONE_ID"] = self.read_node_zone_topology_label(self,self.substitutions["FDB_MACHINE_ID"])
+            self.substitutions["FDB_ZONE_ID"] = self.read_node_zone_topology_label(self, self.substitutions["FDB_MACHINE_ID"])
         if self.substitutions["FDB_PUBLIC_IP"] == "":
             # As long as the public IP is not set fallback to the
             # Pod IP address.
@@ -343,9 +343,11 @@ class Config(object):
         if version == 6:
             ip = f"[{ip}]"
         return ip
- 
-    def get_topology_label(labels, hostname):
-        # failure-domain.beta is deprecated, with topology being the new value. This can vary between clusters/versions.
+
+    def get_topology_label(self, labels, hostname):
+        '''filter the topology label from a dict of labels. If empty return hostname.'''
+        # failure-domain.beta is deprecated, with topology being the new value.
+        # This can vary between clusters/versions.
         # https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints
         FAILURE_DOMAIN_LABEL = 'failure-domain.beta.kubernetes.io/zone'
         TOPOLOGY_LABEL = 'topology.kubernetes.io/zone'
@@ -363,22 +365,26 @@ class Config(object):
         if not tl:
             tl = hostname
             log.error("The node does not have zone topology labels")
-        
+
         return tl
 
-    def read_node_zone_topology_label(self,hostname):
+    def read_node_zone_topology_label(self, hostname):
+        '''read the topology label from the node labels.'''
         try:
             k8s_config.load_incluster_config()
-        except k8s_config.ConfigException:
-            raise Exception("Could not configure kubernetes python client")
+        except Exception as k8s_config_exception:
+            raise Exception("Could not configure kubernetes python client") from k8s_config_exception
 
-        client=k8s_client.CoreV1Api()
+        client = k8s_client.CoreV1Api()
 
         api_response = client.read_node(hostname)
 
         labels = api_response.metadata.labels
 
-        return self.get_topology_label(labels,hostname) if self.read_zone_topology_labels else self.substitutions["FDB_MACHINE_ID"]
+        if self.read_zone_topology_label:
+            return self.get_topology_label(self, labels, hostname)
+        return self.substitutions["FDB_MACHINE_ID"]
+
 
 class ThreadingHTTPServerV6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
