@@ -247,7 +247,7 @@ ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db) {
 
 			wait(store(size, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)) &&
 			     store(expired, expiredKey.getD(tr)) &&
-			     success(getBoundary(tr, idempotencyIdKeys, Reverse::False, &oldestIdVersion, &oldestIdTime)));
+			     success(getBoundary(tr, idempotencyIdKeys, Oldest::True, &oldestIdVersion, &oldestIdTime)));
 			JsonBuilderObject result;
 			result["size_bytes"] = size;
 			if (expired.expired != 0) {
@@ -352,8 +352,10 @@ ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 			if (!finalRange.empty()) {
 				tr->addReadConflictRange(finalRange);
 				tr->clear(finalRange);
-				tr->set(idempotencyIdsExpiredVersion,
-				        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ candidateDeleteVersion }, Unversioned()));
+				tr->set(
+				    idempotencyIdsExpiredVersion,
+				    ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ candidateDeleteVersion, candidateDeleteTime },
+				                          Unversioned()));
 				TraceEvent("IdempotencyIdsCleanerAttempt")
 				    .detail("Range", finalRange.toString())
 				    .detail("IdmpKeySizeEstimate", idmpKeySize)
