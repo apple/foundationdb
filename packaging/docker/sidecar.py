@@ -369,7 +369,8 @@ class Config(object):
         return tl
 
     def read_node_zone_topology_label(self, hostname):
-        '''read the topology label from the node labels.'''
+        '''read the topology label from the node labels. When `read_zone_topology_label` arg is set.
+        Or return the machine ID otherwise.'''
         try:
             k8s_config.load_incluster_config()
         except Exception as k8s_config_exception:
