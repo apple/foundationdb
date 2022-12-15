@@ -641,21 +641,17 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 
 			if (field.isArrayType) {
 				// TODO: Implement
-			} else if (field.type == "int" || field.type == "short" || field.type == "long") {
-				EMIT(writer,
-				     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
-				     curr + vtable.value()[i + 2],
-				     field.name,
-				     field.type);
 			} else if (field.type == "string") {
-				auto type = dynamic_cast<expression::PrimitiveType const*>(fieldType->second);
 				voffset_t offset = dataSize;
 				// Offset to string is the offset from where the address the offset is written at!
 				EMIT(writer,
 				     "\t*reinterpret_cast<uoffset_t*>(buffer + {}) = {} + dynamicOffset2;\n",
 				     curr + vtable.value()[i + 2],
 				     offset - (curr + vtable.value()[i + 2]));
-				EMIT(appendData, "\t*reinterpret_cast<uoffset_t*>(buffer + {} + dynamicOffset) = {}.size();", dataSize, field.name);
+				EMIT(appendData,
+				     "\t*reinterpret_cast<uoffset_t*>(buffer + {} + dynamicOffset) = {}.size();",
+				     dataSize,
+				     field.name);
 				EMIT(appendData,
 				     "\tstd::memcpy(buffer + {0} + {1} + dynamicOffset, {2}.data(), {2}.size());",
 				     dataSize,
@@ -670,6 +666,13 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 				EMIT(appendData, "\tdynamicOffset += {}.size();", field.name);
 				EMIT(writer, "\tdynamicOffset2 += {}.size();", field.name);
 				EMIT(out.source, "\tbufferSize += {}.size();", field.name);
+			} else {
+				// Binary-serialize all remaining primitive types
+				EMIT(writer,
+				     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
+				     curr + vtable.value()[i + 2],
+				     field.name,
+				     field.name);
 			}
 			break;
 		}
