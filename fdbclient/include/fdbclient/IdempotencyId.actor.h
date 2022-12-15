@@ -44,6 +44,8 @@ struct CommitResult {
 // The type of the value stored at the key |idempotencyIdsExpiredVersion|
 struct IdempotencyIdsExpiredVersion {
 	static constexpr auto file_identifier = 3746945;
+	// Any version at or below expired might have had its idempotency id expired. Any version greater than `expired`
+	// definitely has not had it's idempotency id expired.
 	Version expired = 0;
 	int64_t expiredTime = 0;
 
@@ -187,7 +189,15 @@ KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t
 
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
 
+
 ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db);
+
+// Delete zero or more idempotency ids older than minAgeSeconds
+//
+// Normally idempotency ids are deleted as part of the normal commit process, so this only needs to clean ids that
+// leaked during a failure scenario. The rate of leaked idempotency ids should be low. The rate is zero during normal
+// operation, and proportional to the number of in-flight transactions during a failure scenario.
+ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds);
 
 #include "flow/unactorcompiler.h"
 #endif
