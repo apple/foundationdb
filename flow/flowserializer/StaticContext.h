@@ -35,6 +35,7 @@ public:
 	    const std::string& name,
 	    bool excludeCurrent = false) const;
 	void describeTable(std::string const& name) const;
+	[[nodiscard]] unsigned inlinedSizeOf(const expression::Type& type);
 };
 
 } // namespace flowserializer
