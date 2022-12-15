@@ -308,7 +308,7 @@ class ClusterController {
 	    RecruitRemoteFromConfigurationRequest const& req);
 
 	// Given datacenter ID, returns the primary and remote regions.
-	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions, Key dcId);
+	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions, Key dcId) const;
 
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
 	                                                                         Optional<Key> dcId,
@@ -365,14 +365,14 @@ class ClusterController {
 	DegradationInfo getDegradationInfo();
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
-	bool transactionSystemContainsDegradedServers();
+	bool transactionSystemContainsDegradedServers() const;
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 	// servers.
-	bool remoteTransactionSystemContainsDegradedServers();
+	bool remoteTransactionSystemContainsDegradedServers() const;
 
 	// Returns true if remote DC is healthy and can failover to.
-	bool remoteDCIsHealthy();
+	bool remoteDCIsHealthy() const;
 
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.

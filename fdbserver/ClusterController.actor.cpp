@@ -4461,7 +4461,7 @@ RecruitRemoteFromConfigurationReply ClusterController::findRemoteWorkersForConfi
 
 // Given datacenter ID, returns the primary and remote regions.
 std::pair<RegionInfo, RegionInfo> ClusterController::getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions,
-                                                                               Key dcId) {
+                                                                               Key dcId) const {
 	RegionInfo region;
 	RegionInfo remoteRegion;
 	for (const auto& r : regions) {
@@ -5850,7 +5850,7 @@ DegradationInfo ClusterController::getDegradationInfo() {
 }
 
 // Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
-bool ClusterController::transactionSystemContainsDegradedServers() {
+bool ClusterController::transactionSystemContainsDegradedServers() const {
 	const ServerDBInfo& dbi = db.serverInfo->get();
 	auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList) -> bool {
 		for (const auto& server : serverList) {
@@ -5897,7 +5897,7 @@ bool ClusterController::transactionSystemContainsDegradedServers() {
 
 // Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 // servers.
-bool ClusterController::remoteTransactionSystemContainsDegradedServers() {
+bool ClusterController::remoteTransactionSystemContainsDegradedServers() const {
 	if (db.config.usableRegions <= 1) {
 		return false;
 	}
@@ -5918,7 +5918,7 @@ bool ClusterController::remoteTransactionSystemContainsDegradedServers() {
 }
 
 // Returns true if remote DC is healthy and can failover to.
-bool ClusterController::remoteDCIsHealthy() {
+bool ClusterController::remoteDCIsHealthy() const {
 	// Ignore remote DC health if worker health monitor is disabled.
 	if (!SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 		return true;
