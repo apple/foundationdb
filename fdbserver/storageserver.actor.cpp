@@ -1993,7 +1993,9 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -2034,7 +2036,6 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, req.spanContext);
-	span.addAttribute("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
@@ -2424,7 +2425,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	}
 
 	try {
-		reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
+		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::False, deterministicRandom()->randomUniqueID());
 		wait(reader->init(req.token));
 
 		loop {
@@ -2478,13 +2479,15 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	}
 
 	state ICheckpointReader* reader = nullptr;
+	state std::unique_ptr<ICheckpointIterator> iter;
 	try {
-		reader = newCheckpointReader(it->second, self->thisServerID);
+		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
+		iter = reader->getIterator(req.range);
 
 		loop {
 			state RangeResult res =
-			    wait(reader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			    wait(iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			if (!res.empty()) {
 				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
@@ -2523,7 +2526,10 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 		}
 	}
 
-	wait(reader->close());
+	iter.reset();
+	if (!reader->inUse()) {
+		wait(reader->close());
+	}
 	return Void();
 }
 
@@ -2750,10 +2756,35 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 	}
 }
 
+// The normal read case for a change feed stream query is that it will first read the disk portion, which is at a lower
+// version than the memory portion, and then will effectively switch to reading only the memory portion. The complexity
+// lies in the fact that the feed does not know the switchover point ahead of time before reading from disk, and the
+// switchover point is constantly changing as the SS persists the in-memory data to disk. As a result, the
+// implementation first reads from memory, then reads from disk if necessary, then merges the result and potentially
+// discards the in-memory read data if the disk data is large and behind the in-memory data. The goal of
+// FeedDiskReadState is that we want to skip doing the full memory read if we still have a lot of disk reads to catch up
+// on. In the DISK_CATCHUP phase, the feed query will read only the first row from memory, to
+// determine if it's hit the switchover point, instead of reading (potentially) both in the normal phase.  We also want
+// to default to the normal behavior at the start in case there is not a lot of disk data. This guarantees that if we
+// somehow incorrectly went into DISK_CATCHUP when there wasn't much more data on disk, we only have one cycle of
+// getChangeFeedMutations in the incorrect mode that returns a smaller result before switching to NORMAL mode.
+//
+// Put another way, the state transitions are:
+//
+// STARTING ->
+//   DISK_CATCHUP (if after the first read, there is more disk data to read before the first memory data)
+//   NORMAL (otherwise)
+// DISK_CATCHUP ->
+//   still DISK_CATCHUP (if there is still more disk data to read before the first memory data)
+//   NORMAL (otherwise)
+// NORMAL -> NORMAL (always)
+enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
+
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
-                                                                            bool atLatest) {
+                                                                            bool atLatest,
+                                                                            FeedDiskReadState* feedDiskReadState) {
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -2822,7 +2853,13 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (req.end > emptyVersion + 1) {
 		auto it = searchChangeFeedStart(feedInfo->mutations, req.begin, atLatest);
 		while (it != feedInfo->mutations.end()) {
+			// If DISK_CATCHUP, only read 1 mutation from the memory queue
 			if (it->version >= req.end || it->version > dequeVersion || remainingLimitBytes <= 0) {
+				break;
+			}
+			if ((*feedDiskReadState) == FeedDiskReadState::DISK_CATCHUP && !memoryReply.mutations.empty()) {
+				// so we don't add an empty mutation at the end
+				remainingLimitBytes = -1;
 				break;
 			}
 			MutationsAndVersionRef m = *it;
@@ -2979,6 +3016,28 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			lastVersion = version;
 			lastKnownCommitted = knownCommittedVersion;
 		}
+
+		if ((*feedDiskReadState) == FeedDiskReadState::STARTING ||
+		    (*feedDiskReadState) == FeedDiskReadState::DISK_CATCHUP) {
+			if (!memoryReply.mutations.empty() && !reply.mutations.empty() &&
+			    reply.mutations.back().version < memoryReply.mutations.front().version && remainingDurableBytes <= 0) {
+				// if we read a full batch from disk and the entire disk read was still less than the first memory
+				// mutation, switch to disk_catchup mode
+				*feedDiskReadState = FeedDiskReadState::DISK_CATCHUP;
+				CODE_PROBE(true, "Feed switching to disk_catchup mode");
+			} else {
+				// for testing
+				if ((*feedDiskReadState) == FeedDiskReadState::STARTING && BUGGIFY_WITH_PROB(0.001)) {
+					*feedDiskReadState = FeedDiskReadState::DISK_CATCHUP;
+					CODE_PROBE(true, "Feed forcing disk_catchup mode");
+				} else {
+					// else switch to normal mode
+					CODE_PROBE(true, "Feed switching to normal mode");
+					*feedDiskReadState = FeedDiskReadState::NORMAL;
+				}
+			}
+		}
+
 		if (remainingDurableBytes > 0) {
 			reply.arena.dependsOn(memoryReply.arena);
 			auto it = memoryReply.mutations.begin();
@@ -3000,6 +3059,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	} else {
 		reply = memoryReply;
+		*feedDiskReadState = FeedDiskReadState::NORMAL;
 	}
 
 	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
@@ -3158,6 +3218,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state Span span("SS:getChangeFeedStream"_loc, req.spanContext);
 	state bool atLatest = false;
 	state bool removeUID = false;
+	state FeedDiskReadState feedDiskReadState = STARTING;
 	state Optional<Version> blockedVersion;
 
 	try {
@@ -3243,7 +3304,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 
 			// keep this as not state variable so it is freed after sending to reduce memory
 			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, req, false, atLatest);
+			    getChangeFeedMutations(data, req, false, atLatest, &feedDiskReadState);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -4875,13 +4936,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		// keep index for boundary index entries, so that caller can use it as a continuation.
 		result.data[0].key = input.data[0].key;
 		result.data[0].value = input.data[0].value;
-		result.data[0].boundaryAndExist = getMappedKeyValueSize(kvms[0]) > 0;
 
 		result.data.back().key = input.data[resultSize - 1].key;
 		result.data.back().value = input.data[resultSize - 1].value;
-		// index needs to be -1
-		int index = (resultSize - 1) % SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
-		result.data.back().boundaryAndExist = getMappedKeyValueSize(kvms[index]) > 0;
 	}
 	result.more = input.more || resultSize < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -6367,7 +6424,9 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		when(wait(changeFeedInfo->fetchLock.take())) {
 			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
 		}
-		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) {
+			return invalidVersion;
+		}
 	}
 
 	state Version startVersion = beginVersion;
@@ -8391,6 +8450,8 @@ private:
 			// Because of data moves, we can get mutations operating on a change feed we don't yet know about, because
 			// the metadata fetch hasn't started yet
 			bool createdFeed = false;
+			bool popMutationLog = false;
+			bool addMutationToLog = false;
 			if (feed == data->uidChangeFeed.end() && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 				createdFeed = true;
 
@@ -8440,6 +8501,7 @@ private:
 				CODE_PROBE(true, "private mutation for feed scheduled for deletion! Un-mark it as removing");
 
 				feed->second->removing = false;
+				addMutationToLog = true;
 				// reset fetch versions because everything previously fetched was cleaned up
 				feed->second->fetchVersion = invalidVersion;
 				feed->second->durableFetchVersion = NotifiedVersion();
@@ -8448,8 +8510,6 @@ private:
 				feed->second->updateMetadataVersion(currentVersion);
 			}
 
-			bool popMutationLog = false;
-			bool addMutationToLog = false;
 			if (popVersion != invalidVersion && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 				// pop the change feed at pop version, no matter what state it is in
 				if (popVersion - 1 > feed->second->emptyVersion) {
@@ -9020,7 +9080,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				}
 
 				Span span("SS:update"_loc, spanContext);
-				span.addAttribute("key"_sr, msg.param1);
 
 				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
 				// quarantine.
@@ -10355,7 +10414,9 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						  }*/
 					}
-					when(wait(timeout)) { timedout = true; }
+					when(wait(timeout)) {
+						timedout = true;
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)

@@ -1444,20 +1444,25 @@ struct DeleteTenantImpl {
 			throw tenant_not_found();
 		}
 
+		if (tenantEntry.get().renamePair.present()) {
+			ASSERT(tenantEntry.get().tenantState == TenantState::RENAMING_FROM ||
+			       tenantEntry.get().tenantState == TenantState::REMOVING);
+
+			self->pairName = tenantEntry.get().renamePair.get();
+		}
+
 		if (tenantEntry.get().tenantState != TenantState::REMOVING) {
 			// Disallow removing the "new" name of a renamed tenant before it completes
 			if (tenantEntry.get().tenantState == TenantState::RENAMING_TO) {
 				throw tenant_not_found();
 			}
+
 			state TenantMapEntry updatedEntry = tenantEntry.get();
 			// Check if we are deleting a tenant in the middle of a rename
-			if (updatedEntry.renamePair.present()) {
-				ASSERT(updatedEntry.tenantState == TenantState::RENAMING_FROM);
-				self->pairName = updatedEntry.renamePair.get();
-			}
 			updatedEntry.tenantState = TenantState::REMOVING;
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, updatedEntry);
 			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
+
 			// If this has a rename pair, also mark the other entry for deletion
 			if (self->pairName.present()) {
 				state Optional<TenantMapEntry> pairEntry = wait(tryGetTenantTransaction(tr, self->pairName.get()));
@@ -1494,7 +1499,8 @@ struct DeleteTenantImpl {
 			return Void();
 		}
 
-		ASSERT(tenantEntry.get().tenantState == TenantState::REMOVING);
+		ASSERT(tenantEntry.get().tenantState == TenantState::REMOVING &&
+		       (pairDelete || tenantEntry.get().renamePair == self->pairName));
 
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantName);
