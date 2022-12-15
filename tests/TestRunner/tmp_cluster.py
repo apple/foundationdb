@@ -185,6 +185,9 @@ if __name__ == "__main__":
             else:
                 cmd_args.append(cmd)
         env = dict(**os.environ)
+        env["FDB_CLUSTER_FILE"] = env.get(
+            "FDB_CLUSTER_FILE", cluster.cluster_file
+        )
         env["FDB_CLUSTERS"] = env.get(
             "FDB_CLUSTERS", cluster.cluster_file
         )
