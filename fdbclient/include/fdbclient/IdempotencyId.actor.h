@@ -189,7 +189,6 @@ KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t
 
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
 
-
 ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db);
 
 // Delete zero or more idempotency ids older than minAgeSeconds
