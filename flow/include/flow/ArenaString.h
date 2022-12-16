@@ -1,5 +1,5 @@
 /*
- * process.hpp
+ * ArenaString.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,9 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef MAKO_PROCESS_HPP
-#define MAKO_PROCESS_HPP
+#ifndef FLOW_ARENA_STRING_H
+#define FLOW_ARENA_STRING_H
+#pragma once
 
-enum class ProcKind { MAIN, WORKER, STATS, ADMIN };
+#include "flow/ArenaAllocator.h"
+#include "flow/CustomAllocatorString.h"
 
-#endif /*MAKO_PROCESS_HPP*/
+using ArenaString = CustomAllocatorString<ArenaAllocator>;
+
+#endif /*FLOW_ARENA_STRING_H*/
