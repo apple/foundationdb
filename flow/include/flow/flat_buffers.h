@@ -1362,7 +1362,7 @@ struct YesFileIdentifier {
 struct NoFileIdentifier {};
 }; // namespace detail
 
-// members of unions must be tables in flatbuffers, so you can use this to
+// members of unions must be tables in flowserializer, so you can use this to
 // introduce the indirection only when necessary.
 template <class T>
 struct EnsureTable

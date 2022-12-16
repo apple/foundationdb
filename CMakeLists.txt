@@ -141,6 +141,12 @@ include(FlowCommands)
 include(CompileVexillographer)
 
 ################################################################################
+# flowserializer
+################################################################################
+
+add_subdirectory(flow/flowserializer)
+
+################################################################################
 # Generate config file
 ################################################################################
 
@@ -210,6 +216,13 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_link_options(-lexecinfo)
 endif()
+
+################################################################################
+# flowserializer tests
+################################################################################
+
+include(CompileFlatBuffers)
+add_subdirectory(flow/flowserializer/test)
 
 ################################################################################
 # process compile commands for IDE

@@ -44,7 +44,7 @@
 // A more intelligent SFINAE that does "binarySerialize if POD and no serialize() is defined" could
 // replace the usage of is_binary_serializable.
 template <class T>
-struct is_binary_serializable : std::false_type {};
+struct is_binary_serializable : std::is_integral<T> {};
 
 #define BINARY_SERIALIZABLE(T)                                                                                         \
 	template <>                                                                                                        \
@@ -52,6 +52,7 @@ struct is_binary_serializable : std::false_type {};
 
 BINARY_SERIALIZABLE(int8_t);
 BINARY_SERIALIZABLE(uint8_t);
+BINARY_SERIALIZABLE(char);
 BINARY_SERIALIZABLE(int16_t);
 BINARY_SERIALIZABLE(uint16_t);
 BINARY_SERIALIZABLE(int32_t);
@@ -59,6 +60,7 @@ BINARY_SERIALIZABLE(uint32_t);
 BINARY_SERIALIZABLE(int64_t);
 BINARY_SERIALIZABLE(uint64_t);
 BINARY_SERIALIZABLE(bool);
+BINARY_SERIALIZABLE(float);
 BINARY_SERIALIZABLE(double);
 BINARY_SERIALIZABLE(ProtocolVersion);
 

@@ -696,13 +696,13 @@ TEST_CASE("/fdbrpc/TokenSign/bench") {
         auto& rng = *deterministicRandom();
         auto arena = Arena();
         auto jwtSpecs = new (arena) authz::jwt::TokenRef[numSamples];
-        auto fbSpecs = new (arena) authz::flatbuffers::TokenRef[numSamples];
+        auto fbSpecs = new (arena) authz::flowserializer::TokenRef[numSamples];
         auto jwts = new (arena) StringRef[numSamples];
         auto fbs = new (arena) StringRef[numSamples];
         for (auto i = 0; i < numSamples; i++) {
             jwtSpecs[i] = authz::jwt::makeRandomTokenSpec(
                 arena, rng, kty == "EC"_sr ? authz::Algorithm::ES256 : authz::Algorithm::RS256);
-            fbSpecs[i] = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
+            fbSpecs[i] = authz::flowserializer::makeRandomTokenSpec(arena, rng);
         }
         {
             auto const jwtSignBegin = timer_monotonic();
@@ -727,7 +727,7 @@ TEST_CASE("/fdbrpc/TokenSign/bench") {
             auto tmpArena = Arena();
             auto const fbSignBegin = timer_monotonic();
             for (auto i = 0; i < numSamples; i++) {
-                auto fbToken = authz::flatbuffers::signToken(tmpArena, fbSpecs[i], "defaultKey"_sr, key);
+                auto fbToken = authz::flowserializer::signToken(tmpArena, fbSpecs[i], "defaultKey"_sr, key);
                 auto wr = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
                 wr.serialize(fbToken);
                 fbs[i] = wr.toStringRef();
@@ -739,9 +739,9 @@ TEST_CASE("/fdbrpc/TokenSign/bench") {
             auto const fbVerifyBegin = timer_monotonic();
             for (auto rep = 0; rep < repeat; rep++) {
                 for (auto i = 0; i < numSamples; i++) {
-                    auto signedToken = ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(
+                    auto signedToken = ObjectReader::fromStringRef<Standalone<authz::flowserializer::SignedTokenRef>>(
                         fbs[i], Unversioned());
-                    auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKey);
+                    auto verifyOk = authz::flowserializer::verifyToken(signedToken, pubKey);
                     ASSERT(verifyOk);
                 }
             }
