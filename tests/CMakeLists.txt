@@ -306,12 +306,39 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-1.toml
     restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-2.toml)
+  # from_71.2
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/ConfigureTestRestart-1.toml
+    restarting/from_71.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_71.2.0/DrUpgradeRestart-1.txt
     restarting/from_71.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/SnapCycleRestart-1.txt
+    restarting/from_71.2.0/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/SnapIncrementalRestore-1.txt
+    restarting/from_71.2.0/SnapIncrementalRestore-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/SnapTestAttrition-1.txt
+    restarting/from_71.2.0/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/SnapTestRestart-1.txt
+    restarting/from_71.2.0/SnapTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/SnapTestSimpleRestart-1.txt
+    restarting/from_71.2.0/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_71.2.0/UpgradeAndBackupRestore-2.toml)
+  # from 71.3
+  add_fdb_test(
     TEST_FILES restarting/from_71.3.0/DrUpgradeRestart-1.txt
     restarting/from_71.3.0/DrUpgradeRestart-2.txt)
+  # to 71.2
   add_fdb_test(
     TEST_FILES restarting/to_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
