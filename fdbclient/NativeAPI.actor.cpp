@@ -9545,6 +9545,9 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 				Version next = waitNext(data->get().ssStreamSummary.getFuture());
 				ssSummary.push_back(next);
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				if (e.code() != error_code_end_of_stream) {
 					data->get().complete();
 					if (e.code() != error_code_operation_cancelled) {

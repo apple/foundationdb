@@ -327,13 +327,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					for (auto kv : m) {
 						newConfig.set(kv.first, kv.second);
 					}
-					if (!newConfig.isValid()) {
-						return ConfigurationResult::INVALID_CONFIGURATION;
-					}
-					if (!isEncryptionAtRestModeConfigValid(oldConfig, m, creating)) {
-						return ConfigurationResult::INVALID_CONFIGURATION;
-					}
-					if (!isTenantModeModeConfigValid(oldConfig, newConfig)) {
+					if (!newConfig.isValid() || !isEncryptionAtRestModeConfigValid(oldConfig, m, creating) ||
+					    !isTenantModeModeConfigValid(oldConfig, newConfig)) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 

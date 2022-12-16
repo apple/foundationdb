@@ -42,6 +42,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
@@ -403,6 +404,7 @@ public:
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
 	// 7.2 cannot be downgraded to 7.1 or below after enabling encryption-at-rest.
+	// TODO: Remove this bool once the encryption knobs are removed
 	bool disableEncryption = false;
 	// By default, encryption mode is set randomly (based on the tenant mode)
 	// If provided, set using EncryptionAtRestMode::fromString
@@ -2045,6 +2047,15 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setConfigDB(testConfig);
 }
 
+bool validateEncryptAndTenantModePair(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
+	// Domain aware encryption is only allowed when the tenant mode is required. Other encryption modes (disabled or
+	// cluster aware) are allowed regardless of the tenant mode
+	if (encryptMode.mode == EncryptionAtRestMode::DISABLED || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
+		return true;
+	}
+	return tenantMode == TenantMode::REQUIRED;
+}
+
 // Configures the system according to the given specifications in order to run
 // simulation under the correct conditions
 void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
@@ -2064,16 +2075,28 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	simconfig.db.tenantMode = tenantMode;
 	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
-	if (!testConfig.encryptModes.empty()) {
-		simconfig.db.encryptionAtRestMode =
-		    EncryptionAtRestMode::fromString(deterministicRandom()->randomChoice(testConfig.encryptModes));
-	} else if (!testConfig.disableEncryption && deterministicRandom()->coinflip()) {
-		if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT ||
-		    deterministicRandom()->coinflip()) {
-			// optional and disabled tenant modes currently only support cluster aware encryption
-			simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
+	// TODO: Remove check on the ENABLE_ENCRYPTION knob once the EKP can start using the db config
+	if (!testConfig.disableEncryption && (SERVER_KNOBS->ENABLE_ENCRYPTION || !testConfig.encryptModes.empty())) {
+		if (!testConfig.encryptModes.empty()) {
+			std::vector<EncryptionAtRestMode> validEncryptModes;
+			// Get the subset of valid encrypt modes given the tenant mode
+			for (int i = 0; i < testConfig.encryptModes.size(); i++) {
+				EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromString(testConfig.encryptModes.at(i));
+				if (validateEncryptAndTenantModePair(encryptMode, tenantMode)) {
+					validEncryptModes.push_back(encryptMode);
+				}
+			}
+			if (validEncryptModes.size() > 0) {
+				simconfig.db.encryptionAtRestMode = deterministicRandom()->randomChoice(validEncryptModes);
+			}
 		} else {
-			simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
+			// TODO: These cases should only trigger with probability (BUGGIFY) once the server knob is removed
+			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT || BUGGIFY) {
+				// optional and disabled tenant modes currently only support cluster aware encryption
+				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
+			} else {
+				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
+			}
 		}
 	}
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", simconfig.db.encryptionAtRestMode.toString());
