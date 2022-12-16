@@ -41,7 +41,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//#define SevCCheckInfo SevVerbose
+// #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
 
 struct ConsistencyCheckWorkload : TestWorkload {

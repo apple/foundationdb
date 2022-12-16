@@ -189,8 +189,12 @@ ACTOR template <class T>
 Future<T> timeout(Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	Future<Void> end = delay(time, taskID);
 	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) { return timedoutValue; }
+		when(T t = wait(what)) {
+			return t;
+		}
+		when(wait(end)) {
+			return timedoutValue;
+		}
 	}
 }
 
@@ -198,8 +202,12 @@ ACTOR template <class T>
 Future<Optional<T>> timeout(Future<T> what, double time) {
 	Future<Void> end = delay(time);
 	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) { return Optional<T>(); }
+		when(T t = wait(what)) {
+			return t;
+		}
+		when(wait(end)) {
+			return Optional<T>();
+		}
 	}
 }
 
@@ -207,8 +215,12 @@ ACTOR template <class T>
 Future<T> timeoutError(Future<T> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	Future<Void> end = delay(time, taskID);
 	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) { throw timed_out(); }
+		when(T t = wait(what)) {
+			return t;
+		}
+		when(wait(end)) {
+			throw timed_out();
+		}
 	}
 }
 
@@ -229,7 +241,9 @@ Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskP
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	loop choose {
-		when(wait(delay(interval, taskID))) { what(); }
+		when(wait(delay(interval, taskID))) {
+			what();
+		}
 	}
 }
 
@@ -350,7 +364,9 @@ Future<Void> mapAsync(FutureStream<T> input, F actorFunc, PromiseStream<U> outpu
 	loop {
 		try {
 			choose {
-				when(T nextInput = waitNext(input)) { futures.push_back(actorFunc(nextInput)); }
+				when(T nextInput = waitNext(input)) {
+					futures.push_back(actorFunc(nextInput));
+				}
 				when(U nextOutput = wait(futures.size() == 0 ? Never() : futures.front())) {
 					output.send(nextOutput);
 					futures.pop_front();
@@ -467,7 +483,9 @@ Future<Void> asyncFilter(FutureStream<T> input, F actorPred, PromiseStream<T> ou
 	loop {
 		try {
 			choose {
-				when(T nextInput = waitNext(input)) { futures.emplace_back(nextInput, actorPred(nextInput)); }
+				when(T nextInput = waitNext(input)) {
+					futures.emplace_back(nextInput, actorPred(nextInput));
+				}
 				when(bool pass = wait(futures.size() == 0 ? Never() : futures.front().second)) {
 					if (pass)
 						output.send(futures.front().first);
@@ -761,7 +779,9 @@ private:
 			loop {
 				choose {
 					when(wait(self->input.onChange())) {}
-					when(wait(delay(bounceTime))) { break; }
+					when(wait(delay(bounceTime))) {
+						break;
+					}
 				}
 			}
 			self->output.setUnconditional(Void());
@@ -1006,8 +1026,12 @@ Future<Void> smartQuorum(std::vector<Future<T>> results,
 		return Void();
 	wait(quorum(results, required));
 	choose {
-		when(wait(quorum(results, (int)results.size()))) { return Void(); }
-		when(wait(delay(extraSeconds, taskID))) { return Void(); }
+		when(wait(quorum(results, (int)results.size()))) {
+			return Void();
+		}
+		when(wait(delay(extraSeconds, taskID))) {
+			return Void();
+		}
 	}
 }
 
@@ -1195,8 +1219,12 @@ Future<Void> orYield(Future<Void> f);
 ACTOR template <class T>
 Future<T> chooseActor(Future<T> lhs, Future<T> rhs) {
 	choose {
-		when(T t = wait(lhs)) { return t; }
-		when(T t = wait(rhs)) { return t; }
+		when(T t = wait(lhs)) {
+			return t;
+		}
+		when(T t = wait(rhs)) {
+			return t;
+		}
 	}
 }
 
@@ -1291,7 +1319,9 @@ void tagAndForwardError(PromiseStream<T>* pOutput, Error value, Future<Void> sig
 ACTOR template <class T>
 Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	choose {
-		when(T val = wait(f)) { return val; }
+		when(T val = wait(f)) {
+			return val;
+		}
 		when(wait(errorSignal)) {
 			ASSERT(false);
 			throw internal_error();

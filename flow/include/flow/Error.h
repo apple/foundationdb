@@ -107,7 +107,7 @@ extern Error internal_error_impl(const char* a_nm,
 #define internal_error_msg(msg) internal_error_impl(msg, __FILE__, __LINE__)
 
 extern bool isAssertDisabled(int line);
-//#define ASSERT( condition ) ((void)0)
+// #define ASSERT( condition ) ((void)0)
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
 		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
