@@ -140,6 +140,7 @@ ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocat
 ERROR( platform_error, 1500, "Platform error" )
 ERROR( large_alloc_failed, 1501, "Large block allocation failed" )
 ERROR( performance_counter_error, 1502, "QueryPerformanceCounter error" )
+ERROR( bad_allocator, 1503, "Null allocator was used to allocate memory" )
 
 ERROR( io_error, 1510, "Disk i/o operation failed" )
 ERROR( file_not_found, 1511, "File not found" )

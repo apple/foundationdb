@@ -13,7 +13,8 @@ import traceback
 import time
 from binary_download import FdbBinaryDownloader
 from fdb_version import CURRENT_VERSION, FUTURE_VERSION
-from local_cluster import LocalCluster, random_secret_string
+from local_cluster import LocalCluster
+from test_util import random_alphanum_string
 
 TENANT_API_VERSION = 720
 
@@ -56,7 +57,7 @@ class UpgradeTest:
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
-        self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
+        self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.downloader = FdbBinaryDownloader(args.build_dir)
         self.download_old_binaries()
@@ -81,8 +82,8 @@ class UpgradeTest:
         self.log = self.cluster.log
         self.etc = self.cluster.etc
         self.data = self.cluster.data
-        self.input_pipe_path = self.tmp_dir.joinpath("input.{}".format(random_secret_string(8)))
-        self.output_pipe_path = self.tmp_dir.joinpath("output.{}".format(random_secret_string(8)))
+        self.input_pipe_path = self.tmp_dir.joinpath("input.{}".format(random_alphanum_string(8)))
+        self.output_pipe_path = self.tmp_dir.joinpath("output.{}".format(random_alphanum_string(8)))
         os.mkfifo(self.input_pipe_path)
         os.mkfifo(self.output_pipe_path)
         self.progress_event = Event()

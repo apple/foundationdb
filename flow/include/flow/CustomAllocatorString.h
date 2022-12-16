@@ -1,5 +1,5 @@
 /*
- * process.hpp
+ * CustomAllocatorString.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,9 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef MAKO_PROCESS_HPP
-#define MAKO_PROCESS_HPP
+#ifndef FLOW_CUSTOM_ALLOCATOR_STRING_H
+#define FLOW_CUSTOM_ALLOCATOR_STRING_H
+#pragma once
 
-enum class ProcKind { MAIN, WORKER, STATS, ADMIN };
+#include <string>
 
-#endif /*MAKO_PROCESS_HPP*/
+template <template <class> class Allocator>
+using CustomAllocatorString = std::basic_string<char, std::char_traits<char>, Allocator<char>>;
+
+#endif /*FLOW_CUSTOM_ALLOCATOR_STRING_H*/
