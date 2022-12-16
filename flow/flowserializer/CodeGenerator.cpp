@@ -310,7 +310,7 @@ void emitDeserializeMember(StaticContext* context,
 	EMIT(out.source, "\t}}");
 }
 
-void emitDeserialize(StaticContext* context, Streams& out, expression::Table const& table) {
+void emitDeserializeTable(StaticContext* context, Streams& out, expression::Table const& table) {
 	EMIT(out.header, "\t[[nodiscard]] static {} read(ObjectReader& reader);", table.name);
 	EMIT(out.header, "\t[[nodiscard]] static {} read(ArenaObjectReader& reader);", table.name);
 	EMIT(out.header, "\t// These two methods are intended to be used by flowserializer exclusively");
@@ -557,6 +557,8 @@ void CodeGenerator::emit(struct Streams& out, const OldSerializers& s) const {
 	out.source << fmt::format("\n");
 }
 
+namespace {
+
 void emitSerializeField(StaticContext* context,
                         Streams& out,
                         std::ostream& writer,
@@ -596,10 +598,10 @@ void emitSerializeField(StaticContext* context,
 		case expression::PrimitiveTypeClass::IntType:
 		case expression::PrimitiveTypeClass::FloatType:
 			EMIT(writer,
-			     "\tstd::memcpy(buffer + {}, &{}, sizeof({}));",
+			     "\tstd::memcpy(buffer + {}, &{}, {});",
 			     tableOffset + vtable[fieldIndex + 2],
 			     fieldName,
-			     convertType(field.type));
+			     t->size());
 			break;
 		case expression::PrimitiveTypeClass::StringType: {
 			// TODO: Make sure values are aligned
@@ -650,8 +652,16 @@ void emitSerializeField(StaticContext* context,
 		// TODO: Support nested structs, arrays, etc...
 		for (int i = 0; i < s->fields.size(); ++i) {
 			fmt::print("struct field: {}\n", s->fields[i].name);
-			emitSerializeField(
-			    context, out, writer, fieldIndex + i, s->fields[i], alignment, vtable, tableOffset, dataSize, fieldName + ".");
+			emitSerializeField(context,
+			                   out,
+			                   writer,
+			                   fieldIndex + i,
+			                   s->fields[i],
+			                   alignment,
+			                   vtable,
+			                   tableOffset,
+			                   dataSize,
+			                   fieldName + ".");
 		}
 		break;
 	}
@@ -662,7 +672,7 @@ void emitSerializeField(StaticContext* context,
 	}
 }
 
-void emitSerializeHeader(Streams& out, int rootTableOffset, int staticDataSize) {
+void emitSerializeTableHeader(Streams& out, int rootTableOffset, int staticDataSize) {
 	EMIT(out.source, "\n\t// header");
 	EMIT(out.source, "\t// offset to root table");
 	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer) = {};", rootTableOffset);
@@ -672,21 +682,15 @@ void emitSerializeHeader(Streams& out, int rootTableOffset, int staticDataSize) 
 	EMIT(out.source, "\treturn std::make_pair(buffer, {} + bufferSize);", staticDataSize);
 }
 
-void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
-	out.header << fmt::format("struct {} {{\n", table.name);
-	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
-	                          "flowserializer::Type::Table; }};\n\n");
+void emitSerializeTable(StaticContext* context, Streams& out, expression::Table const& table) {
 	out.header << fmt::format("\tstd::pair<uint8_t*, int> write(flowserializer::Writer& w) const;\n");
-	emitDeserialize(context, out, table);
 
-	for (auto const& f : table.fields) {
-		emit(out, f);
-	}
 	auto tableTypeName = assertTrue(context->resolve(table.name))->first;
 	EMIT(out.source,
 	     "std::pair<uint8_t*, int> {}::{}::write(flowserializer::Writer& w) const {{",
 	     fmt::join(tableTypeName.path, "::"),
 	     table.name);
+
 	// the code to allocate the memory has to be called first, but we can already generate code to write the
 	// statically known data
 	// TODO: Only generate serialization for root_type
@@ -752,9 +756,23 @@ void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
 	// 2. Write header
 	// This needs to be called at the end, after `curr` and `dataSize` have
 	// been calculated correctly.
-	emitSerializeHeader(out, curr, dataSize);
-
+	emitSerializeTableHeader(out, curr, dataSize);
 	EMIT(out.source, "}}");
+}
+
+} // namespace
+
+void CodeGenerator::emit(Streams& out, expression::Table const& table) const {
+	out.header << fmt::format("struct {} {{\n", table.name);
+	out.header << fmt::format("\t[[nodiscard]] flowserializer::Type flowSerializerType() const {{ return "
+	                          "flowserializer::Type::Table; }};\n\n");
+	emitDeserializeTable(context, out, table);
+	emitSerializeTable(context, out, table);
+
+	for (auto const& f : table.fields) {
+		emit(out, f);
+	}
+
 	EMIT(out.header, "}};");
 	emit(out, OldSerializers{ table });
 }
