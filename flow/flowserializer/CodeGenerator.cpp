@@ -154,9 +154,9 @@ void emitDeserializeArray(StaticContext* context,
                           std::string qualifiedName,
                           TypeName typeName,
                           expression::Type const& type) {
-	EMIT(out.source, "\t\tauto offset = *reinterpret_cast<const int32_t*>(data + tableOffset + vtable[idx]);");
+	EMIT(out.source, "\t\tauto offset = *reinterpret_cast<const int32_t*>(data + vtableOffset + vtable[idx]);");
 	EMIT(out.source, "\t\t// concert offset to offset starting from 0");
-	EMIT(out.source, "\t\toffset += tableOffset + vtable[idx];");
+	EMIT(out.source, "\t\toffset += vtableOffset + vtable[idx];");
 	EMIT(out.source, "\t\tauto sz = *reinterpret_cast<const uint32_t*>(data + offset);");
 	EMIT(out.source, "\t\t{}.reserve(sz);", qualifiedName);
 	EMIT(out.source, "\t\tdata += sizeof(uint32_t);");
@@ -168,9 +168,9 @@ void emitDeserializeArray(StaticContext* context,
 }
 
 void emitDeserializeString(Streams& out, std::string qualifiedName) {
-	EMIT(out.source, "\t\tauto offset = *reinterpret_cast<const int32_t*>(data + tableOffset + vtable[idx]);");
+	EMIT(out.source, "\t\tauto offset = *reinterpret_cast<const int32_t*>(data + vtableOffset + vtable[idx]);");
 	EMIT(out.source, "\t\t// concert offset to offset starting from 0");
-	EMIT(out.source, "\t\toffset += tableOffset + vtable[idx];");
+	EMIT(out.source, "\t\toffset += vtableOffset + vtable[idx];");
 	EMIT(out.source, "\t\tauto sz = *reinterpret_cast<const uint32_t*>(data + offset);");
 	EMIT(out.source,
 	     "\t\t{} = std::string(reinterpret_cast<const char*>(data + offset + sizeof(uint32_t)), sz);",
