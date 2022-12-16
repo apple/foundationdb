@@ -31,7 +31,7 @@ class TestSidecarConfig(unittest.TestCase):
             'topology.kubernetes.io/zone' : 'tl'
         }
         got = Config.get_topology_label(Config,labels,HOSTNAME)
-        want = 'tl'
+        want = labels['topology.kubernetes.io/zone']
         self.assertEqual(got,want)
 
     def test_get_topology_label_2(self):
@@ -40,7 +40,7 @@ class TestSidecarConfig(unittest.TestCase):
             'failure-domain.beta.kubernetes.io/zone' : 'fdl'
         }
         got = Config.get_topology_label(Config,labels,HOSTNAME)
-        want = 'fdl'
+        want = labels['failure-domain.beta.kubernetes.io/zone']
         self.assertEqual(got,want)
 
     def test_get_topology_label_3(self):
