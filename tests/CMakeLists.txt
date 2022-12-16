@@ -306,12 +306,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/VersionVectorDisableRestart-1.toml
-    restarting/from_7.1.0/VersionVectorDisableRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
-    restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
-  add_fdb_test(
     TEST_FILES restarting/from_71.2.0/DrUpgradeRestart-1.txt
     restarting/from_71.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
