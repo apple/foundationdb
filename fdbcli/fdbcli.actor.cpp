@@ -244,8 +244,8 @@ private:
 		std::map<typename T::Option, Optional<Standalone<StringRef>>> options;
 		std::map<std::string, typename T::Option> legalOptions;
 
-		OptionGroup<T>() {}
-		OptionGroup<T>(OptionGroup<T>& base)
+		OptionGroup() {}
+		OptionGroup(OptionGroup<T>& base)
 		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
 
 		// Enable or disable an option. Returns true if option value changed
@@ -541,9 +541,11 @@ void initHelp() {
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
 	helpMap["quota"] = CommandHelp("quota",
-	                               "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
-	                               "[reserved_throughput|total_throughput] <value> | clear <tag>]",
-	                               "Get, modify, or clear the throughput quota for the specified tag.");
+	                               "quota [get <tag> [reserved_throughput|total_throughput|storage] | "
+	                               "set <tag> [reserved_throughput|total_throughput|storage] <value> | "
+	                               "clear <tag>]",
+	                               "Get, modify, or clear the reserved/total throughput quota (in bytes/s) or "
+	                               "storage quota (in bytes) for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -685,7 +687,9 @@ ACTOR template <class T>
 Future<T> makeInterruptable(Future<T> f) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
-		when(T t = wait(f)) { return t; }
+		when(T t = wait(f)) {
+			return t;
+		}
 		when(wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
@@ -1411,6 +1415,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "blobkey")) {
 					bool _result = wait(makeInterruptable(blobKeyCommandActor(localDb, tenantEntry, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "blobrestore")) {
+					bool _result = wait(makeInterruptable(blobRestoreCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

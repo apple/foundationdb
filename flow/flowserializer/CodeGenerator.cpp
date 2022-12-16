@@ -314,7 +314,7 @@ void emitDeserializeMember(StaticContext* context,
 void emitDeserializeTable(StaticContext* context, Streams& out, expression::Table const& table) {
 	EMIT(out.header, "\t[[nodiscard]] static {} read(ObjectReader& reader);", table.name);
 	EMIT(out.header, "\t[[nodiscard]] static {} read(ArenaObjectReader& reader);", table.name);
-	EMIT(out.header, "\t// These two methods are intended to be used by flowserializer exclusively");
+	EMIT(out.header, "\t// This method are intended to be used by flowserializer exclusively");
 	EMIT(out.header, "\tvoid _load(const uint8_t* reader);");
 	EMIT(out.header, "");
 

@@ -20,12 +20,14 @@
 
 import numpy
 
+
 class RateModel:
     def __init__(self):
         pass
 
     def get_rate(self, time):
         pass
+
 
 class FixedRateModel(RateModel):
     def __init__(self, rate):
@@ -35,9 +37,11 @@ class FixedRateModel(RateModel):
     def get_rate(self, time):
         return self.rate
 
+
 class UnlimitedRateModel(FixedRateModel):
     def __init__(self):
         self.rate = 1e9
+
 
 class IntervalRateModel(RateModel):
     def __init__(self, intervals):
@@ -46,15 +50,16 @@ class IntervalRateModel(RateModel):
     def get_rate(self, time):
         if len(self.intervals) == 0 or time < self.intervals[0][0]:
             return 0
-        
-        target_interval = len(self.intervals)-1
+
+        target_interval = len(self.intervals) - 1
         for i in range(1, len(self.intervals)):
             if time < self.intervals[i][0]:
-                target_interval = i-1
+                target_interval = i - 1
                 break
 
         self.intervals = self.intervals[target_interval:]
         return self.intervals[0][1]
+
 
 class SawtoothRateModel(RateModel):
     def __init__(self, low, high, frequency):
@@ -63,10 +68,11 @@ class SawtoothRateModel(RateModel):
         self.frequency = frequency
 
     def get_rate(self, time):
-        if int(2*time/self.frequency) % 2 == 0:
+        if int(2 * time / self.frequency) % 2 == 0:
             return self.low
         else:
             return self.high
+
 
 class DistributionRateModel(RateModel):
     def __init__(self, distribution, frequency):

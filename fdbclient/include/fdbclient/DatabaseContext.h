@@ -42,8 +42,8 @@
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbrpc/DDSketch.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -149,13 +149,11 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
 public:
 	Promise<Version> watchPromise;
-	Future<Version> watchFuture;
 	Future<Void> watchFutureSS;
 
 	Reference<const WatchParameters> parameters;
 
-	WatchMetadata(Reference<const WatchParameters> parameters)
-	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
+	WatchMetadata(Reference<const WatchParameters> parameters) : parameters(parameters) {}
 };
 
 struct MutationAndVersionStream {
@@ -328,15 +326,32 @@ public:
 	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	Future<ProtocolVersion> getClusterProtocol(Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>());
 
-	// Update the watch counter for the database
-	void addWatch();
-	void removeWatch();
+	// Increases the counter of the number of watches in this DatabaseContext by 1. If the number of watches is too
+	// many, throws too_many_watches.
+	void increaseWatchCounter();
+
+	// Decrease the counter of the number of watches in this DatabaseContext by 1
+	void decreaseWatchCounter();
 
 	// watch map operations
+
+	// Gets the watch metadata per tenant id and key
 	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
+
+	// Refreshes the watch metadata. If the same watch is used (this is determined by the tenant id and the key), the
+	// metadata will be updated.
 	void setWatchMetadata(Reference<WatchMetadata> metadata);
-	void deleteWatchMetadata(int64_t tenant, KeyRef key);
-	void clearWatchMetadata();
+
+	// Removes the watch metadata
+	// If removeReferenceCount is set to be true, the corresponding WatchRefCount record is removed, too.
+	void deleteWatchMetadata(int64_t tenant, KeyRef key, bool removeReferenceCount = false);
+
+	// Increases reference count to the given watch. Returns the number of references to the watch.
+	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
+
+	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
+	// removed. Returns the number of references to the watch.
+	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
@@ -353,8 +368,9 @@ public:
 
 	int apiVersionAtLeast(int minVersion) const { return apiVersion.version() >= minVersion; }
 
-	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
-	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
+	Future<Void> onConnected()
+	    const; // Returns after a majority of coordination servers are available and have reported a
+	           // leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<IClusterConnectionRecord> getConnectionRecord();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
@@ -403,6 +419,7 @@ public:
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
 	                                Optional<TenantName> tenantName = {});
+	Future<bool> blobRestore(const KeyRange range);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -421,6 +438,8 @@ public:
 	explicit DatabaseContext(const Error& err);
 
 	void expireThrottles();
+
+	UID dbId;
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
@@ -504,7 +523,6 @@ public:
 	// servers by their tags).
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
-	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
 	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
@@ -565,7 +583,7 @@ public:
 	Counter bgReadRowsCleared;
 	Counter bgReadRowsInserted;
 	Counter bgReadRowsUpdated;
-	ContinuousSample<double> bgLatencies, bgGranulesPerRequest;
+	DDSketch<double> bgLatencies, bgGranulesPerRequest;
 
 	// Change Feed metrics. Omit change feed metrics from logging if not used
 	bool usedAnyChangeFeeds;
@@ -577,8 +595,7 @@ public:
 	Counter feedPops;
 	Counter feedPopsFallback;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit;
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
@@ -704,8 +721,26 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
-	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
-	    watchMap;
+	using WatchMapKey = std::pair<int64_t, Key>;
+	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
+	using WatchMapValue = Reference<WatchMetadata>;
+	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
+
+	WatchMap_t watchMap;
+
+	// The reason of using a multiset of Versions as counter instead of a simpler integer counter is due to the
+	// possible race condition:
+	//
+	//    1. A watch to key A is set, the watchValueMap ACTOR, noted as X, starts waiting.
+	//    2. All watches are cleared due to connection string change.
+	//    3. The watch to key A is restarted with watchValueMap ACTOR Y.
+	//    4. X receives the cancel exception, and tries to dereference the counter. This causes Y gets cancelled.
+	//
+	// By introducing versions, this race condition is solved.
+	using WatchCounterMapValue = std::multiset<Version>;
+	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
+	// Maps the number of the WatchMapKey being used.
+	WatchCounterMap_t watchCounterMap;
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.

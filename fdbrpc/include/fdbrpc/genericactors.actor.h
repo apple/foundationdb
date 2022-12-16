@@ -133,7 +133,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
-	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
+	state double reconnectInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
 	state std::unique_ptr<RequestStream<Req>> to;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
@@ -145,8 +145,8 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
-				wait(delay(reconnetInterval));
-				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
+				wait(delay(reconnectInterval));
+				reconnectInterval = std::min(2 * reconnectInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();
@@ -165,7 +165,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
-	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
+	state double reconnectInitInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
 	state std::unique_ptr<RequestStream<Req>> to;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
@@ -177,8 +177,9 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
-				wait(delay(reconnetInterval));
-				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
+				wait(delay(reconnectInitInterval));
+				reconnectInitInterval =
+				    std::min(2 * reconnectInitInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();
@@ -193,7 +194,9 @@ ACTOR template <class T>
 Future<T> timeoutWarning(Future<T> what, double time, PromiseStream<Void> output) {
 	state Future<Void> end = delay(time);
 	loop choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			output.send(Void());
 			end = delay(time);
@@ -331,7 +334,9 @@ void endStreamOnDisconnect(Future<Void> signal,
 	stream.setRequestStreamEndpoint(endpoint);
 	try {
 		choose {
-			when(wait(signal)) { stream.sendError(connection_failed()); }
+			when(wait(signal)) {
+				stream.sendError(connection_failed());
+			}
 			when(wait(peer.isValid() ? peer->disconnect.getFuture() : Never())) {
 				stream.sendError(connection_failed());
 			}
@@ -360,7 +365,9 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 	loop {
 		try {
 			choose {
-				when(X x = wait(value)) { return x; }
+				when(X x = wait(value)) {
+					return x;
+				}
 				when(wait(signal)) {
 					return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
 					                      ? unauthorized_attempt()

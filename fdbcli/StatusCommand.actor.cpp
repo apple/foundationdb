@@ -1125,6 +1125,15 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n  Number of Workers      - " + format("%d", numWorkers);
 					auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
 					outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
+					if (statusObjCluster.has("blob_restore")) {
+						StatusObjectReader statusObjBlobRestore = statusObjCluster["blob_restore"];
+						std::string restoreStatus = statusObjBlobRestore["blob_full_restore_phase"].get_str();
+						if (statusObjBlobRestore.has("blob_full_restore_progress")) {
+							auto progress = statusObjBlobRestore["blob_full_restore_progress"].get_int();
+							restoreStatus += " " + format("%d%%", progress);
+						}
+						outputString += "\n  Full Restore           - " + restoreStatus;
+					}
 				}
 			}
 
