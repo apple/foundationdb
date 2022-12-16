@@ -68,7 +68,8 @@ struct TenantManagementWorkload : TestWorkload {
 	int64_t maxId = -1;
 
 	const Key keyName = "key"_sr;
-	const Key testParametersKey = nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
+	const Key testParametersKey =
+	    "test_parameters"_sr; // nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	const ClusterName dataClusterName = "cluster1"_sr;
@@ -169,7 +170,14 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
+	Future<Optional<Key>> waitDataDbTenantModeChange() const {
+		return runRYWTransaction(dataDb, [](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return tr->get(tenantModeConfKey);
+		});
+	}
+
+	ACTOR static Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
@@ -177,6 +185,9 @@ struct TenantManagementWorkload : TestWorkload {
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
+			std::cout << "Start Meta-cluster and register data cluster..."
+			          << "\n";
+			// Configure the metacluster (this changes the tenant mode)
 			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
 
 			DataClusterEntry entry;
@@ -185,6 +196,8 @@ struct TenantManagementWorkload : TestWorkload {
 			    self->mvDb, self->dataClusterName, g_simulator->extraDatabases[0], entry));
 		}
 
+		// set/load test parameters from metacluster
+		std::cout << "Communicate test parameters...\n";
 		state Transaction tr(cx);
 		if (self->clientId == 0) {
 			// Communicates test parameters to all other clients by storing it in a key
@@ -225,7 +238,10 @@ struct TenantManagementWorkload : TestWorkload {
 			self->dataDb = cx;
 		}
 
-		if (self->clientId == 0 && self->dataDb->getTenantMode()) {
+		// wait for tenant mode change on dataDB
+		wait(success(self->waitDataDbTenantModeChange()));
+
+		if (self->clientId == 0 && self->dataDb->getTenantMode() != TenantMode::REQUIRED) {
 			// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
 			state Transaction dataTr(self->dataDb);
 			loop {
@@ -1839,8 +1855,12 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-				Optional<Value> val = wait(tr.get(self->keyName));
-				ASSERT(val.present() && val.get() == self->noTenantValue);
+				Optional<Value> tenantStr = wait(tr.get(tenantModeConfKey));
+				TenantMode mode = TenantMode::fromValue(tenantStr.castTo<ValueRef>());
+				if (mode != TenantMode::REQUIRED) {
+					Optional<Value> val = wait(tr.get(self->keyName));
+					ASSERT(val.present() && val.get() == self->noTenantValue);
+				}
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
