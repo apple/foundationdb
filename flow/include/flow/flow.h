@@ -392,7 +392,7 @@ struct Callback {
 			next->unwait();
 	}
 
-	int countCallbacks() {
+	int countCallbacks() const {
 		int count = 0;
 		for (Callback* c = next; c != this; c = c->next)
 			count++;
@@ -551,12 +551,12 @@ public:
 	}
 
 	void setActorName(const char* name) { actorName_ = name; }
-	const char* actorName() { return actorName_; }
+	const char* actorName() const { return actorName_; }
 	void allocate() {
 		Reference<ActorLineage>::setPtrUnsafe(new ActorLineage());
 		allocated_ = true;
 	}
-	bool isAllocated() { return allocated_; }
+	bool isAllocated() const { return allocated_; }
 
 private:
 	// The actor name has to be a property of the LineageReference because all
@@ -788,7 +788,7 @@ public:
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
 
-	bool isValid() const { return sav != 0; }
+	bool isValid() const { return sav != nullptr; }
 	bool isReady() const { return sav->isSet(); }
 	bool isError() const { return sav->isError(); }
 	// returns true if get can be called on this future (counterpart of canBeSet on Promises)
@@ -798,16 +798,12 @@ public:
 		return sav->error_state;
 	}
 
-	Future() : sav(0) {}
+	Future() : sav(nullptr) {}
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addFutureRef();
-		// if (sav->endpoint.isValid()) std::cout << "Future copied for " << sav->endpoint.key << std::endl;
 	}
-	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
-		rhs.sav = 0;
-		// if (sav->endpoint.isValid()) std::cout << "Future moved for " << sav->endpoint.key << std::endl;
-	}
+	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = nullptr; }
 	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
@@ -819,7 +815,6 @@ public:
 #endif
 
 	~Future() {
-		// if (sav && sav->endpoint.isValid()) std::cout << "Future destroyed for " << sav->endpoint.key << std::endl;
 		if (sav)
 			sav->delFutureRef();
 	}
@@ -835,7 +830,7 @@ public:
 			if (sav)
 				sav->delFutureRef();
 			sav = rhs.sav;
-			rhs.sav = 0;
+			rhs.sav = nullptr;
 		}
 	}
 	bool operator==(const Future& rhs) { return rhs.sav == sav; }
@@ -848,25 +843,23 @@ public:
 
 	void addCallbackAndClear(Callback<T>* cb) {
 		sav->addCallbackAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	void addYieldedCallbackAndClear(Callback<T>* cb) {
 		sav->addYieldedCallbackAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	void addCallbackChainAndClear(Callback<T>* cb) {
 		sav->addCallbackChainAndDelFutureRef(cb);
-		sav = 0;
+		sav = nullptr;
 	}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
-	explicit Future(SAV<T>* sav) : sav(sav) {
-		// if (sav->endpoint.isValid()) std::cout << "Future created for " << sav->endpoint.key << std::endl;
-	}
+	explicit Future(SAV<T>* sav) : sav(sav) {}
 
 private:
 	SAV<T>* sav;
@@ -1084,7 +1077,7 @@ protected:
 template <class T>
 class FutureStream {
 public:
-	bool isValid() const { return queue != 0; }
+	bool isValid() const { return queue != nullptr; }
 	bool isReady() const { return queue->isReady(); }
 	bool isError() const {
 		// This means that the next thing to be popped is an error - it will be false if there is an error in the stream
@@ -1093,7 +1086,7 @@ public:
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
 		queue->addCallbackAndDelFutureRef(cb);
-		queue = 0;
+		queue = nullptr;
 	}
 	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
@@ -1113,14 +1106,14 @@ public:
 			if (queue)
 				queue->delFutureRef();
 			queue = rhs.queue;
-			rhs.queue = 0;
+			rhs.queue = nullptr;
 		}
 	}
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
 	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
 	T pop() { return queue->pop(); }
-	Error getError() {
+	Error getError() const {
 		ASSERT(queue->isError());
 		return queue->error;
 	}
@@ -1144,7 +1137,7 @@ auto const& getReplyPromiseStream(Request const& r) {
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
 #define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
+// #define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {
@@ -1199,7 +1192,9 @@ public:
 		return getReply(reply);
 	}
 
-	FutureStream<T> getFuture() const {
+	// Not const, because this function gives mutable
+	// access to queue
+	FutureStream<T> getFuture() {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}
@@ -1227,6 +1222,7 @@ public:
 	}
 
 	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool isReady() const { return queue->isReady(); }
 	bool isEmpty() const { return !queue->isReady(); }
 
 	Future<Void> onEmpty() {

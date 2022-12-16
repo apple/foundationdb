@@ -303,7 +303,9 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
-				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
+				when(wait(error)) {
+					TraceEvent("FastRestoreLoaderActorCollectionError", self->id());
+				}
 			}
 		} catch (Error& e) {
 			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
@@ -422,11 +424,12 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			state LogMessageVersion msgVersion;
 			msgVersion.version = reader.consumeNetworkUInt64();
 			msgVersion.sub = reader.consumeNetworkUInt32();
-			int msgSize = reader.consumeNetworkInt32();
-			const uint8_t* message = reader.consume(msgSize);
+			state int msgSize = reader.consumeNetworkInt32();
+			state const uint8_t* message = reader.consume(msgSize);
 
 			// Skip mutations out of the version range
 			if (!asset.isInVersionRange(msgVersion.version)) {
+				wait(yield()); // avoid potential stack overflows
 				continue;
 			}
 

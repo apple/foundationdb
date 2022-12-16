@@ -305,7 +305,7 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const&
 	return logSystem;
 }
 
-void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) {
+void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 	if (recoveryComplete.isValid() && recoveryComplete.isError())
 		throw recoveryComplete.getError();
 
@@ -343,11 +343,11 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) {
 	newState.logSystemType = logSystemType;
 }
 
-bool TagPartitionedLogSystem::remoteStorageRecovered() {
+bool TagPartitionedLogSystem::remoteStorageRecovered() const {
 	return remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady();
 }
 
-Future<Void> TagPartitionedLogSystem::onCoreStateChanged() {
+Future<Void> TagPartitionedLogSystem::onCoreStateChanged() const {
 	std::vector<Future<Void>> changes;
 	changes.push_back(Never());
 	if (recoveryComplete.isValid() && !recoveryComplete.isReady()) {
@@ -376,11 +376,11 @@ void TagPartitionedLogSystem::coreStateWritten(DBCoreState const& newState) {
 	}
 }
 
-Future<Void> TagPartitionedLogSystem::onError() {
+Future<Void> TagPartitionedLogSystem::onError() const {
 	return onError_internal(this);
 }
 
-ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSystem* self) {
+ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSystem const* self) {
 	// Never returns normally, but throws an error if the subsystem stops working
 	loop {
 		std::vector<Future<Void>> failed;
@@ -546,7 +546,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 					it->tlogPushDistTrackers.push_back(
 					    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
 					                            it->logServers[i]->get().interf().address().toString(),
-					                            Histogram::Unit::microseconds));
+					                            Histogram::Unit::milliseconds));
 				}
 			}
 			std::vector<Future<Void>> tLogCommitResults;

@@ -33,8 +33,9 @@ struct TenantInfo {
 
 	Arena arena;
 	Optional<TenantNameRef> name;
-	Optional<StringRef> token;
 	int64_t tenantId;
+	Optional<StringRef> prefix;
+	Optional<StringRef> token;
 	// this field is not serialized and instead set by FlowTransport during
 	// deserialization. This field indicates whether the client is trusted.
 	// Untrusted clients are generally expected to set a TenantName
@@ -49,6 +50,7 @@ struct TenantInfo {
 	// NOTE: In a cluster where TenantMode is OPTIONAL or DISABLED, tenant name may be unset.
 	//       In such case, the request containing such TenantInfo is valid iff the requesting peer is trusted.
 	bool isAuthorized() const { return trusted || tenantAuthorized; }
+	bool hasTenant() const { return tenantId != INVALID_TENANT; }
 
 	TenantInfo() : tenantId(INVALID_TENANT) {}
 	TenantInfo(Optional<TenantName> const& tenantName, Optional<Standalone<StringRef>> const& token, int64_t tenantId)
@@ -61,6 +63,14 @@ struct TenantInfo {
 			arena.dependsOn(token.get().arena());
 			this->token = token.get();
 		}
+		if (tenantId != INVALID_TENANT) {
+			prefix = idToPrefix(tenantId, arena);
+		}
+	}
+
+	static StringRef idToPrefix(int64_t id, Arena& arena) {
+		int64_t swapped = bigEndian64(id);
+		return StringRef(arena, reinterpret_cast<const uint8_t*>(&swapped), sizeof(id));
 	}
 };
 
@@ -76,6 +86,9 @@ struct serializable_traits<TenantInfo> : std::true_type {
 			}
 			v.trusted = FlowTransport::transport().currentDeliveryPeerIsTrusted();
 			v.tenantAuthorized = tenantAuthorized;
+			if (v.hasTenant()) {
+				v.prefix = TenantInfo::idToPrefix(v.tenantId, v.arena);
+			}
 		}
 	}
 };

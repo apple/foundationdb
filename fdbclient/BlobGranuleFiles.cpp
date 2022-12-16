@@ -357,7 +357,7 @@ struct IndexBlockRef {
 			// Compressing indexBlock will need offset recalculation (circular depedency). IndexBlock size is bounded by
 			// number of chunks and sizeof(KeyPrefix), 'not' compressing IndexBlock shouldn't cause significant file
 			// size bloat.
-
+			CODE_PROBE(true, "encrypting index block");
 			ASSERT(cipherKeysCtx.present());
 			encrypt(cipherKeysCtx.get(), arena);
 		} else {
@@ -497,6 +497,7 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		if (cipherKeysCtx.present()) {
+			CODE_PROBE(true, "encrypting granule chunk");
 			IndexBlobGranuleFileChunkRef::encrypt(cipherKeysCtx.get(), chunkRef, arena);
 		}
 
@@ -969,6 +970,11 @@ void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
 
 	// TODO: could do a scan through map and coalesce clears (if any boundaries with exactly 1 mutation (clear) and same
 	// clearVersion as previous guy)
+}
+
+void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange) {
+	SortedDeltasT deltasByKey;
+	sortDeltasByKey(deltasByVersion, fileRange, deltasByKey);
 }
 
 // FIXME: Could maybe reduce duplicated code between this and chunkedSnapshot for chunking

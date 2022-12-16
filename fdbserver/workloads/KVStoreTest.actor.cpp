@@ -279,7 +279,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		}
 		double elapsed = timer() - cst;
 		TraceEvent("KVStoreCount").detail("Count", count).detail("Took", elapsed);
-		fmt::print("Counted: {0} in {1:01.f}s\n");
+		fmt::print("Counted: {0} in {1:0.1f}s\n", count, elapsed);
 	}
 
 	if (workload->doSetup) {
@@ -404,7 +404,9 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	try {
 		choose {
 			when(wait(main)) {}
-			when(wait(test.store->getError())) { ASSERT(false); }
+			when(wait(test.store->getError())) {
+				ASSERT(false);
+			}
 		}
 	} catch (Error& e) {
 		err = e;

@@ -652,7 +652,9 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
 	loop {
 		choose {
-			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(deserializer)) {
+				UNSTOPPABLE_ASSERT(false);
+			}
 			when(wait(knownLeader->onChange())) {
 				if (knownLeader->get().present()) {
 					outKnownLeader->set(knownLeader->get().get().clientInterface);
@@ -965,7 +967,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			allConnectionsFailed = false;
 		} else {
 			CODE_PROBE(rep.getError().code() == error_code_failed_to_progress,
-			           "Coordinator cant talk to cluster controller");
+			           "Coordinator cannot talk to cluster controller");
 			TraceEvent("MonitorProxiesConnectFailed")
 			    .detail("Error", rep.getError().name())
 			    .detail("Coordinator", clientLeaderServer.getAddressString());

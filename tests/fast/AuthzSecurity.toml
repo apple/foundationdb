@@ -1,0 +1,31 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['optional', 'required']
+
+[[test]]
+testTitle = 'TenantCreation'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'AuthzSecurityTenant'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'AnotherAuthzSecurityTenant'
+
+[[test]]
+testTitle = 'AuthzSecurityCheck'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'LeakTLogInterface'
+    tenant = 'AuthzSecurityTenant'
+    key = 'TLogInterface'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'AuthzSecurity'
+    tenantA = 'AuthzSecurityTenant'
+    tenantB = 'AnotherAuthzSecurityTenant'
+    tLogConfigKey = 'TLogInterface'
+    testDuration = 10.0

@@ -14,13 +14,13 @@ The global tag throttler cannot throttle tags to a throughput below the reserved
 Internally, the units for these quotas are bytes. The cost of an operation is rounded up to the nearest page size. The cost of a read operation is computed as:
 
 ```
-readCost = ceiling(bytesRead / CLIENT_KNOBS->READ_COST_BYTE_FACTOR) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+readCost = ceiling(bytesRead / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 ```
 
 The cost of a write operation is computed as:
 
 ```
-writeCost = CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * ceiling(bytesWritten / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+writeCost = CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * ceiling(bytesWritten / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 ```
 
 Here `bytesWritten` includes cleared bytes. The size of range clears is estimated at commit time.
@@ -116,12 +116,12 @@ If an individual zone is unhealthy, it may cause the throttling ratio for storag
 ### Client Rate Calculation
 The smoothed per-client rate for each tag is tracked within `GlobalTagThrottlerImpl::PerTagStatistics`. Once a target rate has been computed, this is passed to `GlobalTagThrotterImpl::PerTagStatistics::updateAndGetPerClientRate` which adjusts the per-client rate. The per-client rate is meant to limit the busiest clients, so that at equilibrium, the per-client rate will remain constant and the sum of throughput from all clients will match the target rate.
 
-## Testing
-The `GlobalTagThrottling.toml` test provides a simple end-to-end test using the global tag throttler. Quotas are set using the internal tag quota API in the `GlobalTagThrottling` workload. This is run in parallel with the `ReadWrite` workload, which tags transactions. The number of `transaction_tag_throttled` errors is reported, along with the throughput, which should be roughly predictable based on the quota parameters chosen. 
+## Simulation Testing
+The `ThroughputQuota.toml` test provides a simple end-to-end test using the global tag throttler. Quotas are set using the internal tag quota API in the `ThroughputQuota` workload. This is run with the `Cycle` workload, which randomly tags transactions. 
 
 In addition to this end-to-end test, there is a suite of unit tests with the `/GlobalTagThrottler/` prefix. These tests run in a mock environment, with mock storage servers providing simulated storage queue statistics and tag busyness reports. Mock clients simulate workload on these mock storage servers, and get throttling feedback directly from a global tag throttler which is monitoring the mock storage servers.
 
-In each test, the `GlobalTagThrottlerTesting::monitor` function is used to periodically check whether or not a desired equilibrium state has been reached. If the desired state is reached and maintained for a sufficient period of time, the test passes. If the unit test is unable to reach this desired equilibrium state before a timeout, the test will fail. Commonly, the desired state is for the global tag throttler to report a client rate sufficiently close to the desired rate specified as an input to the `GlobalTagThrottlerTesting::rateIsNear` function.
+In each unit test, the `GlobalTagThrottlerTesting::monitor` function is used to periodically check whether or not a desired equilibrium state has been reached. If the desired state is reached and maintained for a sufficient period of time, the test passes. If the unit test is unable to reach this desired equilibrium state before a timeout, the test will fail. Commonly, the desired state is for the global tag throttler to report a client rate sufficiently close to the desired rate specified as an input to the `GlobalTagThrottlerTesting::rateIsNear` function.
 
 ## Visibility
 

@@ -196,7 +196,7 @@ private:
 
 			Standalone<StringRef> e = wait(self->queue->readNext(payloadSize + 1));
 			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload");
+				CODE_PROBE(true, "Zero fill within payload", probe::decoration::rare);
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -210,7 +210,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}
@@ -768,7 +768,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(Reference<LogData> self,
@@ -1582,7 +1584,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 							logData->queueCommittedVersion.set(qe.version);
 
 							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
-								CODE_PROBE(true, "Flush excess data during TLog queue recovery");
+								CODE_PROBE(
+								    true, "Flush excess data during TLog queue recovery", probe::decoration::rare);
 								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
 								    .detail("BytesInput", self->bytesInput)
 								    .detail("BytesDurable", self->bytesDurable)
@@ -1591,13 +1594,17 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -1633,7 +1640,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId).detail("Version", "4.6");
 
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
 		wait(restorePersistentState(&self, locality));
 
 		self.sharedActors.send(cleanupPeekTrackers(&self));

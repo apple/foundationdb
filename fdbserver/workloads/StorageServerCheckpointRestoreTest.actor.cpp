@@ -66,7 +66,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		return _start(this, cx);
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("RandomMoveKeys");
+		out.insert("Attrition");
+	}
 
 	ACTOR Future<Void> _start(SSCheckpointRestoreWorkload* self, Database cx) {
 		state Key key = "TestKey"_sr;
@@ -82,12 +85,13 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);
 		// Create checkpoint.
 		state Transaction tr(cx);
-		state CheckpointFormat format = deterministicRandom()->coinflip() ? RocksDBColumnFamily : RocksDB;
+		state CheckpointFormat format = DataMoveRocksCF;
+		state UID dataMoveId = deterministicRandom()->randomUniqueID();
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(createCheckpoint(&tr, testRange, format));
+				wait(createCheckpoint(&tr, { testRange }, format, dataMoveId));
 				wait(tr.commit());
 				version = tr.getCommittedVersion();
 				break;
@@ -96,13 +100,17 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("TestCheckpointCreated").detail("Range", testRange).detail("Version", version);
+		TraceEvent("TestCheckpointCreated")
+		    .detail("Range", testRange)
+		    .detail("Version", version)
+		    .detail("DataMoveID", dataMoveId);
 
 		// Fetch checkpoint meta data.
 		loop {
 			records.clear();
 			try {
-				wait(store(records, getCheckpointMetaData(cx, testRange, version, format)));
+				wait(store(records,
+				           getCheckpointMetaData(cx, { testRange }, version, format, Optional<UID>(dataMoveId))));
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")

@@ -25,6 +25,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -62,7 +63,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys", "Attrition" });
+	}
 
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
@@ -213,19 +216,35 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				moveKeysLock.myOwner = owner;
 
 				TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
-				wait(moveKeys(cx,
-				              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-				                              keys,
-				                              dest,
-				                              dest,
-				                              moveKeysLock,
-				                              Promise<Void>(),
-				                              &self->startMoveKeysParallelismLock,
-				                              &self->finishMoveKeysParallelismLock,
-				                              false,
-				                              UID(), // for logging only
-				                              &ddEnabledState,
-				                              CancelConflictingDataMoves::True }));
+				std::unique_ptr<MoveKeysParams> params;
+				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					params = std::make_unique<MoveKeysParams>(deterministicRandom()->randomUniqueID(),
+					                                          std::vector<KeyRange>{ keys },
+					                                          dest,
+					                                          dest,
+					                                          moveKeysLock,
+					                                          Promise<Void>(),
+					                                          &self->startMoveKeysParallelismLock,
+					                                          &self->finishMoveKeysParallelismLock,
+					                                          false,
+					                                          UID(), // for logging only
+					                                          &ddEnabledState,
+					                                          CancelConflictingDataMoves::True);
+				} else {
+					params = std::make_unique<MoveKeysParams>(deterministicRandom()->randomUniqueID(),
+					                                          keys,
+					                                          dest,
+					                                          dest,
+					                                          moveKeysLock,
+					                                          Promise<Void>(),
+					                                          &self->startMoveKeysParallelismLock,
+					                                          &self->finishMoveKeysParallelismLock,
+					                                          false,
+					                                          UID(), // for logging only
+					                                          &ddEnabledState,
+					                                          CancelConflictingDataMoves::True);
+				}
+				wait(moveKeys(cx, *params));
 				break;
 			} catch (Error& e) {
 				TraceEvent("DataLossRecovery").error(e).detail("Phase", "MoveRangeError");
