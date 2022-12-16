@@ -11,6 +11,7 @@
 
 #include "Config.h"
 #include "Compiler.h"
+#include "FlatbuffersTypes.h"
 #include "StaticContext.h"
 #include "CodeGenerator.h"
 
@@ -564,7 +565,6 @@ void emitSerializeField(StaticContext* context,
                         std::ostream& writer,
                         size_t fieldIndex,
                         expression::Field const& field,
-                        unsigned alignment,
                         std::vector<voffset_t> vtable,
                         voffset_t tableOffset,
                         int& dataSize,
@@ -652,16 +652,8 @@ void emitSerializeField(StaticContext* context,
 		// TODO: Support nested structs, arrays, etc...
 		for (int i = 0; i < s->fields.size(); ++i) {
 			fmt::print("struct field: {}\n", s->fields[i].name);
-			emitSerializeField(context,
-			                   out,
-			                   writer,
-			                   fieldIndex + i,
-			                   s->fields[i],
-			                   alignment,
-			                   vtable,
-			                   tableOffset,
-			                   dataSize,
-			                   fieldName + ".");
+			emitSerializeField(
+			    context, out, writer, fieldIndex + i, s->fields[i], vtable, tableOffset, dataSize, fieldName + ".");
 		}
 		break;
 	}
@@ -673,13 +665,20 @@ void emitSerializeField(StaticContext* context,
 }
 
 void emitSerializeTableHeader(Streams& out, int rootTableOffset, int staticDataSize) {
-	EMIT(out.source, "\n\t// header");
-	EMIT(out.source, "\t// offset to root table");
+	EMIT(out.source, "\t// Allocate buffer with alignment 8");
+	EMIT(out.source,
+	     "\tuint8_t* buffer = reinterpret_cast<uint8_t*>(new uint64_t[({} + bufferSize) / 8 + 1]);\n",
+	     staticDataSize);
+	EMIT(out.source, "\t// offset to the root table");
 	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer) = {};", rootTableOffset);
 	EMIT(out.source, "\t// file identifier");
 	EMIT(out.source, "\t*reinterpret_cast<uoffset_t*>(buffer + 4) = {};", 0);
+}
 
-	EMIT(out.source, "\treturn std::make_pair(buffer, {} + bufferSize);", staticDataSize);
+void alignOffset(int& offset, int alignment) {
+	if (offset % alignment != 0) {
+		offset += (alignment - offset % alignment);
+	}
 }
 
 void emitSerializeTable(StaticContext* context, Streams& out, expression::Table const& table) {
@@ -696,8 +695,10 @@ void emitSerializeTable(StaticContext* context, Streams& out, expression::Table 
 	// TODO: Only generate serialization for root_type
 	std::stringstream writer;
 	auto serMap = context->serializationInformation(table.name);
-	int curr = 8; // first eight bytes used by header
+
 	// 0. write all vtables
+	int curr = 8;
+	EMIT(writer, "\tvoffset_t* vtable;", curr);
 	for (auto const& [typeName, serInfo] : serMap) {
 		fmt::print("serMapPath: {}, serMapTypeName: {}, serMapSize: {}, vtable empty: {}\n",
 		           fmt::join(typeName.path, "::"),
@@ -707,24 +708,28 @@ void emitSerializeTable(StaticContext* context, Streams& out, expression::Table 
 		if (serInfo.vtable->empty()) {
 			continue;
 		}
-		writer << fmt::format("\t// vtable for {}{}{}\n",
-		                      fmt::join(typeName.path, "::"),
-		                      typeName.path.empty() ? "" : "::",
-		                      typeName.name);
+		EMIT(writer,
+		     "\t// vtable for {}{}{}",
+		     fmt::join(typeName.path, "::"),
+		     typeName.path.empty() ? "" : "::",
+		     typeName.name);
+		EMIT(writer, "\tvtable = reinterpret_cast<voffset_t*>(buffer + {});", curr);
+		int vtableIdx = 0;
 		for (auto o : *serInfo.vtable) {
-			writer << fmt::format("\t*reinterpret_cast<voffset_t*>(buffer + {}) = {};\n", curr, o);
-			curr += 2;
+			EMIT(writer, "\tvtable[{}] = {};", vtableIdx, o);
+			vtableIdx++;
 		}
+		curr += sizeof(voffset_t) * vtableIdx;
 	}
+
+	// Serialize the vtable offset
+	auto serInfo = serMap.at(tableTypeName);
+	alignOffset(curr, serInfo.alignment);
+
+	EMIT(writer, "\n\t// table (data or offsets to data)");
+	EMIT(writer, "\t*reinterpret_cast<soffset_t*>(buffer + {}) = {};", curr, curr - 8);
 
 	// 1.0. Determine size of all tables
-	auto serInfo = serMap.at(tableTypeName);
-
-	unsigned alignment = serInfo.alignment;
-	if (curr % alignment != 0) {
-		curr += (curr - alignment);
-	}
-
 	auto vtable = serInfo.vtable;
 	int dataSize = curr;
 	if (!vtable->empty()) {
@@ -733,30 +738,20 @@ void emitSerializeTable(StaticContext* context, Streams& out, expression::Table 
 
 	// 1.5. Iterate through all fields and generate all types simultaneously
 	EMIT(out.source, "\tint bufferSize = 0;");
-	EMIT(out.source, "\tint dynamicOffset = 0;");
-	std::stringstream appendData;
-	EMIT(writer, "\n\t// table (data or offsets to data)");
-	EMIT(writer,
-	     "\t*reinterpret_cast<soffset_t*>(buffer + {}) = 0b{:b}; // two's complement offset "
-	     "(subtracted from current address to get vtable address)",
-	     curr,
-	     curr - 8);
+	EMIT(writer, "\tint dynamicOffset = 0;");
 	for (int i = 0; i < table.fields.size(); ++i) {
-		emitSerializeField(context, out, writer, i, table.fields[i], alignment, vtable.value(), curr, dataSize, "");
-	}
-
-	EMIT(out.source, "\tuint8_t* buffer = new uint8_t[{} + bufferSize];\n", dataSize);
-	out.source << writer.str();
-
-	std::string appendStr = appendData.str();
-	if (!appendStr.empty()) {
-		out.source << appendStr;
+		emitSerializeField(context, out, writer, i, table.fields[i], vtable.value(), curr, dataSize, "");
 	}
 
 	// 2. Write header
 	// This needs to be called at the end, after `curr` and `dataSize` have
-	// been calculated correctly.
+	// been calculated correctly
 	emitSerializeTableHeader(out, curr, dataSize);
+
+	// Write serialization code in the middle
+	out.source << writer.str();
+
+	EMIT(out.source, "\treturn std::make_pair(buffer, {} + bufferSize);", dataSize);
 	EMIT(out.source, "}}");
 }
 
