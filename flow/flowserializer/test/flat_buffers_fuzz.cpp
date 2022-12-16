@@ -34,6 +34,9 @@ Verify(T lhs, U rhs, std::string context);
 
 void Randomize(std::mt19937_64& r, bool& x);
 void Randomize(std::mt19937_64& r, char& x);
+void Randomize(std::mt19937_64& r, std::string& x);
+void Randomize(std::mt19937_64& r, std::string& x);
+void Randomize(std::mt19937_64& r, std::string& x, flatbuffers::FlatBufferBuilder&);
 
 template <class T>
 std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>> Randomize(
@@ -79,6 +82,11 @@ void RandomizeUnionHelper(std::mt19937_64& r, int i, Union& x);
 template <class... T>
 void Randomize(std::mt19937_64& r, std::variant<T...>& x);
 
+template <class String>
+void Verify(const std::string& lhs, const String* rhs, std::string context) {
+	CHECK_MESSAGE(lhs == rhs->str(), context);
+}
+
 #include "table_fdbflatbuffers.h"
 
 template <class T, class U>
@@ -105,6 +113,18 @@ void Randomize(std::mt19937_64& r, char& x) {
 	int8_t i;
 	Randomize(r, i);
 	x = static_cast<char>(i);
+}
+
+void Randomize(std::mt19937_64& r, std::string& x) {
+	int len = std::geometric_distribution<>{ 0.1 }(r);
+	x.reserve(len);
+	for (int i = 0; i < len; i++) {
+		x += (char)std::uniform_int_distribution<uint8_t>(32, 126)(r); // printable ASCII
+	}
+}
+
+void Randomize(std::mt19937_64& r, std::string& x, flatbuffers::FlatBufferBuilder&) {
+	Randomize(r, x);
 }
 
 template <class T>
@@ -322,6 +342,20 @@ void testOurNewDeserialize(std::mt19937_64& r, int i) {
 	ours::Verify(ours_new, theirs::testfb::GetTable0(serialized), "NewLoadPath[" + std::to_string(i) + "]: ");
 }
 
+void testNewSerializeDeserialize(std::mt19937_64& r, int i) {
+	// Generate a random instance
+	testfb::Table0 ours_new1;
+	ours::Randomize(r, ours_new1);
+
+	// Serialize using our new serializer
+	flowserializer::Writer w;
+	auto [bufPtr, bufSize] = ours_new1.write(w);
+
+	// Deserialize using our new serializer
+	ObjectReader reader(bufPtr, Unversioned());
+	testfb::Table0 ours_new2 = testfb::Table0::read(reader);
+}
+
 void doFuzzOld() {
 	std::mt19937_64 r(ours::kSeed);
 
@@ -351,6 +385,11 @@ TEST_CASE("Serialize") {
 TEST_CASE("Deserialize") {
 	std::mt19937_64 r(ours::kSeed);
 	testOurNewDeserialize(r, 0);
+}
+
+TEST_CASE("BothWays") {
+	std::mt19937_64 r(ours::kSeed);
+	testNewSerializeDeserialize(r, 0);
 }
 
 TEST_CASE("FuzzOld") {

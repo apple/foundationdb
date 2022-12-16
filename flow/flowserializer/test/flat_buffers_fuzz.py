@@ -13,11 +13,13 @@ Float = 8
 Long = 9
 ULong = 10
 Double = 11
+String = 12
 
-ENABLE_TABLES=True
+ENABLE_NESTED_TABLES=False
 ENABLE_STRUCTS=False
 ENABLE_UNIONS=False
 ENABLE_VECTORS=False
+ENABLE_STRINGS=True
 
 class Type:
     pass
@@ -30,7 +32,7 @@ def choose_type(depth, allow_vector=True):
             choices.append(Vector)
         if ENABLE_STRUCTS:
             choices.append(Struct)
-        if ENABLE_TABLES:
+        if ENABLE_NESTED_TABLES:
             choices.append(Table)
         if ENABLE_UNIONS:
             choices.append(Union)
@@ -52,7 +54,7 @@ def sample_string():
 
 class Primitive(Type):
     def __init__(self, prim):
-        assert(Byte <= prim <= Double)
+        assert(Byte <= prim <= String)
         self.prim = prim
 
     def __repr__(self):
@@ -68,6 +70,7 @@ class Primitive(Type):
             9: 'Long',
             10: 'ULong',
             11: 'Double',
+            12: 'String',
         }[self.prim]
 
     def to_fbidl(self, tables=None):
@@ -109,6 +112,9 @@ class Primitive(Type):
 
     @staticmethod
     def choose_type(depth=1):
+        if ENABLE_STRINGS:
+            if random.random() > 0.7:
+                return Primitive(String)
         return Primitive(random.choice(list(range(Byte, Double + 1))))
 
     def __eq__(self, other):
@@ -310,6 +316,10 @@ class CollectCppTables:
             result += '    }\n'
             result += '    flatbuffers::Offset<flatbuffers::Vector<uint8_t>> {0}_type = fbb.CreateVector({0}_types);\n'.format(k)
             result += '    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<void>>> {0} = fbb.CreateVector({0}_vector);\n'.format(k)
+            return result;
+        if v == Primitive(String):
+            result = '    {1} {0}_str; Randomize(r, {0}_str, fbb);\n'.format(k, v.to_fb_cpp())
+            result += '    flatbuffers::Offset<flatbuffers::String> {0} = fbb.CreateString({0}_str);\n'.format(k)
             return result;
         return '    {1} {0}; Randomize(r, {0}, fbb);'.format(k, v.to_fb_cpp())
 
