@@ -285,8 +285,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-1.txt
     restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
-    restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
+    TEST_FILES restarting/from_7.0.0_until_7.1.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.0.0_until_7.1.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/SnapTestAttrition-1.txt
     restarting/from_7.1.0/SnapTestAttrition-2.txt)
@@ -299,6 +299,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/SnapCycleRestart-1.txt
     restarting/from_7.1.0/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.1.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.1.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
