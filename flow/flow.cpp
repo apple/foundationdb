@@ -449,6 +449,7 @@ void bindDeterministicRandomToOpenssl() {
 }
 
 int nChooseK(int n, int k) {
+	assert(n >= k && k >= 0);
 	if (k == 0) {
 		return 1;
 	}
