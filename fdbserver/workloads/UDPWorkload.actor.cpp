@@ -184,7 +184,9 @@ struct UDPWorkload : TestWorkload {
 					finished = delay(1.0);
 					done = Never();
 				}
-				when(wait(finished)) { return Void(); }
+				when(wait(finished)) {
+					return Void();
+				}
 			}
 		}
 	}
@@ -198,7 +200,9 @@ struct UDPWorkload : TestWorkload {
 		loop {
 			choose {
 				when(wait(delay(0.1))) {}
-				when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
+				when(wait(actors.getResult())) {
+					UNSTOPPABLE_ASSERT(false);
+				}
 			}
 			if (!socket.get().isValid() || deterministicRandom()->random01() < 0.05) {
 				peer = deterministicRandom()->randomChoice(*remotes);

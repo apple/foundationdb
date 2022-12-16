@@ -55,7 +55,9 @@ struct AfterReturn {
 ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore, Future<Void> onClosed) {
 	try {
 		choose {
-			when(wait(onClosed)) { commitReq.reply.sendError(remote_kvs_cancelled()); }
+			when(wait(onClosed)) {
+				commitReq.reply.sendError(remote_kvs_cancelled());
+			}
 			when(wait(kvStore->commit(commitReq.sequential))) {
 				StorageBytes storageBytes = kvStore->getStorageBytes();
 				commitReq.reply.send(IKVSCommitReply(storageBytes));
@@ -102,8 +104,12 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					actors.add(cancellableForwardPromise(getReq.reply,
 					                                     kvStore->readValue(getReq.key, getReq.type, getReq.debugID)));
 				}
-				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) { kvStore->set(req.keyValue); }
-				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) { kvStore->clear(req.range); }
+				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) {
+					kvStore->set(req.keyValue);
+				}
+				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) {
+					kvStore->clear(req.range);
+				}
 				when(IKVSCommitRequest commitReq = waitNext(ikvsInterface.commit.getFuture())) {
 					sendCommitReply(commitReq, kvStore, onClosed.getFuture());
 				}
