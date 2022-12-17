@@ -425,6 +425,22 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	return KeyRangeRef(b, e);
 }
 
+// Calculates the complement of `lhs` from `rhs`.
+inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+	if ((lhs & rhs).empty()) {
+		return { lhs };
+	}
+
+	std::vector<KeyRangeRef> result;
+	if (lhs.begin < rhs.begin) {
+		result.push_back(KeyRangeRef(lhs.begin, rhs.begin));
+	}
+	if (lhs.end > rhs.end) {
+		result.push_back(KeyRangeRef(rhs.end, lhs.end));
+	}
+	return result;
+}
+
 struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
@@ -1504,6 +1520,8 @@ struct EncryptionAtRestMode {
 
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+
+	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
 
 	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {

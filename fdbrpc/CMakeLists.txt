@@ -24,6 +24,10 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
 add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
+add_flow_target(STATIC_LIBRARY NAME tokensign
+  SRCS TokenSign/TokenSignStdTypes.cpp
+  DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
+target_link_libraries(tokensign PRIVATE fdbrpc flow)
 
 add_flow_target(LINK_TEST NAME fdbrpclinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbrpclinktest PRIVATE fdbrpc rapidjson)

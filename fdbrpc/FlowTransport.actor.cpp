@@ -572,7 +572,9 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 					}
 					break;
 				}
-				when(wait(peer->resetPing.onTrigger())) { break; }
+				when(wait(peer->resetPing.onTrigger())) {
+					break;
+				}
 			}
 		}
 	}
@@ -668,7 +670,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 					choose {
 						when(wait(self->dataToSend.onTrigger())) {}
-						when(wait(retryConnectF)) { break; }
+						when(wait(retryConnectF)) {
+							break;
+						}
 					}
 				}
 
@@ -717,7 +721,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 							self->prependConnectPacket();
 							reader = connectionReader(self->transport, conn, self, Promise<Reference<Peer>>());
 						}
-						when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+						when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+							throw connection_failed();
+						}
 					}
 				} catch (Error& e) {
 					++self->connectFailedCount;
@@ -1465,7 +1471,9 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 				ASSERT(false);
 				return Void();
 			}
-			when(Reference<Peer> p = wait(onConnected.getFuture())) { p->onIncomingConnection(p, conn, reader); }
+			when(Reference<Peer> p = wait(onConnected.getFuture())) {
+				p->onIncomingConnection(p, conn, reader);
+			}
 			when(wait(delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 				CODE_PROBE(true, "Incoming connection timed out");
 				throw timed_out();

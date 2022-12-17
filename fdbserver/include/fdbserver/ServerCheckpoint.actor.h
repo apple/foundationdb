@@ -31,6 +31,15 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+FDB_DECLARE_BOOLEAN_PARAM(CheckpointAsKeyValues);
+
+class ICheckpointIterator {
+public:
+	virtual Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) = 0;
+
+	virtual ~ICheckpointIterator() {}
+};
+
 // An ICheckpointReader can read the contents of a checkpoint created from a KV store,
 // i.e., by IKeyValueStore::checkpoint().
 class ICheckpointReader {
@@ -47,11 +56,17 @@ public:
 
 	virtual Future<Void> close() = 0;
 
+	virtual std::unique_ptr<ICheckpointIterator> getIterator(KeyRange range) { throw not_implemented(); }
+
+	virtual bool inUse() const { return false; }
+
 protected:
 	virtual ~ICheckpointReader() {}
 };
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
+                                       const CheckpointAsKeyValues checkpointAsKeyValues,
+                                       UID logID);
 
 // Delete a checkpoint.
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
@@ -64,10 +79,12 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  std::string dir,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
-ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
+// Same as above, except that the checkpoint is fetched as key-value pairs.
+ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
     Database cx,
-    std::vector<CheckpointMetaData> initialStates,
+    CheckpointMetaData initialState,
     std::string dir,
+    std::vector<KeyRange> ranges,
     std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 #include "flow/unactorcompiler.h"

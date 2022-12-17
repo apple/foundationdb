@@ -135,7 +135,9 @@ public:
 
 		loop {
 			choose {
-				when(wait(self->buildTeams())) { return Void(); }
+				when(wait(self->buildTeams())) {
+					return Void();
+				}
 				when(wait(self->restartTeamBuilder.onTrigger())) {}
 			}
 		}
@@ -525,7 +527,9 @@ public:
 		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
 			choose {
 				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
-				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
+				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) {
+					break;
+				}
 			}
 		}
 
@@ -1361,7 +1365,9 @@ public:
 						    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
-					when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
+					when(wait(server->wakeUpTracker.getFuture())) {
+						server->wakeUpTracker = Promise<Void>();
+					}
 					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
@@ -1951,6 +1957,40 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
+		state bool takeRest = true;
+		state Promise<int64_t> avgShardBytes;
+		while (takeRest) {
+			// a minimal delay to avoid excluding and including SS too fast
+			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
+
+			avgShardBytes.reset();
+			self->getAverageShardBytes.send(avgShardBytes);
+			int64_t avgBytes = wait(avgShardBytes.getFuture());
+			double ratio = self->loadBytesBalanceRatio(avgBytes * SERVER_KNOBS->PERPETUAL_WIGGLE_SMALL_LOAD_RATIO);
+			bool imbalance = ratio < SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO;
+			CODE_PROBE(imbalance, "Perpetual Wiggle pause because cluster is imbalance.");
+
+			// there must not have other teams to place wiggled data
+			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
+			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance;
+
+			// log the extra delay and change the wiggler state
+			if (takeRest) {
+				self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
+				if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+					TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
+					    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+					    .detail("BytesBalanceRatio", ratio)
+					    .detail("ServerSize", self->server_info.size())
+					    .detail("MachineSize", self->machine_info.size())
+					    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+				}
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
 	                                                         AsyncVar<bool>* stopSignal,
 	                                                         FutureStream<Void> finishStorageWiggleSignal) {
@@ -1958,24 +1998,9 @@ public:
 			choose {
 				when(wait(stopSignal->onChange())) {}
 				when(waitNext(finishStorageWiggleSignal)) {
-					state bool takeRest = true; // delay to avoid delete and update ServerList too frequently
-					while (takeRest) {
-						wait(delayJittered(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
-						// there must not have other teams to place wiggled data
-						takeRest =
-						    teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
-						    teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-						if (takeRest) {
-							teamCollection->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
-							if (teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-								TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", teamCollection->distributorId)
-								    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-								    .detail("ServerSize", teamCollection->server_info.size())
-								    .detail("MachineSize", teamCollection->machine_info.size())
-								    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
-							}
-						}
-					}
+					// delay to avoid delete and update ServerList too frequently, which could result busy loop or over
+					// utilize the disk of other active SS
+					wait(perpetualStorageWiggleRest(teamCollection));
 					wait(updateNextWigglingStorageID(teamCollection));
 				}
 			}
@@ -2068,7 +2093,9 @@ public:
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
-						when(wait(pauseChanged)) { continue; }
+						when(wait(pauseChanged)) {
+							continue;
+						}
 					}
 				}
 			}
@@ -2584,7 +2611,9 @@ public:
 							}
 						}
 					}
-					when(wait(recruitStorage->onChange())) { fCandidateWorker = Future<RecruitStorageReply>(); }
+					when(wait(recruitStorage->onChange())) {
+						fCandidateWorker = Future<RecruitStorageReply>();
+					}
 					when(wait(self->zeroHealthyTeams->onChange())) {
 						if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
 						    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
@@ -3384,6 +3413,39 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 	return DDTeamCollectionImpl::removeBadTeams(this);
 }
 
+double DDTeamCollection::loadBytesBalanceRatio(int64_t smallLoadThreshold) const {
+	double minLoadBytes = std::numeric_limits<double>::max();
+	double totalLoadBytes = 0;
+	int count = 0;
+	for (auto& [id, s] : server_info) {
+		// If a healthy SS don't have storage metrics, skip this round
+		if (server_status.get(s->getId()).isUnhealthy() || !s->metricsPresent()) {
+			TraceEvent(SevDebug, "LoadBytesBalanceRatioNoMetrics").detail("Server", id);
+			return 0;
+		}
+
+		double load = s->loadBytes();
+		totalLoadBytes += load;
+		++count;
+		minLoadBytes = std::min(minLoadBytes, load);
+	}
+
+	TraceEvent(SevDebug, "LoadBytesBalanceRatioMetrics")
+	    .detail("TotalLoad", totalLoadBytes)
+	    .detail("MinLoadBytes", minLoadBytes)
+	    .detail("SmallLoadThreshold", smallLoadThreshold)
+	    .detail("Count", count);
+
+	// avoid division-by-zero
+	double avgLoad = totalLoadBytes / count;
+	if (totalLoadBytes == 0 || avgLoad < smallLoadThreshold) {
+		CODE_PROBE(true, "The cluster load is small enough to ignore load bytes balance.");
+		return 1;
+	}
+
+	return minLoadBytes / avgLoad;
+}
+
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
                                                            ServerStatus* status,
                                                            Version addedVersion) {
@@ -3532,7 +3594,8 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
-    processingUnhealthy(params.processingUnhealthy), readyToStart(params.readyToStart),
+    processingUnhealthy(params.processingUnhealthy), getAverageShardBytes(params.getAverageShardBytes),
+    readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
@@ -3997,7 +4060,6 @@ void DDTeamCollection::traceAllInfo(bool shouldPrint) const {
 
 void DDTeamCollection::rebuildMachineLocalityMap() {
 	machineLocalityMap.clear();
-	int numHealthyMachine = 0;
 	for (auto& [_, machine] : machine_info) {
 		if (machine->serversOnMachine.empty()) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
@@ -4018,7 +4080,6 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 		}
 		const LocalityEntry& localityEntry = machineLocalityMap.add(locality, &representativeServer->getId());
 		machine->localityEntry = localityEntry;
-		++numHealthyMachine;
 	}
 }
 
@@ -5096,7 +5157,8 @@ public:
 		                                                     makeReference<AsyncVar<bool>>(false),
 		                                                     PromiseStream<GetMetricsRequest>(),
 		                                                     Promise<UID>(),
-		                                                     PromiseStream<Promise<int>>() }));
+		                                                     PromiseStream<Promise<int>>(),
+		                                                     PromiseStream<Promise<int64_t>>() }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -5140,7 +5202,8 @@ public:
 		                                                     makeReference<AsyncVar<bool>>(false),
 		                                                     PromiseStream<GetMetricsRequest>(),
 		                                                     Promise<UID>(),
-		                                                     PromiseStream<Promise<int>>() }));
+		                                                     PromiseStream<Promise<int>>(),
+		                                                     PromiseStream<Promise<int64_t>>() }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
@@ -5809,43 +5872,43 @@ TEST_CASE("/DataDistribution/GetTeam/DeprioritizeWigglePausedTeam") {
 }
 
 TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
-	state StorageWiggler wiggler(nullptr);
+	state Reference<StorageWiggler> wiggler = makeReference<StorageWiggler>(nullptr);
 	state double startTime = now();
-	wiggler.addServer(UID(1, 0),
-	                  StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 5.0,
-	                                      KeyValueStoreType::SSD_BTREE_V2));
-	wiggler.addServer(UID(2, 0),
-	                  StorageMetadataType(
-	                      startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::MEMORY, true));
-	wiggler.addServer(UID(3, 0), StorageMetadataType(startTime - 5.0, KeyValueStoreType::SSD_ROCKSDB_V1, true));
-	wiggler.addServer(UID(4, 0),
-	                  StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 1.0,
-	                                      KeyValueStoreType::SSD_BTREE_V2));
+	wiggler->addServer(UID(1, 0),
+	                   StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 5.0,
+	                                       KeyValueStoreType::SSD_BTREE_V2));
+	wiggler->addServer(UID(2, 0),
+	                   StorageMetadataType(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,
+	                                       KeyValueStoreType::MEMORY,
+	                                       true));
+	wiggler->addServer(UID(3, 0), StorageMetadataType(startTime - 5.0, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler->addServer(UID(4, 0),
+	                   StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 1.0,
+	                                       KeyValueStoreType::SSD_BTREE_V2));
 	std::vector<Optional<UID>> correctResult{ UID(3, 0), UID(2, 0), UID(4, 0), Optional<UID>() };
 	for (int i = 0; i < 4; ++i) {
-		auto id = wiggler.getNextServerId();
+		auto id = wiggler->getNextServerId();
 		ASSERT(id == correctResult[i]);
 	}
 
 	{
 		std::cout << "Finish Initial Check. Start test getNextWigglingServerID() loop...\n";
 		// test the getNextWigglingServerID() loop
-		UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler)));
+		UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(wiggler));
 		ASSERT(id == UID(1, 0));
 	}
 
 	std::cout << "Test after addServer() ...\n";
-	state Future<UID> nextFuture =
-	    DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler));
+	state Future<UID> nextFuture = DDTeamCollectionImpl::getNextWigglingServerID(wiggler);
 	ASSERT(!nextFuture.isReady());
 	startTime = now();
 	StorageMetadataType metadata(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 100.0,
 	                             KeyValueStoreType::SSD_BTREE_V2);
-	wiggler.addServer(UID(5, 0), metadata);
+	wiggler->addServer(UID(5, 0), metadata);
 	ASSERT(!nextFuture.isReady());
 
 	std::cout << "Test after updateServer() ...\n";
-	StorageWiggler* ptr = &wiggler;
+	StorageWiggler* ptr = wiggler.getPtr();
 	wait(trigger(
 	    [ptr]() {
 		    ptr->updateMetadata(UID(5, 0),
@@ -5862,22 +5925,22 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 	state std::unique_ptr<DDTeamCollection> collection =
 	    DDTeamCollectionUnitTest::testMachineTeamCollection(1, Reference<IReplicationPolicy>(new PolicyOne()), 5);
-	state StorageWiggler wiggler(collection.get());
+	state Reference<StorageWiggler> wiggler = makeReference<StorageWiggler>(collection.get());
 
 	std::cout << "Test when need TSS ... \n";
 	collection->configuration.usableRegions = 1;
 	collection->configuration.desiredTSSCount = 1;
 	state double startTime = now();
-	wiggler.addServer(UID(1, 0),
-	                  StorageMetadataType(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0,
-	                                      KeyValueStoreType::SSD_BTREE_V2));
-	wiggler.addServer(UID(2, 0),
-	                  StorageMetadataType(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0,
-	                                      KeyValueStoreType::SSD_BTREE_V2));
-	ASSERT(!wiggler.getNextServerId(true).present());
-	ASSERT(wiggler.getNextServerId(collection->reachTSSPairTarget()) == UID(1, 0));
-	UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(
-	    Reference<StorageWiggler>::addRef(&wiggler), Optional<Value>(), Optional<Value>(), collection.get()));
+	wiggler->addServer(UID(1, 0),
+	                   StorageMetadataType(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0,
+	                                       KeyValueStoreType::SSD_BTREE_V2));
+	wiggler->addServer(UID(2, 0),
+	                   StorageMetadataType(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0,
+	                                       KeyValueStoreType::SSD_BTREE_V2));
+	ASSERT(!wiggler->getNextServerId(true).present());
+	ASSERT(wiggler->getNextServerId(collection->reachTSSPairTarget()) == UID(1, 0));
+	UID id = wait(
+	    DDTeamCollectionImpl::getNextWigglingServerID(wiggler, Optional<Value>(), Optional<Value>(), collection.get()));
 	ASSERT(now() - startTime < SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0);
 	ASSERT(id == UID(2, 0));
 	return Void();

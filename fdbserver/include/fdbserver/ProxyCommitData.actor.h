@@ -107,7 +107,7 @@ struct ProxyStats {
 	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr,
-	                    std::map<TenantName, TenantMapEntry>* pTenantMap)
+	                    std::unordered_map<int64_t, TenantName>* pTenantMap)
 	  : cc("ProxyStats", id.toString()), txnCommitIn("TxnCommitIn", cc),
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
@@ -173,8 +173,8 @@ struct ExpectedIdempotencyIdCountForKey {
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
-	std::map<TenantName, TenantMapEntry> tenantMap;
-	std::unordered_map<int64_t, TenantNameUniqueSet> tenantIdIndex;
+	std::map<TenantName, int64_t> tenantNameIndex;
+	std::unordered_map<int64_t, TenantName> tenantMap;
 	std::unordered_set<TenantName> tenantsOverStorageQuota;
 	ProxyStats stats;
 	MasterInterface master;
@@ -235,7 +235,7 @@ struct ProxyCommitData {
 	double lastResolverReset;
 	int localTLogCount = -1;
 
-	bool isEncryptionEnabled = false;
+	EncryptionAtRestMode encryptMode;
 
 	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey;
 	Standalone<VectorRef<MutationRef>> idempotencyClears;
@@ -299,18 +299,19 @@ struct ProxyCommitData {
 	                Version recoveryTransactionVersion,
 	                PublicRequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo> const> db,
-	                bool firstProxy)
+	                bool firstProxy,
+	                EncryptionAtRestMode encryptMode)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
 	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount, &tenantMap), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
 	    minKnownCommittedVersion(0), version(0), lastVersionTime(0), commitVersionRequestNumber(1),
-	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), lastCoalesceTime(0), locked(false),
-	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), localCommitBatchesStarted(0),
-	    getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), encryptMode(encryptMode), lastCoalesceTime(0),
+	    locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
+	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()), isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+	    lastResolverReset(now()) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

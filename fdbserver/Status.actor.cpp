@@ -3124,6 +3124,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject recoveryStateStatus = wait(
 		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
 
+		state JsonBuilderObject idmpKeyStatus = wait(getIdmpKeyStatus(cx));
+
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
 		// process metrics
@@ -3504,6 +3506,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
+
+		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);

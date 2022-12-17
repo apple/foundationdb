@@ -439,6 +439,8 @@ public:
 
 	void expireThrottles();
 
+	UID dbId;
+
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
@@ -521,7 +523,6 @@ public:
 	// servers by their tags).
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
-	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
 	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
