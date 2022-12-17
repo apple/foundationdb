@@ -173,7 +173,7 @@ struct TenantManagementWorkload : TestWorkload {
 	Future<Optional<Key>> waitDataDbTenantModeChange() const {
 		return runRYWTransaction(dataDb, [](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->get(tenantModeConfKey);
+			return tr->get("\xff"_sr); // just a meaningless read
 		});
 	}
 
@@ -234,12 +234,11 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
 			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
+			// wait for tenant mode change on dataDB
+			wait(success(self->waitDataDbTenantModeChange()));
 		} else {
 			self->dataDb = cx;
 		}
-
-		// wait for tenant mode change on dataDB
-		wait(success(self->waitDataDbTenantModeChange()));
 
 		if (self->clientId == 0 && self->dataDb->getTenantMode() != TenantMode::REQUIRED) {
 			// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
@@ -1855,12 +1854,8 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-				Optional<Value> tenantStr = wait(tr.get(tenantModeConfKey));
-				TenantMode mode = TenantMode::fromValue(tenantStr.castTo<ValueRef>());
-				if (mode != TenantMode::REQUIRED) {
-					Optional<Value> val = wait(tr.get(self->keyName));
-					ASSERT(val.present() && val.get() == self->noTenantValue);
-				}
+				Optional<Value> val = wait(tr.get(self->keyName));
+				ASSERT(val.present() && val.get() == self->noTenantValue);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));

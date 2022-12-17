@@ -1189,37 +1189,36 @@ inline int64_t extractTenantIdFromStringRef(StringRef s) {
 }
 
 int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
-	ASSERT_WE_THINK(!isSystemKey(m.param1));
-	ASSERT_WE_THINK(isSingleKeyMutation((MutationRef::Type)m.type));
+	ASSERT(!isSystemKey(m.param1));
+	ASSERT(isSingleKeyMutation((MutationRef::Type)m.type));
 
 	return extractTenantIdFromStringRef(m.param1);
 }
 
-// Check a single-key mutation is associated with a valid tenant id
+// Return true if a single-key mutation is associated with a valid tenant id or a system key
 // FIXME(xwang): handle clear range properly
-ErrorOr<Void> checkTenantModeAccess(MutationRef m) {
+bool validTenantAccess(MutationRef m) {
 	if (isSystemKey(m.param1))
-		return Void();
+		return true;
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		auto tenantId = extractTenantIdFromSingleKeyMutation(m);
 		// throw exception for invalid raw access
 		if (tenantId == TenantInfo::INVALID_TENANT) {
-			return illegal_tenant_access();
+			return false;
 		}
 	} else {
 		// For clear range, we allow raw access
 		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
 		auto beginTenantId = extractTenantIdFromStringRef(m.param1);
 		auto endTenantId = extractTenantIdFromStringRef(m.param2);
-		CODE_PROBE(!(beginTenantId == endTenantId && beginTenantId != TenantInfo::INVALID_TENANT),
-		           "Clear Range raw access or cross multiple tenants");
+		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
 	}
-	return Void();
+	return true;
 }
 
 // Return true if all tenant check pass. Otherwise, return false and send error back
-bool validTenantModeAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
+bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
 	ErrorOr<Optional<TenantMapEntry>> result =
 	    getTenantEntry(pProxyCommitData, tr.tenantInfo.name.castTo<TenantNameRef>(), tr.tenantInfo.tenantId, true);
 
@@ -1234,9 +1233,8 @@ bool validTenantModeAccess(const CommitTransactionRequest& tr, ProxyCommitData* 
 	}
 
 	for (auto& mutation : tr.transaction.mutations) {
-		ErrorOr<Void> checkRes = checkTenantModeAccess(mutation);
-		if (checkRes.isError()) {
-			tr.reply.sendError(checkRes.getError());
+		if (!validTenantAccess(mutation)) {
+			tr.reply.sendError(illegal_tenant_access());
 			return false;
 		}
 	}
@@ -1253,7 +1251,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 
-			if (!validTenantModeAccess(trs[t], pProxyCommitData)) {
+			if (!validTenantAccess(trs[t], pProxyCommitData)) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
 				continue;
 			}
