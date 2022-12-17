@@ -2,6 +2,9 @@ testClass = "Backup"
 
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
+# FIXME: disable tenant in Backup tests because in DR Test we don’t have a two-phase approach for it yet.
+# Wait for Nim solve this then we'll enable tenant in DR tests
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'BackupAndRestore'
