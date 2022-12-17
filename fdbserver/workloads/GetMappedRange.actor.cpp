@@ -34,6 +34,7 @@ ValueRef SOMETHING = "SOMETHING"_sr;
 const KeyRef prefix = "prefix"_sr;
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
+const int MATCH_INDEX_TEST_710_API = -1;
 
 int recordSize;
 int indexSize;
@@ -161,10 +162,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                           int matchIndex,
 	                           bool isBoundary,
 	                           bool allMissing) {
-		// std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
-		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId))
-		//           << " matchIndex: " << matchIndex << std::endl;
-		if (matchIndex == MATCH_INDEX_ALL || isBoundary) {
+		std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
+		          << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId))
+		          << " matchIndex: " << matchIndex << std::endl;
+		if (matchIndex == MATCH_INDEX_ALL || matchIndex == MATCH_INDEX_TEST_710_API || isBoundary) {
 			ASSERT(it->key == indexEntryKey(expectedId));
 		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
 			ASSERT(it->key == (allMissing ? EMPTY : indexEntryKey(expectedId)));
@@ -229,13 +230,25 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		loop {
 			state Reference<TransactionWrapper> tr = self->createTransaction();
 			try {
-				MappedRangeResult result = wait(tr->getMappedRange(beginSelector,
-				                                                   endSelector,
-				                                                   mapper,
-				                                                   GetRangeLimits(limit, byteLimit),
-				                                                   self->snapshot,
-				                                                   Reverse::False,
-				                                                   matchIndex));
+				state MappedRangeResult result;
+				if (matchIndex == MATCH_INDEX_TEST_710_API) {
+					MappedRangeResult tmpResult = wait(tr->getMappedRange(beginSelector,
+					                                                      endSelector,
+					                                                      mapper,
+					                                                      GetRangeLimits(limit, byteLimit),
+					                                                      self->snapshot,
+					                                                      Reverse::False));
+					result = tmpResult;
+				} else {
+					MappedRangeResult tmpResult = wait(tr->getMappedRangeOptionalIndex(beginSelector,
+					                                                                   endSelector,
+					                                                                   mapper,
+					                                                                   GetRangeLimits(limit, byteLimit),
+					                                                                   self->snapshot,
+					                                                                   Reverse::False,
+					                                                                   matchIndex));
+					result = tmpResult;
+				}
 				//			showResult(result);
 				if (self->BAD_MAPPER) {
 					TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
@@ -374,13 +387,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
 		KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
-		return tr->getMappedRange(beginSelector,
-		                          endSelector,
-		                          mapper,
-		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED),
-		                          self->snapshot,
-		                          Reverse::False,
-		                          MATCH_INDEX_ALL);
+		return tr->getMappedRangeOptionalIndex(beginSelector,
+		                                       endSelector,
+		                                       mapper,
+		                                       GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED),
+		                                       self->snapshot,
+		                                       Reverse::False,
+		                                       MATCH_INDEX_ALL);
 	}
 
 	// If another transaction writes to our read set (the scanned ranges) before we commit, the transaction should
@@ -479,12 +492,14 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		// error is thrown when the range is large.
 		const double r = deterministicRandom()->random01();
 		int matchIndex = MATCH_INDEX_ALL;
-		if (r < 0.25) {
+		if (r < 0.2) {
 			matchIndex = MATCH_INDEX_NONE;
-		} else if (r < 0.5) {
+		} else if (r < 0.4) {
 			matchIndex = MATCH_INDEX_MATCHED_ONLY;
-		} else if (r < 0.75) {
+		} else if (r < 0.6) {
 			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		} else if (r < 0.8) {
+			matchIndex = MATCH_INDEX_TEST_710_API; // use 7.1 version API
 		}
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();

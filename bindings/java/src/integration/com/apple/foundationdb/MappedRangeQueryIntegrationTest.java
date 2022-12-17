@@ -116,6 +116,7 @@ class MappedRangeQueryIntegrationTest {
 			insertRecordsWithIndexes(numRecords, db);
 			instrument(rangeQueryAndThenRangeQueries, "rangeQueryAndThenRangeQueries", db);
 			instrument(mappedRangeQuery, "mappedRangeQuery", db);
+			instrument(mappedRangeQuery71, "mappedRangeQuery71", db);
 		}
 	}
 
@@ -192,6 +193,42 @@ class MappedRangeQueryIntegrationTest {
 	});
 
 	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
+		try {
+
+			List<MappedKeyValue> kvs =
+			    tr.getMappedRangeOptionalIndex(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                                   KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                                   ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL,
+			                                   FDBTransaction.MATCH_INDEX_ALL)
+			        .asList()
+			        .get();
+			Assertions.assertEquals(end - begin, kvs.size());
+
+			if (validate) {
+				final Iterator<MappedKeyValue> results = kvs.iterator();
+				for (int id = begin; id < end; id++) {
+					Assertions.assertTrue(results.hasNext());
+					MappedKeyValue mappedKeyValue = results.next();
+					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
+					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+					byte[] prefix = recordKeyPrefix(id);
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
+					prefix[prefix.length - 1] = (byte)0x01;
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
+
+					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
+					validateRangeResult(id, rangeResult);
+				}
+				Assertions.assertFalse(results.hasNext());
+			}
+		} catch (Exception e) {
+			Assertions.fail("Unexpected exception", e);
+		}
+		return null;
+	});
+
+	RangeQueryWithIndex mappedRangeQuery71 = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
 
 			List<MappedKeyValue> kvs =

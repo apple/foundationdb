@@ -810,7 +810,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range_optional_index(
 		return r;
 	return (
 	    FDBFuture*)(TXN(tr)
-	                    ->getMappedRange(
+	                    ->getMappedRangeOptionalIndex(
 	                        KeySelectorRef(KeyRef(begin_key_name, begin_key_name_length), begin_or_equal, begin_offset),
 	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
 	                        StringRef(mapper_name, mapper_name_length),
@@ -821,8 +821,6 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range_optional_index(
 	                    .extractPtr());
 }
 
-// this method is reserved for 7.1 java API
-// it can be deleted after all java client has been upgraded to > 7.1
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
                                                                  uint8_t const* begin_key_name,
                                                                  int begin_key_name_length,
@@ -840,24 +838,19 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction*
                                                                  int iteration,
                                                                  fdb_bool_t snapshot,
                                                                  fdb_bool_t reverse) {
-	return fdb_transaction_get_mapped_range_optional_index(tr,
-	                                                       begin_key_name,
-	                                                       begin_key_name_length,
-	                                                       begin_or_equal,
-	                                                       begin_offset,
-	                                                       end_key_name,
-	                                                       end_key_name_length,
-	                                                       end_or_equal,
-	                                                       end_offset,
-	                                                       mapper_name,
-	                                                       mapper_name_length,
-	                                                       limit,
-	                                                       target_bytes,
-	                                                       mode,
-	                                                       iteration,
-	                                                       0,
-	                                                       snapshot,
-	                                                       reverse);
+	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
+	if (r != nullptr)
+		return r;
+	return (
+	    FDBFuture*)(TXN(tr)
+	                    ->getMappedRange(
+	                        KeySelectorRef(KeyRef(begin_key_name, begin_key_name_length), begin_or_equal, begin_offset),
+	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
+	                        StringRef(mapper_name, mapper_name_length),
+	                        GetRangeLimits(limit, target_bytes),
+	                        snapshot,
+	                        reverse)
+	                    .extractPtr());
 }
 
 FDBFuture* fdb_transaction_get_range_selector_v13(FDBTransaction* tr,

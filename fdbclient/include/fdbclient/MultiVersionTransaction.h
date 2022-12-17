@@ -475,8 +475,14 @@ public:
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
 	                                               bool snapshot,
-	                                               bool reverse,
-	                                               int matchIndex) override;
+	                                               bool reverse) override;
+	ThreadFuture<MappedRangeResult> getMappedRangeOptionalIndex(const KeySelectorRef& begin,
+	                                                            const KeySelectorRef& end,
+	                                                            const StringRef& mapper,
+	                                                            GetRangeLimits limits,
+	                                                            bool snapshot,
+	                                                            bool reverse,
+	                                                            int matchIndex) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
@@ -702,8 +708,14 @@ public:
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
 	                                               bool snapshot,
-	                                               bool reverse,
-	                                               int matchIndex) override;
+	                                               bool reverse) override;
+	ThreadFuture<MappedRangeResult> getMappedRangeOptionalIndex(const KeySelectorRef& begin,
+	                                                            const KeySelectorRef& end,
+	                                                            const StringRef& mapper,
+	                                                            GetRangeLimits limits,
+	                                                            bool snapshot,
+	                                                            bool reverse,
+	                                                            int matchIndex) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 

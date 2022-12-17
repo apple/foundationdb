@@ -1156,13 +1156,13 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
-		                                                  read.end,
-		                                                  read.mapper,
-		                                                  read.limits,
-		                                                  snapshot,
-		                                                  backwards ? Reverse::True : Reverse::False,
-		                                                  read.matchIndex));
+		MappedRangeResult v = wait(ryw->tr.getMappedRangeOptionalIndex(read.begin,
+		                                                               read.end,
+		                                                               read.mapper,
+		                                                               read.limits,
+		                                                               snapshot,
+		                                                               backwards ? Reverse::True : Reverse::False,
+		                                                               read.matchIndex));
 		return v;
 	}
 
@@ -1704,13 +1704,14 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(const KeySelector& begin
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector begin,
-                                                                    KeySelector end,
-                                                                    Key mapper,
-                                                                    GetRangeLimits limits,
-                                                                    Snapshot snapshot,
-                                                                    Reverse reverse,
-                                                                    int matchIndex) {
+Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRangeHelper(KeySelector begin,
+                                                                          KeySelector end,
+                                                                          Key mapper,
+                                                                          GetRangeLimits limits,
+                                                                          Snapshot snapshot,
+                                                                          Reverse reverse,
+                                                                          int matchIndex) {
+
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
@@ -1761,6 +1762,26 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, matchIndex, limits), snapshot);
 
 	return result;
+}
+
+Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector begin,
+                                                                    KeySelector end,
+                                                                    Key mapper,
+                                                                    GetRangeLimits limits,
+                                                                    Snapshot snapshot,
+                                                                    Reverse reverse) {
+
+	return getMappedRangeHelper(begin, end, mapper, limits, snapshot, reverse, MATCH_INDEX_ALL);
+}
+
+Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRangeOptionalIndex(KeySelector begin,
+                                                                                 KeySelector end,
+                                                                                 Key mapper,
+                                                                                 GetRangeLimits limits,
+                                                                                 Snapshot snapshot,
+                                                                                 Reverse reverse,
+                                                                                 int matchIndex) {
+	return getMappedRangeHelper(begin, end, mapper, limits, snapshot, reverse, matchIndex);
 }
 
 Future<Standalone<VectorRef<const char*>>> ReadYourWritesTransaction::getAddressesForKey(const Key& key) {

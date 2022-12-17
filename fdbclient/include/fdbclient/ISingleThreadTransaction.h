@@ -75,8 +75,14 @@ public:
 	                                                 Key mapper,
 	                                                 GetRangeLimits limits,
 	                                                 Snapshot = Snapshot::False,
-	                                                 Reverse = Reverse::False,
-	                                                 int matchIndex = MATCH_INDEX_ALL) = 0;
+	                                                 Reverse = Reverse::False) = 0;
+	virtual Future<MappedRangeResult> getMappedRangeOptionalIndex(KeySelector begin,
+	                                                              KeySelector end,
+	                                                              Key mapper,
+	                                                              GetRangeLimits limits,
+	                                                              Snapshot = Snapshot::False,
+	                                                              Reverse = Reverse::False,
+	                                                              int matchIndex = MATCH_INDEX_ALL) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;

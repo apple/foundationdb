@@ -161,8 +161,44 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
                                                               const StringRef& mapper,
                                                               GetRangeLimits limits,
                                                               bool snapshot,
-                                                              bool reverse,
-                                                              int matchIndex) {
+                                                              bool reverse) {
+	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
+	                                                       begin.getKey().begin(),
+	                                                       begin.getKey().size(),
+	                                                       begin.orEqual,
+	                                                       begin.offset,
+	                                                       end.getKey().begin(),
+	                                                       end.getKey().size(),
+	                                                       end.orEqual,
+	                                                       end.offset,
+	                                                       mapper.begin(),
+	                                                       mapper.size(),
+	                                                       limits.rows,
+	                                                       limits.bytes,
+	                                                       FDB_STREAMING_MODE_EXACT,
+	                                                       0,
+	                                                       snapshot,
+	                                                       reverse);
+	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBMappedKeyValue* kvms;
+		int count;
+		FdbCApi::fdb_bool_t more;
+		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return MappedRangeResult(
+		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), Arena());
+	});
+}
+
+ThreadFuture<MappedRangeResult> DLTransaction::getMappedRangeOptionalIndex(const KeySelectorRef& begin,
+                                                                           const KeySelectorRef& end,
+                                                                           const StringRef& mapper,
+                                                                           GetRangeLimits limits,
+                                                                           bool snapshot,
+                                                                           bool reverse,
+                                                                           int matchIndex) {
 	FdbCApi::FDBFuture* f = api->transactionGetMappedRangeOptionalIndex(tr,
 	                                                                    begin.getKey().begin(),
 	                                                                    begin.getKey().size(),
@@ -1353,9 +1389,24 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
                                                                         const StringRef& mapper,
                                                                         GetRangeLimits limits,
                                                                         bool snapshot,
-                                                                        bool reverse,
-                                                                        int matchIndex) {
+                                                                        bool reverse) {
 	return executeOperation(&ITransaction::getMappedRange,
+	                        begin,
+	                        end,
+	                        mapper,
+	                        std::forward<GetRangeLimits>(limits),
+	                        std::forward<bool>(snapshot),
+	                        std::forward<bool>(reverse));
+}
+
+ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRangeOptionalIndex(const KeySelectorRef& begin,
+                                                                                     const KeySelectorRef& end,
+                                                                                     const StringRef& mapper,
+                                                                                     GetRangeLimits limits,
+                                                                                     bool snapshot,
+                                                                                     bool reverse,
+                                                                                     int matchIndex) {
+	return executeOperation(&ITransaction::getMappedRangeOptionalIndex,
 	                        begin,
 	                        end,
 	                        mapper,

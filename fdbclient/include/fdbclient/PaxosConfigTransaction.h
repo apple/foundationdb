@@ -55,8 +55,16 @@ public:
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
 	                                         Snapshot = Snapshot::False,
-	                                         Reverse = Reverse::False,
-	                                         int matchIndex = MATCH_INDEX_ALL) override {
+	                                         Reverse = Reverse::False) override {
+		throw client_invalid_operation();
+	}
+	Future<MappedRangeResult> getMappedRangeOptionalIndex(KeySelector begin,
+	                                                      KeySelector end,
+	                                                      Key mapper,
+	                                                      GetRangeLimits limits,
+	                                                      Snapshot = Snapshot::False,
+	                                                      Reverse = Reverse::False,
+	                                                      int matchIndex = MATCH_INDEX_ALL) override {
 		throw client_invalid_operation();
 	}
 	void set(KeyRef const& key, ValueRef const& value) override;

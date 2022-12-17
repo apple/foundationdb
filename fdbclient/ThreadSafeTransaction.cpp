@@ -429,15 +429,31 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
                                                                       const StringRef& mapper,
                                                                       GetRangeLimits limits,
                                                                       bool snapshot,
-                                                                      bool reverse,
-                                                                      int matchIndex) {
+                                                                      bool reverse) {
+	KeySelector b = begin;
+	KeySelector e = end;
+	Key h = mapper;
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<MappedRangeResult> {
+		tr->checkDeferredError();
+		return tr->getMappedRange(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+	});
+}
+
+ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRangeOptionalIndex(const KeySelectorRef& begin,
+                                                                                   const KeySelectorRef& end,
+                                                                                   const StringRef& mapper,
+                                                                                   GetRangeLimits limits,
+                                                                                   bool snapshot,
+                                                                                   bool reverse,
+                                                                                   int matchIndex) {
 	KeySelector b = begin;
 	KeySelector e = end;
 	Key h = mapper;
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, b, e, h, limits, snapshot, reverse, matchIndex]() -> Future<MappedRangeResult> {
 		tr->checkDeferredError();
-		return tr->getMappedRange(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse }, matchIndex);
+		return tr->getMappedRangeOptionalIndex(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse }, matchIndex);
 	});
 }
 

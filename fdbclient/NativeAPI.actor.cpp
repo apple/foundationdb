@@ -5702,12 +5702,21 @@ Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
                                                       const Key& mapper,
                                                       GetRangeLimits limits,
                                                       Snapshot snapshot,
-                                                      Reverse reverse,
-                                                      int matchIndex) {
+                                                      Reverse reverse) {
+	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
+	    begin, end, mapper, limits, snapshot, reverse, MATCH_INDEX_ALL);
+}
+
+Future<MappedRangeResult> Transaction::getMappedRangeOptionalIndex(const KeySelector& begin,
+                                                                   const KeySelector& end,
+                                                                   const Key& mapper,
+                                                                   GetRangeLimits limits,
+                                                                   Snapshot snapshot,
+                                                                   Reverse reverse,
+                                                                   int matchIndex) {
 	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
 	    begin, end, mapper, limits, snapshot, reverse, matchIndex);
 }
-
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           const KeySelector& end,
                                           int limit,

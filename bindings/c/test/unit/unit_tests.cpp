@@ -49,6 +49,8 @@
 
 #include "fdb_api.hpp"
 
+const int MATCH_INDEX_TEST_710_API = -1;
+
 void fdb_check(fdb_error_t e) {
 	if (e) {
 		std::cerr << fdb_get_error(e) << std::endl;
@@ -303,7 +305,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 	result.more = (out_more != 0);
 	result.err = 0;
 
-	std::cout << "out_count:" << out_count << " out_more:" << out_more << " out_mkv:" << (void*)out_mkv << std::endl;
+	// std::cout << "out_count:" << out_count << " out_more:" << out_more << " out_mkv:" << (void*)out_mkv << std::endl;
 
 	for (int i = 0; i < out_count; ++i) {
 		FDBMappedKeyValue mkv = out_mkv[i];
@@ -376,8 +378,6 @@ GetMappedRangeResult get_mapped_range_optional_index(fdb::Transaction& tr,
 	result.more = (out_more != 0);
 	result.err = 0;
 
-	std::cout << "out_count:" << out_count << " out_more:" << out_more << " out_mkv:" << (void*)out_mkv << std::endl;
-
 	for (int i = 0; i < out_count; ++i) {
 		FDBMappedKeyValue mkv = out_mkv[i];
 		auto key = extractString(mkv.key);
@@ -396,7 +396,6 @@ GetMappedRangeResult get_mapped_range_optional_index(fdb::Transaction& tr,
 		}
 		result.mkvs.emplace_back(key, value, begin, end, range_results);
 	}
-	std::cout << "quit2 " << std::endl;
 	return result;
 }
 
@@ -1039,7 +1038,20 @@ GetMappedRangeResult getMappedIndexEntriesInternal(int beginId,
                                                    int matchIndex) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
-
+	if (matchIndex == MATCH_INDEX_TEST_710_API) {
+		return get_mapped_range(
+		    tr,
+		    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyBegin.c_str(), indexEntryKeyBegin.size()),
+		    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyEnd.c_str(), indexEntryKeyEnd.size()),
+		    (const uint8_t*)mapper.c_str(),
+		    mapper.size(),
+		    /* limit */ 0,
+		    /* target_bytes */ 0,
+		    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		    /* iteration */ 0,
+		    /* snapshot */ false,
+		    /* reverse */ 0);
+	}
 	return get_mapped_range_optional_index(
 	    tr,
 	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyBegin.c_str(), indexEntryKeyBegin.size()),
@@ -1132,6 +1144,38 @@ TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
 	UNREACHABLE();
 }
 
+int getMatchIndexRandom() {
+	const double r = deterministicRandom()->random01();
+	int matchIndex = MATCH_INDEX_ALL;
+	if (r < 0.2) {
+		matchIndex = MATCH_INDEX_NONE;
+	} else if (r < 0.4) {
+		matchIndex = MATCH_INDEX_MATCHED_ONLY;
+	} else if (r < 0.6) {
+		matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+	} else if (r < 0.8) {
+		matchIndex = MATCH_INDEX_TEST_710_API;
+	}
+	return matchIndex;
+}
+
+void validateIndex(const GetMappedRangeResult::MappedKV& mkv,
+                   int id,
+                   int matchIndex,
+                   int i,
+                   int expectSize,
+                   bool allMissing) {
+	if (matchIndex == MATCH_INDEX_ALL || matchIndex == MATCH_INDEX_TEST_710_API || i == 0 || i == expectSize - 1) {
+		CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+	} else if ((matchIndex == MATCH_INDEX_MATCHED_ONLY && !allMissing) ||
+	           (matchIndex == MATCH_INDEX_UNMATCHED_ONLY && allMissing)) {
+		CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+	} else {
+		CHECK(EMPTY.compare(mkv.key) == 0);
+	}
+	CHECK(EMPTY.compare(mkv.value) == 0);
+}
+
 TEST_CASE("fdb_transaction_get_mapped_range") {
 	const int TOTAL_RECORDS = 20;
 	fillInRecords(TOTAL_RECORDS);
@@ -1141,17 +1185,9 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 	while (1) {
 		int beginId = 1;
 		int endId = 19;
-		const double r = deterministicRandom()->random01();
-
-		int matchIndex = MATCH_INDEX_ALL;
-		if (r < 0.25) {
-			matchIndex = MATCH_INDEX_NONE;
-		} else if (r < 0.5) {
-			matchIndex = MATCH_INDEX_MATCHED_ONLY;
-		} else if (r < 0.75) {
-			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
-		}
-		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, false);
+		int matchIndex = getMatchIndexRandom();
+		int allMissing = false;
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, allMissing);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -1165,18 +1201,8 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
-			printf("Record %d, expectSize %d\n", i, expectSize);
 			const auto& mkv = result.mkvs[i];
-			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			} else {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			}
-			CHECK(EMPTY.compare(mkv.value) == 0);
+			validateIndex(mkv, id, matchIndex, i, expectSize, allMissing);
 			CHECK(mkv.range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
 				auto& kv = mkv.range_results[split];
@@ -1197,16 +1223,9 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 	while (1) {
 		int beginId = 1;
 		int endId = 19;
-		const double r = deterministicRandom()->random01();
-		int matchIndex = MATCH_INDEX_ALL;
-		if (r < 0.25) {
-			matchIndex = MATCH_INDEX_NONE;
-		} else if (r < 0.5) {
-			matchIndex = MATCH_INDEX_MATCHED_ONLY;
-		} else if (r < 0.75) {
-			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
-		}
-		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, true);
+		int matchIndex = getMatchIndexRandom();
+		int allMissing = true;
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, allMissing);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -1220,17 +1239,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
-			const auto& mkv = result.mkvs[i];
-			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
-			} else {
-				CHECK(EMPTY.compare(mkv.key) == 0);
-			}
-			CHECK(EMPTY.compare(mkv.value) == 0);
+			validateIndex(result.mkvs[i], id, matchIndex, i, expectSize, allMissing);
 		}
 		break;
 	}

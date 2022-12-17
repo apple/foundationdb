@@ -33,6 +33,7 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionConsumer {
 
+	static public final int MATCH_INDEX_NOT_COMPATIBLE = -1;
 	static public final int MATCH_INDEX_ALL = 0;
 	static public final int MATCH_INDEX_NONE = 1;
 	static public final int MATCH_INDEX_MATCHED_ONLY = 2;
@@ -380,8 +381,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		if (mapper == null) {
 			throw new IllegalArgumentException("Mapper must be non-null");
 		}
-		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, 0, reverse, mode,
-		                            eventKeeper);
+		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, MATCH_INDEX_NOT_COMPATIBLE,
+		                            reverse, mode, eventKeeper);
 	}
 
 	@Override
@@ -508,11 +509,18 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			        " -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
 			    begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 			    iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
-			return new FutureMappedResults(
-			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
-			                               end.orEqual(), end.getOffset(), mapper, rowLimit, targetBytes, streamingMode,
-			                               iteration, isSnapshot, reverse, matchIndex),
-			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
+			if (matchIndex == MATCH_INDEX_NOT_COMPATIBLE) {
+				return new FutureMappedResults(
+				    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
+				                               end.getKey(), end.orEqual(), end.getOffset(), mapper, rowLimit,
+				                               targetBytes, streamingMode, iteration, isSnapshot, reverse),
+				    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
+			}
+			return new FutureMappedResults(Transaction_getMappedRangeOptionalIndex(
+			                                   getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
+			                                   end.getKey(), end.orEqual(), end.getOffset(), mapper, rowLimit,
+			                                   targetBytes, streamingMode, iteration, isSnapshot, reverse, matchIndex),
+			                               FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -855,7 +863,14 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	                                               byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 	                                               byte[] mapper, // Nonnull
 	                                               int rowLimit, int targetBytes, int streamingMode, int iteration,
-	                                               boolean isSnapshot, boolean reverse, int matchIndex);
+	                                               boolean isSnapshot, boolean reverse);
+	private native long Transaction_getMappedRangeOptionalIndex(long cPtr, byte[] keyBegin, boolean orEqualBegin,
+	                                                            int offsetBegin, byte[] keyEnd, boolean orEqualEnd,
+	                                                            int offsetEnd,
+	                                                            byte[] mapper, // Nonnull
+	                                                            int rowLimit, int targetBytes, int streamingMode,
+	                                                            int iteration, boolean isSnapshot, boolean reverse,
+	                                                            int matchIndex);
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);
