@@ -209,8 +209,7 @@ description is not currently required but encouraged.
             defaultFor="23"/>
     <Option name="transaction_automatic_idempotency" code="506"
             description="Set a random idempotency id for all transactions. See the transaction option description for more information. This feature is in development and not ready for general use." 
-            defaultFor="505"
-            hidden="true"/>
+            defaultFor="505" />
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
             defaultFor="1100"/>
