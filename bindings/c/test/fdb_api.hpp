@@ -110,18 +110,18 @@ inline int intSize(BytesRef b) {
 }
 
 template <template <class...> class StringLike, class Char>
-ByteString strinc(const StringLike<Char>& s) {
-	int index;
+StringLike<Char> strinc(const StringLike<Char>& s) {
+	int index = -1;
 	for (index = s.size() - 1; index >= 0; index--)
-		if (s[index] != 255)
+		if (static_cast<uint8_t>(s[index]) != 255)
 			break;
 
-	// Must not be called with a string that consists only of zero or more '\xff' bytes.
+	// Must not be called with a string that is empty or only consists of '\xff' bytes.
 	assert(index >= 0);
 
-	ByteString byteResult(s.substr(0, index + 1));
-	byteResult[byteResult.size() - 1]++;
-	return byteResult;
+	auto ret = s.substr(0, index + 1);
+	ret.back()++;
+	return ret;
 }
 
 class Error {
@@ -663,15 +663,42 @@ public:
 		native::fdb_transaction_clear_range(tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
-	void addReadConflictRange(KeyRef begin, KeyRef end) {
+	void addConflictRange(KeyRef begin, KeyRef end, FDBConflictRangeType rangeType) {
 		if (auto err = Error(native::fdb_transaction_add_conflict_range(
-		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), FDB_CONFLICT_RANGE_TYPE_READ))) {
+		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeType))) {
 			throwError("fdb_transaction_add_conflict_range returned error: ", err);
 		}
 	}
+
+	void addReadConflictRange(KeyRef begin, KeyRef end) { addConflictRange(begin, end, FDB_CONFLICT_RANGE_TYPE_READ); }
+
+	void addWriteConflictRange(KeyRef begin, KeyRef end) {
+		addConflictRange(begin, end, FDB_CONFLICT_RANGE_TYPE_WRITE);
+	}
 };
 
-class Tenant final {
+// Handle this as an abstract class instead of interface to preserve lifetime of fdb objects owned by Tenant and
+// Database.
+class IDatabaseOps {
+public:
+	virtual ~IDatabaseOps() = default;
+
+	virtual Transaction createTransaction() = 0;
+
+	virtual TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) = 0;
+	virtual TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) = 0;
+	virtual TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin,
+	                                                                       KeyRef end,
+	                                                                       int rangeLimit) = 0;
+	virtual TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) = 0;
+	virtual TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin,
+	                                                          KeyRef end,
+	                                                          int64_t version,
+	                                                          bool force) = 0;
+	virtual TypedFuture<future_var::None> waitPurgeGranulesComplete(KeyRef purgeKey) = 0;
+};
+
+class Tenant final : public IDatabaseOps {
 	friend class Database;
 	std::shared_ptr<native::FDBTenant> tenant;
 
@@ -687,6 +714,14 @@ public:
 	Tenant(const Tenant&) noexcept = default;
 	Tenant& operator=(const Tenant&) noexcept = default;
 	Tenant() noexcept : tenant(nullptr) {}
+
+	void atomic_store(Tenant other) { std::atomic_store(&tenant, other.tenant); }
+
+	Tenant atomic_load() {
+		Tenant retVal;
+		retVal.tenant = std::atomic_load(&tenant);
+		return retVal;
+	}
 
 	static void createTenant(Transaction tr, BytesRef name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
@@ -709,7 +744,7 @@ public:
 		return tr.get(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), false);
 	}
 
-	Transaction createTransaction() {
+	Transaction createTransaction() override {
 		auto tx_native = static_cast<native::FDBTransaction*>(nullptr);
 		auto err = Error(native::fdb_tenant_create_transaction(tenant.get(), &tx_native));
 		if (err)
@@ -717,14 +752,49 @@ public:
 		return Transaction(tx_native);
 	}
 
-	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) {
+	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!tenant)
-			throw std::runtime_error("blobbifyRange from null tenant");
+			throw std::runtime_error("blobbifyRange() from null tenant");
 		return native::fdb_tenant_blobbify_range(tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
+	TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) override {
+		if (!tenant)
+			throw std::runtime_error("unblobbifyRange() from null tenant");
+		return native::fdb_tenant_unblobbify_range(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
+	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) override {
+		if (!tenant)
+			throw std::runtime_error("listBlobbifiedRanges() from null tenant");
+		return native::fdb_tenant_list_blobbified_ranges(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
+	}
+
+	TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) override {
+		if (!tenant)
+			throw std::runtime_error("verifyBlobRange() from null tenant");
+		return native::fdb_tenant_verify_blob_range(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
+	}
+
+	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) override {
+		if (!tenant)
+			throw std::runtime_error("purgeBlobGranules() from null tenant");
+		native::fdb_bool_t forceBool = force;
+		return native::fdb_tenant_purge_blob_granules(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version, forceBool);
+	}
+
+	TypedFuture<future_var::None> waitPurgeGranulesComplete(KeyRef purgeKey) override {
+		if (!tenant)
+			throw std::runtime_error("waitPurgeGranulesComplete() from null tenant");
+		return native::fdb_tenant_wait_purge_granules_complete(tenant.get(), purgeKey.data(), intSize(purgeKey));
 	}
 };
 
-class Database {
+class Database : public IDatabaseOps {
 	friend class Tenant;
 	std::shared_ptr<native::FDBDatabase> db;
 
@@ -783,7 +853,7 @@ public:
 		return Tenant(tenant_native);
 	}
 
-	Transaction createTransaction() {
+	Transaction createTransaction() override {
 		if (!db)
 			throw std::runtime_error("create_transaction from null database");
 		auto tx_native = static_cast<native::FDBTransaction*>(nullptr);
@@ -793,33 +863,33 @@ public:
 		return Transaction(tx_native);
 	}
 
-	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) {
+	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) override {
 		if (!db)
 			throw std::runtime_error("listBlobbifiedRanges from null database");
 		return native::fdb_database_list_blobbified_ranges(
 		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
 	}
 
-	TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) {
+	TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) override {
 		if (!db)
 			throw std::runtime_error("verifyBlobRange from null database");
 		return native::fdb_database_verify_blob_range(
 		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
 	}
 
-	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) {
+	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!db)
 			throw std::runtime_error("blobbifyRange from null database");
 		return native::fdb_database_blobbify_range(db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
-	TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) {
+	TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!db)
 			throw std::runtime_error("unblobbifyRange from null database");
 		return native::fdb_database_unblobbify_range(db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
-	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) {
+	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) override {
 		if (!db)
 			throw std::runtime_error("purgeBlobGranules from null database");
 		native::fdb_bool_t forceBool = force;
@@ -827,7 +897,7 @@ public:
 		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), version, forceBool);
 	}
 
-	TypedFuture<future_var::None> waitPurgeGranulesComplete(KeyRef purgeKey) {
+	TypedFuture<future_var::None> waitPurgeGranulesComplete(KeyRef purgeKey) override {
 		if (!db)
 			throw std::runtime_error("purgeBlobGranules from null database");
 		return native::fdb_database_wait_purge_granules_complete(db.get(), purgeKey.data(), intSize(purgeKey));

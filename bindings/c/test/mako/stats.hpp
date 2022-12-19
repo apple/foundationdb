@@ -89,17 +89,23 @@ public:
 };
 
 class alignas(64) ThreadStatistics {
-	uint64_t conflicts;
-	uint64_t total_errors;
+	uint64_t conflicts{ 0 };
+	uint64_t total_errors{ 0 };
+	uint64_t total_timeouts{ 0 };
 	std::array<uint64_t, MAX_OP> ops;
 	std::array<uint64_t, MAX_OP> errors;
+	std::array<uint64_t, MAX_OP> timeouts;
 	std::array<uint64_t, MAX_OP> latency_samples;
 	std::array<uint64_t, MAX_OP> latency_us_total;
 	std::vector<DDSketchMako> sketches;
 
 public:
 	ThreadStatistics() noexcept {
-		memset(this, 0, sizeof(ThreadStatistics));
+		std::fill(ops.begin(), ops.end(), 0);
+		std::fill(errors.begin(), errors.end(), 0);
+		std::fill(timeouts.begin(), timeouts.end(), 0);
+		std::fill(latency_samples.begin(), latency_samples.end(), 0);
+		std::fill(latency_us_total.begin(), latency_us_total.end(), 0);
 		sketches.resize(MAX_OP);
 	}
 
@@ -112,7 +118,11 @@ public:
 
 	uint64_t getErrorCount(int op) const noexcept { return errors[op]; }
 
+	uint64_t getTimeoutCount(int op) const noexcept { return timeouts[op]; }
+
 	uint64_t getTotalErrorCount() const noexcept { return total_errors; }
+
+	uint64_t getTotalTimeoutCount() const noexcept { return total_timeouts; }
 
 	uint64_t getLatencySampleCount(int op) const noexcept { return latency_samples[op]; }
 
@@ -133,7 +143,9 @@ public:
 			sketches[op].mergeWith(other.sketches[op]);
 			ops[op] += other.ops[op];
 			errors[op] += other.errors[op];
+			timeouts[op] += other.timeouts[op];
 			total_errors += other.errors[op];
+			total_timeouts += other.timeouts[op];
 			latency_samples[op] += other.latency_samples[op];
 			latency_us_total[op] += other.latency_us_total[op];
 		}
@@ -147,6 +159,11 @@ public:
 	void incrErrorCount(int op) noexcept {
 		total_errors++;
 		errors[op]++;
+	}
+
+	void incrTimeoutCount(int op) noexcept {
+		total_timeouts++;
+		timeouts[op]++;
 	}
 
 	void addLatency(int op, timediff_t diff) noexcept {
@@ -178,6 +195,8 @@ inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
 	writer.Uint64(stats.conflicts);
 	writer.String("total_errors");
 	writer.Uint64(stats.total_errors);
+	writer.String("total_timeouts");
+	writer.Uint64(stats.total_timeouts);
 
 	writer.String("ops");
 	writer.StartArray();
@@ -190,6 +209,13 @@ inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
 	writer.StartArray();
 	for (auto op = 0; op < MAX_OP; op++) {
 		writer.Uint64(stats.errors[op]);
+	}
+	writer.EndArray();
+
+	writer.String("timeouts");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.timeouts[op]);
 	}
 	writer.EndArray();
 
@@ -235,14 +261,17 @@ inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
 	doc.Parse(buffer.str().c_str());
 	stats.conflicts = doc["conflicts"].GetUint64();
 	stats.total_errors = doc["total_errors"].GetUint64();
+	stats.total_timeouts = doc["total_timeouts"].GetUint64();
 
 	auto jsonOps = doc["ops"].GetArray();
 	auto jsonErrors = doc["errors"].GetArray();
+	auto jsonTimeouts = doc["timeouts"].GetArray();
 	auto jsonLatencySamples = doc["latency_samples"].GetArray();
 	auto jsonLatencyUsTotal = doc["latency_us_total"].GetArray();
 
 	populateArray(stats.ops, jsonOps);
 	populateArray(stats.errors, jsonErrors);
+	populateArray(stats.timeouts, jsonTimeouts);
 	populateArray(stats.latency_samples, jsonLatencySamples);
 	populateArray(stats.latency_us_total, jsonLatencyUsTotal);
 	for (int op = 0; op < MAX_OP; op++) {

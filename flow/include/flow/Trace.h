@@ -119,9 +119,13 @@ public:
 	const Field& operator[](int index) const;
 	bool tryGetValue(std::string key, std::string& outValue) const;
 	std::string getValue(std::string key) const;
+	bool tryGetInt(std::string key, int& outVal, bool permissive = false) const;
 	int getInt(std::string key, bool permissive = false) const;
+	bool tryGetInt64(std::string key, int64_t& outVal, bool permissive = false) const;
 	int64_t getInt64(std::string key, bool permissive = false) const;
+	bool tryGetUint64(std::string key, uint64_t& outVal, bool permissive = false) const;
 	uint64_t getUint64(std::string key, bool permissive = false) const;
+	bool tryGetDouble(std::string key, double& outVal, bool permissive = false) const;
 	double getDouble(std::string key, bool permissive = false) const;
 
 	Field& mutate(int index);

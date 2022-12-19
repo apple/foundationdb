@@ -46,14 +46,19 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	static constexpr auto NAME = "AutomaticIdempotencyCorrectness";
 	int64_t numTransactions;
 	Key keyPrefix;
+	int64_t minMinAgeSeconds;
 	double automaticPercentage;
+	constexpr static double slop = 2.0;
+	double pollingInterval;
 
 	bool ok = true;
 
 	AutomaticIdempotencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		numTransactions = getOption(options, "numTransactions"_sr, 2500);
 		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "/autoIdempotency/"_sr));
+		minMinAgeSeconds = getOption(options, "minMinAgeSeconds"_sr, 15);
 		automaticPercentage = getOption(options, "automaticPercentage"_sr, 0.1);
+		pollingInterval = getOption(options, "pollingInterval"_sr, 5.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -101,6 +106,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		wait(runRYWTransaction(db,
 		                       [=](Reference<ReadYourWritesTransaction> tr) { return logIdempotencyIds(self, tr); }));
 		wait(runRYWTransaction(db, [=](Reference<ReadYourWritesTransaction> tr) { return testIdempotency(self, tr); }));
+		wait(testCleaner(self, db));
 		return self->ok;
 	}
 
@@ -161,6 +167,167 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			self->ok = false;
 		}
 		ASSERT_EQ(ids.size(), self->clientCount * self->numTransactions);
+		return Void();
+	}
+
+	ACTOR static Future<int64_t> getOldestCreatedTime(AutomaticIdempotencyWorkload* self, Database db) {
+		state ReadYourWritesTransaction tr(db);
+		state RangeResult result;
+		state Key key;
+		state Version commitVersion;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				wait(store(result, tr.getRange(idempotencyIdKeys, /*limit*/ 1)));
+				if (result.empty()) {
+					TraceEvent("AutomaticIdempotencyNoIdsLeft").log();
+					return -1;
+				}
+				for (const auto& [k, v] : result) {
+					uint8_t highOrderBatchIndex;
+					decodeIdempotencyKey(k, commitVersion, highOrderBatchIndex);
+
+					// Decode the first idempotency id in the value
+					BinaryReader valReader(v.begin(), v.size(), IncludeVersion());
+					int64_t timeStamp; // ignored
+					valReader >> timeStamp;
+					uint8_t length;
+					valReader >> length;
+					StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
+					uint8_t lowOrderBatchIndex;
+					valReader >> lowOrderBatchIndex;
+
+					// Recover the key written in the transaction associated with this idempotency id
+					BinaryWriter keyWriter(Unversioned());
+					keyWriter.serializeBytes(self->keyPrefix);
+					keyWriter.serializeBinaryItem(bigEndian64(commitVersion));
+					keyWriter.serializeBinaryItem(highOrderBatchIndex);
+					keyWriter.serializeBinaryItem(lowOrderBatchIndex);
+					key = keyWriter.toValue();
+
+					// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
+					// be using a tenant.
+					Optional<Value> entry = wait(runRYWTransaction(
+					    db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); }));
+					if (!entry.present()) {
+						TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
+						    .detail("Key", key)
+						    .detail("CommitVersion", commitVersion)
+						    .detail("ReadVersion", tr.getReadVersion().get());
+					}
+					ASSERT(entry.present());
+					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
+					return e.createdTime;
+				}
+				ASSERT(false);
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<bool> testCleanerOneIteration(AutomaticIdempotencyWorkload* self,
+	                                                  Database db,
+	                                                  ActorCollection* actors,
+	                                                  int64_t minAgeSeconds,
+	                                                  const std::vector<int64_t>* createdTimes) {
+		state Future<Void> cleaner = recurringAsync(
+		    [db = db, minAgeSeconds = minAgeSeconds]() { return cleanIdempotencyIds(db, minAgeSeconds); },
+		    self->pollingInterval,
+		    true,
+		    self->pollingInterval);
+
+		state int64_t oldestCreatedTime;
+		state int64_t successes = 0;
+		actors->add(cleaner);
+		loop {
+			// Oldest created time of a transaction from the workload which still has an idempotency id
+			wait(store(oldestCreatedTime, getOldestCreatedTime(self, db)));
+			if (oldestCreatedTime == -1) {
+				return true; // Test can't make meaningful progress anymore
+			}
+
+			// oldestCreatedTime could seem too high if there's a large gap in the age
+			// of entries, so account for this by making oldestCreatedTime one more than
+			// the youngest entry that actually got deleted.
+			auto iter = std::lower_bound(createdTimes->begin(), createdTimes->end(), oldestCreatedTime);
+			if (iter != createdTimes->begin()) {
+				--iter;
+				oldestCreatedTime = *iter + 1;
+			}
+			auto maxActualAge = int64_t(now()) - oldestCreatedTime;
+			if (maxActualAge > minAgeSeconds * self->slop) {
+				CODE_PROBE(true, "Idempotency cleaner more to clean");
+				TraceEvent("AutomaticIdempotencyCleanerMoreToClean")
+				    .detail("MaxActualAge", maxActualAge)
+				    .detail("MinAgePolicy", minAgeSeconds);
+				successes = 0;
+				// Cleaning should happen eventually
+			} else if (maxActualAge < minAgeSeconds / self->slop) {
+				TraceEvent(SevError, "AutomaticIdempotencyCleanedTooMuch")
+				    .detail("MaxActualAge", maxActualAge)
+				    .detail("MinAgePolicy", minAgeSeconds);
+				self->ok = false;
+				ASSERT(false);
+			} else {
+				++successes;
+				TraceEvent("AutomaticIdempotencyCleanerSuccess")
+				    .detail("MaxActualAge", maxActualAge)
+				    .detail("MinAgePolicy", minAgeSeconds)
+				    .detail("Successes", successes);
+				if (successes >= 10) {
+					break;
+				}
+			}
+			wait(delay(self->pollingInterval));
+		}
+		cleaner.cancel();
+		return false;
+	}
+
+	ACTOR static Future<std::vector<int64_t>> getCreatedTimes(AutomaticIdempotencyWorkload* self,
+	                                                          Reference<ReadYourWritesTransaction> tr) {
+		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+		ASSERT(!result.more);
+		std::vector<int64_t> createdTimes;
+		for (const auto& [k, v] : result) {
+			auto e = ObjectReader::fromStringRef<ValueType>(v, Unversioned());
+			createdTimes.emplace_back(e.createdTime);
+		}
+		std::sort(createdTimes.begin(), createdTimes.end());
+		return createdTimes;
+	}
+
+	// Check that min age is respected. Also test that we can tolerate concurrent cleaners.
+	ACTOR static Future<Void> testCleaner(AutomaticIdempotencyWorkload* self, Database db) {
+		state ActorCollection actors;
+		state int64_t minAgeSeconds;
+		state std::vector<int64_t> createdTimes;
+
+		// Initialize minAgeSeconds to match the current status
+		wait(store(minAgeSeconds, fmap([](int64_t t) { return int64_t(now()) - t; }, getOldestCreatedTime(self, db))) &&
+		     store(createdTimes, runRYWTransaction(db, [self = self](Reference<ReadYourWritesTransaction> tr) {
+			           return getCreatedTimes(self, tr);
+		           })));
+
+		// Slowly and somewhat randomly allow the cleaner to do more cleaning. Observe that it cleans some, but not too
+		// much.
+		loop {
+			minAgeSeconds *= 1 / (self->slop * 2);
+			if (minAgeSeconds < self->minMinAgeSeconds) {
+				break;
+			}
+			choose {
+				when(bool done = wait(testCleanerOneIteration(self, db, &actors, minAgeSeconds, &createdTimes))) {
+					if (done) {
+						break;
+					}
+				}
+				when(wait(actors.getResult())) {
+					ASSERT(false);
+				}
+			}
+		}
 		return Void();
 	}
 

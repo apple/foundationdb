@@ -29,7 +29,7 @@
 #include <stdint.h>
 #include <variant>
 #include <atomic>
-#include "boost/asio.hpp"
+#include <boost/asio.hpp>
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
 #include "flow/IRandom.h"
@@ -532,6 +532,7 @@ public:
 		enBitFlipper = 17,
 		enHistogram = 18,
 		enTokenCache = 19,
+		enMetrics = 20,
 		COUNT // Add new fields before this enumerator
 	};
 

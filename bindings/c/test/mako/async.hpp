@@ -26,6 +26,7 @@
 #include <boost/asio.hpp>
 #include "logger.hpp"
 #include "mako.hpp"
+#include "future.hpp"
 #include "shm.hpp"
 #include "stats.hpp"
 #include "time.hpp"
@@ -79,6 +80,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	boost::asio::io_context& io_context;
 	Arguments const& args;
 	ThreadStatistics& stats;
+	int64_t total_xacts;
 	std::atomic<int>& stopcount;
 	std::atomic<int> const& signal;
 	int max_iters;
@@ -102,20 +104,22 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	                             std::atomic<int> const& signal,
 	                             int max_iters,
 	                             OpIterator iter)
-	  : logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats), stopcount(stopcount),
-	    signal(signal), max_iters(max_iters), iter(iter), needs_commit(false) {
+	  : logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats), total_xacts(0),
+	    stopcount(stopcount), signal(signal), max_iters(max_iters), iter(iter), needs_commit(false) {
 		key1.resize(args.key_length);
 		key2.resize(args.key_length);
 		val.resize(args.value_length);
+		setTransactionTimeoutIfEnabled(args, tx);
 	}
 	void signalEnd() noexcept { stopcount.fetch_add(1); }
-	bool ended() noexcept {
-		return (max_iters != -1 && max_iters >= stats.getOpCount(OP_TRANSACTION)) || signal.load() == SIGNAL_RED;
-	}
+	bool ended() noexcept { return (max_iters != -1 && total_xacts >= max_iters) || signal.load() == SIGNAL_RED; }
 	void postNextTick();
 	void runOneTick();
 	void updateStepStats();
 	void onTransactionSuccess();
+	void onIterationEnd(FutureRC rc);
+	void updateErrorStats(fdb::Error err, int op);
+	bool isExpectedError(fdb::Error err);
 };
 
 using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;

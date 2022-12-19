@@ -56,6 +56,8 @@ public:
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& fileName) override;
 
+	Future<Void> writeEntireFile(const std::string& fileName, const std::string& fileContents) override;
+
 	Future<FilesAndSizesT> listFiles(const std::string& path = "",
 	                                 std::function<bool(std::string const&)> folderPathFilter = nullptr) override;
 

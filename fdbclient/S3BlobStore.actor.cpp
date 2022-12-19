@@ -41,7 +41,7 @@
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
 #include "rapidxml/rapidxml.hpp"
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 #include "fdbclient/FDBAWSCredentialsProvider.h"
 #endif
 
@@ -489,7 +489,9 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(wait(done)) { done = Never(); }
+				when(wait(done)) {
+					done = Never();
+				}
 
 				when(S3BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
 					for (auto& object : list.objects) {
@@ -618,7 +620,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 // If the credentials expire, the connection will eventually fail and be discarded from the pool, and then a new
 // connection will be constructed, which will call this again to get updated credentials
 static S3BlobStoreEndpoint::Credentials getSecretSdk() {
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 	double elapsed = -timer_monotonic();
 	Aws::Auth::AWSCredentials awsCreds = FDBAWSCredentialsProvider::getAwsCredentials();
 	elapsed += timer_monotonic();
@@ -1205,7 +1207,9 @@ ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobS
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(wait(done)) { done = Never(); }
+				when(wait(done)) {
+					done = Never();
+				}
 
 				when(S3BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
 					results.commonPrefixes.insert(
@@ -1568,10 +1572,11 @@ ACTOR Future<Void> writeEntireFile_impl(Reference<S3BlobStoreEndpoint> bstore,
                                         std::string object,
                                         std::string content) {
 	state UnsentPacketQueue packets;
-	PacketWriter pw(packets.getWriteBuffer(content.size()), nullptr, Unversioned());
-	pw.serializeBytes(content);
 	if (content.size() > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
+
+	PacketWriter pw(packets.getWriteBuffer(content.size()), nullptr, Unversioned());
+	pw.serializeBytes(content);
 
 	// Yield because we may have just had to copy several MB's into packet buffer chain and next we have to calculate an
 	// MD5 sum of it.

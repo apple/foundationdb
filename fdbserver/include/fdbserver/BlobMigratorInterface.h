@@ -30,6 +30,7 @@
 struct BlobMigratorInterface {
 	constexpr static FileIdentifier file_identifier = 869199;
 	RequestStream<struct HaltBlobMigratorRequest> haltBlobMigrator;
+	RequestStream<ReplyPromise<Void>> waitFailure;
 	LocalityData locality;
 	UID uniqueID;
 	StorageServerInterface ssi;
@@ -48,7 +49,7 @@ struct BlobMigratorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, uniqueID, haltBlobMigrator);
+		serializer(ar, locality, uniqueID, haltBlobMigrator, waitFailure);
 	}
 };
 

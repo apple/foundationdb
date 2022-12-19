@@ -26,6 +26,8 @@
 #include <random>
 #include <limits>
 
+#include <boost/unordered_set.hpp>
+
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include "flow/ProtocolVersion.h"
@@ -54,7 +56,7 @@ public:
 		FailDisk,
 		RebootAndDelete,
 		RebootProcessAndDelete,
-		RebootProcessAndSwitch,
+		RebootProcessAndSwitch, // Reboot and switch cluster file
 		Reboot,
 		RebootProcess,
 		None
@@ -97,6 +99,7 @@ public:
 		LocalityData locality;
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
+		MetricCollection metrics;
 		ChaosMetrics chaosMetrics;
 		HistogramRegistry histograms;
 		std::map<NetworkAddress, Reference<IListener>> listenerMap;
@@ -477,6 +480,7 @@ public:
 	Optional<Standalone<StringRef>> primaryDcId;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
 	int32_t usableRegions;
+	bool quiesced = false;
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;
@@ -519,6 +523,8 @@ public:
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
+	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
+
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
 
@@ -531,6 +537,9 @@ public:
 		}
 		return 0;
 	}
+
+	// generate authz token for use in simulation environment
+	Standalone<StringRef> makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow);
 
 	static thread_local ProcessInfo* currentProcess;
 

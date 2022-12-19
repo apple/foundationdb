@@ -1,4 +1,5 @@
 storageEngineExcludeTypes=4,5
+logAntiQuorum=0
 
 ;write 1000 Keys ending with even number
 testTitle=SnapSimplePre

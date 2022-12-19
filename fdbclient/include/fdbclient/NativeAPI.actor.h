@@ -161,6 +161,7 @@ struct TransactionOptions {
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
 	bool rawAccess : 1;
+	bool bypassStorageQuota : 1;
 
 	TransactionPriority priority;
 
@@ -303,6 +304,11 @@ private:
 	Optional<TenantName> tenant_;
 	int64_t tenantId_ = TenantInfo::INVALID_TENANT;
 	bool tenantSet;
+};
+
+class Tenant {
+	Future<int64_t> id;
+	TenantName name;
 };
 
 class Transaction : NonCopyable {
@@ -550,22 +556,27 @@ int64_t extractIntOption(Optional<StringRef> value,
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
-// each and every shards overlapping with `range`. Each checkpoint will be created at a random
-// storage server for each shard.
+// each and every shards overlapping with `ranges`.
 // All checkpoint(s) will be created at the transaction's commit version.
-Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Transaction* tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> dataMoveId = Optional<UID>());
 
 // Same as above.
-Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> dataMoveId = Optional<UID>());
 
-// Gets checkpoint metadata for `keys` at the specific version, with the particular format.
-// One CheckpointMetaData will be returned for each distinctive shard.
-// The collective keyrange of the returned checkpoint(s) is a super-set of `keys`.
-// checkpoint_not_found() error will be returned if the specific checkpoint(s) cannot be found.
+// Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
+// The keyranges of the returned checkpoint is a super-set of `ranges`.
+// checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
 ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                    KeyRange keys,
+                                                                    std::vector<KeyRange> ranges,
                                                                     Version version,
                                                                     CheckpointFormat format,
+                                                                    Optional<UID> dataMoveId = Optional<UID>(),
                                                                     double timeout = 5.0);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
@@ -574,18 +585,18 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 // Measured in bytes, rounded up to the nearest page size. Multiply by fungibility ratio
 // because writes are more expensive than reads.
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
-	return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR *
-	       ((bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1);
+	return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
+	       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
 }
 
 // Measured in bytes, rounded up to the nearest page size.
 inline uint64_t getReadOperationCost(uint64_t bytes) {
-	return ((bytes - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1) * CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+	return ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
-// will be 1. Otherwise, the value will be 0.
-// Returns the FDB version at which the transaction was committed.
+// will be 1. Otherwise, the value will be 0. The caller should take care of the reset of StorageWiggleMetrics if
+// necessary. Returns the FDB version at which the transaction was committed.
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,

@@ -24,6 +24,7 @@
 #include <fdb_api.hpp>
 #include <cassert>
 #include <string_view>
+#include <type_traits>
 #include "logger.hpp"
 #include "macro.hpp"
 
@@ -31,57 +32,134 @@ extern thread_local mako::Logger logr;
 
 namespace mako {
 
-enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
+enum class FutureRC { OK, RETRY, ABORT };
 
-template <class FutureType>
-force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
-	if (auto err = f.error()) {
-		if (err.is(1020 /*not_committed*/)) {
-			return FutureRC::CONFLICT;
-		} else if (err.retryable()) {
-			logr.warn("Retryable error '{}' found at on_error(), step: {}", err.what(), step);
-			return FutureRC::RETRY;
-		} else {
-			logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
-			tx.reset();
-			return FutureRC::ABORT;
+struct LogContext {
+	static constexpr const bool do_log = true;
+	LogContext(std::string_view step) noexcept : step(step), transaction_timeout_expected(false) {}
+	LogContext(std::string_view step, bool transaction_timeout_expected) noexcept
+	  : step(step), transaction_timeout_expected(transaction_timeout_expected) {}
+	std::string_view step;
+	bool transaction_timeout_expected;
+};
+
+struct NoLog {
+	static constexpr const bool do_log = false;
+};
+
+template <class FutureType, class LogInfo>
+force_inline bool waitFuture(FutureType& f, LogInfo log_info) {
+	assert(f);
+	auto err = f.blockUntilReady();
+	if (err) {
+		assert(!err.retryable());
+		if constexpr (LogInfo::do_log) {
+			logr.error("'{}' found at blockUntilReady during step '{}'", err.what(), log_info.step);
 		}
+		return false;
+	} else {
+		return true;
+	}
+}
+
+namespace detail {
+
+template <class FutureType, class LogInfo>
+force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, LogInfo log_info) {
+	if (auto err = f.error()) {
+		assert(!(err.retryable()));
+		if constexpr (LogInfo::do_log) {
+			logr.printWithLogLevel(err.is(1031 /*timeout*/) && log_info.transaction_timeout_expected ? VERBOSE_WARN
+			                                                                                         : VERBOSE_NONE,
+			                       "ERROR",
+			                       "Unretryable error '{}' found at on_error(), step: {}",
+			                       err.what(),
+			                       log_info.step);
+		}
+		tx.reset();
+		return FutureRC::ABORT;
 	} else {
 		return FutureRC::RETRY;
 	}
 }
 
+} // namespace detail
+
 template <class FutureType>
-force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+force_inline FutureRC
+handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step, bool transaction_timeout_expected) {
+	return detail::handleForOnError(tx, f, LogContext(step, transaction_timeout_expected));
+}
+
+template <class FutureType>
+force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+	return detail::handleForOnError(tx, f, LogContext(step));
+}
+
+template <class FutureType>
+force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f) {
+	return detail::handleForOnError(tx, f, NoLog{});
+}
+
+namespace detail {
+
+template <class FutureType, class LogInfo>
+force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, LogInfo log_info) {
 	assert(f);
-	if (auto err = f.blockUntilReady()) {
-		logr.error("'{}' found while waiting for on_error() future, step: {}", err.what(), step);
+	if (!waitFuture(f, log_info)) {
 		return FutureRC::ABORT;
 	}
-	return handleForOnError(tx, f, step);
+	return detail::handleForOnError(tx, f, log_info);
 }
 
 // wait on any non-immediate tx-related step to complete. Follow up with on_error().
-template <class FutureType>
-force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+template <class FutureType, class LogInfo>
+force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, LogInfo log_info) {
 	assert(f);
-	auto err = fdb::Error{};
-	if ((err = f.blockUntilReady())) {
-		const auto retry = err.retryable();
-		logr.error("{} error '{}' found during step: {}", (retry ? "Retryable" : "Unretryable"), err.what(), step);
-		return retry ? FutureRC::RETRY : FutureRC::ABORT;
+	if (!waitFuture(f, log_info)) {
+		return FutureRC::ABORT;
 	}
-	err = f.error();
-	if (!err)
+	auto err = f.error();
+	if (!err) {
 		return FutureRC::OK;
-	if (err.retryable()) {
-		logr.warn("step {} returned '{}'", step, err.what());
-	} else {
-		logr.error("step {} returned '{}'", step, err.what());
 	}
+	if constexpr (LogInfo::do_log) {
+		logr.printWithLogLevel(((err.is(1031 /*timeout*/) && log_info.transaction_timeout_expected) || err.retryable())
+		                           ? VERBOSE_WARN
+		                           : VERBOSE_NONE,
+		                       "ERROR",
+		                       "step {} returned '{}'",
+		                       log_info.step,
+		                       err.what());
+	}
+
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	return waitAndHandleForOnError(tx, follow_up, step);
+	return waitAndHandleForOnError(tx, follow_up, log_info);
+}
+
+} // namespace detail
+
+template <class FutureType>
+force_inline FutureRC
+waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step, bool transaction_timeout_expected) {
+	return detail::waitAndHandleForOnError(tx, f, LogContext(step, transaction_timeout_expected));
+}
+
+template <class FutureType>
+force_inline FutureRC
+waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step, bool transaction_timeout_expected) {
+	return detail::waitAndHandleError(tx, f, LogContext(step, transaction_timeout_expected));
+}
+
+template <class FutureType>
+force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
+	return detail::waitAndHandleError(tx, f, LogContext(step));
+}
+
+template <class FutureType>
+force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f) {
+	return detail::waitAndHandleError(tx, f, NoLog{});
 }
 
 } // namespace mako

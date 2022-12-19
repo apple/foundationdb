@@ -34,7 +34,7 @@ class TransactionCostWorkload : public TestWorkload {
 		return bw.toValue().withPrefix(prefix);
 	}
 
-	static Value getValue(uint32_t size) { return makeString(size); }
+	static Value getValue(uint32_t size) { return ValueRef(std::string(size, '\x00')); }
 
 	static UID getDebugID(uint64_t testNumber) { return UID(testNumber << 32, testNumber << 32); }
 
@@ -59,7 +59,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return success(tr->get(workload.getKey(testNumber)));
 		}
 
-		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->READ_COST_BYTE_FACTOR; }
+		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 	};
 
 	class ReadLargeValueTest : public ITest {
@@ -69,7 +69,7 @@ class TransactionCostWorkload : public TestWorkload {
 			state Transaction tr(cx);
 			loop {
 				try {
-					tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
+					tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
 					wait(tr.commit());
 					return Void();
 				} catch (Error& e) {
@@ -89,7 +89,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return success(tr->get(workload.getKey(testNumber)));
 		}
 
-		int64_t expectedFinalCost() const override { return 2 * CLIENT_KNOBS->READ_COST_BYTE_FACTOR; }
+		int64_t expectedFinalCost() const override { return 2 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 	};
 
 	class WriteTest : public ITest {
@@ -102,7 +102,7 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+			return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 		}
 	};
 
@@ -111,12 +111,13 @@ class TransactionCostWorkload : public TestWorkload {
 		explicit WriteLargeValueTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
-			tr->set(workload.getKey(testNumber), getValue(CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR));
+			tr->set(workload.getKey(testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
 			return Void();
 		}
 
 		int64_t expectedFinalCost() const override {
-			return 2 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+			return 2 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO *
+			       CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 		}
 	};
 
@@ -132,7 +133,8 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 		int64_t expectedFinalCost() const override {
-			return 10 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+			return 10 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO *
+			       CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 		}
 	};
 
@@ -145,7 +147,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return Void();
 		}
 
-		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR; }
+		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 	};
 
 	class ReadRangeTest : public ITest {
@@ -176,7 +178,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return success(tr->getRange(keys, 10));
 		}
 
-		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->READ_COST_BYTE_FACTOR; }
+		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 	};
 
 	class ReadMultipleValuesTest : public ITest {
@@ -212,7 +214,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return waitForAll(futures);
 		}
 
-		int64_t expectedFinalCost() const override { return 10 * CLIENT_KNOBS->READ_COST_BYTE_FACTOR; }
+		int64_t expectedFinalCost() const override { return 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 	};
 
 	class LargeReadRangeTest : public ITest {
@@ -224,7 +226,7 @@ class TransactionCostWorkload : public TestWorkload {
 				try {
 					for (int i = 0; i < 10; ++i) {
 						tr.set(workload->getKey(self->testNumber, i),
-						       workload->getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
+						       workload->getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
 					}
 					wait(tr.commit());
 					return Void();
@@ -246,7 +248,7 @@ class TransactionCostWorkload : public TestWorkload {
 			return success(tr->getRange(keys, 10));
 		}
 
-		int64_t expectedFinalCost() const override { return 11 * CLIENT_KNOBS->READ_COST_BYTE_FACTOR; }
+		int64_t expectedFinalCost() const override { return 11 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 	};
 
 	static std::unique_ptr<ITest> createRandomTest(int64_t testNumber) {

@@ -46,7 +46,7 @@ struct AuditStorageState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, keyId, range, type, phase, error);
+		serializer(ar, id, range, type, phase, error);
 	}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
@@ -56,7 +56,6 @@ struct AuditStorageState {
 	AuditPhase getPhase() const { return static_cast<AuditPhase>(this->phase); }
 
 	UID id;
-	int64_t keyId;
 	KeyRange range;
 	uint8_t type;
 	uint8_t phase;

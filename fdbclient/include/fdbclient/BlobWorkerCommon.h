@@ -57,6 +57,11 @@ struct BlobWorkerStats {
 	int64_t lastResidentMemory;
 	int64_t estimatedMaxResidentMemory;
 
+	LatencySample snapshotBlobWriteLatencySample;
+	LatencySample deltaBlobWriteLatencySample;
+	LatencySample reSnapshotLatencySample;
+	LatencySample readLatencySample;
+
 	Reference<FlowLock> initialSnapshotLock;
 	Reference<FlowLock> resnapshotLock;
 	Reference<FlowLock> deltaWritesLock;
@@ -68,7 +73,10 @@ struct BlobWorkerStats {
 	                         double interval,
 	                         Reference<FlowLock> initialSnapshotLock,
 	                         Reference<FlowLock> resnapshotLock,
-	                         Reference<FlowLock> deltaWritesLock)
+	                         Reference<FlowLock> deltaWritesLock,
+	                         double sampleLoggingInterval,
+	                         double fileOpLatencySketchAccuracy,
+	                         double requestLatencySketchAccuracy)
 	  : cc("BlobWorkerStats", id.toString()),
 
 	    s3PutReqs("S3PutReqs", cc), s3GetReqs("S3GetReqs", cc), s3DeleteReqs("S3DeleteReqs", cc),
@@ -87,6 +95,13 @@ struct BlobWorkerStats {
 	    forceFlushCleanups("ForceFlushCleanups", cc), readDrivenCompactions("ReadDrivenCompactions", cc),
 	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0),
 	    minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0),
+	    snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
+	                                   id,
+	                                   sampleLoggingInterval,
+	                                   fileOpLatencySketchAccuracy),
+	    deltaBlobWriteLatencySample("DeltaBlobWriteMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
+	    reSnapshotLatencySample("GranuleResnapshotMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
+	    readLatencySample("GranuleReadLatencyMetrics", id, sampleLoggingInterval, requestLatencySketchAccuracy),
 	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock),
 	    deltaWritesLock(deltaWritesLock) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });

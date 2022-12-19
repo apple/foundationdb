@@ -110,6 +110,7 @@ public:
 	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
+	double POP_FROM_LOG_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -185,9 +186,14 @@ public:
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
-	double CHECK_TEAM_DELAY;
-	double PERPETUAL_WIGGLE_DELAY;
-	bool PERPETUAL_WIGGLE_DISABLE_REMOVER;
+	double CHECK_TEAM_DELAY; // Perpetual wiggle check cluster team healthy
+	double PERPETUAL_WIGGLE_SMALL_LOAD_RATIO; // If the average load of storage server is less than this ratio * average
+	                                          // shard bytes, the perpetual wiggle won't consider the available space
+	                                          // load balance in the cluster
+	double PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO; // target min : average space load balance ratio after re-include
+	                                                 // before perpetual wiggle will start the next wiggle
+	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
+	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -236,11 +242,17 @@ public:
 	int64_t
 	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
+	bool STORAGE_QUOTA_ENABLED; // Whether storage quota enforcement for tenant groups and all the relevant storage
+	                            // usage / quota monitors are enabled.
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
 	int TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL; // How often the storage bytes used by each tenant is refreshed
 	                                                 // in the TenantCache
 	int TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL; // How often the storage quota allocated to each tenant is
 	                                                 // refreshed in the TenantCache
+	int TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL; // The minimum interval between consecutive trace events logging the
+	                                               // storage bytes used by a tenant group
+	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
+	                                                  // distributor to fetch the list of tenants over storage quota
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -306,13 +318,15 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
+	bool ROCKSDB_SET_READ_TIMEOUT;
+	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+	bool ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_READER_THREAD_PRIORITY;
 	int ROCKSDB_WRITER_THREAD_PRIORITY;
-	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
-	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
+	int ROCKSDB_CHECKPOINT_READER_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
 	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
@@ -324,6 +338,8 @@ public:
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
 	double ROCKSDB_READ_RANGE_TIMEOUT;
+	double ROCKSDB_READ_CHECKPOINT_TIMEOUT;
+	int64_t ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE;
 	double ROCKSDB_READ_QUEUE_WAIT;
 	int ROCKSDB_READ_QUEUE_SOFT_MAX;
 	int ROCKSDB_READ_QUEUE_HARD_MAX;
@@ -353,6 +369,7 @@ public:
 	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
 	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
+	int ROCKSDB_STATS_LEVEL;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
@@ -701,7 +718,7 @@ public:
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
 	int64_t IOPS_UNITS_PER_SAMPLE;
-	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
+	int64_t BYTES_WRITTEN_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
@@ -756,14 +773,16 @@ public:
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	bool STRICTLY_ENFORCE_BYTE_LIMIT;
+	double FRACTION_INDEX_BYTELIMIT_PREFETCH;
 	int MAX_PARALLEL_QUICK_GET_VALUE;
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 	int STORAGE_FEED_QUERY_HARD_LIMIT;
-	int STORAGE_SERVER_READ_CONCURRENCY;
-	std::string STORAGESERVER_READ_RANKS;
 	std::string STORAGESERVER_READ_PRIORITIES;
+	int STORAGE_SERVER_READ_CONCURRENCY;
+	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -912,10 +931,11 @@ public:
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 	bool REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; // Whether to split pages by tenant if encryption is enabled
 
-	std::string REDWOOD_PRIORITY_LAUNCHS;
+	std::string REDWOOD_IO_PRIORITIES;
 
 	// Server request latency measurement
-	int LATENCY_SAMPLE_SIZE;
+	double LATENCY_SKETCH_ACCURACY;
+	double FILE_LATENCY_SKETCH_ACCURACY;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	// Cluster recovery
@@ -961,6 +981,7 @@ public:
 	bool BG_ENABLE_READ_DRIVEN_COMPACTION;
 	int BG_RDC_BYTES_FACTOR;
 	int BG_RDC_READ_FACTOR;
+	bool BG_WRITE_MULTIPART;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
@@ -985,6 +1006,8 @@ public:
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	bool BLOB_FULL_RESTORE_MODE;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
+	int BLOB_MANIFEST_RW_ROWS;
+	std::string BLOB_RESTORE_MLOGS_URL;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
@@ -1003,6 +1026,8 @@ public:
 
 	// Idempotency ids
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
+	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
+	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

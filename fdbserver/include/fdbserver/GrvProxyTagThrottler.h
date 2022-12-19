@@ -60,6 +60,7 @@ class GrvProxyTagThrottler {
 		void setRate(double rate);
 		bool isMaxThrottled(double maxThrottleDuration) const;
 		void rejectRequests(LatencyBandsMap&);
+		void endReleaseWindow(int64_t numStarted, double elapsed);
 	};
 
 	// Track the budgets for each tag

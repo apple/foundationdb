@@ -1,3 +1,5 @@
+#include "fdbrpc/Base64Encode.h"
+#include "fdbrpc/Base64Decode.h"
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/TokenCache.h"
 #include "fdbrpc/TokenSign.h"
@@ -6,6 +8,10 @@
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"
+
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
 
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
@@ -210,50 +216,64 @@ bool TokenCache::validate(TenantNameRef name, StringRef token) {
 	    .detail("From", peer)                                                                                          \
 	    .detail("Reason", reason)                                                                                      \
 	    .detail("CurrentTime", currentTime)                                                                            \
-	    .detail("Token", token.toStringRef(arena).toStringView())
+	    .detail("Token", toStringRef(arena, token).toStringView())
 
 bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer) {
 	Arena arena;
 	authz::jwt::TokenRef t;
-	if (!authz::jwt::parseToken(arena, t, token)) {
-		CODE_PROBE(true, "Token can't be parsed");
-		TraceEvent(SevWarn, "InvalidToken")
-		    .detail("From", peer)
-		    .detail("Reason", "ParseError")
-		    .detail("Token", token.toString());
+	StringRef signInput;
+	Optional<StringRef> err;
+	bool verifyOutcome;
+	if ((err = authz::jwt::parseToken(arena, token, t, signInput)).present()) {
+		CODE_PROBE(true, "Token can't be parsed", probe::decoration::rare);
+		TraceEvent te(SevWarn, "InvalidToken");
+		te.detail("From", peer);
+		te.detail("Reason", "ParseError");
+		te.detail("ErrorDetail", err.get());
+		if (signInput.empty()) { // unrecognizable token structure
+			te.detail("Token", token.toString());
+		} else { // trace with signature part taken out
+			te.detail("SignInput", signInput.toString());
+		}
 		return false;
 	}
 	auto key = FlowTransport::transport().getPublicKeyByName(t.keyId);
 	if (!key.present()) {
-		CODE_PROBE(true, "Token referencing non-existing key");
+		CODE_PROBE(true, "Token referencing non-existing key", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("UnknownKey", t);
 		return false;
 	} else if (!t.issuedAtUnixTime.present()) {
-		CODE_PROBE(true, "Token has no issued-at field");
+		CODE_PROBE(true, "Token has no issued-at field", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoIssuedAt", t);
 		return false;
 	} else if (!t.expiresAtUnixTime.present()) {
-		CODE_PROBE(true, "Token has no expiration time");
+		CODE_PROBE(true, "Token has no expiration time", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
 		return false;
 	} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
-		CODE_PROBE(true, "Expired token");
+		CODE_PROBE(true, "Expired token", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("Expired", t);
 		return false;
 	} else if (!t.notBeforeUnixTime.present()) {
-		CODE_PROBE(true, "Token has no not-before field");
+		CODE_PROBE(true, "Token has no not-before field", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoNotBefore", t);
 		return false;
 	} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
-		CODE_PROBE(true, "Tokens not-before is in the future");
+		CODE_PROBE(true, "Token's not-before is in the future", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("TokenNotYetValid", t);
 		return false;
 	} else if (!t.tenants.present()) {
-		CODE_PROBE(true, "Token with no tenants");
+		CODE_PROBE(true, "Token with no tenants", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("NoTenants", t);
 		return false;
-	} else if (!authz::jwt::verifyToken(token, key.get())) {
-		CODE_PROBE(true, "Token with invalid signature");
+	}
+	std::tie(verifyOutcome, err) = authz::jwt::verifyToken(signInput, t, key.get());
+	if (err.present()) {
+		CODE_PROBE(true, "Error while verifying token", probe::decoration::rare);
+		TRACE_INVALID_PARSED_TOKEN("ErrorWhileVerifyingToken", t).detail("ErrorDetail", err.get());
+		return false;
+	} else if (!verifyOutcome) {
+		CODE_PROBE(true, "Token with invalid signature", probe::decoration::rare);
 		TRACE_INVALID_PARSED_TOKEN("InvalidSignature", t);
 		return false;
 	} else {
@@ -314,7 +334,13 @@ extern TokenRef makeRandomTokenSpec(Arena&, IRandom&, authz::Algorithm);
 }
 
 TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
-	std::pair<void (*)(Arena&, IRandom&, authz::jwt::TokenRef&), char const*> badMutations[]{
+	auto const pubKeyName = "someEcPublicKey"_sr;
+	auto const rsaPubKeyName = "someRsaPublicKey"_sr;
+	auto privateKey = mkcert::makeEcP256();
+	auto publicKey = privateKey.toPublic();
+	auto rsaPrivateKey = mkcert::makeRsa4096Bit(); // to trigger unmatched sign algorithm
+	auto rsaPublicKey = rsaPrivateKey.toPublic();
+	std::pair<std::function<void(Arena&, IRandom&, authz::jwt::TokenRef&)>, char const*> badMutations[]{
 		{
 		    [](Arena&, IRandom&, authz::jwt::TokenRef&) { FlowTransport::transport().removeAllPublicKeys(); },
 		    "NoKeyWithSuchName",
@@ -355,19 +381,21 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		    },
 		    "UnmatchedTenant",
 		},
+		{
+		    [rsaPubKeyName](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.keyId = rsaPubKeyName; },
+		    "UnmatchedSignAlgorithm",
+		},
 	};
-	auto const pubKeyName = "somePublicKey"_sr;
-	auto privateKey = mkcert::makeEcP256();
 	auto const numBadMutations = sizeof(badMutations) / sizeof(badMutations[0]);
 	for (auto repeat = 0; repeat < 50; repeat++) {
 		auto arena = Arena();
 		auto& rng = *deterministicRandom();
 		auto validTokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 		validTokenSpec.keyId = pubKeyName;
-		for (auto i = 0; i <= numBadMutations; i++) {
-			FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
-			auto publicKeyClearGuard =
-			    ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
+		for (auto i = 0; i <= numBadMutations + 1; i++) {
+			FlowTransport::transport().addPublicKey(pubKeyName, publicKey);
+			FlowTransport::transport().addPublicKey(rsaPubKeyName, rsaPublicKey);
+			auto publicKeyClearGuard = ScopeExit([]() { FlowTransport::transport().removeAllPublicKeys(); });
 			auto signedToken = StringRef();
 			auto tmpArena = Arena();
 			if (i < numBadMutations) {
@@ -378,15 +406,38 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
 					fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
 					           mutationDesc,
-					           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
+					           toStringRef(tmpArena, mutatedTokenSpec).toStringView());
+					ASSERT(false);
+				}
+			} else if (i == numBadMutations) {
+				// squeeze in a bad signature case that does not fit into mutation interface
+				signedToken = authz::jwt::signToken(tmpArena, validTokenSpec, privateKey);
+				signedToken.popBack();
+				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
+					fmt::print("Unexpected successful validation with a token with truncated signature part\n");
 					ASSERT(false);
 				}
 			} else {
-				// squeeze in a bad signature case that does not fit into mutation interface
-				signedToken = authz::jwt::signToken(tmpArena, validTokenSpec, privateKey);
-				signedToken = signedToken.substr(0, signedToken.size() - 1);
+				// test if badly base64-encoded tenant name causes validation to fail as expected
+				auto signInput = authz::jwt::makeSignInput(tmpArena, validTokenSpec);
+				auto b64Header = signInput.eat("."_sr);
+				auto payload = base64::url::decode(tmpArena, signInput).get();
+				rapidjson::Document d;
+				d.Parse(reinterpret_cast<const char*>(payload.begin()), payload.size());
+				ASSERT(!d.HasParseError());
+				rapidjson::StringBuffer wrBuf;
+				rapidjson::Writer<rapidjson::StringBuffer> wr(wrBuf);
+				auto tenantsField = d.FindMember("tenants");
+				ASSERT(tenantsField != d.MemberEnd());
+				tenantsField->value.PushBack("ABC#", d.GetAllocator()); // inject base64-illegal character
+				d.Accept(wr);
+				auto b64ModifiedPayload = base64::url::encode(
+				    tmpArena, StringRef(reinterpret_cast<const uint8_t*>(wrBuf.GetString()), wrBuf.GetSize()));
+				signInput = b64Header.withSuffix("."_sr, tmpArena).withSuffix(b64ModifiedPayload, tmpArena);
+				signedToken = authz::jwt::signToken(tmpArena, signInput, validTokenSpec.algorithm, privateKey);
 				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
-					fmt::print("Unexpected successful validation with a token with truncated signature part\n");
+					fmt::print(
+					    "Unexpected successful validation of a token with tenant name containing non-base64 chars)\n");
 					ASSERT(false);
 				}
 			}
@@ -424,7 +475,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
 	if (!TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print("Unexpected failed token validation, token spec: {}, now: {}\n",
-		           tokenSpec.toStringRef(arena).toStringView(),
+		           toStringRef(arena, tokenSpec).toStringView(),
 		           g_network->timer());
 		ASSERT(false);
 	}
@@ -432,7 +483,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	if (TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print(
 		    "Unexpected successful token validation after supposedly expiring in cache, token spec: {}, now: {}\n",
-		    tokenSpec.toStringRef(arena).toStringView(),
+		    toStringRef(arena, tokenSpec).toStringView(),
 		    g_network->timer());
 		ASSERT(false);
 	}
