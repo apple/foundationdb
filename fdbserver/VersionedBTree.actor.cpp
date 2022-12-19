@@ -2657,16 +2657,17 @@ public:
 		} else if (cacheEntry.reading()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the outstanding read to finish, then start the write
-			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-			    success(cacheEntry.readFuture), [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture = mapAsync(success(cacheEntry.readFuture),
+			                                  [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		}
+
 		// If the page is being written, wait for this write before issuing the new write to ensure the
 		// writes happen in the correct order
 		else if (cacheEntry.writing()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the previous write to finish, then start new write
-			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-			    cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture =
+			    mapAsync(cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		} else {
 			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		}
