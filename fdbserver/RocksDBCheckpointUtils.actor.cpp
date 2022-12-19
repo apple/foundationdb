@@ -70,7 +70,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
 	options.create_if_missing = false;
-	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
 
