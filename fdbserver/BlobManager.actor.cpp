@@ -30,6 +30,7 @@
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobGranuleRequest.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/DatabaseContext.h"
@@ -2062,21 +2063,24 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
                                      KeyRange keyRange,
                                      Version version) {
 	state Transaction tr(bmData->db);
-	state KeyRange currentRange = keyRange;
+	state Key beginKey = keyRange.begin;
+	state Key endKey = keyRange.end;
+	int64_t epoch = bmData->epoch;
+	Version v = version;
+	state FlushGranuleRequest req(epoch, keyRange, v, false);
 
 	if (BM_DEBUG) {
-		fmt::print(
-		    "Flushing Granules [{0} - {1}) @ {2}\n", keyRange.begin.printable(), keyRange.end.printable(), version);
+		fmt::print("Flushing Granules [{0} - {1}) @ {2}\n", beginKey.printable(), endKey.printable(), version);
 	}
 
 	loop {
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		if (currentRange.begin == currentRange.end) {
+		if (beginKey >= endKey) {
 			break;
 		}
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, keyRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
 				CODE_PROBE(true, "Granule flush stopped because of force purge", probe::decoration::rare);
@@ -2092,113 +2096,16 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 				return false;
 			}
 
-			// TODO KNOB
-			state RangeResult blobGranuleMapping = wait(krmGetRanges(
-			    &tr, blobGranuleMappingKeys.begin, currentRange, 64, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			wait(success(
+			    txnDoBlobGranuleRequests(&tr, &beginKey, endKey, req, &BlobWorkerInterface::flushGranuleRequest)));
 
-			state int i = 0;
-			state std::vector<Future<ErrorOr<Void>>> flushes;
-
-			for (; i < blobGranuleMapping.size() - 1; i++) {
-				if (!blobGranuleMapping[i].value.size()) {
-					if (BM_DEBUG) {
-						fmt::print("ERROR: No valid granule data for range [{0} - {1}) \n",
-						           blobGranuleMapping[i].key.printable(),
-						           blobGranuleMapping[i + 1].key.printable());
-					}
-					// range isn't force purged because of above check, so flush was for invalid range
-					throw blob_granule_transaction_too_old();
-				}
-
-				state UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-				if (workerId == UID()) {
-					if (BM_DEBUG) {
-						fmt::print("ERROR: Invalid Blob Worker ID for range [{0} - {1}) \n",
-						           blobGranuleMapping[i].key.printable(),
-						           blobGranuleMapping[i + 1].key.printable());
-					}
-					// range isn't force purged because of above check, so flush was for invalid range
-					throw blob_granule_transaction_too_old();
-				}
-
-				if (!tr.trState->cx->blobWorker_interf.count(workerId)) {
-					Optional<Value> workerInterface = wait(tr.get(blobWorkerListKeyFor(workerId)));
-					// from the time the mapping was read from the db, the associated blob worker
-					// could have died and so its interface wouldn't be present as part of the blobWorkerList
-					// we persist in the db.
-					if (workerInterface.present()) {
-						tr.trState->cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
-					} else {
-						if (BM_DEBUG) {
-							fmt::print("ERROR: Worker  for range [{1} - {2}) does not exist!\n",
-							           workerId.toString().substr(0, 5),
-							           blobGranuleMapping[i].key.printable(),
-							           blobGranuleMapping[i + 1].key.printable());
-						}
-						break;
-					}
-				}
-
-				if (BM_DEBUG) {
-					fmt::print("Flushing range [{0} - {1}) from worker {2}!\n",
-					           blobGranuleMapping[i].key.printable(),
-					           blobGranuleMapping[i + 1].key.printable(),
-					           workerId.toString().substr(0, 5));
-				}
-
-				KeyRangeRef range(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key);
-				Future<ErrorOr<Void>> flush =
-				    tr.trState->cx->blobWorker_interf[workerId].flushGranuleRequest.tryGetReply(
-				        FlushGranuleRequest(bmData->epoch, range, version));
-				flushes.push_back(flush);
-			}
-			// wait for each flush, if it has an error, retry from there if it is a retriable error
-			state int j = 0;
-			for (; j < flushes.size(); j++) {
-				try {
-					ErrorOr<Void> result = wait(flushes[j]);
-					if (result.isError()) {
-						throw result.getError();
-					}
-					if (BM_DEBUG) {
-						fmt::print("Flushing range [{0} - {1}) complete!\n",
-						           blobGranuleMapping[j].key.printable(),
-						           blobGranuleMapping[j + 1].key.printable());
-					}
-				} catch (Error& e) {
-					if (e.code() == error_code_wrong_shard_server || e.code() == error_code_request_maybe_delivered ||
-					    e.code() == error_code_broken_promise || e.code() == error_code_connection_failed) {
-						// re-read range and retry from failed req
-						i = j;
-						break;
-					} else {
-						if (BM_DEBUG) {
-							fmt::print("ERROR: BM {0} Error flushing range [{1} - {2}): {3}!\n",
-							           bmData->epoch,
-							           blobGranuleMapping[j].key.printable(),
-							           blobGranuleMapping[j + 1].key.printable(),
-							           e.name());
-						}
-						throw;
-					}
-				}
-			}
-			if (i < blobGranuleMapping.size() - 1) {
-				// a request failed, retry from there after a sleep
-				currentRange = KeyRangeRef(blobGranuleMapping[i].key, currentRange.end);
-				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-			} else if (blobGranuleMapping.more) {
-				// no requests failed but there is more to read, continue reading
-				currentRange = KeyRangeRef(blobGranuleMapping.back().key, currentRange.end);
-			} else {
-				break;
-			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
 
 	if (BM_DEBUG) {
+
 		fmt::print("Flushing Granules [{0} - {1}) @ {2} Complete!\n",
 		           keyRange.begin.printable(),
 		           keyRange.end.printable(),

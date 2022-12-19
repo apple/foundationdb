@@ -60,6 +60,11 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
                                             Optional<Reference<Tenant>> tenantName,
                                             Promise<Void> testComplete);
 
+ACTOR Future<Void> validateForceFlushing(Database cx,
+                                         KeyRange range, // raw key range (includes tenant)
+                                         double testDuration,
+                                         Promise<Void> testComplete);
+
 ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug);
 
 #include "flow/unactorcompiler.h"

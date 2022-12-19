@@ -20,6 +20,8 @@
 
 #include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbclient/BlobGranuleRequest.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range) {
@@ -332,6 +334,144 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
 		}
 		throw e;
 	}
+}
+
+ACTOR Future<Void> validateForceFlushing(Database cx,
+                                         KeyRange range, // raw key range (includes tenant)
+                                         double testDuration,
+                                         Promise<Void> testComplete) {
+	TraceEvent("ValidateForceFlushSleeping").detail("Range", range);
+	// do randomly once with random delay through whole test
+	wait(delay(deterministicRandom()->random01() * testDuration));
+
+	TraceEvent("ValidateForceFlushRunning").detail("Range", range);
+
+	// verify range first to make sure it's active
+	loop {
+		Version v = wait(cx->verifyBlobRange(range, {}, {}));
+		if (v != invalidVersion) {
+			TraceEvent("ValidateForceFlushVerified").detail("Range", range).detail("Version", v);
+			break;
+		}
+		wait(delay(2.0));
+	}
+
+	state KeyRange toFlush = range;
+	state Version flushVersion = invalidVersion;
+	// then get blob ranges, pick random set of range(s) within
+	state Transaction tr(cx);
+	loop {
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+		try {
+			wait(store(flushVersion, tr.getReadVersion()));
+			Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000));
+			ASSERT(!granules.empty());
+			if (granules.size() > 2) {
+				// pick sub-range if many granules to flush
+				int targetRanges = deterministicRandom()->randomInt(1, std::min(10, (int)granules.size()));
+				int targetStart = deterministicRandom()->randomInt(0, granules.size() - targetRanges);
+
+				Key startKey = granules[targetStart].begin;
+				Key endKey = granules[targetStart + targetRanges - 1].end;
+
+				// client req may not exactly align to granules - buggify this behavior
+				if (BUGGIFY_WITH_PROB(0.1)) {
+					if (deterministicRandom()->coinflip()) {
+						startKey = keyAfter(startKey);
+					}
+					// extend end (if there are granules in that space)
+					if (targetStart + targetRanges < granules.size() && deterministicRandom()->coinflip()) {
+						endKey = keyAfter(endKey);
+					}
+				}
+
+				toFlush = KeyRangeRef(startKey, endKey);
+			}
+
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	state bool compact = deterministicRandom()->random01() < 0.25;
+
+	TraceEvent("ValidateForceFlushRequesting")
+	    .detail("Range", range)
+	    .detail("ToFlush", toFlush)
+	    .detail("Version", flushVersion)
+	    .detail("Compact", compact);
+
+	// call flush and make sure it returns eventually
+	FlushGranuleRequest req(-1, toFlush, flushVersion, compact);
+	wait(success(doBlobGranuleRequests(cx, toFlush, req, &BlobWorkerInterface::flushGranuleRequest)));
+
+	TraceEvent("ValidateForceFlushRequestComplete")
+	    .detail("Range", range)
+	    .detail("ToFlush", toFlush)
+	    .detail("Version", flushVersion)
+	    .detail("Compact", compact);
+
+	// once it returns, do a read from the range at that version and make sure the returned versions all obey the
+	// property that at least flushVersion is durable
+
+	// FIXME: just flush in loop until this works to fix merging race?
+	state Version readVersion;
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+			if (compact) {
+				// read at current read version version in case re-snapshot had to redo at a higher version
+				wait(store(readVersion, tr.getReadVersion()));
+			} else {
+				readVersion = flushVersion;
+			}
+			Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tr.readBlobGranules(toFlush, 0, readVersion));
+			fmt::print("Chunks from force flush [{0} - {1}) @ {2}\n",
+			           toFlush.begin.printable(),
+			           toFlush.end.printable(),
+			           readVersion);
+			printGranuleChunks(chunks);
+			fmt::print("Processing\n");
+			for (auto& it : chunks) {
+
+				if (compact) {
+					if (it.snapshotVersion < flushVersion) {
+						fmt::print("Chunk [{0} - {1}). SV={2}, FV={3}\n",
+						           it.keyRange.begin.printable(),
+						           it.keyRange.end.printable(),
+						           it.snapshotVersion,
+						           flushVersion);
+					}
+					ASSERT(it.snapshotVersion >= flushVersion);
+				} /* else {
+				     // TODO this check doesn't work due to race with merging. Just make sure it finishes
+
+				     if (!it.newDeltas.empty()) {
+				         fmt::print("{0} Deltas {1} - {2}\n", it.newDeltas.size(), it.newDeltas.front().version,
+				 it.newDeltas.back().version);
+				     }
+				     ASSERT(it.newDeltas.empty());
+				     if (it.snapshotVersion < flushVersion) {
+				         ASSERT(!it.deltaFiles.empty());
+				         // could parse delta file version out of file but that's annoying
+				     }
+				 }*/
+			}
+
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("ValidateForceFlushDone")
+	    .detail("Range", range)
+	    .detail("ToFlush", toFlush)
+	    .detail("Version", flushVersion);
+
+	return Void();
 }
 
 struct feed_cmp_f {
