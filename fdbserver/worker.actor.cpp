@@ -26,6 +26,7 @@
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
@@ -1659,8 +1660,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	filesClosed.add(stopping.getFuture());
 
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(
-	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder,
+	                                                              locality.dcId(),
+	                                                              locality.zoneId(),
+	                                                              locality.machineId(),
+	                                                              g_network->getLocalAddress().ip,
+	                                                              FDB_VT_VERSION));
 
 	{
 		auto recruited = interf;
