@@ -1636,9 +1636,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "audit_storage")) {
-					bool _result = wait(makeInterruptable(auditStorageCommandActor(ccf, tokens)));
-					if (!_result)
+					UID  auditId = wait(makeInterruptable(auditStorageCommandActor(ccf, tokens)));
+					if (!auditId.isValid()) {
 						is_error = true;
+					} else {
+						printf("Started audit: %s\n", auditId.toString().c_str());
+					}
 					continue;
 				}
 

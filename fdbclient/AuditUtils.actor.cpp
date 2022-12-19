@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbserver/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.actor.h"
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbclient/ClientKnobs.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -141,8 +141,8 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, 
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     auditRangePrefixFor(id),
 			                                     range,
-			                                     SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-			                                     SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 			auditStates = res_;
 			break;
 		} catch (Error& e) {

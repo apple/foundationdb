@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SERVER_AUDITUTILS_ACTOR_G_H)
-#define FDBSERVER_SERVER_AUDITUTILS_ACTOR_G_H
-#include "fdbserver/AuditUtils.actor.g.h"
-#elif !defined(FDBSERVER_SERVER_AUDITUTILS_ACTOR_H)
-#define FDBSERVER_SERVER_AUDITUTILS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_AUDITUTILS_ACTOR_G_H)
+#define FDBCLIENT_AUDITUTILS_ACTOR_G_H
+#include "fdbclient/AuditUtils.actor.g.h"
+#elif !defined(FDBCLIENT_AUDITUTILS_ACTOR_H)
+#define FDBCLIENT_AUDITUTILS_ACTOR_H
 #pragma once
 
 #include "fdbclient/Audit.h"

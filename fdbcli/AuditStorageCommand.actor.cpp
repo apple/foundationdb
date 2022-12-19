@@ -32,27 +32,19 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                            std::vector<StringRef> tokens) {
-	//    KeyRange range,
-	//    AuditType type,
-	//    bool async = false
-	if (tokens.size() < 2) {
+ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
+                                           std::vector<StringRef> tokens) {
+	if (tokens.size() < 3) {
 		printUsage(tokens[0]);
-		return false;
+		return UID();
 	}
 
 	UID auditId = wait(auditStorage(clusterFile, KeyRangeRef(tokens[2], tokens[3]), AuditType::ValidateHA, true));
-	return true;
+	return auditId;
 }
 
-CommandFactory auditStorageFactory(
-    "audit_storage",
-    CommandHelp("force_recovery_with_data_loss <DCID>",
-                "Force the database to recover into DCID",
-                "A forced recovery will cause the database to lose the most recently committed mutations. The "
-                "amount of mutations that will be lost depends on how far behind the remote datacenter is. This "
-                "command will change the region configuration to have a positive priority for the chosen DCID, and "
-                "a negative priority for all other DCIDs. This command will set usable_regions to 1. If the "
-                "database has already recovered, this command does nothing.\n"));
+CommandFactory auditStorageFactory("audit_storage",
+                                   CommandHelp("audit_storage <BeginKey> <EndKey>",
+                                               "Start an audit storage",
+                                               "Trigger an audit storage, the auditID is returned.\n"));
 } // namespace fdb_cli
