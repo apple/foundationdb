@@ -257,7 +257,7 @@ public:
 
 private:
 	template <class F>
-	using MapRet = std::remove_reference_t<std::remove_const_t<std::invoke_result_t<F, T>>>;
+	using MapRet = std::decay_t<std::invoke_result_t<F, T>>;
 
 	template <class F>
 	using EnableIfNotMemberPointer =
@@ -278,12 +278,12 @@ public:
 	// Converts an Optional<T> to an Optional<R> of one of its value's members
 	//
 	// v.map(&T::member) is equivalent to v.map([](T v) { return v.member; })
-	template <class R, class Rp = std::remove_const_t<R>>
+	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
 	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
 		return present() ? Optional<Rp>(get().*member) : Optional<Rp>();
 	}
-	template <class R, class Rp = std::remove_const_t<R>>
+	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
 	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
 		return present() ? Optional<Rp>(std::move(*this).get().*member) : Optional<Rp>();
@@ -293,13 +293,13 @@ public:
 	//
 	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
 	// v.map([](T v) { return v.memberFunc(arg1, arg2, ...); })
-	template <class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	template <class R, class... Args, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
 	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
 	    Args&&... args) const& {
 		return present() ? Optional<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : Optional<Rp>();
 	}
-	template <class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	template <class R, class... Args, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
 	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
 	    Args&&... args) && {
@@ -312,7 +312,7 @@ public:
 	// returns an empty Optional<R>.
 	//
 	// v.mapRef(&P::member) is equivalent to Optional<R>(v.get()->member) if v is present and non-null
-	template <class P, class R, class Rp = std::remove_const_t<R>>
+	template <class P, class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::*member) const& {
 		if (!present() || !get()) {
 			return Optional<Rp>();
@@ -328,7 +328,7 @@ public:
 	//
 	// v.mapRef(&T::memberFunc, arg1, arg2, ...) is equivalent to Optional<R>(v.get()->memberFunc(arg1, arg2, ...)) if v
 	// is present and non-null
-	template <class P, class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	template <class P, class R, class... Args, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
 	                                                                                  Args&&... args) const& {
 		if (!present() || !get()) {

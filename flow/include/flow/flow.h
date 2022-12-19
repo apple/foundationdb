@@ -165,7 +165,7 @@ public:
 
 private:
 	template <class F>
-	using MapRet = std::remove_reference_t<std::remove_const_t<std::invoke_result_t<F, T>>>;
+	using MapRet = std::decay_t<std::invoke_result_t<F, T>>;
 
 	template <class F>
 	using EnableIfNotMemberPointer =
@@ -186,12 +186,12 @@ public:
 	// Converts an ErrorOr<T> to an ErrorOr<R> of one of its value's members
 	//
 	// v.map(&T::member) is equivalent to v.map<R>([](T t) { return t.member; })
-	template <class R, class Rp = std::remove_const_t<R>>
+	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
 	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
 		return present() ? ErrorOr<Rp>(get().*member) : ErrorOr<Rp>(getError());
 	}
-	template <class R, class Rp = std::remove_const_t<R>>
+	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
 	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
 		return present() ? ErrorOr<Rp>(std::move(*this).get().*member) : ErrorOr<Rp>(getError());
@@ -201,13 +201,13 @@ public:
 	//
 	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
 	// v.map<R>([](T t) { return t.memberFunc(arg1, arg2, ...); })
-	template <class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	template <class R, class... Args, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
 	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
 	    Args&&... args) const& {
 		return present() ? ErrorOr<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : ErrorOr<Rp>(getError());
 	}
-	template <class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	template <class R, class... Args, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
 	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
 	    Args&&... args) && {
@@ -220,7 +220,7 @@ public:
 	// returns a default constructed ErrorOr<R>.
 	//
 	// v.mapRef(&P::member) is equivalent to ErrorOr<R>(v.get()->member) if v is present and non-null
-	template <class P, class R, class Rp = std::remove_const_t<R>>
+	template <class P, class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R P::*member) const& {
 
 		if (!present()) {
@@ -239,7 +239,7 @@ public:
 	//
 	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to ErrorOr<R>(v.get()->memberFunc(arg1, arg2, ...)) if v is
 	// present and non-null
-	template <class P, class R, class... Args, class Rp = std::remove_const_t<std::remove_reference_t<R>>>
+	template <class P, class R, class... Args, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
 	                                                                                 Args&&... args) const& {
 		if (!present()) {
