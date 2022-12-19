@@ -307,6 +307,8 @@ else()
       -Wno-unknown-warning-option
       -Wno-unused-parameter
       -Wno-constant-logical-operand
+      # TODO: Disable only for zstd
+      -Wno-strict-prototypes
       )
     if (USE_CCACHE)
       add_compile_options(
