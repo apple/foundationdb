@@ -284,7 +284,8 @@ public:
 		              StorageMetrics const& metrics,
 		              std::vector<ShardsAffectedByTeamFailure::Team> teams,
 		              PhysicalShardCreationTime whenCreated)
-		  : txnProcessor(txnProcessor), id(id), metrics(metrics), teams(teams), whenCreated(whenCreated) {}
+		  : txnProcessor(txnProcessor), id(id), metrics(metrics),
+		    stats(makeReference<AsyncVar<Optional<StorageMetrics>>>()), teams(teams), whenCreated(whenCreated) {}
 
 		// Adds `newRange` to this physical shard and starts monitoring the shard.
 		void addRange(const KeyRange& newRange);
@@ -297,15 +298,18 @@ public:
 		Reference<IDDTxnProcessor> txnProcessor;
 		uint64_t id; // physical shard id (never changed)
 		StorageMetrics metrics; // current metrics, updated by shardTracker
+		Reference<AsyncVar<Optional<StorageMetrics>>> stats;
 		std::vector<ShardsAffectedByTeamFailure::Team> teams; // which team owns this physical shard (never changed)
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
 
 		struct RangeData {
 			Future<Void> trackMetrics;
-			Reference<AsyncVar<Optional<ShardMetrics>>>
-			    stats; // TODO(zhewu): aggregate all metrics to a single physical shard metrics.
+			Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 		};
 		std::unordered_map<KeyRange, RangeData> rangeData;
+
+	private:
+		void insertNewRangeData(const KeyRange& newRange);
 	};
 
 	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
