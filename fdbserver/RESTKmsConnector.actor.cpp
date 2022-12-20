@@ -497,7 +497,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		// just do extra memory copy for simplicity here
 		Standalone<VectorRef<StringRef>> partitions;
 		if (isPartitionsPresent) {
-			for (const auto& partition : doc[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
+			for (const auto& partition : detail[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
 				if (!partition.IsString()) {
 					TraceEvent("ParseBlobMetadataResponseFailurePartitionNotString", ctx->uid)
 					    .detail("Type", partition.GetType());
