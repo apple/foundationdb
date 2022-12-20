@@ -933,12 +933,12 @@ public:
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
 
 	KeyRangeMap<std::vector<Reference<ChangeFeedInfo>>> keyChangeFeed;
-	std::map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
+	std::unordered_map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
 	Deque<std::pair<std::vector<Key>, Version>> changeFeedVersions;
 	std::map<UID, PromiseStream<Key>> changeFeedDestroys;
 	std::set<Key> currentChangeFeeds;
 	std::set<Key> fetchingChangeFeeds;
-	std::unordered_map<NetworkAddress, std::map<UID, Version>> changeFeedClientVersions;
+	std::unordered_map<NetworkAddress, std::unordered_map<UID, Version>> changeFeedClientVersions;
 	std::unordered_map<Key, Version> changeFeedCleanupDurable;
 	int64_t activeFeedQueries = 0;
 	int64_t changeFeedMemoryBytes = 0;
@@ -2543,6 +2543,7 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
 
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
+                                                                            Reference<ChangeFeedInfo> feedInfo,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
                                                                             bool atLatest,
@@ -2577,12 +2578,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		throw wrong_shard_server();
 	}
 
-	auto feed = data->uidChangeFeed.find(req.rangeID);
-	if (feed == data->uidChangeFeed.end()) {
+	if (feedInfo->removing) {
 		throw unknown_change_feed();
 	}
-
-	state Reference<ChangeFeedInfo> feedInfo = feed->second;
 
 	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
 	// waiting for the results
@@ -2982,6 +2980,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state bool removeUID = false;
 	state FeedDiskReadState feedDiskReadState = STARTING;
 	state Optional<Version> blockedVersion;
+	state Reference<ChangeFeedInfo> feedInfo;
+	state Future<Void> streamEndReached;
 
 	try {
 		++data->counters.feedStreamQueries;
@@ -3023,6 +3023,18 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 
 		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
 		wait(success(waitForVersionNoTooOld(data, checkTooOldVersion)));
+
+		// set persistent references to map data structures to not have to re-look them up every loop
+		auto feed = data->uidChangeFeed.find(req.rangeID);
+		if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+			req.reply.sendError(unknown_change_feed());
+			// throw to delete from changeFeedClientVersions if present
+			throw unknown_change_feed();
+		}
+		feedInfo = feed->second;
+
+		streamEndReached =
+		    (req.end == std::numeric_limits<Version>::max()) ? Never() : data->version.whenAtLeast(req.end);
 
 		// send an empty version at begin - 1 to establish the stream quickly
 		ChangeFeedStreamReply emptyInitialReply;
@@ -3066,7 +3078,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			wait(onReady);
 			// keep this as not state variable so it is freed after sending to reduce memory
 			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, req, false, atLatest, streamUID, &feedDiskReadState);
+			    getChangeFeedMutations(data, feedInfo, req, false, atLatest, streamUID, &feedDiskReadState);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -3097,11 +3109,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
 			if (removeUID) {
 				if (gotAll || req.begin == req.end) {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(streamUID);
+					clientVersions.erase(streamUID);
 					removeUID = false;
 				} else {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
-					    feedReply.mutations.back().version;
+					clientVersions[streamUID] = feedReply.mutations.back().version;
 				}
 			}
 
@@ -3122,19 +3133,16 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 			if (gotAll) {
 				blockedVersion = Optional<Version>();
-				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+				if (feedInfo->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
 				}
 				choose {
-					when(wait(feed->second->newMutations.onTrigger())) {}
-					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
-					                                                         : data->version.whenAtLeast(req.end))) {}
+					when(wait(feedInfo->newMutations.onTrigger())) {}
+					when(wait(streamEndReached)) {}
 				}
-				auto feedItr = data->uidChangeFeed.find(req.rangeID);
-				if (feedItr == data->uidChangeFeed.end() || feedItr->second->removing) {
+				if (feedInfo->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
