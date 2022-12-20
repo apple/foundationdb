@@ -5647,7 +5647,8 @@ private:
 					canUseDefaultDomain =
 					    (height > 1 && (currentDomainId == defaultDomainId ||
 					                    (prefixLength == rec.key.size() &&
-					                     !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))));
+					                     (nextRecord.key == dbEnd.key ||
+					                      !nextRecord.key.startsWith(rec.key.substr(0, prefixLength))))));
 				} else if (splitByDomain) {
 					ASSERT(domainId.present());
 					if (domainId == currentDomainId) {
@@ -5659,9 +5660,11 @@ private:
 							ASSERT(prefixLength < rec.key.size());
 							canUseDefaultDomain = false;
 						}
-					} else if (canUseDefaultDomain && (currentDomainId == defaultDomainId ||
-					                                   (prefixLength == rec.key.size() &&
-					                                    !nextRecord.key.startsWith(rec.key.substr(0, prefixLength))))) {
+					} else if (canUseDefaultDomain &&
+					           (currentDomainId == defaultDomainId ||
+					            (prefixLength == rec.key.size() &&
+					             (nextRecord.key == dbEnd.key ||
+					              !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))))) {
 						// The new record meets one of the following conditions:
 						//   1. it falls in the default domain, or
 						//   2. its key contain only the domain prefix, and
