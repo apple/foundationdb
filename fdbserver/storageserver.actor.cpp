@@ -3021,7 +3021,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
-		wait(success(waitForVersionNoTooOld(data, req.begin)));
+		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
+		wait(success(waitForVersionNoTooOld(data, checkTooOldVersion)));
 
 		// send an empty version at begin - 1 to establish the stream quickly
 		ChangeFeedStreamReply emptyInitialReply;
