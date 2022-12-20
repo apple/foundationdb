@@ -5,6 +5,7 @@ from pathlib import Path
 import platform
 import shutil
 import stat
+import subprocess
 from urllib import request
 import hashlib
 from fdb_version import CURRENT_VERSION, FUTURE_VERSION
@@ -76,24 +77,8 @@ class FdbBinaryDownloader:
     def lib_path(self, version):
         return self.lib_dir(version).joinpath("libfdb_c.so")
 
-    # Download an old binary of a given version from a remote repository
-    def download_old_binary(self, version, target_bin_name, remote_bin_name, make_executable):
-        local_file = self.download_dir.joinpath(version, target_bin_name)
-        if local_file.exists():
-            return
-
-        # Download to a temporary file and then replace the target file atomically
-        # to avoid consistency errors in case of multiple tests are downloading the
-        # same file in parallel
-        local_file_tmp = Path("{}.{}".format(str(local_file), random_alphanum_string(8)))
-        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
-        remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT, version, remote_bin_name)
-        remote_sha256 = "{}.sha256".format(remote_file)
-        local_sha256 = Path("{}.sha256".format(local_file_tmp))
-
-        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
-            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
-                assert False, "Failed to download {} after {} attempts".format(local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
+    def apple_bin_download(self, local_file_tmp, remote_file, local_sha256, remote_sha256):
+        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS):
             try:
                 print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
                 request.urlretrieve(remote_file, local_file_tmp)
@@ -113,8 +98,52 @@ class FdbBinaryDownloader:
                 break
             print("Checksum mismatch. Expected: {} Actual: {}".format(expected_checksum, actual_checkum))
 
-        os.rename(local_file_tmp, local_file)
-        os.remove(local_sha256)
+
+    def snowflake_s3_download(self, binary, version, local_file_tmp):
+        bin_dir = "lib" if binary == "libfdb_c.so" else "bin"
+        s3_path = "s3://sfc-jenkins/foundationdb/builds/release/{arch}/snowflake-{version}/{bin_dir}/{binary}"
+        s3_path = s3_path.format(arch=self.platform, version=version, bin_dir=bin_dir, binary=binary)
+        aws_cmd = ["aws", "s3", "cp", s3_path, local_file_tmp]
+        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS):
+            try:
+                subprocess.run(aws_cmd)
+                break
+            except Exception as e:
+                print("Retrying on error:", e)
+
+    # Download an old binary of a given version from a remote repository
+    def download_old_binary(self, version, target_bin_name, remote_bin_name, make_executable):
+        local_file = self.download_dir.joinpath(version, target_bin_name)
+        if local_file.exists():
+            return
+
+        # Download to a temporary file and then replace the target file atomically
+        # to avoid consistency errors in case of multiple tests are downloading the
+        # same file in parallel
+        local_file_tmp = Path("{}.{}".format(str(local_file), random_alphanum_string(8)))
+        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
+        remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT, version, remote_bin_name)
+        remote_sha256 = "{}.sha256".format(remote_file)
+        local_sha256 = Path("{}.sha256".format(local_file_tmp))
+
+        self.apple_bin_download(local_file_tmp, remote_file, local_sha256, remote_sha256)
+
+        self.snowflake_s3_download(target_bin_name, version, local_file_tmp)
+
+        if not os.path.exists(local_file_tmp):
+            assert False, "Failed to download {} after {} attempts".format(local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
+
+        # Rename / remove temp file & sha
+        try:
+            os.rename(local_file_tmp, local_file)
+            chmod_cmd = ["chmod", "+x", local_file]
+            subprocess.run(chmod_cmd)
+        except:
+            pass
+        try:
+            os.remove(local_sha256)
+        except:
+            pass
 
         if make_executable:
             make_executable_path(local_file)
