@@ -19,24 +19,21 @@
  */
 
 #include "fdbcli/fdbcli.actor.h"
-
-#include "fdbclient/IClientApi.h"
-
-#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Audit.h"
-
+#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/IClientApi.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
-ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                           std::vector<StringRef> tokens) {
-	if (tokens.size() < 2) {
+ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens) {
+	if (tokens.size() != 4) {
 		printUsage(tokens[0]);
-		return UID();
+		return false;
 	}
 
 	AuditType type = AuditType::Invalid;
@@ -44,29 +41,27 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		type = AuditType::ValidateHA;
 	} else {
 		printUsage(tokens[0]);
-		return UID();
+		return false;
 	}
 
-	Key begin, end;
-	if (tokens.size() == 2) {
-		begin = allKeys.begin;
-		end = allKeys.end;
-	} else if (tokens.size() == 3) {
-		begin = tokens[2];
-	} else if (tokens.size() == 4) {
-		begin = tokens[2];
-		end = tokens[3];
-	} else {
-		printUsage(tokens[0]);
-		return UID();
+	if (tokencmp(tokens[2], "id")) {
+		const UID id = UID::fromString(tokens[3].toString());
+		AuditStorageState res = wait(getAuditState(cx, type, id));
+		printf("Audit result is:\n%s", res.toString().c_str());
+	} else if (tokencmp(tokens[2], "recent")) {
+		const int count = std::stoi(tokens[3].toString());
+		std::vector<AuditStorageState> res = wait(getLatestAuditStates(cx, type, count));
+		for (const auto& it : res) {
+			printf("Audit result is:\n%s\n", it.toString().c_str());
+		}
 	}
-
-	UID auditId = wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, true));
-	return auditId;
+	return true;
 }
 
-CommandFactory auditStorageFactory("audit_storage",
-                                   CommandHelp("audit_storage <ha> [BeginKey] [EndKey]",
-                                               "Start an audit storage",
-                                               "Trigger an audit storage, the auditID is returned.\n"));
+CommandFactory getAuditStatusFactory(
+    "get_audit_status",
+    CommandHelp("get_audit_status <ha> <id|recent> [ARGs]",
+                "Retrieve audit storage results of the specific type",
+                "Fetch audit result with an ID: get_audit_status [Type] id [ID];\n"
+                "Fetch most recent audit results: get_audit_status [Type] recent [Count].\n"));
 } // namespace fdb_cli
