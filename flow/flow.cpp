@@ -359,6 +359,27 @@ void enableBuggify(bool enabled, BuggifyType type) {
 	buggifyActivated[int(type)] = enabled;
 }
 
+int nChooseK(int n, int k) {
+	assert(n >= k && k >= 0);
+	if (k == 0) {
+		return 1;
+	}
+	if (k > n / 2) {
+		return nChooseK(n, n - k);
+	}
+
+	long ret = 1;
+
+	// To avoid integer overflow, we do n/1 * (n-1)/2 * (n-2)/3 * (n-i+1)/i, where i = k
+	for (int i = 1; i <= k; ++i) {
+		ret *= n - i + 1;
+		ret /= i;
+	}
+	ASSERT(ret <= INT_MAX);
+
+	return ret;
+}
+
 namespace {
 // Simple message for flatbuffers unittests
 struct Int {
