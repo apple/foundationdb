@@ -87,7 +87,7 @@ endif()
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -166,18 +166,24 @@ else()
   set(SANITIZER_COMPILE_OPTIONS)
   set(SANITIZER_LINK_OPTIONS)
 
-  # we always compile with debug symbols. For release builds CPack will strip them out
-  # and create a debuginfo rpm
-  add_compile_options(-fno-omit-frame-pointer -gz)
-  add_link_options(-gz)
+  add_compile_options(-fno-omit-frame-pointer)
+
   if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
-    # Also generating full debug symbols in release builds, because they are packaged
-    # separately and installed optionally
+    # Also generating full debug symbols in release builds. CPack will strip them out
+    # and create a debuginfo rpm
     add_compile_options(-ggdb)
   else()
     # Generating minimal debug symbols by default. They are sufficient for testing purposes
     add_compile_options(-ggdb1)
+  endif()
+
+  if(NOT FDB_RELEASE)
+    # Enable compression of the debug sections. This reduces the size of the binaries several times. 
+    # We do not enable it release builds, because CPack fails to generate debuginfo packages when
+    # compression is enabled
+    add_compile_options(-gz)
+    add_link_options(-gz)
   endif()
 
   if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
@@ -347,6 +353,8 @@ else()
       # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
       # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
       -Wno-unused-command-line-argument
+      # Disable C++ 20 warning for ambiguous operator.
+      -Wno-ambiguous-reversed-operator
       )
     if (USE_CCACHE)
       add_compile_options(

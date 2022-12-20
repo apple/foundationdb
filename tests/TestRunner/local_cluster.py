@@ -9,6 +9,8 @@ import time
 import fcntl
 import sys
 import tempfile
+from authz_util import private_key_gen, public_keyset_from_keys
+from test_util import random_alphanum_string
 
 CLUSTER_UPDATE_TIMEOUT_SEC = 10
 EXCLUDE_SERVERS_TIMEOUT_SEC = 120
@@ -61,10 +63,6 @@ class PortProvider:
                 pass
         self._lock_files.clear()
 
-
-valid_letters_for_secret = string.ascii_letters + string.digits
-
-
 class TLSConfig:
     # Passing a negative chain length generates expired leaf certificate
     def __init__(
@@ -76,11 +74,6 @@ class TLSConfig:
         self.server_chain_len = server_chain_len
         self.client_chain_len = client_chain_len
         self.verify_peers = verify_peers
-
-
-def random_secret_string(length):
-    return "".join(random.choice(valid_letters_for_secret) for _ in range(length))
-
 
 class LocalCluster:
     configuration_template = """
@@ -145,7 +138,8 @@ logdir = {logdir}
         tls_config: TLSConfig = None,
         mkcert_binary: str = "",
         custom_config: dict = {},
-        public_key_json_str: str = "",
+        authorization_kty: str = "",
+        authorization_keypair_id: str = "",
     ):
         self.port_provider = PortProvider()
         self.basedir = Path(basedir)
@@ -179,8 +173,8 @@ logdir = {logdir}
         self.server_ports = {server_id: self.__next_port() for server_id in range(self.process_number)}
         self.server_by_port = {port: server_id for server_id, port in self.server_ports.items()}
         self.next_server_id = self.process_number
-        self.cluster_desc = random_secret_string(8)
-        self.cluster_secret = random_secret_string(8)
+        self.cluster_desc = random_alphanum_string(8)
+        self.cluster_secret = random_alphanum_string(8)
         self.env_vars = {}
         self.running = False
         self.process = None
@@ -189,7 +183,12 @@ logdir = {logdir}
         self.coordinators = set()
         self.active_servers = set(self.server_ports.keys())
         self.tls_config = tls_config
+        self.public_key_jwks_str = None
         self.public_key_json_file = None
+        self.private_key = None
+        self.authorization_private_key_pem_file = None
+        self.authorization_keypair_id = authorization_keypair_id
+        self.authorization_kty = authorization_kty
         self.mkcert_binary = Path(mkcert_binary)
         self.server_cert_file = self.cert.joinpath("server_cert.pem")
         self.client_cert_file = self.cert.joinpath("client_cert.pem")
@@ -198,10 +197,17 @@ logdir = {logdir}
         self.server_ca_file = self.cert.joinpath("server_ca.pem")
         self.client_ca_file = self.cert.joinpath("client_ca.pem")
 
-        if public_key_json_str:
+        if self.authorization_kty:
+            assert self.authorization_keypair_id, "keypair ID must be set to enable authorization"
             self.public_key_json_file = self.etc.joinpath("public_keys.json")
+            self.private_key = private_key_gen(
+                    kty=self.authorization_kty, kid=self.authorization_keypair_id)
+            self.public_key_jwks_str = public_keyset_from_keys([self.private_key])
             with open(self.public_key_json_file, "w") as pubkeyfile:
-                pubkeyfile.write(public_key_json_str)
+                pubkeyfile.write(self.public_key_jwks_str)
+            self.authorization_private_key_pem_file = self.etc.joinpath("authorization_private_key.pem")
+            with open(self.authorization_private_key_pem_file, "w") as privkeyfile:
+                privkeyfile.write(self.private_key.as_pem(is_private=True).decode("utf8"))
 
         if create_config:
             self.create_cluster_file()
@@ -288,7 +294,7 @@ logdir = {logdir}
             "--lockfile",
             str(self.etc.joinpath("fdbmonitor.lock")),
         ]
-        self.fdbmonitor_logfile = open(self.log.joinpath("fdbmonitor.log"), "w")
+        self.fdbmonitor_logfile = open(self.log.joinpath("fdbmonitor.log"), "a+")
         self.process = subprocess.Popen(
             args,
             stdout=self.fdbmonitor_logfile,
@@ -303,6 +309,7 @@ logdir = {logdir}
             self.process.terminate()
             self.process.communicate(timeout=10)
         self.running = False
+        self.fdbmonitor_logfile.close()
 
     def ensure_ports_released(self, timeout_sec=5):
         sec = 0

@@ -293,10 +293,19 @@ namespace {
 
 void reportCgroupCpuStat(JsonBuilderObject& object, const TraceEventFields& eventFields) {
 	JsonBuilderObject cgroupCpuStatObj;
-	cgroupCpuStatObj.setKeyRawNumber("nr_periods", eventFields.getValue("NrPeriods"));
-	cgroupCpuStatObj.setKeyRawNumber("nr_throttled", eventFields.getValue("NrThrottled"));
-	cgroupCpuStatObj.setKeyRawNumber("throttled_time", eventFields.getValue("ThrottledTime"));
-	object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	std::string val;
+	if (eventFields.tryGetValue("NrPeriods", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_periods", val);
+	}
+	if (eventFields.tryGetValue("NrThrottled", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_throttled", val);
+	}
+	if (eventFields.tryGetValue("ThrottledTime", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("throttled_time", val);
+	}
+	if (!cgroupCpuStatObj.empty()) {
+		object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	}
 }
 
 JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
@@ -3115,6 +3124,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject recoveryStateStatus = wait(
 		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
 
+		state JsonBuilderObject idmpKeyStatus = wait(getIdmpKeyStatus(cx));
+
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
 		// process metrics
@@ -3495,6 +3506,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
+
+		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);

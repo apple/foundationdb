@@ -1837,7 +1837,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			if (deterministicRandom()->coinflip()) {
 				entry.tenantGroup = "TestTenantGroup"_sr;
 			}
-			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
 			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
 		}
@@ -2104,7 +2103,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) { return Void(); }
+		when(wait(tests)) {
+			return Void();
+		}
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();

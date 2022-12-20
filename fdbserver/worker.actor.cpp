@@ -30,6 +30,7 @@
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -675,18 +676,42 @@ ACTOR Future<Void> registrationClient(
 					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 				}
 			}
-			when(wait(ccInterface->onChange())) { break; }
-			when(wait(ddInterf->onChange())) { break; }
-			when(wait(rkInterf->onChange())) { break; }
-			when(wait(csInterf->onChange())) { break; }
-			when(wait(bmInterf->onChange())) { break; }
-			when(wait(blobMigratorInterf->onChange())) { break; }
-			when(wait(ekpInterf->onChange())) { break; }
-			when(wait(degraded->onChange())) { break; }
-			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
-			when(wait(issues->onChange())) { break; }
-			when(wait(recovered)) { break; }
-			when(wait(clusterId->onChange())) { break; }
+			when(wait(ccInterface->onChange())) {
+				break;
+			}
+			when(wait(ddInterf->onChange())) {
+				break;
+			}
+			when(wait(rkInterf->onChange())) {
+				break;
+			}
+			when(wait(csInterf->onChange())) {
+				break;
+			}
+			when(wait(bmInterf->onChange())) {
+				break;
+			}
+			when(wait(blobMigratorInterf->onChange())) {
+				break;
+			}
+			when(wait(ekpInterf->onChange())) {
+				break;
+			}
+			when(wait(degraded->onChange())) {
+				break;
+			}
+			when(wait(FlowTransport::transport().onIncompatibleChanged())) {
+				break;
+			}
+			when(wait(issues->onChange())) {
+				break;
+			}
+			when(wait(recovered)) {
+				break;
+			}
+			when(wait(clusterId->onChange())) {
+				break;
+			}
 		}
 	}
 }
@@ -1786,6 +1811,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
 			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
+	} else {
+		metricsLogger = runMetrics();
 	}
 
 	errorForwarders.add(resetAfter(degraded,
@@ -1802,8 +1829,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	filesClosed.add(stopping.getFuture());
 
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(
-	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder,
+	                                                              locality.dcId(),
+	                                                              locality.zoneId(),
+	                                                              locality.machineId(),
+	                                                              g_network->getLocalAddress().ip,
+	                                                              FDB_VT_VERSION));
 
 	{
 		auto recruited = interf;
