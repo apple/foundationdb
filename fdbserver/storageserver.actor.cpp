@@ -382,10 +382,6 @@ struct StorageServerDisk {
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
 
-	Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) {
-		return storage->cleanUpShardsIfNeeded(shardIds);
-	};
-
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
 	Future<Void> canCommit() { return storage->canCommit(); }
@@ -4732,13 +4728,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		// keep index for boundary index entries, so that caller can use it as a continuation.
 		result.data[0].key = input.data[0].key;
 		result.data[0].value = input.data[0].value;
-		result.data[0].boundaryAndExist = getMappedKeyValueSize(kvms[0]) > 0;
 
 		result.data.back().key = input.data[resultSize - 1].key;
 		result.data.back().value = input.data[resultSize - 1].value;
-		// index needs to be -1
-		int index = (resultSize - 1) % SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
-		result.data.back().boundaryAndExist = getMappedKeyValueSize(kvms[index]) > 0;
 	}
 	result.more = input.more || resultSize < sz;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -9276,18 +9268,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
-				state std::vector<std::string> emptyShardIds;
 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-					auto ids = data->storage.removeRange(range);
-					emptyShardIds.insert(emptyShardIds.end(), ids.begin(), ids.end());
-					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
-				}
-				if (emptyShardIds.size() > 0) {
-					state double start = now();
-					wait(data->storage.cleanUpShardsIfNeeded(emptyShardIds));
-					TraceEvent(SevInfo, "RemoveEmptyPhysicalShards", data->thisServerID)
-					    .detail("NumShards", emptyShardIds.size())
-					    .detail("TimeSpent", now() - start);
+					data->storage.removeRange(range);
 				}
 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
