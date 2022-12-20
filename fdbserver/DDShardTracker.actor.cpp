@@ -1553,8 +1553,9 @@ FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
-// Tracks storage metrics for `keys`. This function is similar to `trackShardMetrics()` and altered for physical shard.
-// This meant to be temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
+// Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning
+// this key range. This function is similar to `trackShardMetrics()` and altered for physical shard. This meant to be
+// temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
 ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(
     Reference<IDDTxnProcessor> db,
     KeyRange keys,
@@ -1599,6 +1600,7 @@ ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(
 					physicalShardStats->set(metrics.first.get());
 				} else {
 					if (!shardMetrics->get().present()) {
+						// We collect key range stats for the first time.
 						physicalShardStats->set(physicalShardStats->get().get() + metrics.first.get());
 					} else {
 						physicalShardStats->set(physicalShardStats->get().get() - shardMetrics->get().get().metrics +

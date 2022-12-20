@@ -298,7 +298,8 @@ public:
 		Reference<IDDTxnProcessor> txnProcessor;
 		uint64_t id; // physical shard id (never changed)
 		StorageMetrics metrics; // current metrics, updated by shardTracker
-		Reference<AsyncVar<Optional<StorageMetrics>>> stats;
+		// todo(zhewu): combine above metrics with stats. They are redundant.
+		Reference<AsyncVar<Optional<StorageMetrics>>> stats; // Stats of this physical shard.
 		std::vector<ShardsAffectedByTeamFailure::Team> teams; // which team owns this physical shard (never changed)
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
 
@@ -309,6 +310,7 @@ public:
 		std::unordered_map<KeyRange, RangeData> rangeData;
 
 	private:
+		// Inserts a new key range into this physical shard. `newRange` must not exist in this shard already.
 		void insertNewRangeData(const KeyRange& newRange);
 	};
 
