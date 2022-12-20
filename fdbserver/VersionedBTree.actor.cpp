@@ -5761,6 +5761,7 @@ private:
 		// Leaves can have just one record if it's large, but internal pages should have at least 4
 		int minRecords = height == 1 ? 1 : 4;
 		double maxSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_MAX_SLACK;
+		double maxNewSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION;
 		RedwoodRecordRef emptyRecord;
 		std::vector<PageToBuild> pages;
 
@@ -5835,7 +5836,7 @@ private:
 				// While the last page page has too much slack and the second to last page
 				// has more than the minimum record count, shift a record from the second
 				// to last page to the last page.
-				while (b.slackFraction() > maxSlack && a.count > minRecords) {
+				while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
 					int i = a.lastIndex();
 					if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
 						break;
