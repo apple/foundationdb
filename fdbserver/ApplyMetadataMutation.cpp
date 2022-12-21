@@ -133,7 +133,7 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	std::unordered_map<int64_t, TenantName>* tenantMap = nullptr;
+	std::unordered_map<int64_t, TenantMinimalMetadata>* tenantMap = nullptr;
 	std::map<TenantName, int64_t>* tenantNameIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
@@ -670,12 +670,12 @@ private:
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
 				    .detail("Tenant", tenantName)
-				    .detail("Id", tenantEntry.id)
+				    .detail("Id", tenantEntry.tenantMinimalMetadata.id)
 				    .detail("Version", version);
 
-				(*tenantMap)[tenantEntry.id] = tenantName;
+				(*tenantMap)[tenantEntry.tenantMinimalMetadata.id].tenantName = tenantName;
 				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantName] = tenantEntry.id;
+					(*tenantNameIndex)[tenantName] = tenantEntry.tenantMinimalMetadata.id;
 				}
 			}
 

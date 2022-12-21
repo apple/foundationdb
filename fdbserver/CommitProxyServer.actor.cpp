@@ -264,22 +264,22 @@ ErrorOr<int64_t> lookupTenant(ProxyCommitData* commitData, TenantNameRef tenant,
 	return itr->second;
 }
 
-bool checkTenant(ProxyCommitData* commitData, int64_t tenant, Optional<TenantNameRef> tenantName) {
+Optional<TenantLockState> checkTenant(ProxyCommitData* commitData, int64_t tenant, Optional<TenantNameRef> tenantName) {
 	if (tenant != TenantInfo::INVALID_TENANT) {
 		auto itr = commitData->tenantMap.find(tenant);
 		if (itr == commitData->tenantMap.end()) {
 			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("Tenant", tenant);
-			return false;
-		} else if (tenantName.present() && itr->second != tenantName.get()) {
+			return {};
+		} else if (tenantName.present() && itr->second.tenantName != tenantName.get()) {
 			// This is temporary and will be removed when the client stops caching the tenant name -> ID mapping
 			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("Tenant", tenant);
-			return false;
+			return {};
 		}
 
-		return true;
+		return itr->second.tenantLockState;
 	}
 
-	return true;
+	return TenantLockState::UNLOCKED;
 }
 
 bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransactionRequest& req) {
@@ -1164,13 +1164,12 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			bool isValid = checkTenant(pProxyCommitData, trs[t].tenantInfo.tenantId, trs[t].tenantInfo.name);
+			auto lState = checkTenant(pProxyCommitData, trs[t].tenantInfo.tenantId, trs[t].tenantInfo.name);
 
-			if (!isValid) {
+			if (!lState.present()) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
 				trs[t].reply.sendError(unknown_tenant());
-			} else if (result.get().present() && result.get().get().tenantLockState != TenantLockState::UNLOCKED &&
-			           !trs[t].isLockAware()) {
+			} else if (lState.get() != TenantLockState::UNLOCKED && !trs[t].isLockAware()) {
 				self->committed[t] = ConflictBatch::TransactionTenantLocked;
 			} else {
 				self->commitCount++;

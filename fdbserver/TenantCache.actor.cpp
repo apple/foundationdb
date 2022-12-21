@@ -58,7 +58,7 @@ public:
 
 				TraceEvent(SevInfo, "TenantFound", tenantCache->id())
 				    .detail("TenantName", tenantList[i].first)
-				    .detail("TenantID", tenantList[i].second.id)
+				    .detail("TenantID", tenantList[i].second.tenantMinimalMetadata.id)
 				    .detail("TenantPrefix", tenantList[i].second.prefix);
 			}
 		} catch (Error& e) {
@@ -217,7 +217,7 @@ void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
 	ASSERT(tenantCache.find(tenantPrefix) == tenantCache.end());
 
-	TenantInfo tenantInfo(tenantName, Optional<Standalone<StringRef>>(), tenant.id);
+	TenantInfo tenantInfo(tenantName, Optional<Standalone<StringRef>>(), tenant.tenantMinimalMetadata.id);
 	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix);
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
 

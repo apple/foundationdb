@@ -67,6 +67,23 @@ enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, R
 // Can be used in conjunction with the other tenant states above.
 enum class TenantLockState : uint8_t { UNLOCKED, READ_ONLY, LOCKED };
 
+// metadata used in proxies and stored in the txnStateStore
+struct TenantMinimalMetadata {
+	constexpr static FileIdentifier file_identifier = 265557;
+
+	int64_t id = -1;
+	TenantName tenantName;
+	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
+
+	TenantMinimalMetadata() = default;
+	TenantMinimalMetadata(int64_t id, TenantName tenantName);
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, tenantName, tenantLockState);
+	}
+};
+
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
@@ -76,11 +93,9 @@ struct TenantMapEntry {
 	static std::string tenantLockStateToString(TenantLockState tenantState);
 	static TenantLockState stringToTenantLockState(std::string stateStr);
 
-	int64_t id = -1;
+	TenantMinimalMetadata tenantMinimalMetadata;
 	Key prefix;
-	TenantName tenantName;
 	TenantState tenantState = TenantState::READY;
-	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
 	Optional<UID> lockID = Optional<UID>();
 	Optional<TenantGroupName> tenantGroup;
 	Optional<ClusterName> assignedCluster;
@@ -90,7 +105,7 @@ struct TenantMapEntry {
 	// Can be set to an error string if the tenant is in the ERROR state
 	std::string error;
 
-	TenantMapEntry();
+	TenantMapEntry() = default;
 	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState);
 	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
 
@@ -108,10 +123,8 @@ struct TenantMapEntry {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
-		           id,
-		           tenantName,
+		           tenantMinimalMetadata,
 		           tenantState,
-		           tenantLockState,
 		           tenantGroup,
 		           assignedCluster,
 		           configurationSequenceNum,
@@ -119,8 +132,8 @@ struct TenantMapEntry {
 		           error,
 		           lockID);
 		if constexpr (Ar::isDeserializing) {
-			if (id >= 0) {
-				prefix = TenantAPI::idToPrefix(id);
+			if (tenantMinimalMetadata.id >= 0) {
+				prefix = TenantAPI::idToPrefix(tenantMinimalMetadata.id);
 			}
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 		}

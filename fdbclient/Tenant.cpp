@@ -130,29 +130,30 @@ json_spirit::mObject binaryToJson(StringRef bytes) {
 	return obj;
 }
 
-TenantMapEntry::TenantMapEntry() {}
+TenantMinimalMetadata::TenantMinimalMetadata(int64_t id, TenantName tenantName) : id(id), tenantName(tenantName) {}
+
 TenantMapEntry::TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState)
-  : tenantName(tenantName), tenantState(tenantState) {
+  : tenantMinimalMetadata(id, tenantName), tenantState(tenantState) {
 	setId(id);
 }
 TenantMapEntry::TenantMapEntry(int64_t id,
                                TenantName tenantName,
                                TenantState tenantState,
                                Optional<TenantGroupName> tenantGroup)
-  : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
+  : tenantMinimalMetadata(id, tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
 	setId(id);
 }
 
 void TenantMapEntry::setId(int64_t id) {
 	ASSERT(id >= 0);
-	this->id = id;
+	this->tenantMinimalMetadata.id = id;
 	prefix = TenantAPI::idToPrefix(id);
 }
 
 std::string TenantMapEntry::toJson() const {
 	json_spirit::mObject tenantEntry;
-	tenantEntry["id"] = id;
-	tenantEntry["name"] = binaryToJson(tenantName);
+	tenantEntry["id"] = tenantMinimalMetadata.id;
+	tenantEntry["name"] = binaryToJson(tenantMinimalMetadata.tenantName);
 	tenantEntry["prefix"] = binaryToJson(prefix);
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
@@ -222,12 +223,12 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 	TenantMapEntry entry1(1, "name"_sr, TenantState::READY);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
 	TenantMapEntry entry2 = TenantMapEntry::decode(entry1.encode());
-	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
+	ASSERT(entry1.tenantMinimalMetadata.id == entry2.tenantMinimalMetadata.id && entry1.prefix == entry2.prefix);
 
 	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "name"_sr, TenantState::READY);
 	ASSERT(entry3.prefix == "\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
 	TenantMapEntry entry4 = TenantMapEntry::decode(entry3.encode());
-	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
+	ASSERT(entry3.tenantMinimalMetadata.id == entry4.tenantMinimalMetadata.id && entry3.prefix == entry4.prefix);
 
 	for (int i = 0; i < 100; ++i) {
 		int bits = deterministicRandom()->randomInt(1, 64);
@@ -237,10 +238,12 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 
 		TenantMapEntry entry(id, "name"_sr, TenantState::READY);
 		int64_t bigEndianId = bigEndian64(id);
-		ASSERT(entry.id == id && entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
+		ASSERT(entry.tenantMinimalMetadata.id == id &&
+		       entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
 
 		TenantMapEntry decodedEntry = TenantMapEntry::decode(entry.encode());
-		ASSERT(decodedEntry.id == entry.id && decodedEntry.prefix == entry.prefix);
+		ASSERT(decodedEntry.tenantMinimalMetadata.id == entry.tenantMinimalMetadata.id &&
+		       decodedEntry.prefix == entry.prefix);
 	}
 
 	return Void();

@@ -416,7 +416,7 @@ private:
 				return Void();
 			}
 			// Ensure byId and byName cache are in-sync
-			itrId = mapByTenantId.find(itrName->value.entry.id);
+			itrId = mapByTenantId.find(itrName->value.entry.tenantMinimalMetadata.id);
 			ASSERT(itrId != mapByTenantId.end());
 		} else {
 			// Invalid input, one of: tenantId, tenantPrefix or tenantName needs to be valid.
@@ -541,13 +541,13 @@ public:
 	void put(const TenantNameEntryPair& pair) {
 		const auto& [name, entry] = pair;
 		TenantEntryCachePayload<T> payload = createPayloadFunc(name, entry);
-		auto idItr = mapByTenantId.find(entry.id);
+		auto idItr = mapByTenantId.find(entry.tenantMinimalMetadata.id);
 		auto nameItr = mapByTenantName.find(name);
 
 		Optional<TenantName> existingName;
 		Optional<int64_t> existingId;
 		if (nameItr != mapByTenantName.end()) {
-			existingId = nameItr->value.entry.id;
+			existingId = nameItr->value.entry.tenantMinimalMetadata.id;
 		}
 		if (idItr != mapByTenantId.end()) {
 			existingName = idItr->value.name;
@@ -559,13 +559,13 @@ public:
 			mapByTenantName.erase(existingName.get());
 		}
 
-		mapByTenantId[entry.id] = payload;
+		mapByTenantId[entry.tenantMinimalMetadata.id] = payload;
 		mapByTenantName[name] = payload;
 
 		TraceEvent("TenantEntryCachePut")
 		    .detail("TenantName", name)
 		    .detail("TenantNameExisting", existingName)
-		    .detail("TenantID", entry.id)
+		    .detail("TenantID", entry.tenantMinimalMetadata.id)
 		    .detail("TenantIDExisting", existingId)
 		    .detail("TenantPrefix", pair.second.prefix);
 

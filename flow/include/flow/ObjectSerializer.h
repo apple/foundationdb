@@ -181,6 +181,22 @@ public:
 		vo.read(*this);
 	}
 
+	template <class T, class VersionOptions>
+	static T fromStringRef(Arena arena, StringRef sr, VersionOptions vo) {
+		T t;
+		ArenaObjectReader reader(arena, sr, vo);
+		reader.deserialize(t);
+		return t;
+	}
+
+	template <class T, class VersionOptions>
+	static T fromValue(Standalone<StringRef> val, VersionOptions vo) {
+		T t;
+		ArenaObjectReader reader(val.arena(), val, vo);
+		reader.deserialize(t);
+		return t;
+	}
+
 	const uint8_t* data() { return _data; }
 
 	Arena& arena() { return _arena; }

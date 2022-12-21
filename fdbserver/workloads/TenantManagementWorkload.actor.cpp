@@ -22,7 +22,7 @@
 #include <limits>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBOptions.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -72,8 +72,6 @@ struct TenantManagementWorkload : TestWorkload {
 		CONFIGURE_TENANT,
 		GET_TENANT_GROUP,
 		LIST_TENANT_GROUPS,
-		LOCK_TENANT,
-		UNLOCK_TENANT,
 		MAX_OP
 	};
 
@@ -528,7 +526,7 @@ struct TenantManagementWorkload : TestWorkload {
 					state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
 
 					ASSERT(entry.present());
-					ASSERT(entry.get().id > self->maxId);
+					ASSERT(entry.get().tenantMinimalMetadata.id > self->maxId);
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -540,15 +538,15 @@ struct TenantManagementWorkload : TestWorkload {
 						Optional<TenantMapEntry> dataEntry =
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 						ASSERT(dataEntry.present());
-						ASSERT(dataEntry.get().id == entry.get().id);
+						ASSERT(dataEntry.get().tenantMinimalMetadata.id == entry.get().tenantMinimalMetadata.id);
 						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
 						ASSERT(dataEntry.get().tenantState == TenantState::READY);
 					}
 
 					// Update our local tenant state to include the newly created one
-					self->maxId = entry.get().id;
+					self->maxId = entry.get().tenantMinimalMetadata.id;
 					self->createdTenants[tenantItr->first] =
-					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
+					    TenantData(entry.get().tenantMinimalMetadata.id, tenantItr->second.tenantGroup, true);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
@@ -679,7 +677,7 @@ struct TenantManagementWorkload : TestWorkload {
 			// the errors to flow through there
 			Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->mvDb, beginTenant));
 			if (entry.present() && deterministicRandom()->coinflip()) {
-				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.get().id));
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.get().tenantMinimalMetadata.id));
 				CODE_PROBE(true, "Deleted tenant by ID");
 			} else {
 				wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
@@ -1052,7 +1050,7 @@ struct TenantManagementWorkload : TestWorkload {
 				// Get the tenant metadata and check that it matches our local state
 				state TenantMapEntry entry = wait(getTenantImpl(tr, tenant, operationType, self));
 				ASSERT(alreadyExists);
-				ASSERT(entry.id == tenantData.id);
+				ASSERT(entry.tenantMinimalMetadata.id == tenantData.id);
 				ASSERT(entry.tenantGroup == tenantData.tenantGroup);
 				wait(checkTenantContents(self, tenant, tenantData));
 				return Void();
@@ -1691,14 +1689,6 @@ struct TenantManagementWorkload : TestWorkload {
 				break;
 			case TenantOperation::LIST_TENANT_GROUPS:
 				operation = listTenantGroups(self);
-				break;
-			case TenantOperation::LOCK_TENANT:
-#warning "Implement"
-				operation = delay(1.0);
-				break;
-			case TenantOperation::UNLOCK_TENANT:
-#warning "Implement"
-				operation = delay(1.0);
 				break;
 			case TenantOperation::MAX_OP:
 				UNSTOPPABLE_ASSERT(false);

@@ -102,7 +102,9 @@ struct TenantLock : TestWorkload {
 		                       {},
 		                       Error::fromCode(error_code_internal_error)));
 		// make sure we can read with read-lock-aware
-		TraceEvent("TenantLockProgress").detail("Phase", "Read-only Tx against locked tenant with read-lock-aware").log();
+		TraceEvent("TenantLockProgress")
+		    .detail("Phase", "Read-only Tx against locked tenant with read-lock-aware")
+		    .log();
 		wait(success(probeTx(db, self->tenant1, currentValue1, true, LockAwareTx::READ)));
 		// make sure we can write with a lock-aware transaction
 		TraceEvent("TenantLockProgress").detail("Phase", "Read-write Tx against locked tenant with lock-aware").log();

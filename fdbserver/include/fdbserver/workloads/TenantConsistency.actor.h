@@ -151,9 +151,9 @@ private:
 
 		for (auto [tenantName, tenantMapEntry] : metadata.tenantMap) {
 			if (metadata.clusterType != ClusterType::METACLUSTER_DATA) {
-				ASSERT_LE(tenantMapEntry.id, metadata.lastTenantId);
+				ASSERT_LE(tenantMapEntry.tenantMinimalMetadata.id, metadata.lastTenantId);
 			}
-			ASSERT(metadata.tenantIdIndex[tenantMapEntry.id] == tenantName);
+			ASSERT(metadata.tenantIdIndex[tenantMapEntry.tenantMinimalMetadata.id] == tenantName);
 
 			if (tenantMapEntry.tenantGroup.present()) {
 				auto tenantGroupMapItr = metadata.tenantGroupMap.find(tenantMapEntry.tenantGroup.get());
@@ -169,7 +169,7 @@ private:
 				// If the rename pair is present, it should be in the map and match our current entry
 				if (tenantMapEntry.renamePair.present()) {
 					auto pairMapEntry = metadata.tenantMap[tenantMapEntry.renamePair.get()];
-					ASSERT_EQ(pairMapEntry.id, tenantMapEntry.id);
+					ASSERT_EQ(pairMapEntry.tenantMinimalMetadata.id, tenantMapEntry.tenantMinimalMetadata.id);
 					ASSERT(pairMapEntry.prefix == tenantMapEntry.prefix);
 					ASSERT_EQ(pairMapEntry.configurationSequenceNum, tenantMapEntry.configurationSequenceNum);
 					ASSERT(pairMapEntry.assignedCluster.present());

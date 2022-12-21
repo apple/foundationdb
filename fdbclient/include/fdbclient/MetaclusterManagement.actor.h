@@ -1115,7 +1115,7 @@ struct CreateTenantImpl {
 				// configuration
 				throw tenant_already_exists();
 			} else if (!self->replaceExistingTenantId.present() ||
-			           self->replaceExistingTenantId.get() != existingEntry.get().id) {
+			           self->replaceExistingTenantId.get() != existingEntry.get().tenantMinimalMetadata.id) {
 				// The tenant creation has already started, so resume where we left off
 				ASSERT(existingEntry.get().assignedCluster.present());
 				if (self->preferAssignedCluster &&
@@ -1132,15 +1132,17 @@ struct CreateTenantImpl {
 				// The previous creation is permanently failed, so cleanup the tenant and create it again from scratch
 				// We don't need to remove it from the tenant map because we will overwrite the existing entry later in
 				// this transaction.
-				ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(tr, existingEntry.get().id);
+				ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(
+				    tr, existingEntry.get().tenantMinimalMetadata.id);
 				ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
 				ManagementClusterMetadata::clusterTenantCount.atomicOp(
 				    tr, existingEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
 
 				ManagementClusterMetadata::clusterTenantIndex.erase(
 				    tr,
-				    Tuple::makeTuple(
-				        existingEntry.get().assignedCluster.get(), self->tenantName, existingEntry.get().id));
+				    Tuple::makeTuple(existingEntry.get().assignedCluster.get(),
+				                     self->tenantName,
+				                     existingEntry.get().tenantMinimalMetadata.id));
 
 				state DataClusterMetadata previousAssignedClusterMetadata =
 				    wait(getClusterTransaction(tr, existingEntry.get().assignedCluster.get()));
@@ -1259,11 +1261,12 @@ struct CreateTenantImpl {
 		// Create a tenant entry in the management cluster
 		Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata().lastTenantId.get(tr));
 		self->tenantEntry.setId(lastId.orDefault(-1) + 1);
-		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
+		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.tenantMinimalMetadata.id);
 
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, self->tenantEntry);
-		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.set(tr, self->tenantEntry.id, self->tenantName);
+		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.set(
+		    tr, self->tenantEntry.tenantMinimalMetadata.id, self->tenantName);
 		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
@@ -1279,7 +1282,9 @@ struct CreateTenantImpl {
 
 		// Updated indexes to include the new tenant
 		ManagementClusterMetadata::clusterTenantIndex.insert(
-		    tr, Tuple::makeTuple(self->tenantEntry.assignedCluster.get(), self->tenantName, self->tenantEntry.id));
+		    tr,
+		    Tuple::makeTuple(
+		        self->tenantEntry.assignedCluster.get(), self->tenantName, self->tenantEntry.tenantMinimalMetadata.id));
 
 		wait(setClusterFuture);
 
@@ -1312,7 +1317,7 @@ struct CreateTenantImpl {
 		state Optional<TenantMapEntry> managementEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 		if (!managementEntry.present()) {
 			throw tenant_removed();
-		} else if (managementEntry.get().id != self->tenantEntry.id) {
+		} else if (managementEntry.get().tenantMinimalMetadata.id != self->tenantEntry.tenantMinimalMetadata.id) {
 			throw tenant_already_exists();
 		}
 
@@ -1349,7 +1354,7 @@ struct CreateTenantImpl {
 				if (e.code() == error_code_tenant_creation_permanently_failed) {
 					// If the data cluster has permanently failed to create the tenant, then we can reassign it in
 					// the management cluster and start over
-					self->replaceExistingTenantId = self->tenantEntry.id;
+					self->replaceExistingTenantId = self->tenantEntry.tenantMinimalMetadata.id;
 					self->ctx.clearCluster();
 				} else {
 					throw;
@@ -1408,8 +1413,8 @@ struct DeleteTenantImpl {
 				self->pairName = tenantEntry.get().renamePair.get();
 			}
 		}
-		ASSERT(self->tenantId == -1 || self->tenantId == tenantEntry.get().id);
-		self->tenantId = tenantEntry.get().id;
+		ASSERT(self->tenantId == -1 || self->tenantId == tenantEntry.get().tenantMinimalMetadata.id);
+		self->tenantId = tenantEntry.get().tenantMinimalMetadata.id;
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster.get()));
 		return tenantEntry.get().tenantState == TenantState::REMOVING;
 	}
@@ -1421,7 +1426,7 @@ struct DeleteTenantImpl {
 	// SOMEDAY: should this also lock the tenant when locking is supported?
 	ACTOR static Future<Void> checkTenantEmpty(DeleteTenantImpl* self, Reference<ITransaction> tr) {
 		state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, self->tenantName));
-		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
+		if (!tenantEntry.present() || tenantEntry.get().tenantMinimalMetadata.id != self->tenantId) {
 			// The tenant must have been removed simultaneously
 			return Void();
 		}
@@ -1440,7 +1445,7 @@ struct DeleteTenantImpl {
 	                                                    Reference<typename DB::TransactionT> tr) {
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
-		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
+		if (!tenantEntry.present() || tenantEntry.get().tenantMinimalMetadata.id != self->tenantId) {
 			throw tenant_not_found();
 		}
 
@@ -1470,7 +1475,7 @@ struct DeleteTenantImpl {
 				// Sanity check that our pair has us named as their partner
 				ASSERT(updatedPairEntry.renamePair.present());
 				ASSERT(updatedPairEntry.renamePair.get() == self->tenantName);
-				ASSERT(updatedPairEntry.id == self->tenantId);
+				ASSERT(updatedPairEntry.tenantMinimalMetadata.id == self->tenantId);
 				CODE_PROBE(true, "marking pair tenant in removing state");
 				updatedPairEntry.tenantState = TenantState::REMOVING;
 				ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->pairName.get(), updatedPairEntry);
@@ -1495,7 +1500,7 @@ struct DeleteTenantImpl {
 		state TenantName tenantName = pairDelete ? self->pairName.get() : self->tenantName;
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, tenantName));
 
-		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
+		if (!tenantEntry.present() || tenantEntry.get().tenantMinimalMetadata.id != self->tenantId) {
 			return Void();
 		}
 
@@ -1504,7 +1509,7 @@ struct DeleteTenantImpl {
 
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantName);
-		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(tr, tenantEntry.get().id);
+		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(tr, tenantEntry.get().tenantMinimalMetadata.id);
 		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		// This is idempotent because this function is only called if the tenant is in the map
@@ -1764,7 +1769,8 @@ struct ConfigureTenantImpl {
 	ACTOR static Future<Void> updateDataCluster(ConfigureTenantImpl* self, Reference<ITransaction> tr) {
 		state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, self->tenantName));
 
-		if (!tenantEntry.present() || tenantEntry.get().id != self->updatedEntry.id ||
+		if (!tenantEntry.present() ||
+		    tenantEntry.get().tenantMinimalMetadata.id != self->updatedEntry.tenantMinimalMetadata.id ||
 		    tenantEntry.get().configurationSequenceNum >= self->updatedEntry.configurationSequenceNum) {
 			// If the tenant isn't in the metacluster, it must have been concurrently removed
 			return Void();
@@ -1783,7 +1789,8 @@ struct ConfigureTenantImpl {
 	                                                      Reference<typename DB::TransactionT> tr) {
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
-		if (!tenantEntry.present() || tenantEntry.get().id != self->updatedEntry.id ||
+		if (!tenantEntry.present() ||
+		    tenantEntry.get().tenantMinimalMetadata.id != self->updatedEntry.tenantMinimalMetadata.id ||
 		    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION ||
 		    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
 			return Void();
@@ -1864,7 +1871,7 @@ struct RenameTenantImpl {
 		wait(store(oldTenantEntry, getTenantTransaction(tr, self->oldName)) &&
 		     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)));
 
-		if (self->tenantId != -1 && oldTenantEntry.id != self->tenantId) {
+		if (self->tenantId != -1 && oldTenantEntry.tenantMinimalMetadata.id != self->tenantId) {
 			// The tenant must have been removed simultaneously
 			CODE_PROBE(true, "Metacluster rename old tenant ID mismatch");
 			throw tenant_removed();
@@ -1885,7 +1892,7 @@ struct RenameTenantImpl {
 			    newTenantEntry.get().renamePair.get() == self->oldName && oldTenantEntry.renamePair.present() &&
 			    oldTenantEntry.renamePair.get() == self->newName) {
 				wait(self->ctx.setCluster(tr, oldTenantEntry.assignedCluster.get()));
-				self->tenantId = newTenantEntry.get().id;
+				self->tenantId = newTenantEntry.get().tenantMinimalMetadata.id;
 				self->configurationSequenceNum = newTenantEntry.get().configurationSequenceNum;
 				CODE_PROBE(true, "Metacluster rename retry in progress");
 				return Void();
@@ -1895,7 +1902,7 @@ struct RenameTenantImpl {
 			};
 		} else {
 			if (self->tenantId == -1) {
-				self->tenantId = oldTenantEntry.id;
+				self->tenantId = oldTenantEntry.tenantMinimalMetadata.id;
 			}
 			++oldTenantEntry.configurationSequenceNum;
 			self->configurationSequenceNum = oldTenantEntry.configurationSequenceNum;
@@ -1966,7 +1973,7 @@ struct RenameTenantImpl {
 		// Possible for the new entry to also have been tampered with,
 		// so it may or may not be present with or without the same id, which are all
 		// legal states. Assume the rename completed properly in this case
-		if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId ||
+		if (!oldTenantEntry.present() || oldTenantEntry.get().tenantMinimalMetadata.id != self->tenantId ||
 		    oldTenantEntry.get().configurationSequenceNum > self->configurationSequenceNum) {
 			CODE_PROBE(true,
 			           "Metacluster finished rename with missing entries, mismatched id, and/or mismatched "
@@ -1978,7 +1985,7 @@ struct RenameTenantImpl {
 			throw tenant_removed();
 		}
 		ASSERT(newTenantEntry.present());
-		ASSERT(newTenantEntry.get().id == self->tenantId);
+		ASSERT(newTenantEntry.get().tenantMinimalMetadata.id == self->tenantId);
 
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
 		TenantMapEntry updatedNewEntry = newTenantEntry.get();

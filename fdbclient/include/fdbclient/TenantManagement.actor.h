@@ -134,7 +134,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
     ClusterType clusterType = ClusterType::STANDALONE) {
 
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
-	ASSERT(tenantEntry.id >= 0);
+	ASSERT(tenantEntry.tenantMinimalMetadata.id >= 0);
 
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_tenant_name();
@@ -148,7 +148,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
 	state Future<Void> tenantModeCheck = checkTenantMode(tr, clusterType);
 	state Future<bool> tombstoneFuture =
-	    (clusterType == ClusterType::STANDALONE) ? false : checkTombstone(tr, tenantEntry.id);
+	    (clusterType == ClusterType::STANDALONE) ? false : checkTombstone(tr, tenantEntry.tenantMinimalMetadata.id);
 	state Future<Optional<TenantGroupEntry>> existingTenantGroupEntryFuture;
 	if (tenantEntry.tenantGroup.present()) {
 		existingTenantGroupEntryFuture = TenantMetadata::tenantGroupMap().get(tr, tenantEntry.tenantGroup.get());
@@ -177,7 +177,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	tenantEntry.assignedCluster = Optional<ClusterName>();
 
 	TenantMetadata::tenantMap().set(tr, name, tenantEntry);
-	TenantMetadata::tenantIdIndex().set(tr, tenantEntry.id, name);
+	TenantMetadata::tenantIdIndex().set(tr, tenantEntry.tenantMinimalMetadata.id, name);
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 
 	if (tenantEntry.tenantGroup.present()) {
@@ -221,7 +221,7 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool checkExistence = clusterType != ClusterType::METACLUSTER_DATA;
-	state bool generateTenantId = tenantEntry.id < 0;
+	state bool generateTenantId = tenantEntry.tenantMinimalMetadata.id < 0;
 
 	ASSERT(clusterType == ClusterType::STANDALONE || !generateTenantId);
 
@@ -259,7 +259,7 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 
 				TraceEvent("CreatedTenant")
 				    .detail("Tenant", name)
-				    .detail("TenantId", newTenant.first.get().id)
+				    .detail("TenantId", newTenant.first.get().tenantMinimalMetadata.id)
 				    .detail("Prefix", newTenant.first.get().prefix)
 				    .detail("TenantGroup", tenantEntry.tenantGroup)
 				    .detail("Version", tr->getCommittedVersion());
@@ -334,7 +334,8 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	wait(checkTenantMode(tr, clusterType));
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
-	if (tenantEntry.present() && (!tenantId.present() || tenantEntry.get().id == tenantId.get())) {
+	if (tenantEntry.present() &&
+	    (!tenantId.present() || tenantEntry.get().tenantMinimalMetadata.id == tenantId.get())) {
 		state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
 		    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
 
@@ -345,7 +346,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		// This is idempotent because we only erase an entry from the tenant map if it is present
 		TenantMetadata::tenantMap().erase(tr, name);
-		TenantMetadata::tenantIdIndex().erase(tr, tenantEntry.get().id);
+		TenantMetadata::tenantIdIndex().erase(tr, tenantEntry.get().tenantMinimalMetadata.id);
 		TenantMetadata::tenantCount().atomicOp(tr, -1, MutationRef::AddValue);
 		TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 
@@ -393,7 +394,7 @@ Future<Void> deleteTenant(Reference<DB> db,
 				// If an ID wasn't specified, use the current ID. This way we cannot inadvertently delete
 				// multiple tenants if this transaction retries.
 				if (!tenantId.present()) {
-					tenantId = entry.id;
+					tenantId = entry.tenantMinimalMetadata.id;
 				}
 
 				checkExistence = false;
@@ -418,7 +419,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
                                         TenantNameRef tenantName,
                                         TenantMapEntry originalEntry,
                                         TenantMapEntry updatedTenantEntry) {
-	ASSERT(updatedTenantEntry.id == originalEntry.id);
+	ASSERT(updatedTenantEntry.tenantMinimalMetadata.id == originalEntry.tenantMinimalMetadata.id);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	TenantMetadata::tenantMap().set(tr, tenantName, updatedTenantEntry);
@@ -511,7 +512,7 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	state Optional<TenantMapEntry> newEntry;
 	wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
 	     store(newEntry, tryGetTenantTransaction(tr, newName)));
-	if (!oldEntry.present() || (tenantId.present() && tenantId.get() != oldEntry.get().id)) {
+	if (!oldEntry.present() || (tenantId.present() && tenantId.get() != oldEntry.get().tenantMinimalMetadata.id)) {
 		throw tenant_not_found();
 	}
 	if (newEntry.present()) {
@@ -525,7 +526,7 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	}
 	TenantMetadata::tenantMap().erase(tr, oldName);
 	TenantMetadata::tenantMap().set(tr, newName, oldEntry.get());
-	TenantMetadata::tenantIdIndex().set(tr, oldEntry.get().id, newName);
+	TenantMetadata::tenantIdIndex().set(tr, oldEntry.get().tenantMinimalMetadata.id, newName);
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 
 	// Update the tenant group index to reflect the new tenant name
@@ -568,15 +569,15 @@ Future<Void> renameTenant(Reference<DB> db,
 					throw tenant_already_exists();
 				}
 				// Store the id we see when first reading this key
-				id = oldEntry.get().id;
+				id = oldEntry.get().tenantMinimalMetadata.id;
 
 				firstTry = false;
 			} else {
 				// If we got commit_unknown_result, the rename may have already occurred.
 				if (newEntry.present()) {
-					int64_t checkId = newEntry.get().id;
+					int64_t checkId = newEntry.get().tenantMinimalMetadata.id;
 					if (id == checkId) {
-						ASSERT(!oldEntry.present() || oldEntry.get().id != id);
+						ASSERT(!oldEntry.present() || oldEntry.get().tenantMinimalMetadata.id != id);
 						return Void();
 					}
 					// If the new entry is present but does not match, then
@@ -586,7 +587,7 @@ Future<Void> renameTenant(Reference<DB> db,
 				if (!oldEntry.present()) {
 					throw tenant_not_found();
 				}
-				int64_t checkId = oldEntry.get().id;
+				int64_t checkId = oldEntry.get().tenantMinimalMetadata.id;
 				// If the id has changed since we made our first attempt,
 				// then it's possible we've already moved the tenant. Don't move it again.
 				if (id != checkId) {
@@ -669,15 +670,15 @@ Future<Void> lockTenantTransaction(Transaction tr, TenantLockState lockType, Ten
 		throw tenant_not_found();
 	}
 	TenantMapEntry mapEntry = mapEntryOptional.get();
-	ASSERT((mapEntry.tenantLockState != TenantLockState::UNLOCKED) == mapEntry.lockID.present());
+	ASSERT((mapEntry.tenantMinimalMetadata.tenantLockState != TenantLockState::UNLOCKED) == mapEntry.lockID.present());
 	if (mapEntry.lockID.present()) {
-		if (mapEntry.tenantLockState == lockType && mapEntry.lockID.get() == lockID) {
+		if (mapEntry.tenantMinimalMetadata.tenantLockState == lockType && mapEntry.lockID.get() == lockID) {
 			return Void();
 		} else {
 			throw tenant_locked();
 		}
 	}
-	mapEntry.tenantLockState = lockType;
+	mapEntry.tenantMinimalMetadata.tenantLockState = lockType;
 	mapEntry.lockID = lockID;
 	TenantMetadata::tenantMap().set(tr, tenant, mapEntry);
 	tr->addWriteConflictRange(prefixRange(mapEntry.prefix));
@@ -708,15 +709,15 @@ Future<Void> unlockTenantTransaction(Transaction tr, TenantName tenant, UID lock
 		throw tenant_not_found();
 	}
 	auto mapEntry = mapEntryOpt.get();
-	ASSERT((mapEntry.tenantLockState != TenantLockState::UNLOCKED) == mapEntry.lockID.present());
-	if (mapEntry.tenantLockState == TenantLockState::UNLOCKED) {
+	ASSERT((mapEntry.tenantMinimalMetadata.tenantLockState != TenantLockState::UNLOCKED) == mapEntry.lockID.present());
+	if (mapEntry.tenantMinimalMetadata.tenantLockState == TenantLockState::UNLOCKED) {
 		return Void();
 	}
 	if (mapEntry.lockID.get() != lockID) {
 		throw tenant_locked();
 	}
 	mapEntry.lockID = Optional<UID>();
-	mapEntry.tenantLockState = TenantLockState::UNLOCKED;
+	mapEntry.tenantMinimalMetadata.tenantLockState = TenantLockState::UNLOCKED;
 	TenantMetadata::instance().tenantMap.template set(tr, tenant, mapEntry);
 	return Void();
 }

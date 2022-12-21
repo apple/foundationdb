@@ -119,7 +119,7 @@ private:
 			ASSERT(t.size() == 3);
 			TenantName tenantName = t.getString(1);
 			int64_t tenantId = t.getInt(2);
-			ASSERT(tenantId == self->managementMetadata.tenantMap[tenantName].id);
+			ASSERT(tenantId == self->managementMetadata.tenantMap[tenantName].tenantMinimalMetadata.id);
 			self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantName);
 		}
 
@@ -308,7 +308,7 @@ private:
 			ASSERT(expectedTenants.count(name));
 			TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[name];
 			ASSERT(!entry.assignedCluster.present());
-			ASSERT(entry.id == metaclusterEntry.id);
+			ASSERT(entry.tenantMinimalMetadata.id == metaclusterEntry.tenantMinimalMetadata.id);
 
 			ASSERT(entry.tenantState == TenantState::READY);
 			ASSERT(self->allowPartialMetaclusterOperations || metaclusterEntry.tenantState == TenantState::READY);
