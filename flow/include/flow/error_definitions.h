@@ -108,6 +108,7 @@ ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
 ERROR( future_released, 1102, "Future has been released" )
 ERROR( connection_leaked, 1103, "Connection object leaked" )
 ERROR( never_reply, 1104, "Never reply to the request" )
+ERROR( retry, 1105, "Retry operation" )
 
 ERROR( recruitment_failed, 1200, "Recruitment of a server failed" )   // Be careful, catching this will delete the data of a storage server or tlog permanently
 ERROR( move_to_removed_server, 1201, "Attempt to move keys to a storage server that was removed" )

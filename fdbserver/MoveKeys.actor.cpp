@@ -1263,14 +1263,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	ASSERT(ranges.size() == 1);
 	state KeyRangeRef keys = ranges[0];
 	try {
-		state Key begin = keys.begin;
-		state KeyRange currentKeys = keys;
-		state int maxRetries = 0;
-		state bool complete = false;
-
 		loop {
+			state Key begin = keys.begin;
+			state KeyRange currentKeys = keys;
+			state int maxRetries = 0;
+			state bool complete = false;
+
 			state Transaction tr(occ);
-			complete = false;
 
 			try {
 				// Keep track of old dests that may need to have ranges removed from serverKeys
@@ -1381,6 +1380,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							if (destId == anonymousShardId) {
 								wait(cleanUpSingleShardDataMove(
 								    occ, rangeIntersectKeys, lock, startMoveKeysLock, dataMoveId, ddEnabledState));
+								throw retry();
 							} else {
 								if (cancelConflictingDataMoves) {
 									TraceEvent(
@@ -1389,6 +1389,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									    .detail("DataMoveID", dataMoveId)
 									    .detail("ExistingDataMoveID", destId);
 									wait(cleanUpDataMove(occ, destId, lock, startMoveKeysLock, keys, ddEnabledState));
+									throw retry();
 								} else {
 									Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
 									ASSERT(val.present());
@@ -1485,16 +1486,20 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					break;
 				}
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
-				    .errorUnsuppressed(e)
-				    .detail("DataMoveID", dataMoveId)
-				    .detail("DataMoveRange", keys)
-				    .detail("CurrentDataMoveMetaData", dataMove.toString());
-				state Error err = e;
-				if (err.code() == error_code_move_to_removed_server) {
-					throw;
+				if (err.code() == error_code_retry) {
+					wait(delay(1));
+				} else {
+					TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
+					    .errorUnsuppressed(e)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("DataMoveRange", keys)
+					    .detail("CurrentDataMoveMetaData", dataMove.toString());
+					state Error err = e;
+					if (err.code() == error_code_move_to_removed_server) {
+						throw;
+					}
+					wait(tr.onError(e));
 				}
-				wait(tr.onError(e));
 			}
 		}
 	} catch (Error& e) {
