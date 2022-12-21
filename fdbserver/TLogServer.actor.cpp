@@ -1670,7 +1670,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 			UID ssID = deterministicRandom()->randomUniqueID();
 			std::string s = "PeekVersionCounts " + tag.toString();
 			self->peekVersionCounts.try_emplace(
-			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
 		}
 		LatencySample& sample = self->peekVersionCounts.at(tag);
 		sample.addMeasurement(versionCount);
