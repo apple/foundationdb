@@ -474,6 +474,11 @@ Reference<ITransaction> DLTenant::createTransaction() {
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
+// Incomplete
+ThreadFuture<int64_t> DLTenant::getId() {
+	return 0;
+}
+
 ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	if (!api->tenantPurgeBlobGranules) {
 		return unsupported_operation();
@@ -1741,6 +1746,10 @@ ThreadFuture<T> MultiVersionTenant::executeOperation(ThreadFuture<T> (ITenant::*
 
 	// Wait for the database to be initialized
 	return abortableFuture(ThreadFuture<T>(Never()), tenantDb.onChange);
+}
+
+ThreadFuture<int64_t> MultiVersionTenant::getId() {
+	return executeOperation(&ITenant::getId);
 }
 
 ThreadFuture<Key> MultiVersionTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {

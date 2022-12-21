@@ -25,6 +25,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -1811,6 +1812,13 @@ struct TenantManagementWorkload : TestWorkload {
 
 	ACTOR static Future<bool> _check(Database cx, TenantManagementWorkload* self) {
 		state Transaction tr(self->dataDb);
+
+		Reference<IDatabase> threadSafeHandle =
+		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+		Reference<ITenant> t = threadSafeHandle->openTenant(self->createdTenants.begin()->first);
+		int64_t testId = wait(unsafeThreadFutureToFuture(t->getId()));
+
+		TraceEvent("BreakpointPrint").detail("TenantId", testId);
 
 		// Check that the key we set outside of the tenant is present and has the correct value
 		// This is the same key we set inside some of our tenants, so this checks that no tenant

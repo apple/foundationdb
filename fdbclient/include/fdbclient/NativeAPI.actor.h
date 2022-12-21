@@ -310,6 +310,7 @@ class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, No
 public:
 	Tenant(DatabaseContext* cx, TenantName name);
 	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
+	Future<int64_t> getId();
 
 private:
 	Future<int64_t> id;

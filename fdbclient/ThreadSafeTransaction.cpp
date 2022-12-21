@@ -233,6 +233,11 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
 }
 
+ThreadFuture<int64_t> ThreadSafeTenant::getId() {
+	Tenant* tenant = this->tenant;
+	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getId(); });
+}
+
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	DatabaseContext* db = this->db->db;
 	TenantName tenantName = this->name;

@@ -148,6 +148,7 @@ public:
 
 	virtual Reference<ITransaction> createTransaction() = 0;
 
+	virtual ThreadFuture<int64_t> getId() = 0;
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
