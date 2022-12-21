@@ -2410,7 +2410,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
 					backupWorkerCache.set(req.reqId, backupReady.getFuture());
 					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-					backupProcess = storageCache.removeOnReady(req.reqId, backupProcess);
+					backupProcess = backupWorkerCache.removeOnReady(req.reqId, backupProcess);
 					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
 					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
 					InitializeBackupReply reply(recruited, req.backupEpoch);
