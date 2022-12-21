@@ -1486,7 +1486,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					break;
 				}
 			} catch (Error& e) {
-				if (err.code() == error_code_retry) {
+				if (e.code() == error_code_retry) {
 					wait(delay(1));
 				} else {
 					TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
@@ -1494,10 +1494,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveRange", keys)
 					    .detail("CurrentDataMoveMetaData", dataMove.toString());
-					state Error err = e;
-					if (err.code() == error_code_move_to_removed_server) {
-						throw;
-					}
 					wait(tr.onError(e));
 				}
 			}

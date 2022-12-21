@@ -488,7 +488,6 @@ public:
 				if (!unhealthy && self->configuration.usableRegions > 1) {
 					unhealthy = iShard.remoteSrc.size() != self->configuration.storageTeamSize;
 				}
-				// Schedule a DataMove if SHARD_ENCODE_LOCATION_METADATA is enabled.
 				self->relocationProducer.send(
 				    RelocateShard(keys,
 				                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
