@@ -344,10 +344,10 @@ Future<Void> storeOrThrow(T& out, Future<Optional<T>> what, Error e = key_not_fo
 }
 
 // Waits for a future to be ready, and then applies an asynchronous function to it.
-ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
-Future<U> mapAsync(Future<T> what, F actorFunc) {
+ACTOR template <class T, class F>
+Future<decltype(std::declval<F>()(std::declval<T>()).getValue())> mapAsync(Future<T> what, F actorFunc) {
 	T val = wait(what);
-	U ret = wait(actorFunc(val));
+	decltype(std::declval<F>()(std::declval<T>()).getValue()) ret = wait(actorFunc(val));
 	return ret;
 }
 
