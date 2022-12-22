@@ -8,7 +8,11 @@ if (RocksDB_FOUND)
   ExternalProject_Add(rocksdb
     SOURCE_DIR "${RocksDB_ROOT}"
     DOWNLOAD_COMMAND ""
-    CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
+    CMAKE_ARGS -DUSE_RTTI=1
+               -DPORTABLE=${PORTABLE_ROCKSDB}
+               -DFORCE_SSE42=ON
+               -DFORCE_AVX=ON
+               -DFORCE_AVX2=OFF
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
@@ -39,7 +43,11 @@ else()
   ExternalProject_Add(rocksdb
     URL        https://github.com/facebook/rocksdb/archive/refs/tags/v7.7.3.tar.gz
     URL_HASH   SHA256=b8ac9784a342b2e314c821f6d701148912215666ac5e9bdbccd93cf3767cb611
-    CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
+    CMAKE_ARGS -DUSE_RTTI=1
+               -DPORTABLE=${PORTABLE_ROCKSDB}
+               -DFORCE_SSE42=ON
+               -DFORCE_AVX=ON
+               -DFORCE_AVX2=OFF
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
