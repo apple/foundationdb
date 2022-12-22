@@ -165,9 +165,25 @@ else()
   set(SANITIZER_COMPILE_OPTIONS)
   set(SANITIZER_LINK_OPTIONS)
 
-  # we always compile with debug symbols. For release builds CPack will strip them out
-  # and create a debuginfo rpm
-  add_compile_options(-ggdb -fno-omit-frame-pointer)
+  add_compile_options(-fno-omit-frame-pointer)
+
+  if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
+    # Also generating full debug symbols in release builds. CPack will strip them out
+    # and create a debuginfo rpm
+    add_compile_options(-ggdb)
+  else()
+    # Generating minimal debug symbols by default. They are sufficient for testing purposes
+    add_compile_options(-ggdb1)
+  endif()
+
+  if(CLANG)
+    # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
+    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
+    # to use a version that has a fix.
+    add_compile_options(-gdwarf-4)
+  endif()
+
   if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
       add_compile_options(-fsanitize-coverage=trace-pc-guard)
       link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
