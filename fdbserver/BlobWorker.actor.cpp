@@ -460,11 +460,11 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	ASSERT(tenantData.isValid());
 
 	std::unordered_set<EncryptCipherDomainId> domainIds;
-	domainIds.emplace(tenantData->entry.tenantMinimalMetadata.id);
+	domainIds.emplace(tenantData->entry.id());
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
 	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
 
-	auto domainKeyItr = domainKeyMap.find(tenantData->entry.tenantMinimalMetadata.id);
+	auto domainKeyItr = domainKeyMap.find(tenantData->entry.id());
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
@@ -3547,7 +3547,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
 		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
 		if (tenantEntry.present()) {
-			ASSERT(tenantEntry.get().tenantMinimalMetadata.id == req.tenantInfo.tenantId);
+			ASSERT(tenantEntry.get().id() == req.tenantInfo.tenantId);
 			tenantPrefix = tenantEntry.get().prefix;
 		} else {
 			CODE_PROBE(true, "Blob worker unknown tenant");

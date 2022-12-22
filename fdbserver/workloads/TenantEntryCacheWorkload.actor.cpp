@@ -38,7 +38,7 @@ TenantEntryCachePayload<int64_t> createPayload(const TenantName& name, const Ten
 	TenantEntryCachePayload<int64_t> payload;
 	payload.name = name;
 	payload.entry = entry;
-	payload.payload = entry.tenantMinimalMetadata.id;
+	payload.payload = entry.id();
 
 	return payload;
 }
@@ -61,9 +61,9 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	static void compareTenants(Optional<TenantEntryCachePayload<int64_t>> left, TenantMapEntry& right) {
 		ASSERT(left.present());
-		ASSERT_EQ(left.get().entry.tenantMinimalMetadata.id, right.tenantMinimalMetadata.id);
+		ASSERT_EQ(left.get().entry.id(), right.id());
 		ASSERT_EQ(left.get().entry.prefix.compare(right.prefix), 0);
-		ASSERT_EQ(left.get().payload, right.tenantMinimalMetadata.id);
+		ASSERT_EQ(left.get().payload, right.id());
 	}
 
 	ACTOR static Future<Void> compareContents(std::vector<std::pair<TenantName, TenantMapEntry>>* tenants,
@@ -72,7 +72,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		for (i = 0; i < tenants->size(); i++) {
 			if (deterministicRandom()->coinflip()) {
 				Optional<TenantEntryCachePayload<int64_t>> e =
-				    wait(cache->getById(tenants->at(i).second.tenantMinimalMetadata.id));
+				    wait(cache->getById(tenants->at(i).second.id()));
 				compareTenants(e, tenants->at(i).second);
 			} else {
 				Optional<TenantEntryCachePayload<int64_t>> e = wait(cache->getByName(tenants->at(i).first));
@@ -93,7 +93,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		ASSERT_EQ(cache->numRefreshByInit(), 1);
 
 		state TenantMapEntry dummy(std::numeric_limits<int64_t>::max(), "name"_sr, TenantState::READY);
-		Optional<TenantEntryCachePayload<int64_t>> value = wait(cache->getById(dummy.tenantMinimalMetadata.id));
+		Optional<TenantEntryCachePayload<int64_t>> value = wait(cache->getById(dummy.id()));
 		ASSERT(!value.present());
 
 		Optional<TenantEntryCachePayload<int64_t>> value1 = wait(cache->getByPrefix(dummy.prefix));
@@ -171,11 +171,11 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		compareTenants(entry, p.second);
 
 		// Tenant delete & recreate
-		p.second.tenantMinimalMetadata.id =
-		    p.second.tenantMinimalMetadata.id +
+		p.second.id() =
+		    p.second.id() +
 		    deterministicRandom()->randomInt(self->maxTenants + 500, self->maxTenants + 700);
 		cache->put(p);
-		Optional<TenantEntryCachePayload<int64_t>> e1 = wait(cache->getById(p.second.tenantMinimalMetadata.id));
+		Optional<TenantEntryCachePayload<int64_t>> e1 = wait(cache->getById(p.second.id()));
 		entry = e1;
 		compareTenants(entry, p.second);
 		ASSERT_EQ(p.first.contents().toString().compare(entry.get().name.contents().toString()), 0);
@@ -185,7 +185,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		tenantList->pop_back();
 		wait(TenantAPI::deleteTenant(cx.getReference(), p1.first));
 		cache->put(std::make_pair(p1.first, p.second));
-		Optional<TenantEntryCachePayload<int64_t>> e2 = wait(cache->getById(p.second.tenantMinimalMetadata.id));
+		Optional<TenantEntryCachePayload<int64_t>> e2 = wait(cache->getById(p.second.id()));
 		entry = e2;
 		compareTenants(entry, p.second);
 		ASSERT_EQ(p1.first.contents().toString().compare(entry.get().name.contents().toString()), 0);
@@ -288,14 +288,14 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		ASSERT(entry.present());
 
 		TraceEvent("TestTenantEntryRemoveStart")
-		    .detail("Id", tenantList->at(idx).second.tenantMinimalMetadata.id)
+		    .detail("Id", tenantList->at(idx).second.id())
 		    .detail("Name", tenantList->at(idx).first)
 		    .detail("Prefix", tenantList->at(idx).second.prefix);
 
 		wait(TenantAPI::deleteTenant(cx.getReference(), tenantList->at(idx).first));
 
 		if (deterministicRandom()->coinflip()) {
-			wait(cache->removeEntryById(tenantList->at(idx).second.tenantMinimalMetadata.id));
+			wait(cache->removeEntryById(tenantList->at(idx).second.id()));
 		} else if (deterministicRandom()->coinflip()) {
 			wait(cache->removeEntryByPrefix(tenantList->at(idx).second.prefix));
 		} else {
@@ -303,7 +303,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		}
 
 		state Optional<TenantEntryCachePayload<int64_t>> e =
-		    wait(cache->getById(tenantList->at(idx).second.tenantMinimalMetadata.id));
+		    wait(cache->getById(tenantList->at(idx).second.id()));
 		ASSERT(!e.present());
 		state Optional<TenantEntryCachePayload<int64_t>> e1 =
 		    wait(cache->getByPrefix(tenantList->at(idx).second.prefix));
@@ -314,7 +314,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		// Ensure remove-entry is an idempotent operation
 		cache->removeEntryByName(tenantList->at(idx).first);
 		Optional<TenantEntryCachePayload<int64_t>> e3 =
-		    wait(cache->getById(tenantList->at(idx).second.tenantMinimalMetadata.id));
+		    wait(cache->getById(tenantList->at(idx).second.id()));
 		ASSERT(!e3.present());
 
 		return Void();

@@ -670,12 +670,12 @@ private:
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
 				    .detail("Tenant", tenantName)
-				    .detail("Id", tenantEntry.tenantMinimalMetadata.id)
+				    .detail("Id", tenantEntry.id())
 				    .detail("Version", version);
 
-				(*tenantMap)[tenantEntry.tenantMinimalMetadata.id].tenantName = tenantName;
+				(*tenantMap)[tenantEntry.id()].tenantName = tenantName;
 				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantName] = tenantEntry.tenantMinimalMetadata.id;
+					(*tenantNameIndex)[tenantName] = tenantEntry.id();
 				}
 			}
 

@@ -94,6 +94,12 @@ struct TenantMapEntry {
 	static TenantLockState stringToTenantLockState(std::string stateStr);
 
 	TenantMinimalMetadata tenantMinimalMetadata;
+	int64_t& id() { return tenantMinimalMetadata.id; }
+	int64_t const& id() const { return tenantMinimalMetadata.id; }
+	TenantName& tenantName() { return tenantMinimalMetadata.tenantName; }
+	TenantName const& tenantName() const { return tenantMinimalMetadata.tenantName; }
+	TenantLockState& tenantLockState() { return tenantMinimalMetadata.tenantLockState; }
+	TenantLockState const& tenantLockState() const { return tenantMinimalMetadata.tenantLockState; }
 	Key prefix;
 	TenantState tenantState = TenantState::READY;
 	Optional<UID> lockID = Optional<UID>();

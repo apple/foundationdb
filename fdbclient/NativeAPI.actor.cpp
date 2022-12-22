@@ -3050,7 +3050,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 
 	if (trState->tenant().present() && useTenant && trState->tenantId() == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const KeyRangeLocationInfo& locationInfo) {
-			trState->trySetTenantId(locationInfo.tenantEntry.tenantMinimalMetadata.id);
+			trState->trySetTenantId(locationInfo.tenantEntry.id());
 			return locationInfo;
 		});
 	} else {
@@ -3191,7 +3191,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	if (trState->tenant().present() && useTenant && trState->tenantId() == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const std::vector<KeyRangeLocationInfo>& locationInfo) {
 			ASSERT(!locationInfo.empty());
-			trState->trySetTenantId(locationInfo[0].tenantEntry.tenantMinimalMetadata.id);
+			trState->trySetTenantId(locationInfo[0].tenantEntry.id());
 			return locationInfo;
 		});
 	} else {
@@ -3687,7 +3687,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 		                                                              parameters->useProvisionalProxies,
 		                                                              Reverse::False,
 		                                                              parameters->version));
-		if (parameters->tenant.tenantId != locationInfo.tenantEntry.tenantMinimalMetadata.id) {
+		if (parameters->tenant.tenantId != locationInfo.tenantEntry.id()) {
 			throw tenant_not_found();
 		}
 
@@ -5444,7 +5444,7 @@ ACTOR Future<Void> restartWatch(Database cx,
 		                                                              useProvisionalProxies,
 		                                                              Reverse::False,
 		                                                              latestVersion));
-		tenantInfo.tenantId = locationInfo.tenantEntry.tenantMinimalMetadata.id;
+		tenantInfo.tenantId = locationInfo.tenantEntry.id();
 	}
 
 	wait(watchValueMap(cx->minAcceptableReadVersion,
@@ -8070,13 +8070,13 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self,
 		tme = cachedLocationInfo.get().tenantEntry;
 	}
 
-	if (tme.tenantMinimalMetadata.id == TenantInfo::INVALID_TENANT) {
+	if (tme.id() == TenantInfo::INVALID_TENANT) {
 		throw tenant_not_found();
 	}
 
 	// Modify transaction if desired.
 	if (!tenantName.present()) {
-		self->trState->trySetTenantId(tme.tenantMinimalMetadata.id);
+		self->trState->trySetTenantId(tme.id());
 	}
 	return tme;
 }

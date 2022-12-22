@@ -178,7 +178,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			GetValueRequest req;
 			req.key = key;
 			req.version = committedVersion;
-			req.tenantInfo.tenantId = loc.tenantEntry.tenantMinimalMetadata.id;
+			req.tenantInfo.tenantId = loc.tenantEntry.id();
 			req.tenantInfo.name = tenant;
 			req.tenantInfo.token = token;
 			try {
@@ -273,7 +273,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			req.transaction.read_snapshot = readVersion;
 			req.tenantInfo.name = tenant;
 			req.tenantInfo.token = token;
-			req.tenantInfo.tenantId = tenantEntry.tenantMinimalMetadata.id;
+			req.tenantInfo.tenantId = tenantEntry.id();
 			try {
 				CommitID reply = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
 				                                       &CommitProxyInterface::commit,

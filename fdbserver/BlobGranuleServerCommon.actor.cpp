@@ -502,13 +502,13 @@ Future<Void> loadBlobMetadataForTenant(BGTenantMap* self, BlobMetadataDomainId d
 void BGTenantMap::addTenants(std::vector<std::pair<TenantName, TenantMapEntry>> tenants) {
 	std::vector<BlobMetadataDomainId> tenantsToLoad;
 	for (auto entry : tenants) {
-		if (tenantInfoById.insert({ entry.second.tenantMinimalMetadata.id, entry.second }).second) {
+		if (tenantInfoById.insert({ entry.second.id(), entry.second }).second) {
 			auto r = makeReference<GranuleTenantData>(entry.first, entry.second);
 			tenantData.insert(KeyRangeRef(entry.second.prefix, entry.second.prefix.withSuffix(normalKeys.end)), r);
 			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 				r->bstoreLoaded.send(Void());
 			} else {
-				tenantsToLoad.push_back(entry.second.tenantMinimalMetadata.id);
+				tenantsToLoad.push_back(entry.second.id());
 			}
 		}
 	}
@@ -548,7 +548,7 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 		} else if (tenant.cvalue()->bstore->isExpired()) {
 			CODE_PROBE(true, "re-fetching expired blob metadata");
 			// fetch again
-			Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.tenantMinimalMetadata.id);
+			Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id());
 			wait(reload);
 			if (loopCount > 1) {
 				TraceEvent(SevWarn, "BlobMetadataStillExpired").suppressFor(5.0).detail("LoopCount", loopCount);
@@ -557,7 +557,7 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 		} else {
 			// handle refresh in background if tenant needs refres
 			if (tenant.cvalue()->bstore->needsRefresh()) {
-				Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.tenantMinimalMetadata.id);
+				Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id());
 				self->addActor.send(reload);
 			}
 			return tenant.cvalue();

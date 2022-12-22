@@ -526,7 +526,7 @@ struct TenantManagementWorkload : TestWorkload {
 					state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
 
 					ASSERT(entry.present());
-					ASSERT(entry.get().tenantMinimalMetadata.id > self->maxId);
+					ASSERT(entry.get().id() > self->maxId);
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -538,15 +538,15 @@ struct TenantManagementWorkload : TestWorkload {
 						Optional<TenantMapEntry> dataEntry =
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 						ASSERT(dataEntry.present());
-						ASSERT(dataEntry.get().tenantMinimalMetadata.id == entry.get().tenantMinimalMetadata.id);
+						ASSERT(dataEntry.get().id() == entry.get().id());
 						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
 						ASSERT(dataEntry.get().tenantState == TenantState::READY);
 					}
 
 					// Update our local tenant state to include the newly created one
-					self->maxId = entry.get().tenantMinimalMetadata.id;
+					self->maxId = entry.get().id();
 					self->createdTenants[tenantItr->first] =
-					    TenantData(entry.get().tenantMinimalMetadata.id, tenantItr->second.tenantGroup, true);
+					    TenantData(entry.get().id(), tenantItr->second.tenantGroup, true);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
@@ -677,7 +677,7 @@ struct TenantManagementWorkload : TestWorkload {
 			// the errors to flow through there
 			Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->mvDb, beginTenant));
 			if (entry.present() && deterministicRandom()->coinflip()) {
-				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.get().tenantMinimalMetadata.id));
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.get().id()));
 				CODE_PROBE(true, "Deleted tenant by ID");
 			} else {
 				wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
@@ -1050,7 +1050,7 @@ struct TenantManagementWorkload : TestWorkload {
 				// Get the tenant metadata and check that it matches our local state
 				state TenantMapEntry entry = wait(getTenantImpl(tr, tenant, operationType, self));
 				ASSERT(alreadyExists);
-				ASSERT(entry.tenantMinimalMetadata.id == tenantData.id);
+				ASSERT(entry.id() == tenantData.id);
 				ASSERT(entry.tenantGroup == tenantData.tenantGroup);
 				wait(checkTenantContents(self, tenant, tenantData));
 				return Void();
