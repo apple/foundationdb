@@ -528,7 +528,7 @@ function(add_python_venv_test)
   if(USE_SANITIZER)
     set(test_env_vars "${test_env_vars};${SANITIZER_OPTIONS}")
   endif()
-  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT ${test_env_vars})
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${test_env_vars}")
 endfunction()
 
 # Creates a single cluster before running the specified command (usually a ctest test)
