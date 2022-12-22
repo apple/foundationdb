@@ -216,7 +216,7 @@ struct SubNetTest {
 			return IPAddress(arr[0]);
 		} else {
 			std::array<unsigned char, 16> res;
-			memcpy(res.data(), arr, 4);
+			memcpy(res.data(), arr, 16);
 			return IPAddress(res);
 		}
 	}
