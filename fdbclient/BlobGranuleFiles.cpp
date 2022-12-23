@@ -1356,7 +1356,7 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 	int maxExpectedSize = 0;
 
 	// check if a given stream is actively clearing
-	bool clearActive[streams.size()];
+	bool clearActive[streams.size() + 1];
 	for (int16_t i = 0; i < streams.size(); i++) {
 		clearActive[i] = startClears[i];
 		if (startClears[i]) {
