@@ -20,7 +20,6 @@
 
 #ifndef FLOW_OPENNETWORK_H
 #define FLOW_OPENNETWORK_H
-#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include <array>
@@ -29,10 +28,13 @@
 #include <stdint.h>
 #include <variant>
 #include <atomic>
-#include <boost/asio.hpp>
+#include <boost/asio/ip/address_v6.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
 #include "flow/IRandom.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "flow/WriteOnlySet.h"
 
