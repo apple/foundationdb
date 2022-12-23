@@ -687,9 +687,7 @@ ACTOR template <class T>
 Future<T> makeInterruptable(Future<T> f) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
-		when(T t = wait(f)) {
-			return t;
-		}
+		when(T t = wait(f)) { return t; }
 		when(wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
@@ -2116,6 +2114,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "idempotencyids")) {
+					bool _result = wait(makeInterruptable(idempotencyIdsCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
 					continue;
 				}
 

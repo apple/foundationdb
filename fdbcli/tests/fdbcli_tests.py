@@ -1309,6 +1309,31 @@ def tenants():
     run_tenant_test(tenant_group_get)
 
 
+@enable_logging()
+def idempotency_ids(logger):
+    command = "idempotencyids status"
+    output = run_fdbcli_command(command)
+    logger.debug(command + " : " + output)
+    json.loads(output)
+
+    command = "idempotencyids clear 5"
+    output = run_fdbcli_command(command)
+    logger.debug(command + " : " + output)
+    assert output == "Successfully cleared idempotency IDs.", output
+
+    # Incorrect number of tokens
+    command = "idempotencyids clear"
+    output = run_fdbcli_command(command)
+    logger.debug(command + " : " + output)
+    assert output == "idempotencyids [status | clear <min_age_seconds>]", output
+
+    # Incorrect number of tokens
+    command = "idempotencyids"
+    output = run_fdbcli_command(command)
+    logger.debug(command + " : " + output)
+    assert output == "idempotencyids [status | clear <min_age_seconds>]", output
+
+
 def integer_options():
     process = subprocess.Popen(
         command_template[:-1],
@@ -1429,6 +1454,7 @@ if __name__ == "__main__":
         knobmanagement()
         # TODO: fix the issue when running through the external client
         # quota()
+        idempotency_ids()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
