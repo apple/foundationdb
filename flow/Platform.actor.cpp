@@ -59,6 +59,12 @@
 #include "flow/UnitTest.h"
 #include "flow/Util.h"
 
+// boost uses either std::array or boost::asio::detail::array to store the IPv6 Addresses.
+// Enforce the format of IPAddressStore, which is declared in IPAddress.h, is using the same type
+// to boost.
+static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<uint8_t, 16>>::value,
+              "IPAddressStore must be std::array<uint8_t, 16>");
+
 #ifdef _WIN32
 
 #include <conio.h>

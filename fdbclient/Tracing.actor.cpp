@@ -28,6 +28,7 @@
 #include <functional>
 #include <iomanip>
 #include <memory>
+#include "flow/IUDPSocket.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
