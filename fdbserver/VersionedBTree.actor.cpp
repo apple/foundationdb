@@ -5901,20 +5901,18 @@ private:
 			}
 		}
 
+		state PageToBuild* p = nullptr;
 		for (pageIndex = 0; pageIndex < pagesToBuild.size(); ++pageIndex) {
-			debug_printf("building page %d of %zu %s\n",
-			             pageIndex + 1,
-			             pagesToBuild.size(),
-			             pagesToBuild[pageIndex].toString().c_str());
-			ASSERT(pagesToBuild[pageIndex].count != 0);
+			p = &pagesToBuild[pageIndex];
+			debug_printf("building page %d of %zu %s\n", pageIndex + 1, pagesToBuild.size(), p->toString().c_str());
+			ASSERT(p->count != 0);
 
 			// Use the next entry as the upper bound, or upperBound if there are no more entries beyond this page
-			int endIndex = pagesToBuild[pageIndex].endIndex();
+			int endIndex = p->endIndex();
 			bool lastPage = endIndex == entries.size();
 			pageUpperBound = lastPage ? upperBound->withoutValue() : entries[endIndex].withoutValue();
 
 			if (!lastPage) {
-				PageToBuild& p = pagesToBuild[pageIndex];
 				PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
 				if (height == 1) {
 					// If this is a leaf page, and not the last one to be written, shorten the upper boundary)
@@ -5922,9 +5920,9 @@ private:
 					pageUpperBound.truncate(commonPrefix + 1);
 				}
 				if (useEncryptionDomain) {
-					ASSERT(p.domainId.present());
+					ASSERT(p->domainId.present());
 					ASSERT(nextPage.domainId.present());
-					if (p.domainId.get() != nextPage.domainId.get() &&
+					if (p->domainId.get() != nextPage.domainId.get() &&
 					    nextPage.domainId.get() != self->m_keyProvider->getDefaultEncryptionDomainId()) {
 						pageUpperBound =
 						    RedwoodRecordRef(entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength));
@@ -5938,12 +5936,11 @@ private:
 			// being built now will serve as the previous subtree's upper boundary as it is the same
 			// key as entries[p.startIndex] and there is no need to actually store the null link in
 			// the new page.
-			if (height != 1 && !entries[pagesToBuild[pageIndex].startIndex].value.present()) {
-				auto& p = pagesToBuild[pageIndex];
-				p.kvBytes -= entries[p.startIndex].key.size();
-				++p.startIndex;
-				--p.count;
-				debug_printf("Skipping first null record, new count=%d\n", p.count);
+			if (height != 1 && !entries[p->startIndex].value.present()) {
+				p->kvBytes -= entries[p->startIndex].key.size();
+				++p->startIndex;
+				--p->count;
+				debug_printf("Skipping first null record, new count=%d\n", p->count);
 
 				// In case encryption or encryption domain is not enabled, if the page is now empty then it must be the
 				// last page in pagesToBuild, otherwise there would be more than 1 item since internal pages need to
@@ -5955,7 +5952,7 @@ private:
 				// replacing.  Put another way, the upper boundary of the rightmost page of the page set that was just
 				// built does not match the upper boundary of the original page that the page set is replacing, so
 				// adding the extra null link fixes this.
-				if (p.count == 0) {
+				if (p->count == 0) {
 					ASSERT(useEncryptionDomain || lastPage);
 					records.push_back_deep(records.arena(), pageLowerBound);
 					pageLowerBound = pageUpperBound;
@@ -5964,25 +5961,22 @@ private:
 			}
 
 			// Create and init page here otherwise many variables must become state vars
-			state Reference<ArenaPage> page = self->m_pager->newPageBuffer(pagesToBuild[pageIndex].blockCount);
-			page->init(self->m_encodingType,
-			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
-			           height);
+			state Reference<ArenaPage> page = self->m_pager->newPageBuffer(p->blockCount);
+			page->init(
+			    self->m_encodingType, (p->blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
 			if (page->isEncrypted()) {
 				ArenaPage::EncryptionKey k =
-				    wait(useEncryptionDomain
-				             ? self->m_keyProvider->getLatestEncryptionKey(pagesToBuild[pageIndex].domainId.get())
-				             : self->m_keyProvider->getLatestDefaultEncryptionKey());
+				    wait(useEncryptionDomain ? self->m_keyProvider->getLatestEncryptionKey(p->domainId.get())
+				                             : self->m_keyProvider->getLatestDefaultEncryptionKey());
 				page->encryptionKey = k;
 			}
 
-			auto& p = pagesToBuild[pageIndex];
 			BTreePage* btPage = (BTreePage*)page->mutateData();
-			btPage->init(height, p.kvBytes);
-			g_redwoodMetrics.kvSizeWritten->sample(p.kvBytes);
+			btPage->init(height, p->kvBytes);
+			g_redwoodMetrics.kvSizeWritten->sample(p->kvBytes);
 
 			debug_printf("Building tree for %s\nlower: %s\nupper: %s\n",
-			             p.toString().c_str(),
+			             p->toString().c_str(),
 			             pageLowerBound.toString(false).c_str(),
 			             pageUpperBound.toString(false).c_str());
 
@@ -5990,34 +5984,34 @@ private:
 			debug_printf("Building tree at %p deltaTreeSpace %d p.usedBytes=%d\n",
 			             btPage->tree(),
 			             deltaTreeSpace,
-			             p.usedBytes());
+			             p->usedBytes());
 			state int written = btPage->tree()->build(
-			    deltaTreeSpace, &entries[p.startIndex], &entries[p.endIndex()], &pageLowerBound, &pageUpperBound);
+			    deltaTreeSpace, &entries[p->startIndex], &entries[p->endIndex()], &pageLowerBound, &pageUpperBound);
 
 			if (written > deltaTreeSpace) {
 				debug_printf("ERROR:  Wrote %d bytes to page %s deltaTreeSpace=%d\n",
 				             written,
-				             p.toString().c_str(),
+				             p->toString().c_str(),
 				             deltaTreeSpace);
 				TraceEvent(SevError, "RedwoodDeltaTreeOverflow")
-				    .detail("PageSize", p.pageSize)
+				    .detail("PageSize", p->pageSize)
 				    .detail("BytesWritten", written);
 				ASSERT(false);
 			}
 			auto& metrics = g_redwoodMetrics.level(height);
 			metrics.metrics.pageBuild += 1;
-			metrics.metrics.pageBuildExt += p.blockCount - 1;
+			metrics.metrics.pageBuildExt += p->blockCount - 1;
 
-			metrics.buildFillPctSketch->samplePercentage(p.usedFraction());
-			metrics.buildStoredPctSketch->samplePercentage(p.kvFraction());
-			metrics.buildItemCountSketch->sampleRecordCounter(p.count);
+			metrics.buildFillPctSketch->samplePercentage(p->usedFraction());
+			metrics.buildStoredPctSketch->samplePercentage(p->kvFraction());
+			metrics.buildItemCountSketch->sampleRecordCounter(p->count);
 
 			// Write this btree page, which is made of 1 or more pager pages.
 			state BTreeNodeLinkRef childPageID;
 
 			// If we are only writing 1 BTree node and its block count is 1 and the original node also had 1 block
 			// then try to update the page atomically so its logical page ID does not change
-			if (pagesToBuild.size() == 1 && p.blockCount == 1 && previousID.size() == 1) {
+			if (pagesToBuild.size() == 1 && p->blockCount == 1 && previousID.size() == 1) {
 				page->setLogicalPageInfo(previousID.front(), parentID);
 				LogicalPageID id = wait(
 				    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), page, v));
@@ -6051,7 +6045,7 @@ private:
 					self->freeBTreePage(height, previousID, v);
 				}
 
-				childPageID.resize(records.arena(), p.blockCount);
+				childPageID.resize(records.arena(), p->blockCount);
 				state int i = 0;
 				for (i = 0; i < childPageID.size(); ++i) {
 					LogicalPageID id = wait(self->m_pager->newPageID());
@@ -6066,7 +6060,7 @@ private:
 
 			if (self->m_pBoundaryVerifier != nullptr) {
 				ASSERT(self->m_pBoundaryVerifier->update(
-				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, pagesToBuild[pageIndex].domainId));
+				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, p->domainId));
 			}
 
 			if (++sinceYield > 100) {
@@ -6075,16 +6069,15 @@ private:
 			}
 
 			if (REDWOOD_DEBUG) {
-				auto& p = pagesToBuild[pageIndex];
 				debug_printf("Wrote %s %s original=%s deltaTreeSize=%d for %s\nlower: %s\nupper: %s\n",
 				             toString(v).c_str(),
 				             toString(childPageID).c_str(),
 				             toString(previousID).c_str(),
 				             written,
-				             p.toString().c_str(),
+				             p->toString().c_str(),
 				             pageLowerBound.toString(false).c_str(),
 				             pageUpperBound.toString(false).c_str());
-				for (int j = p.startIndex; j < p.endIndex(); ++j) {
+				for (int j = p->startIndex; j < p->endIndex(); ++j) {
 					debug_printf(" %3d: %s\n", j, entries[j].toString(height == 1).c_str());
 				}
 				ASSERT(pageLowerBound.key <= pageUpperBound.key);
