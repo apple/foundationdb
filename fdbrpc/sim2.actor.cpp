@@ -54,6 +54,7 @@
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
+#include "flow/IUDPSocket.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void CorruptedBytesRecorder::mark(const std::string& fileName, const uint64_t position) {

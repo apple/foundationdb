@@ -39,6 +39,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/TokenSign.h"
+#include "flow/IUDPSocket.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
