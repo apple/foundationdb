@@ -27,6 +27,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/VersionedBTreeDebug.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -54,43 +55,6 @@
 #include <vector>
 
 #include "flow/actorcompiler.h" // must be last include
-
-#define REDWOOD_DEBUG 0
-
-// Only print debug info for a specific address
-static NetworkAddress g_debugAddress = NetworkAddress::parse("0.0.0.0:0");
-// Only print debug info after a specific time
-static double g_debugStart = 0;
-// Debug output stream
-static FILE* g_debugStream = stdout;
-
-#define debug_printf_always(...)                                                                                       \
-	if (now() >= g_debugStart && (!g_network->getLocalAddress().isValid() || !g_debugAddress.isValid() ||              \
-	                              g_network->getLocalAddress() == g_debugAddress)) {                                   \
-		std::string prefix = format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);  \
-		std::string msg = format(__VA_ARGS__);                                                                         \
-		fputs(addPrefix(prefix, msg).c_str(), g_debugStream);                                                          \
-		fflush(g_debugStream);                                                                                         \
-	}
-
-#define debug_print(str) debug_printf("%s\n", str.c_str())
-#define debug_print_always(str) debug_printf_always("%s\n", str.c_str())
-#define debug_printf_noop(...)
-
-#if defined(NO_INTELLISENSE)
-#if REDWOOD_DEBUG
-#define debug_printf debug_printf_always
-#else
-#define debug_printf debug_printf_noop
-#endif
-#else
-// To get error-checking on debug_printf statements in IDE
-#define debug_printf printf
-#endif
-
-#define BEACON debug_printf_always("HERE\n")
-#define TRACE                                                                                                          \
-	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
 using namespace std::string_view_literals;
 
