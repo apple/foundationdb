@@ -47,6 +47,7 @@
 #include <rapidjson/writer.h>
 #include <boost/algorithm/string.hpp>
 #include <cstring>
+#include <stack>
 #include <memory>
 #include <queue>
 #include <sstream>

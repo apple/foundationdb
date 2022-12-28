@@ -25,6 +25,10 @@
 
 #include "flow/flow.h"
 #include "flow/IAsyncFile.h"
+#include "flow/network.h"
+#include "flow/ActorCollection.h"
+#include "flow/ChaosMetrics.h"
+#include "fdbrpc/simulator.h"
 
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {
 private:

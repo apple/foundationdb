@@ -69,6 +69,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/ChaosMetrics.h"
 
 #ifdef __linux__
 #include <fcntl.h>
