@@ -745,6 +745,8 @@ struct LogPushData : NonCopyable {
 
 	void addTxsTag();
 
+	void addThisTxsTag(int id);
+
 	// addTag() adds a tag for the *next* message to be added
 	void addTag(Tag tag) { next_message_tags.push_back(tag); }
 
@@ -799,6 +801,7 @@ struct LogPushData : NonCopyable {
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.
 	void recordEmptyMessage(int loc, const Standalone<StringRef>& value);
+	bool getMessageWrittenForLoc(int loc);
 
 	// Returns the ratio of empty messages in this version batch.
 	// MUST be called after getMessages() and recordEmptyMessage().

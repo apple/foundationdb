@@ -555,6 +555,9 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 					if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
 						prevVersion = tpcvMap.get()[location];
 					} else {
+						Standalone<StringRef> msg = data.getMessages(location);
+						data.recordEmptyMessage(location, msg);
+						ASSERT(!data.getMessageWrittenForLoc(location));
 						location++;
 						continue;
 					}
@@ -580,7 +583,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				tLogCommitResults.push_back(commitSuccess);
 				location++;
 			}
-			quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum));
+			quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() /*- it->tLogWriteAntiQuorum*/));
 			logGroupLocal++;
 		}
 	}

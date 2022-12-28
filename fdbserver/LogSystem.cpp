@@ -278,6 +278,10 @@ LogPushData::LogPushData(Reference<ILogSystem> logSystem, int tlogCount) : logSy
 	messagesWritten = std::vector<bool>(tlogCount, false);
 }
 
+void LogPushData::addThisTxsTag(int tagId) {
+	next_message_tags.push_back(Tag(tagLocalityTxs,tagId));
+}
+
 void LogPushData::addTxsTag() {
 	if (logSystem->getTLogVersion() >= TLogVersion::V4) {
 		next_message_tags.push_back(logSystem->getRandomTxsTag());
@@ -335,6 +339,10 @@ void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value
 			messagesWritten[loc] = true;
 		}
 	}
+}
+
+bool LogPushData::getMessageWrittenForLoc(int loc) {
+	return messagesWritten[loc];
 }
 
 float LogPushData::getEmptyMessageRatio() const {

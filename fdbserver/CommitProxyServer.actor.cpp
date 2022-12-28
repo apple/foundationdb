@@ -498,6 +498,10 @@ struct CommitBatchContext {
 	int64_t localBatchNumber;
 	LogPushData toCommit;
 
+	int x = 0;
+
+	int preliminaryCount = 0;
+
 	int batchOperations = 0;
 
 	Span span;
@@ -1004,7 +1008,10 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		// Resolver also calculates forceRecovery and only applies metadata mutations
 		// in the same set of transactions as this proxy.
 		ResolveTransactionBatchReply& reply = self->resolution[0];
+
 		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+
+		self->preliminaryCount = self->toCommit.getMutationCount();
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
 			self->tpcvMap = reply.tpcvMap;
@@ -1262,7 +1269,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaToCommittedTxn");
 	}
-
+				self->preliminaryCount = self->toCommit.getMutationCount();
 	// Second pass
 	wait(assignMutationsToStorageServers(self));
 
@@ -1336,14 +1343,25 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterStoreCommits");
 
 	// txnState (transaction subsystem state) tag: message extracted from log adapter
+	std::set<int> tpcvLoc;
+	for (auto const& [key, val] : self->tpcvMap) {
+		tpcvLoc.insert(key);
+	}
+
 	bool firstMessage = true;
 	for (auto m : self->msg.messages) {
 		if (firstMessage) {
-			self->toCommit.addTxsTag();
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && tpcvLoc.size()) {
+				ASSERT(tpcvLoc.size() >= pProxyCommitData->db->get().logSystemConfig.numLogs());
+				self->toCommit.addThisTxsTag(*tpcvLoc.begin());
+			} else {
+				self->toCommit.addTxsTag();
+			}
 		}
 		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		firstMessage = false;
 	}
+	self->preliminaryCount = self->toCommit.getMutationCount();
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion); //< Is this valid?
@@ -1373,6 +1391,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	                                                          self->debugID,
 	                                                          tpcvMap);
 
+	TraceEvent(SevWarn,"MutationCount4",pProxyCommitData->dbgid).detail("O",self->preliminaryCount).detail("N",self->toCommit.getMutationCount());
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
 
