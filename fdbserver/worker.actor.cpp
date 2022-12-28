@@ -70,6 +70,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/ChaosMetrics.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -692,42 +693,18 @@ ACTOR Future<Void> registrationClient(
 					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 				}
 			}
-			when(wait(ccInterface->onChange())) {
-				break;
-			}
-			when(wait(ddInterf->onChange())) {
-				break;
-			}
-			when(wait(rkInterf->onChange())) {
-				break;
-			}
-			when(wait(csInterf->onChange())) {
-				break;
-			}
-			when(wait(bmInterf->onChange())) {
-				break;
-			}
-			when(wait(blobMigratorInterf->onChange())) {
-				break;
-			}
-			when(wait(ekpInterf->onChange())) {
-				break;
-			}
-			when(wait(degraded->onChange())) {
-				break;
-			}
-			when(wait(FlowTransport::transport().onIncompatibleChanged())) {
-				break;
-			}
-			when(wait(issues->onChange())) {
-				break;
-			}
-			when(wait(recovered)) {
-				break;
-			}
-			when(wait(clusterId->onChange())) {
-				break;
-			}
+			when(wait(ccInterface->onChange())) { break; }
+			when(wait(ddInterf->onChange())) { break; }
+			when(wait(rkInterf->onChange())) { break; }
+			when(wait(csInterf->onChange())) { break; }
+			when(wait(bmInterf->onChange())) { break; }
+			when(wait(blobMigratorInterf->onChange())) { break; }
+			when(wait(ekpInterf->onChange())) { break; }
+			when(wait(degraded->onChange())) { break; }
+			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
+			when(wait(issues->onChange())) { break; }
+			when(wait(recovered)) { break; }
+			when(wait(clusterId->onChange())) { break; }
 		}
 	}
 }

@@ -69,4 +69,9 @@ private:
 	std::variant<uint32_t, IPAddressStore> addr;
 };
 
+template <>
+struct Traceable<IPAddress> : std::true_type {
+	static std::string toString(const IPAddress& value) { return value.toString(); }
+};
+
 #endif // FLOW_IPADDRESS_H

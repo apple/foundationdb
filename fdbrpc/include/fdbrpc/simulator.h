@@ -30,6 +30,7 @@
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/ProtocolVersion.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
