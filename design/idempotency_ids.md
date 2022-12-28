@@ -14,7 +14,7 @@ Add
 ```
 FDBFuture* fdb_database_commit_result(FDBDatabase* db, uint8_t const* idempotency_id, int idempotency_id_length, int64_t read_snapshot)
 ```
-, which can be used to determine the result of a commit with the given read snapshot and idempotency id.
+, which can be used to determine the result of a commit with the given read snapshot and idempotency id. Read snapshot is the read version of the last transaction attempt, and this is used to narrow down the keyspace that needs to be searched for the idempotency id.
 
 Add
 ```
@@ -59,9 +59,10 @@ in that id and the cluster can reclaim the space used to store the idempotency
 id. The commit proxy that committed a batch is responsible for cleaning all
 idempotency kv pairs from that batch, so clients must tell that specific proxy
 that they're done with the id. The first proxy will also periodically clean up
-the oldest idempotency ids, based on a policy determined by knobs.  One knob
-will control the minimum lifetime of an idempotency id (i.e. don't delete
-anything younger than 1 day). More knobs may be considered in the future.
+the oldest idempotency ids, based on a policy determined by knobs.  The knob
+`IDEMPOTENCY_IDS_MIN_AGE_SECONDS` controls the minimum lifetime of an
+idempotency id (i.e. don't delete anything younger than 1 day). More knobs may
+be considered in the future.
 
 # Commit protocol
 
@@ -85,8 +86,8 @@ If a transaction learns that it has been in-flight so long that its idempotency 
 
 # Considerations
 
-- Additional storage space on the cluster.
-- Potential write hot spot.
+- Additional storage space on the cluster for the idempotency ids.
+- Potential write hot spot, since all idempotency id writes are adjacent and monotonically increasing.
 
 # Multi-version client
 
@@ -98,7 +99,7 @@ The multi-version client will generate its own idempotency id for a transaction 
 FDBFuture* fdb_database_commit_result(FDBDatabase* db, uint8_t const* idempotency_id, int idempotency_id_length, int64_t read_snapshot)
 ```
 
-The implementation would first commit a transaction that conflicts with any transaction with the same idempotency id (recall that the idempotency id is added to the conflict ranges), to ensure that none are in flight.
+The implementation will commit a dummy transaction that conflicts with transactions that have this idempotency_id. (Recall that idempotency_id is added to the conflict ranges, so any transaction with the same idempotency id conflict with the dummy transaction.) This ensures that no transactions with this idempotency_id are in flight.
 
 The implementation would then search storage servers for the idempotency id to determine the commit result. The range of keys that need to be read is bounded by the range of possible commit versions for a transaction with `read_snapshot`.
 
@@ -106,7 +107,7 @@ The implementation would then search storage servers for the idempotency id to d
 void fdb_database_expire_idempotency_id(FDBDatabase* db, uint8_t const* idempotency_id, int idempotency_id_length)
 ```
 
-The fdb client would need to keep track of which commit proxies are responsible for recently committed transactions with idempotency ids, so it knows where to direct the expire requests. Proactively expiring idempotency ids is done on a best-effort basis, but this needs to work well enough that the storage used by the cluster for idempotency ids is acceptable.
+The fdb client would need to keep track of which commit proxies are responsible for recently committed transactions with idempotency ids, so it knows where to direct the expire requests. Proactively expiring idempotency ids is done on a best-effort basis, but this needs to work well enough that the storage used by the cluster for idempotency ids is acceptable. Users who are not using `AUTOMATIC_IDEMPOTENCY` are expected to call `fdb_database_expire_idempotency_id` to do the proactive clean up.
 
 # Experiments
 
