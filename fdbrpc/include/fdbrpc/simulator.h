@@ -41,8 +41,10 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/TokenSign.h"
 #include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
+
 
 struct ValidationData {
 	// global validation that missing refreshed feeds were previously destroyed

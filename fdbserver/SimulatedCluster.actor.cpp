@@ -49,8 +49,9 @@
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "fdbserver/SimulatedCluster.h"
+#include "flow/IConnection.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
 #undef min
