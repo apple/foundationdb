@@ -35,6 +35,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IAsyncFile.h"
+#include "flow/IConnection.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"

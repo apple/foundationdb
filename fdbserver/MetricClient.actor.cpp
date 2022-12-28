@@ -33,6 +33,7 @@
 #endif
 #include "flow/network.h"
 #include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h"
 
 UDPMetricClient::UDPMetricClient()

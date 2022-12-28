@@ -44,6 +44,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/asio.hpp>
 
 #include "fmt/format.h"
 

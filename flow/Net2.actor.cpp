@@ -57,6 +57,7 @@
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
 #include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>

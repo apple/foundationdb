@@ -28,6 +28,7 @@
 #include "flow/flow.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 
 ChaosMetrics::ChaosMetrics() {
 	clear();

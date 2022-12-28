@@ -24,6 +24,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "boost/algorithm/string/predicate.hpp"
+#include "flow/IConnection.h"
 
 #undef state
 #include "fdbclient/SimpleIni.h"
