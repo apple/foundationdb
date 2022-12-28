@@ -1553,11 +1553,14 @@ FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
-// Tracks storage metrics for `keys`. This function is similar to `trackShardMetrics()` and altered for physical shard.
-// This meant to be temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
-ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(Reference<IDDTxnProcessor> db,
-                                                       KeyRange keys,
-                                                       Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics) {
+// Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning
+// this key range. This function is similar to `trackShardMetrics()` and altered for physical shard. This meant to be
+// temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
+ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(
+    Reference<IDDTxnProcessor> db,
+    KeyRange keys,
+    Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics,
+    Reference<AsyncVar<Optional<StorageMetrics>>> physicalShardStats) {
 	state BandwidthStatus bandwidthStatus =
 	    shardMetrics->get().present() ? getBandwidthStatus(shardMetrics->get().get().metrics) : BandwidthStatusNormal;
 	state double lastLowBandwidthStartTime =
@@ -1591,6 +1594,20 @@ ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(Reference<IDDTxnProcessor
 					lastLowBandwidthStartTime = now();
 				}
 				bandwidthStatus = newBandwidthStatus;
+
+				// Update current physical shard aggregated stats;
+				if (!physicalShardStats->get().present()) {
+					physicalShardStats->set(metrics.first.get());
+				} else {
+					if (!shardMetrics->get().present()) {
+						// We collect key range stats for the first time.
+						physicalShardStats->set(physicalShardStats->get().get() + metrics.first.get());
+					} else {
+						physicalShardStats->set(physicalShardStats->get().get() - shardMetrics->get().get().metrics +
+						                        metrics.first.get());
+					}
+				}
+
 				shardMetrics->set(ShardMetrics(metrics.first.get(), lastLowBandwidthStartTime, shardCount));
 				break;
 			} else {
@@ -1605,6 +1622,14 @@ ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(Reference<IDDTxnProcessor
 	}
 }
 
+void PhysicalShardCollection::PhysicalShard::insertNewRangeData(const KeyRange& newRange) {
+	RangeData data;
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	data.trackMetrics = trackKeyRangeInPhysicalShardMetrics(txnProcessor, newRange, data.stats, stats);
+	auto it = rangeData.emplace(newRange, data);
+	ASSERT(it.second);
+}
+
 void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) {
 	if (g_network->isSimulated()) {
 		// Test that new range must not overlap with any existing range in this shard.
@@ -1613,10 +1638,7 @@ void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) 
 		}
 	}
 
-	RangeData data;
-	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
-	data.trackMetrics = trackKeyRangeInPhysicalShardMetrics(txnProcessor, newRange, data.stats);
-	rangeData.emplace(newRange, data);
+	insertNewRangeData(newRange);
 }
 
 void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRange) {
@@ -1631,10 +1653,7 @@ void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRang
 		std::vector<KeyRangeRef> remainingRanges = range - outRange;
 		for (auto& r : remainingRanges) {
 			ASSERT(r != range);
-			RangeData data;
-			data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
-			data.trackMetrics = trackKeyRangeInPhysicalShardMetrics(txnProcessor, r, data.stats);
-			rangeData.emplace(r, data);
+			insertNewRangeData(r);
 		}
 		// Must erase last since `remainingRanges` uses data in `range`.
 		rangeData.erase(range);

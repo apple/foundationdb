@@ -100,6 +100,9 @@ extern StringRef strinc(StringRef const& str, Arena& arena);
 extern Standalone<StringRef> addVersionStampAtEnd(StringRef const& str);
 extern StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena);
 
+// Return the number of combinations to choose k items out of n choices
+int nChooseK(int n, int k);
+
 template <typename Iter>
 StringRef concatenate(Iter b, Iter const& e, Arena& arena) {
 	int rsize = 0;
