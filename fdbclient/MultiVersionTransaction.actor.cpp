@@ -2660,6 +2660,8 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	}
 }
 #if defined(__unixish__)
+#include <fcntl.h>
+
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	ASSERT_GE(threadCount, 1);
 	// Copy library for each thread configured per version
