@@ -25,6 +25,7 @@
 #include "fdbrpc/simulator.h"
 #include "boost/algorithm/string/predicate.hpp"
 #include "flow/IConnection.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #undef state
 #include "fdbclient/SimpleIni.h"
@@ -142,7 +143,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SaveFile(self->restartInfo.c_str());
 
 		for (auto process = allProcessesMap.begin(); process != allProcessesMap.end(); process++) {
-			g_simulator->killProcess(process->second, ISimulator::Reboot);
+			g_simulator->killProcess(process->second, ISimulator::KillType::Reboot);
 		}
 
 		for (i = 0; i < 100; i++) {

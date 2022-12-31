@@ -38,6 +38,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/network.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1114,9 +1115,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);
 					if (p->isReliable()) {
-						g_simulator->rebootProcess(p, ISimulator::RebootProcess);
+						g_simulator->rebootProcess(p, ISimulator::KillType::RebootProcess);
 					} else {
-						g_simulator->killProcess(p, ISimulator::KillInstantly);
+						g_simulator->killProcess(p, ISimulator::KillType::KillInstantly);
 					}
 				}
 

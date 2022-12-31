@@ -70,6 +70,7 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/ChaosMetrics.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #ifdef __linux__
 #include <fcntl.h>
