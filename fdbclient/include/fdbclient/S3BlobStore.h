@@ -28,8 +28,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbclient/JSONDoc.h"
-
-class IConnection;
+#include "flow/IConnection.h"
 
 // Representation of all the things you need to connect to a blob store instance with some credentials.
 // Reference counted because a very large number of them could be needed.
