@@ -602,8 +602,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema"
-                                         R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
          "required_resolvers":1,
@@ -976,6 +974,13 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "num_tenants":0,
          "num_tenant_groups":10,
          "tenant_group_capacity":20
+      },
+      "idempotency_ids":{
+         "size_bytes": 0,
+         "expired_version": 0,
+         "expired_age": 0,
+         "oldest_id_version": 0,
+         "oldest_id_age": 0
       }
    },
    "client":{
