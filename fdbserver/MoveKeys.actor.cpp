@@ -1400,7 +1400,14 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									    .detail("DataMoveID", dataMoveId)
 									    .detail("ExistingDataMoveID", destId)
 									    .detail("ExistingDataMove", dmv.toString());
-									throw movekeys_conflict();
+									if (dmv.getPhase() != DataMoveMetaData::Deleting) {
+										if (!dataMove.ranges.empty()) {
+											dataMove.setPhase(DataMoveMetaData::Deleting);
+											tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+											wait(tr.commit());
+										}
+										throw data_move_cancelled();
+									}
 								}
 							}
 						}
@@ -1488,6 +1495,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 			} catch (Error& e) {
 				if (e.code() == error_code_retry) {
 					wait(delay(1));
+					tr.reset();
 				} else {
 					TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
 					    .errorUnsuppressed(e)
