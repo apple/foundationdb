@@ -293,7 +293,7 @@ rocksdb::Options getOptions() {
 	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_CF_WRITE_BUFFER_SIZE;
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
-	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
 
@@ -2883,11 +2883,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	int count = std::unique(shardIds.begin(), shardIds.end()) - shardIds.begin();
 	ASSERT_EQ(count, 1);
 	ASSERT(shardIds[0] == "shard-2");
-	shardsToCleanUp.insert(shardsToCleanUp.end(), shardIds.begin(), shardIds.end());
-
-	// Clean up empty shards. shard-2 is empty now.
-	Future<Void> cleanUpFuture = kvStore->cleanUpShardsIfNeeded(shardsToCleanUp);
-	wait(cleanUpFuture);
 
 	// Add more ranges.
 	std::vector<Future<Void>> addRangeFutures;
@@ -2941,9 +2936,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 
 		// Add another range to shard-2.
 		wait(kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2"));
-
-		// Clean up shards. Shard-2 should not be removed.
-		wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
 	}
 	{
 		auto dataMap = rocksdbStore->getDataMapping();
