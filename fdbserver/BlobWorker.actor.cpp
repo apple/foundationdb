@@ -1457,13 +1457,9 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
-							break;
-						}
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
-						when(wait(metadata->resumeSnapshot.getFuture())) {
-							break;
-						}
+						when(wait(metadata->resumeSnapshot.getFuture())) { break; }
 					}
 				}
 				if (metadata->resumeSnapshot.isSet()) {
@@ -1502,9 +1498,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		// manager change/no response
 		choose {
 			when(wait(bwData->currentManagerStatusStream.onChange())) {}
-			when(wait(metadata->resumeSnapshot.getFuture())) {
-				break;
-			}
+			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
 			when(wait(delay(1.0))) {}
 		}
 
@@ -1591,9 +1585,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			// wait for manager stream to become ready, and send a message
 			loop {
 				choose {
-					when(wait(bwData->currentManagerStatusStream.get().onReady())) {
-						break;
-					}
+					when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 					when(wait(bwData->currentManagerStatusStream.onChange())) {}
 				}
 			}
@@ -1677,12 +1669,8 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) {
-							break;
-						}
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
-							break;
-						}
+						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) { break; }
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
 					}
 				}
@@ -1965,9 +1953,7 @@ ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata, Version 
 			                                 ? metadata->activeCFData.get()->whenAtLeast(waitVersion)
 			                                 : Never();
 			choose {
-				when(wait(atLeast)) {
-					break;
-				}
+				when(wait(atLeast)) { break; }
 				when(wait(metadata->activeCFData.onChange())) {}
 			}
 		} catch (Error& e) {
@@ -3629,9 +3615,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			if (!bwData->isFullRestoreMode) {
 				choose {
 					when(wait(metadata->readable.getFuture())) {}
-					when(wait(metadata->cancelled.getFuture())) {
-						throw wrong_shard_server();
-					}
+					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 				}
 			}
 
@@ -3648,9 +3632,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				if (metadata->historyLoaded.canBeSet()) {
 					choose {
 						when(wait(metadata->historyLoaded.getFuture())) {}
-						when(wait(metadata->cancelled.getFuture())) {
-							throw wrong_shard_server();
-						}
+						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 					}
 				}
 
@@ -3662,9 +3644,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						when(GranuleFiles f = wait(finalChunks[chunkIdx].second)) {
 							rangeGranulePair.push_back(std::pair(finalChunks[chunkIdx].first, f));
 						}
-						when(wait(metadata->cancelled.getFuture())) {
-							throw wrong_shard_server();
-						}
+						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 					}
 
 					if (rangeGranulePair.back().second.snapshotFiles.empty()) {
@@ -3705,13 +3685,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					// version on rollback
 					try {
 						choose {
-							when(wait(waitForVersionFuture)) {
-								break;
-							}
+							when(wait(waitForVersionFuture)) { break; }
 							when(wait(metadata->activeCFData.onChange())) {}
-							when(wait(metadata->cancelled.getFuture())) {
-								throw wrong_shard_server();
-							}
+							when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 						}
 					} catch (Error& e) {
 						// We can get change feed cancelled from whenAtLeast. This means the change feed may
@@ -5108,6 +5084,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
+	// Since the blob worker gets initalized through the blob manager it is easier to fetch the encryption state using
+	// the DB Config rather than passing it through the initalization request for the blob manager and blob worker
 	DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 	self->encryptMode = config.encryptionAtRestMode;
 	TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
