@@ -523,8 +523,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			}
 
 			if (resetPPWStats) {
-				wait(resetStorageWiggleMetrics(tr, PrimaryRegion(true)));
-				wait(resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
+				state StorageWiggleData wiggleData;
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(true)));
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
 			}
 
 			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));

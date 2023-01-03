@@ -134,10 +134,10 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
-class RestoreConfig : public KeyBackedConfig {
+class RestoreConfig : public KeyBackedTaskConfig {
 public:
-	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfig(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
+	RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
+	RestoreConfig(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
 
 	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 	Future<StringRef> stateText(Reference<ReadYourWritesTransaction> tr) {
@@ -745,7 +745,7 @@ ACTOR Future<Void> checkTaskVersion(Database cx, Reference<Task> task, StringRef
 		    .detail("TaskVersion", taskVersion)
 		    .detail("Name", name)
 		    .detail("Version", version);
-		if (KeyBackedConfig::TaskParams.uid().exists(task)) {
+		if (KeyBackedTaskConfig::TaskParams.uid().exists(task)) {
 			std::string msg = format("%s task version `%lu' is greater than supported version `%lu'",
 			                         task->params[Task::reservedTaskParamKeyType].toString().c_str(),
 			                         (unsigned long)taskVersion,

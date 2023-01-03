@@ -25,7 +25,7 @@
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -445,6 +445,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
 
 	DDTeamCollection const* teamCollection;
+	StorageWiggleData wiggleData; // the wiggle related data persistent in database
+
 	StorageWiggleMetrics metrics;
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;

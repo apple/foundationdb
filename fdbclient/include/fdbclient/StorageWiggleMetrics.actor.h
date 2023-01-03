@@ -1,5 +1,5 @@
 /*
- * StorageWiggleMetrics.actor.h
+ * StorageWiggleMetrics.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,8 +28,10 @@
 #include "fdbrpc/Smoother.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
-#include "fdbclient/Status.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbclient/SystemData.h"
+#include "fdbclient/KeyBackedConfig.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
+#include "flow/actorcompiler.h"
 
 FDB_DECLARE_BOOLEAN_PARAM(PrimaryRegion);
 
@@ -103,56 +105,6 @@ struct StorageWiggleMetrics {
 	}
 };
 
-// read from DB
-ACTOR template <typename TxnType>
-Future<Optional<StorageWiggleMetrics>> loadStorageWiggleMetrics(TxnType tr, PrimaryRegion primary) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-	auto f = tr->get(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_STATS));
-	Optional<Value> value = wait(safeThreadFutureToFuture(f));
-	if (!value.present()) {
-		return Optional<StorageWiggleMetrics>();
-	}
-	return ObjectReader::fromStringRef<StorageWiggleMetrics>(value.get(), IncludeVersion());
-}
-
-// update the serialized metrics when the perpetual wiggle is enabled
-ACTOR template <typename TxnType>
-Future<Void> updateStorageWiggleMetrics(TxnType tr, StorageWiggleMetrics metrics, PrimaryRegion primary) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	auto f = tr->get(perpetualStorageWiggleKey);
-	Optional<Value> v = wait(safeThreadFutureToFuture(f));
-	if (v.present() && v == "1"_sr) {
-		tr->set(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_STATS),
-		        ObjectWriter::toValue(metrics, IncludeVersion()));
-	} else {
-		CODE_PROBE(true, "Intend to update StorageWiggleMetrics after PW disabled");
-	}
-	return Void();
-}
-
-// set all fields except for smoothed durations to default values. If the metrics is not given, load from system key
-// space
-ACTOR template <class TrType>
-Future<Void> resetStorageWiggleMetrics(TrType tr,
-                                       PrimaryRegion primary,
-                                       Optional<StorageWiggleMetrics> metrics = Optional<StorageWiggleMetrics>()) {
-
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	if (!metrics.present()) {
-		wait(store(metrics, loadStorageWiggleMetrics(tr, primary)));
-	}
-
-	if (metrics.present()) {
-		metrics.get().reset();
-		tr->set(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_STATS),
-		        ObjectWriter::toValue(metrics.get(), IncludeVersion()));
-	}
-	return Void();
-}
-
 struct StorageWiggleDelay {
 	constexpr static FileIdentifier file_identifier = 102937;
 	double delaySeconds = 0;
@@ -164,58 +116,119 @@ struct StorageWiggleDelay {
 	}
 };
 
+namespace {
+// Persistent the total delay time to the database, and return accumulated delay time.
 ACTOR template <class TrType>
-Future<StorageWiggleDelay> readPerpetualWiggleDelay(TrType tr, PrimaryRegion primary) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+Future<double> addPerpetualWiggleDelay_impl(
+    TrType tr,
+    KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())> delayProperty,
+    double secDelta) {
+
+	state StorageWiggleDelay delayObj = wait(delayProperty.getD(tr, Snapshot::False));
+	delayObj.delaySeconds += secDelta;
+	delayProperty.set(tr, delayObj);
+
+	return delayObj.delaySeconds;
+}
+
+// set all fields except for smoothed durations to default values. If the metrics is not given, load from system key
+// space
+ACTOR template <class TrType>
+Future<Void> resetStorageWiggleMetrics_impl(
+    TrType tr,
+    KeyBackedObjectProperty<StorageWiggleMetrics, decltype(IncludeVersion())> metricsProperty,
+    Optional<StorageWiggleMetrics> metrics) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	auto f = tr->get(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_DELAY));
-	Optional<Value> v = wait(safeThreadFutureToFuture(f));
-	StorageWiggleDelay delayObj;
-	if (v.present()) {
-		delayObj = BinaryReader::fromStringRef<StorageWiggleDelay>(v.get(), IncludeVersion());
+	if (!metrics.present()) {
+		wait(store(metrics, metricsProperty.get(tr)));
 	}
-	return delayObj;
-}
 
-// Persistent the total delay time to the database, and return accumulated delay time.
-ACTOR template <class TrType>
-Future<double> addPerpetualWiggleDelay(TrType tr, PrimaryRegion primary, double secDelta) {
-	state double totalDelay = 0;
-	loop {
-		tr->reset();
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state StorageWiggleDelay delayObj = wait(readPerpetualWiggleDelay(tr, primary));
-			delayObj.delaySeconds += secDelta;
-			totalDelay = delayObj.delaySeconds;
-			tr->set(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_DELAY),
-			        BinaryWriter::toValue(delayObj, IncludeVersion()));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-	return totalDelay;
-}
-
-// Persistent the total delay time to the database, and return accumulated delay time.
-ACTOR template <class TrType>
-Future<Void> clearPerpetualWiggleDelay(TrType tr, PrimaryRegion primary) {
-	loop {
-		tr->reset();
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->clear(perpetualStorageWiggleKeyFor(primary, PerpetualWiggleKeyType::WIGGLE_DELAY));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
+	if (metrics.present()) {
+		metrics.get().reset();
+		metricsProperty.set(tr, metrics.get());
 	}
 	return Void();
 }
+} // namespace
+// After 7.3, the perpetual wiggle related keys should use format "\xff/storageWiggle/[primary | remote]/[fieldName]"
+class StorageWiggleData : public KeyBackedConfig {
+public:
+	StorageWiggleData() : KeyBackedConfig(perpetualStorageWigglePrefix) {}
+
+	auto perpetualWiggleSpeed() const { return KeyBackedProperty<Value, NullCodec>(perpetualStorageWiggleKey); }
+
+	auto wigglingStorageServer(PrimaryRegion primaryDc) const {
+		Key mapPrefix = perpetualStorageWiggleIDPrefix.withSuffix(primaryDc ? "primary/"_sr : "remote/"_sr);
+		return KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())>(mapPrefix, IncludeVersion());
+	}
+
+	auto storageWiggleMetrics(PrimaryRegion primaryDc) const {
+		Key key = perpetualStorageWiggleStatsPrefix.withSuffix(primaryDc ? "primary"_sr : "remote"_sr);
+		return KeyBackedObjectProperty<StorageWiggleMetrics, decltype(IncludeVersion())>(key, IncludeVersion());
+	}
+
+	auto storageWiggleDelay(PrimaryRegion primaryDc) const {
+		Key key = prefix.withSuffix(primaryDc ? "primary/"_sr : "remote/"_sr).withSuffix("wiggleDelay"_sr);
+		return KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())>(key, IncludeVersion());
+	}
+
+	// Persistent the total delay time to the database, and return accumulated delay time.
+	template <class DB>
+	Future<double> addPerpetualWiggleDelay(Reference<DB> db, PrimaryRegion primary, double secDelta) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return addPerpetualWiggleDelay_impl(tr, self.storageWiggleDelay(primary), secDelta);
+		});
+	}
+
+	// clear the persistent total delay in database
+	template <class DB>
+	Future<Void> clearPerpetualWiggleDelay(Reference<DB> db, PrimaryRegion primary) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			self.storageWiggleDelay(primary).clear(tr);
+			return Future<Void>(Void());
+		});
+	}
+
+	// set all fields except for smoothed durations to default values. If the metrics is not given, load from system key
+	// space
+	template <class TrType>
+	Future<Void> resetStorageWiggleMetrics(TrType tr,
+	                                       PrimaryRegion primary,
+	                                       Optional<StorageWiggleMetrics> metrics = Optional<StorageWiggleMetrics>()) {
+		return resetStorageWiggleMetrics_impl(tr, storageWiggleMetrics(primary), metrics);
+	}
+
+	ACTOR template <typename TrType>
+	static Future<Void> updateStorageWiggleMetrics_impl(
+	    KeyBackedProperty<Value, NullCodec> wiggleSpeed,
+	    KeyBackedObjectProperty<StorageWiggleMetrics, decltype(IncludeVersion())> storageMetrics,
+	    TrType tr,
+	    StorageWiggleMetrics metrics,
+	    PrimaryRegion primary) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		Optional<Value> v = wait(wiggleSpeed.get(tr));
+		if (v.present() && v == "1"_sr) {
+			storageMetrics.set(tr, metrics);
+		} else {
+			CODE_PROBE(true, "Intend to update StorageWiggleMetrics after PW disabled");
+		}
+		return Void();
+	}
+
+	// update the serialized metrics when the perpetual wiggle is enabled
+	template <typename TrType>
+	Future<Void> updateStorageWiggleMetrics(TrType tr, StorageWiggleMetrics metrics, PrimaryRegion primary) {
+		return updateStorageWiggleMetrics_impl(
+		    perpetualWiggleSpeed(), storageWiggleMetrics(primary), tr, metrics, primary);
+	}
+};
 
 #include "flow/unactorcompiler.h"
 #endif

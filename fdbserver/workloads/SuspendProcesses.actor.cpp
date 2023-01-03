@@ -25,7 +25,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 struct SuspendProcessesWorkload : TestWorkload {
