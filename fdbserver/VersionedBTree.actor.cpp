@@ -2552,7 +2552,7 @@ public:
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
-		debug_printf("DWALPager(%s) op=%s %s %d ptr=%p\n",
+		debug_printf("DWALPager(%s) op=%s %s encoding=%d ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysicalPage"),
 		             toString(pageIDs).c_str(),
