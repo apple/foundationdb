@@ -36,7 +36,8 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
-#include "fdbserver/ClusterController.actor.h"
+#include "fdbserver/ClusterController.h"
+#include "fdbserver/ClusterControllerDBInfo.h"
 #include "fdbserver/DBCoreState.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -165,7 +166,7 @@ private:
 };
 
 struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> {
-	ClusterControllerData* controllerData;
+	ClusterController* controllerData;
 
 	UID dbgid;
 
@@ -255,7 +256,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	Reference<EventCacheHolder> clusterRecoveryDurationEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryAvailableEventHolder;
 
-	ClusterRecoveryData(ClusterControllerData* controllerData,
+	ClusterRecoveryData(ClusterController* controllerData,
 	                    Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	                    MasterInterface const& masterInterface,
 	                    LifetimeToken const& masterLifetimeToken,
@@ -304,9 +305,6 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	}
 };
 
-ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
-                                    ClusterControllerData::DBInfo* db,
-                                    MasterInterface* newMaster);
 ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self, bool exThrown);
 ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);
 bool isNormalClusterRecoveryError(const Error&);

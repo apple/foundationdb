@@ -80,117 +80,6 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 	}
 }
 
-ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
-                                    ClusterControllerData::DBInfo* db,
-                                    MasterInterface* newMaster) {
-	state Future<ErrorOr<MasterInterface>> fNewMaster;
-	state WorkerFitnessInfo masterWorker;
-
-	loop {
-		// We must recruit the master in the same data center as the cluster controller.
-		// This should always be possible, because we can recruit the master on the same process as the cluster
-		// controller.
-		std::map<Optional<Standalone<StringRef>>, int> id_used;
-		id_used[cluster->clusterControllerProcessId]++;
-		masterWorker = cluster->getWorkerForRoleInDatacenter(
-		    cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
-		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
-		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
-		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
-		    !cluster->goodRecruitmentTime.isReady()) {
-			TraceEvent("RecruitNewMaster", cluster->id)
-			    .detail("Fitness", masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master));
-			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-			continue;
-		}
-		RecruitMasterRequest rmq;
-		rmq.lifetime = db->serverInfo->get().masterLifetime;
-		rmq.forceRecovery = db->forceRecovery;
-
-		cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
-		cluster->db.unfinishedRecoveries++;
-		fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
-		wait(ready(fNewMaster) || db->forceMasterFailure.onTrigger());
-		if (fNewMaster.isReady() && fNewMaster.get().present()) {
-			TraceEvent("RecruitNewMaster", cluster->id).detail("Recruited", fNewMaster.get().get().id());
-
-			// for status tool
-			TraceEvent("RecruitedMasterWorker", cluster->id)
-			    .detail("Address", fNewMaster.get().get().address())
-			    .trackLatest(cluster->recruitedMasterWorkerEventHolder->trackingKey);
-
-			*newMaster = fNewMaster.get().get();
-
-			return Void();
-		} else {
-			CODE_PROBE(true, "clusterWatchDatabase() !newMaster.present()");
-			wait(delay(SERVER_KNOBS->MASTER_SPIN_DELAY));
-		}
-	}
-}
-
-ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, Reference<RecruitWorkersInfo> req) {
-	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	CODE_PROBE(true, "ClusterController RecruitTLogsRequest");
-	loop {
-		try {
-			req->rep = self->findWorkersForConfiguration(req->req);
-			return Void();
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers && self->goodRecruitmentTime.isReady()) {
-				self->outstandingRecruitmentRequests.push_back(req);
-				TraceEvent(SevWarn, "RecruitFromConfigurationNotAvailable", self->id).error(e);
-				wait(req->waitForCompletion.onTrigger());
-				return Void();
-			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
-				// recruitment not good enough, try again
-				TraceEvent("RecruitFromConfigurationRetry", self->id)
-				    .error(e)
-				    .detail("GoodRecruitmentTimeReady", self->goodRecruitmentTime.isReady());
-				while (!self->goodRecruitmentTime.isReady()) {
-					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-				}
-			} else {
-				TraceEvent(SevError, "RecruitFromConfigurationError", self->id).error(e);
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
-}
-
-ACTOR Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
-    ClusterControllerData* self,
-    Reference<RecruitRemoteWorkersInfo> req) {
-	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	CODE_PROBE(true, "ClusterController RecruitTLogsRequest Remote");
-	loop {
-		try {
-			auto rep = self->findRemoteWorkersForConfiguration(req->req);
-			return rep;
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers && self->goodRemoteRecruitmentTime.isReady()) {
-				self->outstandingRemoteRecruitmentRequests.push_back(req);
-				TraceEvent(SevWarn, "RecruitRemoteFromConfigurationNotAvailable", self->id).error(e);
-				wait(req->waitForCompletion.onTrigger());
-				return req->rep;
-			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
-				// recruitment not good enough, try again
-				TraceEvent("RecruitRemoteFromConfigurationRetry", self->id)
-				    .error(e)
-				    .detail("GoodRecruitmentTimeReady", self->goodRemoteRecruitmentTime.isReady());
-				while (!self->goodRemoteRecruitmentTime.isReady()) {
-					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-				}
-			} else {
-				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id).error(e);
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
-}
-
 ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
 	std::vector<Future<CommitProxyInterface>> initializationReplies;
 	for (int i = 0; i < recr.commitProxies.size(); i++) {
@@ -304,7 +193,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		    makeReference<RecruitRemoteWorkersInfo>(remoteRecruitReq);
 		recruitWorkersInfo->dbgId = self->dbgid;
 		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers =
-		    clusterRecruitRemoteFromConfiguration(self->controllerData, recruitWorkersInfo);
+		    self->controllerData->clusterRecruitRemoteFromConfiguration(recruitWorkersInfo);
 
 		self->primaryLocality = self->dcId_locality[recr.dcId];
 		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
@@ -983,7 +872,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	RecruitFromConfigurationRequest recruitReq(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
 	state Reference<RecruitWorkersInfo> recruitWorkersInfo = makeReference<RecruitWorkersInfo>(recruitReq);
 	recruitWorkersInfo->dbgId = self->dbgid;
-	wait(clusterRecruitFromConfiguration(self->controllerData, recruitWorkersInfo));
+	wait(self->controllerData->clusterRecruitFromConfiguration(recruitWorkersInfo));
 	state RecruitFromConfigurationReply recruits = recruitWorkersInfo->rep;
 
 	std::string primaryDcIds, remoteDcIds;
