@@ -868,7 +868,7 @@ const KeyRef configKeysPrefix = configKeys.begin;
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
 // The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
-// format "\xff/storageWiggle/[primary | remote]/[fieldName]"
+// format "\xff/storageWiggle/[primary | remote]/[fieldName]". See class StorageWiggleData for the data schema.
 const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary/ or /remote/
 const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); // withSuffix /primary or /remote
 const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
