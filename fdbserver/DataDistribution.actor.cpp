@@ -626,7 +626,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
-			self->physicalShardCollection = makeReference<PhysicalShardCollection>();
+			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
 			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
@@ -723,7 +723,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
-			    getUnhealthyRelocationCount });
+			    getUnhealthyRelocationCount,
+			    getAverageShardBytes });
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
@@ -744,7 +745,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                processingWiggle,
 				                                getShardMetrics,
 				                                removeFailedServer,
-				                                getUnhealthyRelocationCount });
+				                                getUnhealthyRelocationCount,
+				                                getAverageShardBytes });
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(remoteTeamCollection,
@@ -1558,9 +1560,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
-					CODE_PROBE(true,
-					           "Data distributor received a duplicate ongoing snapshot request",
-					           probe::decoration::rare);
+					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;

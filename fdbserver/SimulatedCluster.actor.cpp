@@ -42,6 +42,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
@@ -403,6 +404,7 @@ public:
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
 	// 7.2 cannot be downgraded to 7.1 or below after enabling encryption-at-rest.
+	// TODO: Remove this bool once the encryption knobs are removed
 	bool disableEncryption = false;
 	// By default, encryption mode is set randomly (based on the tenant mode)
 	// If provided, set using EncryptionAtRestMode::fromString
@@ -2045,7 +2047,9 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setConfigDB(testConfig);
 }
 
-bool validEncryptAndTenantMode(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
+bool validateEncryptAndTenantModePair(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
+	// Domain aware encryption is only allowed when the tenant mode is required. Other encryption modes (disabled or
+	// cluster aware) are allowed regardless of the tenant mode
 	if (encryptMode.mode == EncryptionAtRestMode::DISABLED || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
 		return true;
 	}
@@ -2078,7 +2082,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			// Get the subset of valid encrypt modes given the tenant mode
 			for (int i = 0; i < testConfig.encryptModes.size(); i++) {
 				EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromString(testConfig.encryptModes.at(i));
-				if (validEncryptAndTenantMode(encryptMode, tenantMode)) {
+				if (validateEncryptAndTenantModePair(encryptMode, tenantMode)) {
 					validEncryptModes.push_back(encryptMode);
 				}
 			}
@@ -2086,8 +2090,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				simconfig.db.encryptionAtRestMode = deterministicRandom()->randomChoice(validEncryptModes);
 			}
 		} else {
-			// TODO: This case should only trigger with probability (BUGGIFY) once the server knob is removed
-			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT) {
+			// TODO: These cases should only trigger with probability (BUGGIFY) once the server knob is removed
+			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT || BUGGIFY) {
 				// optional and disabled tenant modes currently only support cluster aware encryption
 				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
 			} else {
@@ -2369,7 +2373,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    .detail("ConfigString", startingConfigString);
 
 	bool requiresExtraDBMachines = !g_simulator->extraDatabases.empty() && !useLocalDatabase;
-	int assignedMachines = 0, nonVersatileMachines = 0;
+	int assignedMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
@@ -2423,10 +2427,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
-				if (processClass ==
-				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
-					nonVersatileMachines++;
-				}
+
 				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
 					possible_ss++;
 				}
@@ -2438,11 +2439,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			if (machine >= machines) {
 				if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					storageCacheMachines--;
 				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
 					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					blobWorkerMachines--;
 				}
 			}
@@ -2638,14 +2637,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// snapshot of the storage engine without a snapshotting file system.
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
-	}
-
-	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
-	// possibly due to running the rocksdb in single thread in simulation.
-	// Re-enable the backup and restore related simulation tests when the tests are passing again.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}

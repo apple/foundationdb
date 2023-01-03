@@ -36,6 +36,7 @@ struct BulkSetupWorkload : TestWorkload {
 	double maxNumTenants;
 	double minNumTenants;
 	std::vector<TenantName> tenantNames;
+	double testDuration;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
@@ -45,6 +46,7 @@ struct BulkSetupWorkload : TestWorkload {
 		maxNumTenants = getOption(options, "maxNumTenants"_sr, 0);
 		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
 		ASSERT(minNumTenants <= maxNumTenants);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -64,7 +66,6 @@ struct BulkSetupWorkload : TestWorkload {
 			std::vector<Future<Void>> tenantFutures;
 			for (int i = 0; i < numTenantsToCreate; i++) {
 				TenantMapEntry entry;
-				entry.encrypted = false;
 				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
 				TraceEvent("CreatingTenant")
 				    .detail("Tenant", workload->tenantNames.back())
@@ -74,32 +75,28 @@ struct BulkSetupWorkload : TestWorkload {
 			}
 			wait(waitForAll(tenantFutures));
 		}
+		wait(bulkSetup(cx,
+		               workload,
+		               workload->nodeCount,
+		               Promise<double>(),
+		               false,
+		               0.0,
+		               1e12,
+		               std::vector<uint64_t>(),
+		               Promise<std::vector<std::pair<uint64_t, double>>>(),
+		               0,
+		               0.1,
+		               0,
+		               0,
+		               workload->tenantNames));
 		return Void();
 	}
 
-	Future<Void> start(Database const& cx) override {
-		if (clientId == 0) {
-			return bulkSetup(cx,
-			                 this,
-			                 nodeCount,
-			                 Promise<double>(),
-			                 false,
-			                 0.0,
-			                 1e12,
-			                 std::vector<uint64_t>(),
-			                 Promise<std::vector<std::pair<uint64_t, double>>>(),
-			                 0,
-			                 0.1,
-			                 0,
-			                 0,
-			                 tenantNames);
-		}
-		return Void();
-	}
+	Future<Void> start(Database const& cx) override { return Void(); }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			return _setup(this, cx);
+			return timeout(_setup(this, cx), testDuration, Void());
 		}
 		return Void();
 	}

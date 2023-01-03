@@ -53,11 +53,10 @@ struct TenantManagementWorkload : TestWorkload {
 		int64_t id;
 		Optional<TenantGroupName> tenantGroup;
 		bool empty;
-		bool encrypted;
 
 		TenantData() : id(-1), empty(true) {}
-		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty, bool encrypted)
-		  : id(id), tenantGroup(tenantGroup), empty(empty), encrypted(encrypted) {}
+		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
+		  : id(id), tenantGroup(tenantGroup), empty(empty) {}
 	};
 
 	struct TenantGroupData {
@@ -400,11 +399,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
-			if (operationType == OperationType::SPECIAL_KEYS) {
-				entry.encrypted = false;
-			} else {
-				entry.encrypted = deterministicRandom()->coinflip();
-			}
 
 			if (self->createdTenants.count(tenant)) {
 				alreadyExists = true;
@@ -534,7 +528,7 @@ struct TenantManagementWorkload : TestWorkload {
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
 					self->createdTenants[tenantItr->first] =
-					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true, tenantItr->second.encrypted);
+					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
@@ -657,9 +651,19 @@ struct TenantManagementWorkload : TestWorkload {
 
 			wait(waitForAll(deleteFutures));
 			wait(tr->commit());
-		} else {
+		} else { // operationType == OperationType::METACLUSTER
 			ASSERT(!endTenant.present() && tenants.size() == 1);
-			wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
+			// Read the entry first and then issue delete by ID
+			// getTenant throwing tenant_not_found will break some test cases because it is not wrapped
+			// by runManagementTransaction. For such cases, fall back to delete by name and allow
+			// the errors to flow through there
+			Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->mvDb, beginTenant));
+			if (entry.present() && deterministicRandom()->coinflip()) {
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, entry.get().id));
+				CODE_PROBE(true, "Deleted tenant by ID");
+			} else {
+				wait(MetaclusterAPI::deleteTenant(self->mvDb, beginTenant));
+			}
 		}
 
 		return Void();
@@ -943,19 +947,26 @@ struct TenantManagementWorkload : TestWorkload {
 
 		int64_t id;
 
+		std::string name;
+		std::string base64Name;
+		std::string printableName;
 		std::string prefix;
 		std::string base64Prefix;
 		std::string printablePrefix;
 		std::string tenantStateStr;
 		std::string base64TenantGroup;
 		std::string printableTenantGroup;
-		bool encrypted;
 		std::string assignedClusterStr;
 
 		jsonDoc.get("id", id);
+		jsonDoc.get("name.base64", base64Name);
+		jsonDoc.get("name.printable", printableName);
+
+		name = base64::decoder::from_string(base64Name);
+		ASSERT(name == unprintable(printableName));
+
 		jsonDoc.get("prefix.base64", base64Prefix);
 		jsonDoc.get("prefix.printable", printablePrefix);
-		jsonDoc.get("prefix.encrypted", encrypted);
 
 		prefix = base64::decoder::from_string(base64Prefix);
 		ASSERT(prefix == unprintable(printablePrefix));
@@ -975,7 +986,7 @@ struct TenantManagementWorkload : TestWorkload {
 			assignedCluster = ClusterNameRef(assignedClusterStr);
 		}
 
-		TenantMapEntry entry(id, TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup, encrypted);
+		TenantMapEntry entry(id, TenantNameRef(name), TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup);
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}
