@@ -1,5 +1,5 @@
 /*
- * KeyBackedConfig.actor.h
+ * KeyBackedConfig.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,9 @@
  * limitations under the License.
  */
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_KEYBACKEDCONFIG_G_H)
-#define FDBCLIENT_KEYBACKEDCONFIG_G_H
-#include "fdbclient/KeyBackedConfig.actor.g.h"
-#elif !defined(FDBCLIENT_KEYBACKEDCONFIG_ACTOR_H)
-#define FDBCLIENT_KEYBACKEDCONFIG_ACTOR_H
+#ifndef FDBCLIENT_KEYBACKEDCONFIG_H
+#define FDBCLIENT_KEYBACKEDCONFIG_H
 #include "fdbclient/KeyBackedTypes.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 class KeyBackedConfig {
 public:
@@ -55,5 +51,4 @@ protected:
 	Subspace configSpace;
 };
 
-#include "flow/unactorcompiler.h"
-#endif // FOUNDATIONDB_KEYBACKEDCONFIG_H
+#endif // FDBCLIENT_KEYBACKEDCONFIG_H
