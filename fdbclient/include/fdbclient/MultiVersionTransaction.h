@@ -247,6 +247,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    int end_key_name_length,
 	                                    int64_t version);
 
+	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction

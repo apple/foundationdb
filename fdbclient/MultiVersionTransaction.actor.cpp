@@ -474,9 +474,17 @@ Reference<ITransaction> DLTenant::createTransaction() {
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
-// Incomplete
 ThreadFuture<int64_t> DLTenant::getId() {
-	return 0;
+	if (!api->tenantGetId) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->tenantGetId(tenant);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		int64_t res;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
+		ASSERT(!error);
+		return res;
+	});
 }
 
 ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
@@ -941,6 +949,7 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_tenant_verify_blob_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	loadClientFunction(&api->tenantGetId, lib, fdbCPath, "fdb_tenant_get_id", headerVersion >= 720);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);

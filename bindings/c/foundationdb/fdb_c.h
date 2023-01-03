@@ -412,6 +412,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* 
                                                                      int end_key_name_length,
                                                                      int64_t version);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant);
+
 DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
