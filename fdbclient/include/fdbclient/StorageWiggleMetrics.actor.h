@@ -1,5 +1,5 @@
 /*
- * StorageWiggleMetrics.h
+ * StorageWiggleMetrics.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,7 +29,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedConfig.actor.h"
+#include "fdbclient/KeyBackedConfig.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h"
 
