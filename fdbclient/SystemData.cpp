@@ -21,7 +21,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
@@ -872,28 +871,7 @@ const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wigg
 // format "\xff/storageWiggle/[primary | remote]/[fieldName]"
 const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary/ or /remote/
 const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); // withSuffix /primary or /remote
-// "\xff/storageWiggle/[primary | remote]/[fieldName]"
 const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
-
-// the final char is "/"
-const Key perpetualStorageWigglePrefixFor(bool primaryDc, PerpetualWigglePrefixType type) {
-	if (type == PerpetualWigglePrefixType::STORAGE_ID)
-		return perpetualStorageWiggleIDPrefix.withSuffix(primaryDc ? "primary/"_sr : "remote/"_sr);
-	ASSERT(false);
-	return ""_sr;
-}
-
-const Key perpetualStorageWiggleKeyFor(bool primaryDc, PerpetualWiggleKeyType type) {
-	if (type == PerpetualWiggleKeyType::WIGGLE_STATS)
-		return perpetualStorageWiggleStatsPrefix.withSuffix(primaryDc ? "primary"_sr : "remote"_sr);
-
-	Key result = perpetualStorageWigglePrefix.withSuffix(primaryDc ? "primary/"_sr : "remote/"_sr);
-	if (type == PerpetualWiggleKeyType::WIGGLE_DELAY)
-		return result.withSuffix("wiggleDelay"_sr);
-
-	ASSERT(false);
-	return ""_sr;
-}
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 

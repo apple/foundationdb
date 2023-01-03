@@ -277,11 +277,7 @@ extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;
 extern const KeyRef perpetualStorageWiggleStatsPrefix;
-// the final char is "/"
-enum class PerpetualWigglePrefixType { STORAGE_ID };
-enum class PerpetualWiggleKeyType { WIGGLE_STATS, WIGGLE_DELAY };
-const Key perpetualStorageWigglePrefixFor(bool primaryDc, PerpetualWigglePrefixType type);
-const Key perpetualStorageWiggleKeyFor(bool primaryDc, PerpetualWiggleKeyType type);
+extern const KeyRef perpetualStorageWigglePrefix;
 
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;

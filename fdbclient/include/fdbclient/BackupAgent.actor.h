@@ -55,7 +55,106 @@ FDB_DECLARE_BOOLEAN_PARAM(WaitForDestUID);
 FDB_DECLARE_BOOLEAN_PARAM(CheckBackupUID);
 FDB_DECLARE_BOOLEAN_PARAM(DeleteData);
 FDB_DECLARE_BOOLEAN_PARAM(PartialBackup);
+FDB_DECLARE_BOOLEAN_PARAM(SetValidation);
 
+// Key backed tags are a single-key slice of the TagUidMap, defined below.
+// The Value type of the key is a UidAndAbortedFlagT which is a pair of {UID, aborted_flag}
+// All tasks on the UID will have a validation key/value that requires aborted_flag to be
+// false, so changing that value, such as changing the UID or setting aborted_flag to true,
+// will kill all of the active tasks on that backup/restore UID.
+typedef std::pair<UID, bool> UidAndAbortedFlagT;
+class KeyBackedTag : public KeyBackedProperty<UidAndAbortedFlagT> {
+public:
+	KeyBackedTag() : KeyBackedProperty(StringRef()) {}
+	KeyBackedTag(std::string tagName, StringRef tagMapPrefix);
+
+	Future<Void> cancel(Reference<ReadYourWritesTransaction> tr) {
+		std::string tag = tagName;
+		Key _tagMapPrefix = tagMapPrefix;
+		return map(get(tr), [tag, _tagMapPrefix, tr](Optional<UidAndAbortedFlagT> up) -> Void {
+			if (up.present()) {
+				// Set aborted flag to true
+				up.get().second = true;
+				KeyBackedTag(tag, _tagMapPrefix).set(tr, up.get());
+			}
+			return Void();
+		});
+	}
+
+	std::string tagName;
+	Key tagMapPrefix;
+};
+
+typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
+// Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
+class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
+	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
+	                                                           Reference<ReadYourWritesTransaction> tr,
+	                                                           Snapshot snapshot);
+
+public:
+	TagUidMap(const StringRef& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
+
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
+	                                         Snapshot snapshot = Snapshot::False) {
+		return getAll_impl(this, tr, snapshot);
+	}
+
+	Key prefix;
+};
+
+class KeyBackedTaskConfig : public KeyBackedConfig {
+public:
+	static struct {
+		static TaskParam<UID> uid() { return __FUNCTION__sr; }
+	} TaskParams;
+
+	KeyBackedTaskConfig(StringRef prefix, UID uid = UID()) : KeyBackedConfig(prefix, uid) {}
+
+	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
+
+	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
+	                    Reference<Task> task,
+	                    SetValidation setValidation = SetValidation::True) {
+		// Set the uid task parameter
+		TaskParams.uid().set(task, uid);
+
+		if (!setValidation) {
+			return Void();
+		}
+
+		// Set the validation condition for the task which is that the restore uid's tag's uid is the same as the
+		// restore uid. Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the
+		// validation key which TaskBucket will check, and its value must be this restore config's uid.
+		UID u = uid; // 'this' could be invalid in lambda
+		Key p = prefix;
+		return map(tag().get(tr), [u, p, task](Optional<std::string> const& tag) -> Void {
+			if (!tag.present())
+				throw restore_error();
+			// Validation contition is that the uidPair key must be exactly {u, false}
+			TaskBucket::setValidationCondition(
+			    task, KeyBackedTag(tag.get(), p).key, TupleCodec<UidAndAbortedFlagT>::pack({ u, false }));
+			return Void();
+		});
+	}
+
+	// Updates the error per type map and the last error property
+	Future<Void> updateErrorInfo(Database cx, Error e, std::string message) {
+		// Avoid capture of this ptr
+		auto& copy = *this;
+
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) mutable {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return map(tr->getReadVersion(), [=](Version v) mutable {
+				copy.lastError().set(tr, { message, v });
+				copy.lastErrorPerType().set(tr, e.code(), { message, v });
+				return Void();
+			});
+		});
+	}
+};
 class BackupAgentBase : NonCopyable {
 public:
 	// Time formatter for anything backup or restore related
@@ -643,10 +742,10 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
 }
 
-class BackupConfig : public KeyBackedConfig {
+class BackupConfig : public KeyBackedTaskConfig {
 public:
-	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
-	BackupConfig(Reference<Task> task) : KeyBackedConfig(fileBackupPrefixRange.begin, task) {}
+	BackupConfig(UID uid = UID()) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, uid) {}
+	BackupConfig(Reference<Task> task) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, task) {}
 
 	// rangeFileMap maps a keyrange file's End to its Begin and Filename
 	struct RangeSlice {
