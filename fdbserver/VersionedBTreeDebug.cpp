@@ -28,6 +28,9 @@ static NetworkAddress g_debugAddress = NetworkAddress::parse("0.0.0.0:0");
 static double g_debugStart = 0;
 static double g_debugEnd = std::numeric_limits<double>::max();
 
+FILE* g_debugStream = stdout;
+bool g_allowXOREncryptionInSimulation = true;
+
 bool enableRedwoodDebug() {
 	return g_debugEnabled && now() >= g_debugStart && now() < g_debugEnd &&
 	       (!g_network->getLocalAddress().isValid() || !g_debugAddress.isValid() ||

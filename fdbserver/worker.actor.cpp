@@ -35,6 +35,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -1869,8 +1870,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+
+				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
+				if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+					encryptionKeyProvider =
+					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(dbInfo);
+				} else {
+					encryptionKeyProvider =
+					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
+				}
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -2564,8 +2572,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
+					if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+						encryptionKeyProvider =
+						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(
+						        dbInfo);
+					} else {
+						encryptionKeyProvider =
+						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
+					}
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,

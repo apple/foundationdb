@@ -27,7 +27,10 @@
 #define REDWOOD_DEBUG 0
 
 // Debug output stream
-static FILE* g_debugStream = stdout;
+extern FILE* g_debugStream;
+
+// Knob to disable XOR encryption for unit tests that aren't compatible with XOR encryption.
+extern bool g_allowXOREncryptionInSimulation;
 
 bool enableRedwoodDebug();
 

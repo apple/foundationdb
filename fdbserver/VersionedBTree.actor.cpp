@@ -2552,10 +2552,11 @@ public:
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
-		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
+		debug_printf("DWALPager(%s) op=%s %s %d ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysicalPage"),
 		             toString(pageIDs).c_str(),
+		             page->getEncodingType(),
 		             page->rawData());
 
 		// Set metadata before prewrite so it's in the pre-encrypted page in cache if the page is encrypted
@@ -7876,10 +7877,11 @@ public:
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
 		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
-			ASSERT(encryptionKeyProvider->expectedEncodingType() == EncodingType::AESEncryptionV1);
-			encodingType = EncodingType::AESEncryptionV1;
+			encodingType = FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ? EncodingType::AESEncryptionWithAuth
+			                                                             : EncodingType::AESEncryption;
+			ASSERT_EQ(encodingType, encryptionKeyProvider->expectedEncodingType());
 			m_keyProvider = encryptionKeyProvider;
-		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
+		} else if (g_allowXOREncryptionInSimulation && g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Simulation only. Deterministically enable encryption based on uid
 			encodingType = EncodingType::XOREncryption_TestOnly;
 			m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(filename);
@@ -9942,7 +9944,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
 	state unsigned int encryptionDomainMode =
 	    params.getInt("domainMode")
-	        .orDefault(deterministicRandom()->randomInt(0, RandomEncryptionKeyProvider::EncryptionDomainMode::MAX));
+	        .orDefault(deterministicRandom()->randomInt(
+	            0, RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode::MAX));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -9995,9 +9998,12 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state Reference<IPageEncryptionKeyProvider> keyProvider;
-	if (encodingType == EncodingType::AESEncryptionV1) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider>(
-		    RandomEncryptionKeyProvider::EncryptionDomainMode(encryptionDomainMode));
+	if (encodingType == EncodingType::AESEncryption) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryption>>(
+		    RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode(encryptionDomainMode));
+	} else if (encodingType == EncodingType::AESEncryptionWithAuth) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>(
+		    RandomEncryptionKeyProvider<AESEncryptionWithAuth>::EncryptionDomainMode(encryptionDomainMode));
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
@@ -11144,9 +11150,13 @@ ACTOR Future<Void> sequentialInsert(IKeyValueStore* kvs, int prefixLen, int valu
 	return Void();
 }
 
-Future<Void> closeKVS(IKeyValueStore* kvs) {
+Future<Void> closeKVS(IKeyValueStore* kvs, bool dispose = false) {
 	Future<Void> closed = kvs->onClosed();
-	kvs->close();
+	if (dispose) {
+		kvs->dispose();
+	} else {
+		kvs->close();
+	}
 	return closed;
 }
 
@@ -11321,5 +11331,71 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	return Void();
+}
+
+namespace {
+void setAuthMode(EncodingType encodingType) {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	if (encodingType == AESEncryption) {
+		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ false }));
+	} else {
+		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ true }));
+		g_knobs.setKnob("encrypt_header_auth_token_algo", KnobValueRef::create(int{ 1 }));
+	}
+}
+} // anonymous namespace
+
+TEST_CASE("/redwood/correctness/EnforceEncodingType") {
+	state const std::vector<std::pair<EncodingType, EncodingType>> testCases = {
+		{ XXHash64, AESEncryption }, { AESEncryption, AESEncryptionWithAuth }
+	};
+	state const std::map<EncodingType, Reference<IPageEncryptionKeyProvider>> encryptionKeyProviders = {
+		{ XXHash64, makeReference<NullKeyProvider>() },
+		{ AESEncryption, makeReference<RandomEncryptionKeyProvider<AESEncryption>>() },
+		{ AESEncryptionWithAuth, makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>() }
+	};
+	state IKeyValueStore* kvs = nullptr;
+	g_allowXOREncryptionInSimulation = false;
+	for (const auto& testCase : testCases) {
+		state EncodingType initialEncodingType = testCase.first;
+		state EncodingType reopenEncodingType = testCase.second;
+		ASSERT_NE(initialEncodingType, reopenEncodingType);
+		ASSERT(ArenaPage::isEncodingTypeEncrypted(reopenEncodingType));
+		deleteFile("test.redwood-v1");
+		printf("Create KV store with encoding type %d\n", initialEncodingType);
+		setAuthMode(initialEncodingType);
+		kvs = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1,
+		                  "test.redwood-v1",
+		                  UID(),
+		                  0,
+		                  false,
+		                  false,
+		                  false,
+		                  encryptionKeyProviders.at(initialEncodingType));
+		wait(kvs->init());
+		kvs->set(KeyValueRef("foo"_sr, "bar"_sr));
+		wait(kvs->commit());
+		wait(closeKVS(kvs));
+		// Reopen
+		printf("Reopen KV store with encoding type %d\n", reopenEncodingType);
+		setAuthMode(reopenEncodingType);
+		kvs = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1,
+		                  "test.redwood-v1",
+		                  UID(),
+		                  0,
+		                  false,
+		                  false,
+		                  false,
+		                  encryptionKeyProviders.at(reopenEncodingType));
+		wait(kvs->init());
+		try {
+			Optional<Value> v = wait(kvs->readValue("foo"_sr));
+			UNREACHABLE();
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_unexpected_encoding_type);
+		}
+		wait(closeKVS(kvs, true /*dispose*/));
+	}
 	return Void();
 }
