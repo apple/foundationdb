@@ -208,11 +208,13 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
-ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
-                                         const Reference<AsyncVar<Optional<ShardMetrics>>>& shardMetrics,
-                                         const BandwidthStatus& bandwidthStatus,
-                                         PromiseStream<KeyRange> readHotShard) {
+// Returns the shard size bounds as well as whether `keys` a read hot shard.
+std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
+    const KeyRange& keys,
+    const Reference<AsyncVar<Optional<ShardMetrics>>>& shardMetrics,
+    const BandwidthStatus& bandwidthStatus) {
 	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
+	bool readHotShard = false;
 	if (shardMetrics->get().present()) {
 		auto bytes = shardMetrics->get().get().metrics.bytes;
 		auto readBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get().metrics);
@@ -252,15 +254,13 @@ ShardSizeBounds calculateShardSizeBounds(const KeyRange& keys,
 			                                 SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
 			                                 (1.0 - SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 			bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
-			// TraceEvent("RHDTriggerReadHotLoggingForShard")
-			//     .detail("ShardBegin", keys.begin.printable().c_str())
-			//     .detail("ShardEnd", keys.end.printable().c_str());
-			readHotShard.send(keys);
+
+			readHotShard = true;
 		} else {
 			ASSERT(false);
 		}
 	}
-	return bounds;
+	return { bounds, readHotShard };
 }
 
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
@@ -285,7 +285,15 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	try {
 		loop {
 			state ShardSizeBounds bounds;
-			bounds = calculateShardSizeBounds(keys, shardMetrics, bandwidthStatus, self()->readHotShard);
+			bool readHotShard;
+			std::tie(bounds, readHotShard) = calculateShardSizeBounds(keys, shardMetrics, bandwidthStatus);
+
+			if (readHotShard) {
+				// TraceEvent("RHDTriggerReadHotLoggingForShard")
+				//     .detail("ShardBegin", keys.begin.printable().c_str())
+				//     .detail("ShardEnd", keys.end.printable().c_str());
+				self()->readHotShard.send(keys);
+			}
 
 			loop {
 				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
@@ -327,6 +335,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 							        keys, metrics.first.get(), shardMetrics->get().get().metrics, initWithNewMetrics);
 							if (needToMove) {
 								// Do we need to update shardsAffectedByTeamFailure here?
+								// TODO(zhewu): move this to physical shard tracker that does shard split based on size.
 								self()->output.send(
 								    RelocateShard(keys,
 								                  DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
@@ -1449,7 +1458,9 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
+			req.reply.sendError(timed_out());
+		}
 	}
 	return Void();
 }
@@ -1492,7 +1503,9 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		}
 
 		loop choose {
-			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) { req.send(self.getAverageShardBytes()); }
+			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {
+				req.send(self.getAverageShardBytes());
+			}
 			when(wait(loggingTrigger)) {
 				TraceEvent("DDTrackerStats", self.distributorId)
 				    .detail("Shards", self.shards->size())
@@ -1540,6 +1553,113 @@ FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
+// Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning
+// this key range. This function is similar to `trackShardMetrics()` and altered for physical shard. This meant to be
+// temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.
+ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(
+    Reference<IDDTxnProcessor> db,
+    KeyRange keys,
+    Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics,
+    Reference<AsyncVar<Optional<StorageMetrics>>> physicalShardStats) {
+	state BandwidthStatus bandwidthStatus =
+	    shardMetrics->get().present() ? getBandwidthStatus(shardMetrics->get().get().metrics) : BandwidthStatusNormal;
+	state double lastLowBandwidthStartTime =
+	    shardMetrics->get().present() ? shardMetrics->get().get().lastLowBandwidthStartTime : now();
+	state int shardCount = shardMetrics->get().present() ? shardMetrics->get().get().shardCount : 1;
+	wait(delay(0, TaskPriority::DataDistribution));
+
+	/*TraceEvent("trackKeyRangeInPhysicalShardMetricsStarting")
+	    .detail("Keys", keys)
+	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
+	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
+	    .detail("StartingMerges", shardMetrics->get().present() ? shardMetrics->get().get().merges : 0);*/
+
+	loop {
+		state ShardSizeBounds bounds;
+		bool readHotShard;
+		std::tie(bounds, readHotShard) = calculateShardSizeBounds(keys, shardMetrics, bandwidthStatus);
+
+		loop {
+			// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
+			std::pair<Optional<StorageMetrics>, int> metrics =
+			    wait(db->waitStorageMetrics(keys,
+			                                bounds.min,
+			                                bounds.max,
+			                                bounds.permittedError,
+			                                CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+			                                shardCount));
+			if (metrics.first.present()) {
+				BandwidthStatus newBandwidthStatus = getBandwidthStatus(metrics.first.get());
+				if (newBandwidthStatus == BandwidthStatusLow && bandwidthStatus != BandwidthStatusLow) {
+					lastLowBandwidthStartTime = now();
+				}
+				bandwidthStatus = newBandwidthStatus;
+
+				// Update current physical shard aggregated stats;
+				if (!physicalShardStats->get().present()) {
+					physicalShardStats->set(metrics.first.get());
+				} else {
+					if (!shardMetrics->get().present()) {
+						// We collect key range stats for the first time.
+						physicalShardStats->set(physicalShardStats->get().get() + metrics.first.get());
+					} else {
+						physicalShardStats->set(physicalShardStats->get().get() - shardMetrics->get().get().metrics +
+						                        metrics.first.get());
+					}
+				}
+
+				shardMetrics->set(ShardMetrics(metrics.first.get(), lastLowBandwidthStartTime, shardCount));
+				break;
+			} else {
+				shardCount = metrics.second;
+				if (shardMetrics->get().present()) {
+					auto newShardMetrics = shardMetrics->get().get();
+					newShardMetrics.shardCount = shardCount;
+					shardMetrics->set(newShardMetrics);
+				}
+			}
+		}
+	}
+}
+
+void PhysicalShardCollection::PhysicalShard::insertNewRangeData(const KeyRange& newRange) {
+	RangeData data;
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	data.trackMetrics = trackKeyRangeInPhysicalShardMetrics(txnProcessor, newRange, data.stats, stats);
+	auto it = rangeData.emplace(newRange, data);
+	ASSERT(it.second);
+}
+
+void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) {
+	if (g_network->isSimulated()) {
+		// Test that new range must not overlap with any existing range in this shard.
+		for (const auto& [range, data] : rangeData) {
+			ASSERT(!range.intersects(newRange));
+		}
+	}
+
+	insertNewRangeData(newRange);
+}
+
+void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRange) {
+	std::vector<KeyRangeRef> updateRanges;
+	for (auto& [range, data] : rangeData) {
+		if (range.intersects(outRange)) {
+			updateRanges.push_back(range);
+		}
+	}
+
+	for (auto& range : updateRanges) {
+		std::vector<KeyRangeRef> remainingRanges = range - outRange;
+		for (auto& r : remainingRanges) {
+			ASSERT(r != range);
+			insertNewRangeData(r);
+		}
+		// Must erase last since `remainingRanges` uses data in `range`.
+		rangeData.erase(range);
+	}
+}
+
 // Decide whether a physical shard is available at the moment when the func is calling
 PhysicalShardAvailable PhysicalShardCollection::checkPhysicalShardAvailable(uint64_t physicalShardID,
                                                                             StorageMetrics const& moveInMetrics) {
@@ -1585,16 +1705,69 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
 	ASSERT(physicalShardID != anonymousShardId.first() && physicalShardID != UID().first());
 	ASSERT(physicalShardInstances.count(physicalShardID) == 0);
 	physicalShardInstances.insert(
-	    std::make_pair(physicalShardID, PhysicalShard(physicalShardID, metrics, teams, whenCreated)));
+	    std::make_pair(physicalShardID, PhysicalShard(txnProcessor, physicalShardID, metrics, teams, whenCreated)));
 	return;
 }
 
+// This method maintains the consistency between keyRangePhysicalShardIDMap and the RangeData in physicalShardInstances.
+// They are all updated in this method.
 void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
                                                                uint64_t physicalShardID,
                                                                uint64_t debugID) {
 	ASSERT(physicalShardID != UID().first());
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
+	std::set<uint64_t> physicalShardIDSet;
+
+	// If there are any existing physical shards own `keyRange`, remove the overlaping ranges from existing physical
+	// shards.
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		uint64_t shardID = it->value();
+		if (shardID == UID().first()) {
+			continue;
+		}
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		physicalShardInstances[shardID].removeRange(keyRange);
+	}
+
+	// Insert `keyRange` to the new physical shard.
 	keyRangePhysicalShardIDMap.insert(keyRange, physicalShardID);
-	return;
+	ASSERT(physicalShardInstances.find(physicalShardID) != physicalShardInstances.end());
+	physicalShardInstances[physicalShardID].addRange(keyRange);
+
+	// KeyRange to physical shard mapping consistency sanity check.
+	checkKeyRangePhysicalShardMapping();
+}
+
+void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
+	if (!g_network->isSimulated()) {
+		return;
+	}
+
+	// Check the invariant that keyRangePhysicalShardIDMap and physicalShardInstances should be consistent.
+	KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = keyRangePhysicalShardIDMap.ranges();
+	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
+	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
+		uint64_t shardID = it->value();
+		if (shardID == UID().first()) {
+			continue;
+		}
+		auto keyRangePiece = KeyRangeRef(it->range().begin, it->range().end);
+		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
+		bool exist = false;
+		for (const auto& [range, data] : physicalShardInstances[shardID].rangeData) {
+			if (range == keyRangePiece) {
+				exist = true;
+				break;
+			}
+		}
+		ASSERT(exist);
+	}
+
+	for (auto& [shardID, physicalShard] : physicalShardInstances) {
+		for (auto& [range, data] : physicalShard.rangeData) {
+			ASSERT(keyRangePhysicalShardIDMap[range.begin] == shardID);
+		}
+	}
 }
 
 // At beginning of the transition from the initial state without physical shard notion

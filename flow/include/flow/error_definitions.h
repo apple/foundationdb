@@ -140,6 +140,7 @@ ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocat
 ERROR( platform_error, 1500, "Platform error" )
 ERROR( large_alloc_failed, 1501, "Large block allocation failed" )
 ERROR( performance_counter_error, 1502, "QueryPerformanceCounter error" )
+ERROR( bad_allocator, 1503, "Null allocator was used to allocate memory" )
 
 ERROR( io_error, 1510, "Disk i/o operation failed" )
 ERROR( file_not_found, 1511, "File not found" )
@@ -238,6 +239,7 @@ ERROR( client_lib_not_available, 2121, "Client library exists, but is not availa
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 ERROR( no_external_client_provided, 2123, "No external client library provided." )
 ERROR( all_external_clients_failed, 2124, "All external clients have failed." )
+ERROR( incompatible_client, 2125, "None of the available clients match the protocol version of the cluster." )
 
 ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )

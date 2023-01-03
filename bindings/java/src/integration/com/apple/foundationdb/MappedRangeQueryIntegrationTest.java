@@ -209,11 +209,6 @@ class MappedRangeQueryIntegrationTest {
 					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
 					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
 					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
-					if (id == begin || id == end - 1) {
-						Assertions.assertTrue(mappedKeyValue.getBoundaryAndExist());
-					} else {
-						Assertions.assertFalse(mappedKeyValue.getBoundaryAndExist());
-					}
 					byte[] prefix = recordKeyPrefix(id);
 					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
 					prefix[prefix.length - 1] = (byte)0x01;

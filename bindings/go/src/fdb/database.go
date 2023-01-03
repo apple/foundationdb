@@ -44,6 +44,10 @@ import (
 type Database struct {
 	// String reference to the cluster file.
 	clusterFile string
+	// This variable is to track if we have to remove the database from the cached
+	// database structs. We can't use clusterFile alone, since the default clusterFile
+	// would be an empty string.
+	isCached bool
 	*database
 }
 
@@ -62,7 +66,9 @@ type DatabaseOptions struct {
 // You have to ensure that you're not resuing this database.
 func (d *Database) Close() {
 	// Remove database object from the cached databases
-	delete(openDatabases, d.clusterFile)
+	if d.isCached {
+		delete(openDatabases, d.clusterFile)
+	}
 
 	// Destroy the database
 	d.destroy()
