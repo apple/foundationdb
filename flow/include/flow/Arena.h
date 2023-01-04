@@ -267,11 +267,11 @@ public:
 	// If the optional is set, calls the function f on the value and returns the value. Otherwise, returns an empty
 	// optional.
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	Optional<MapRet<F>> map(F f) const& {
+	Optional<MapRet<F>> map(const F& f) const& {
 		return present() ? Optional<MapRet<F>>(f(get())) : Optional<MapRet<F>>();
 	}
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	Optional<MapRet<F>> map(F f) && {
+	Optional<MapRet<F>> map(const F& f) && {
 		return present() ? Optional<MapRet<F>>(f(std::move(*this).get())) : Optional<MapRet<F>>();
 	}
 

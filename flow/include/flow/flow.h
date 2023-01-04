@@ -175,11 +175,11 @@ public:
 	// If the ErrorOr is set, calls the function f on the value and returns the value. Otherwise, returns an ErrorOr
 	// with the same error value as this ErrorOr.
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	ErrorOr<MapRet<F>> map(F f) const& {
+	ErrorOr<MapRet<F>> map(const F& f) const& {
 		return present() ? ErrorOr<MapRet<F>>(f(get())) : ErrorOr<MapRet<F>>(getError());
 	}
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	ErrorOr<MapRet<F>> map(F f) && {
+	ErrorOr<MapRet<F>> map(const F& f) && {
 		return present() ? ErrorOr<MapRet<F>>(f(std::move(*this).get())) : ErrorOr<MapRet<F>>(getError());
 	}
 
