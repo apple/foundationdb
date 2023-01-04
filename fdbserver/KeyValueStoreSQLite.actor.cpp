@@ -149,7 +149,21 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				const auto pageStartOffset = (pageNumber - 1) * pageLen;
+				const auto pageEndOffset = pageNumber * pageLen;
+				// Check if there is any injected corrupted byte inside the page range.
+				// NOTE It is NOT guaranteed that the injected corrupted byte is the cause of hash failure.
+				if (g_simulator->corruptedBytes.isByteCorruptedInRange(filename, pageStartOffset, pageEndOffset)) {
+					severity = SevWarnAlways;
+				}
+				TraceEvent("CheckCorruption")
+				    .detail("Filename", filename)
+				    .detail("StartOffset", pageStartOffset)
+				    .detail("EndOffset", pageEndOffset);
+			}
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)

@@ -56,6 +56,41 @@
 #include "flow/TaskQueue.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+void CorruptedBytesRecorder::mark(const std::string& fileName, const uint64_t position) {
+	corruptedBytes[fileName].insert(position);
+}
+
+void CorruptedBytesRecorder::truncate(const std::string& fileName, const uint64_t truncatedSize) {
+	if (corruptedBytes.count(fileName) == 0) {
+		return;
+	}
+	corruptedBytes[fileName].erase(corruptedBytes[fileName].upper_bound(truncatedSize),
+	                               std::end(corruptedBytes[fileName]));
+}
+
+void CorruptedBytesRecorder::rename(const std::string& originalFileName, const std::string& newFileName) {
+	corruptedBytes[newFileName].swap(corruptedBytes[originalFileName]);
+	corruptedBytes.erase(originalFileName);
+}
+
+bool CorruptedBytesRecorder::isByteCorrupted(const std::string& fileName, const uint64_t position) const {
+	if (const auto iter = corruptedBytes.find(fileName); iter != std::end(corruptedBytes)) {
+		return iter->second.count(position);
+	}
+	return false;
+}
+
+bool CorruptedBytesRecorder::isByteCorruptedInRange(const std::string& fileName,
+                                                    const uint64_t begin,
+                                                    const uint64_t end) const {
+	ASSERT(begin <= end);
+	if (const auto iter = corruptedBytes.find(fileName); iter != std::end(corruptedBytes)) {
+		const auto lbound = iter->second.lower_bound(begin);
+		return lbound != std::end(iter->second) && *lbound < end;
+	}
+	return false;
+}
+
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 
@@ -784,12 +819,14 @@ private:
 			std::string sourceFilename = self->filename + ".part";
 
 			if (machineCache.count(sourceFilename)) {
+				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
 				TraceEvent("SimpleFileRename")
 				    .detail("From", sourceFilename)
 				    .detail("To", self->filename)
 				    .detail("SourceCount", machineCache.count(sourceFilename))
 				    .detail("FileCount", machineCache.count(self->filename));
 				renameFile(sourceFilename.c_str(), self->filename.c_str());
+				g_simulator->corruptedBytes.rename(sourceFilename, self->filename);
 
 				machineCache[self->filename] = machineCache[sourceFilename];
 				machineCache.erase(sourceFilename);
@@ -1219,13 +1256,15 @@ public:
 
 	static void runLoop(Sim2* self) {
 		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+		int lastPrintTime = 0;
 		while (!self->isStopped) {
 			if (self->taskQueue.canSleep()) {
 				double sleepTime = self->taskQueue.getSleepTime(self->time);
 				self->time +=
 				    sleepTime + FLOW_KNOBS->MAX_RUNLOOP_SLEEP_DELAY * pow(deterministicRandom()->random01(), 1000.0);
-				if (self->printSimTime) {
+				if (self->printSimTime && (int)self->time > lastPrintTime) {
 					printf("Time: %d\n", (int)self->time);
+					lastPrintTime = (int)self->time;
 				}
 				self->timerTime = std::max(self->timerTime, self->time);
 			}
@@ -1338,7 +1377,7 @@ public:
 	bool isAvailable() const override {
 		std::vector<ProcessInfo*> processesLeft, processesDead;
 		for (auto processInfo : getAllProcesses()) {
-			if (processInfo->isAvailableClass()) {
+			if (processInfo->isAvailableClass()) { // Only checks availability of main cluster
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					processesDead.push_back(processInfo);
 				} else {
@@ -2734,6 +2773,11 @@ Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBe
 
 ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
 	wait(delay(0.5 * deterministicRandom()->random01()));
+	// rename all keys in the corrupted list
+	// first we have to delete all corruption of the destination, since this file will be unlinked if it exists
+	TraceEvent("RenamingFile").detail("From", from).detail("To", to).log();
+	g_simulator->corruptedBytes.rename(from, to);
+	// do the rename
 	::renameFile(from, to);
 	wait(delay(0.5 * deterministicRandom()->random01()));
 	return Void();

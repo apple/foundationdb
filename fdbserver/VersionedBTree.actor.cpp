@@ -91,6 +91,8 @@ static FILE* g_debugStream = stdout;
 #define TRACE                                                                                                          \
 	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
+using namespace std::string_view_literals;
+
 // Returns a string where every line in lines is prefixed with prefix
 std::string addPrefix(std::string prefix, std::string lines) {
 	StringRef m = lines;
@@ -1229,17 +1231,29 @@ public:
 					// These pages are not encrypted
 					page->postReadPayload(c.pageID);
 				} catch (Error& e) {
-					TraceEvent(SevError, "RedwoodChecksumFailed")
+					bool isInjected = false;
+					if (g_network->isSimulated()) {
+						const auto fileName = self->pager->getName();
+						const auto physicalPageSize = self->pager->getPhysicalPageSize();
+						const auto begin = c.pageID * physicalPageSize;
+						const auto end = begin + physicalPageSize;
+						isInjected |= g_simulator->corruptedBytes.isByteCorruptedInRange(fileName, begin, end);
+					}
+					TraceEvent(isInjected ? SevWarnAlways : SevError, "RedwoodChecksumFailed")
 					    .error(e)
 					    .detail("PageID", c.pageID)
 					    .detail("PageSize", self->pager->getPhysicalPageSize())
-					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize());
+					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
+					    .detail("Filename", self->pager->getName());
 
 					debug_printf("FIFOQueue::Cursor(%s) peekALLExt getSubPage error=%s for %s. Offset %d ",
 					             c.toString().c_str(),
 					             e.what(),
 					             toString(c.pageID).c_str(),
 					             c.pageID * self->pager->getPhysicalPageSize());
+					if (isInjected) {
+						throw e.asInjectedFault();
+					}
 					throw;
 				}
 
@@ -8122,9 +8136,9 @@ RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
+	KeyValueStoreRedwood(std::string filename, UID logID_, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
 	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH), logID(logID_) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
@@ -8457,6 +8471,7 @@ private:
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
+	const UID logID;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {

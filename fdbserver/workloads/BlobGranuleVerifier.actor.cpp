@@ -172,6 +172,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			}
 		}
 	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
