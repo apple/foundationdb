@@ -2010,7 +2010,7 @@ void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
 }
 
 Optional<TenantMinimalMetadata> StorageServer::getTenantEntry(Version version, TenantInfo const& tenantInfo) {
-	if (tenantInfo.name.present()) {
+	if (tenantInfo.hasTenant()) {
 		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantInfo.tenantId);
 		if (itr == view.end()) {
