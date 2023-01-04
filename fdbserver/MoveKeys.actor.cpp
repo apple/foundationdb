@@ -1262,6 +1262,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(ranges.size() == 1);
 	state KeyRangeRef keys = ranges[0];
+	state bool cancelDataMove = false;
 	try {
 		loop {
 			state Key begin = keys.begin;
@@ -1292,6 +1293,12 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
 					ASSERT(!dataMove.ranges.empty() && dataMove.ranges.front().begin == keys.begin);
+					if (cancelDataMove) {
+						dataMove.setPhase(DataMoveMetaData::Deleting);
+						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+						wait(tr.commit());
+						throw data_move_cancelled();
+					}
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 						TraceEvent(SevVerbose, "StartMoveShardsDataMove", relocationIntervalId)
 						    .detail("DataMoveBeingDeleted", dataMoveId);
@@ -1305,6 +1312,10 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					}
 					begin = dataMove.ranges.front().end;
 				} else {
+					if (cancelDataMove) {
+						throw data_move_cancelled();
+					}
+					dataMove = DataMoveMetaData();
 					dataMove.id = dataMoveId;
 					TraceEvent(SevVerbose, "StartMoveKeysNewDataMove", relocationIntervalId)
 					    .detail("DataMoveRange", keys)
@@ -1365,8 +1376,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						if (destId.isValid()) {
 							TraceEvent(SevWarn, "StartMoveShardsDestIDExist", relocationIntervalId)
 							    .detail("Range", rangeIntersectKeys)
-							    .detail("DataMoveID", dataMoveId)
-							    .detail("DestID", destId)
+							    .detail("DataMoveID", dataMoveId.toString())
+							    .detail("DestID", destId.toString())
 							    .log();
 							ASSERT(!dest.empty());
 
@@ -1386,8 +1397,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									TraceEvent(
 									    SevWarn, "StartMoveShardsCancelConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
-									    .detail("DataMoveID", dataMoveId)
-									    .detail("ExistingDataMoveID", destId);
+									    .detail("DataMoveID", dataMoveId.toString())
+									    .detail("ExistingDataMoveID", destId.toString());
 									wait(cleanUpDataMove(occ, destId, lock, startMoveKeysLock, keys, ddEnabledState));
 									throw retry();
 								} else {
@@ -1397,17 +1408,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									TraceEvent(
 									    SevWarnAlways, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
-									    .detail("DataMoveID", dataMoveId)
-									    .detail("ExistingDataMoveID", destId)
+									    .detail("DataMoveID", dataMoveId.toString())
+									    .detail("ExistingDataMoveID", destId.toString())
 									    .detail("ExistingDataMove", dmv.toString());
-									if (dmv.getPhase() != DataMoveMetaData::Deleting) {
-										if (!dataMove.ranges.empty()) {
-											dataMove.setPhase(DataMoveMetaData::Deleting);
-											tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
-											wait(tr.commit());
-										}
-										throw data_move_cancelled();
-									}
+									cancelDataMove = true;
+									throw retry();
 								}
 							}
 						}
@@ -1495,7 +1500,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 			} catch (Error& e) {
 				if (e.code() == error_code_retry) {
 					wait(delay(1));
-					tr.reset();
 				} else {
 					TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
 					    .errorUnsuppressed(e)
