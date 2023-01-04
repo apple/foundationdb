@@ -1088,6 +1088,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
 		encryptModeForTxnStateStore = encryptMode;
 	}
+	TraceEvent("CRTxnStateStoreEncryptMode").detail("Mode", encryptModeForTxnStateStore.toString());
 	CODE_PROBE(encryptModeForTxnStateStore.isEncryptionEnabled(), "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
