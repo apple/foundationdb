@@ -34,7 +34,6 @@
 #include <ctime>
 #include <climits>
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/KeyBackedConfig.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 FDB_DECLARE_BOOLEAN_PARAM(LockDB);
@@ -634,15 +633,39 @@ public:
 	Key prefix;
 };
 
-class KeyBackedTaskConfig : public KeyBackedConfig {
+class KeyBackedTaskConfig : public KeyBackedStruct {
+protected:
+	UID uid;
+	Subspace configSpace;
+
 public:
 	static struct {
 		static TaskParam<UID> uid() { return __FUNCTION__sr; }
 	} TaskParams;
 
-	KeyBackedTaskConfig(StringRef prefix, UID uid = UID()) : KeyBackedConfig(prefix, uid) {}
+	KeyBackedTaskConfig(StringRef prefix, UID uid = UID())
+	  : KeyBackedStruct(prefix), uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
 
-	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
+	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task)
+	  : KeyBackedTaskConfig(prefix, TaskParams.uid().get(task)) {}
+
+	KeyBackedProperty<std::string> tag() { return configSpace.pack(__FUNCTION__sr); }
+
+	UID getUid() { return uid; }
+
+	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
+
+	template <class TrType>
+	void clear(TrType tr) {
+		tr->clear(configSpace.range());
+	}
+
+	// lastError is a pair of error message and timestamp expressed as an int64_t
+	KeyBackedProperty<std::pair<std::string, Version>> lastError() { return configSpace.pack(__FUNCTION__sr); }
+
+	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
+		return configSpace.pack(__FUNCTION__sr);
+	}
 
 	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
 	                    Reference<Task> task,

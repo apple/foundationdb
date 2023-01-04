@@ -29,7 +29,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedConfig.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h"
 
@@ -151,10 +151,23 @@ Future<Void> resetStorageWiggleMetrics_impl(
 	return Void();
 }
 } // namespace
+
 // After 7.3, the perpetual wiggle related keys should use format "\xff/storageWiggle/[primary | remote]/[fieldName]"
-class StorageWiggleData : public KeyBackedConfig {
+class StorageWiggleData {
+protected:
+	Key prefix;
+
 public:
-	StorageWiggleData() : KeyBackedConfig(perpetualStorageWigglePrefix) {}
+	struct DataForDc : public KeyBackedStruct {
+		DataForDc(StringRef prefix) : KeyBackedStruct(prefix) {}
+
+		auto storageWiggleDelay() const {
+			auto key = rootSpace.pack("storageWiggleDelay"_sr);
+			return KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())>(key, IncludeVersion());
+		}
+	};
+
+	StorageWiggleData() : prefix(perpetualStorageWigglePrefix) {}
 
 	auto perpetualWiggleSpeed() const { return KeyBackedProperty<Value, NullCodec>(perpetualStorageWiggleKey); }
 
@@ -168,9 +181,8 @@ public:
 		return KeyBackedObjectProperty<StorageWiggleMetrics, decltype(IncludeVersion())>(key, IncludeVersion());
 	}
 
-	auto storageWiggleDelay(PrimaryRegion primaryDc) const {
-		Key key = prefix.withSuffix(primaryDc ? "primary/"_sr : "remote/"_sr).withSuffix("wiggleDelay"_sr);
-		return KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())>(key, IncludeVersion());
+	DataForDc forDc(PrimaryRegion primaryDc) const {
+		return DataForDc(primaryDc ? prefix.withSuffix("primary/"_sr) : prefix.withSuffix("remote/"_sr));
 	}
 
 	// Persistent the total delay time to the database, and return accumulated delay time.
@@ -180,7 +192,7 @@ public:
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			return addPerpetualWiggleDelay_impl(tr, self.storageWiggleDelay(primary), secDelta);
+			return addPerpetualWiggleDelay_impl(tr, self.forDc(primary).storageWiggleDelay(), secDelta);
 		});
 	}
 
@@ -190,7 +202,7 @@ public:
 		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			self.storageWiggleDelay(primary).clear(tr);
+			self.forDc(primary).storageWiggleDelay().clear(tr);
 			return Future<Void>(Void());
 		});
 	}
