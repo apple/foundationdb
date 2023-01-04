@@ -318,13 +318,13 @@ public:
 		}
 	};
 
-	bool workerAvailable(WorkerInfo const& worker, bool checkStable) {
+	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const {
 		return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
 		       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
 		        (!checkStable || worker.reboots < 2));
 	}
 
-	bool isLongLivedStateless(Optional<Key> const& processId) {
+	bool isLongLivedStateless(Optional<Key> const& processId) const {
 		return (db.serverInfo->get().distributor.present() &&
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
@@ -2181,27 +2181,29 @@ public:
 
 	void compareWorkers(const DatabaseConfiguration& conf,
 	                    const std::vector<WorkerInterface>& first,
-	                    std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
+	                    const std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
 	                    const std::vector<WorkerInterface>& second,
-	                    std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
+	                    const std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
 	                    ProcessClass::ClusterRole role,
 	                    std::string description) {
 		std::vector<WorkerDetails> firstDetails;
-		for (auto& it : first) {
-			auto w = id_worker.find(it.locality.processId());
+		for (auto& worker : first) {
+			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
-			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
-			firstDetails.push_back(w->second.details);
+			auto const& [_, workerInfo] = *w;
+			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
+			firstDetails.push_back(workerInfo.details);
 			//TraceEvent("CompareAddressesFirst").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness firstFitness(firstDetails, role, firstUsed);
 
 		std::vector<WorkerDetails> secondDetails;
-		for (auto& it : second) {
-			auto w = id_worker.find(it.locality.processId());
+		for (auto& worker : second) {
+			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
-			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
-			secondDetails.push_back(w->second.details);
+			auto const& [_, workerInfo] = *w;
+			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
+			secondDetails.push_back(workerInfo.details);
 			//TraceEvent("CompareAddressesSecond").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
@@ -3323,7 +3325,7 @@ public:
 		return recentHealthTriggeredRecoveryTime.size();
 	}
 
-	bool isExcludedDegradedServer(const NetworkAddressList& a) {
+	bool isExcludedDegradedServer(const NetworkAddressList& a) const {
 		for (const auto& server : excludedDegradedServers) {
 			if (a.contains(server))
 				return true;
