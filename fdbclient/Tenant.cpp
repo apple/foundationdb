@@ -238,12 +238,10 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 
 		TenantMapEntry entry(id, "name"_sr, TenantState::READY);
 		int64_t bigEndianId = bigEndian64(id);
-		ASSERT(entry.id() == id &&
-		       entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
+		ASSERT(entry.id() == id && entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
 
 		TenantMapEntry decodedEntry = TenantMapEntry::decode(entry.encode());
-		ASSERT(decodedEntry.id() == entry.id() &&
-		       decodedEntry.prefix == entry.prefix);
+		ASSERT(decodedEntry.id() == entry.id() && decodedEntry.prefix == entry.prefix);
 	}
 
 	return Void();

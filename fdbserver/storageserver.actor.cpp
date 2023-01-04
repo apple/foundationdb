@@ -2093,9 +2093,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (req.tenantInfo.hasTenant()) {
 			bool lockAware = req.options.present() && req.options.get().lockAware;
 			auto tenant = data->getTenantEntry(req.version, req.tenantInfo);
-			if (!tenant.present()) {
-				throw wrong_shard_server();
-			} else if (!lockAware && tenant.get().tenantLockState == TenantLockState::LOCKED) {
+			if (!lockAware && tenant.get().tenantLockState == TenantLockState::LOCKED) {
 				throw tenant_locked();
 			}
 			req.key = req.key.withPrefix(req.tenantInfo.prefix.get());

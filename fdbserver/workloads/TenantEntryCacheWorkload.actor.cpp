@@ -71,8 +71,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		state int i;
 		for (i = 0; i < tenants->size(); i++) {
 			if (deterministicRandom()->coinflip()) {
-				Optional<TenantEntryCachePayload<int64_t>> e =
-				    wait(cache->getById(tenants->at(i).second.id()));
+				Optional<TenantEntryCachePayload<int64_t>> e = wait(cache->getById(tenants->at(i).second.id()));
 				compareTenants(e, tenants->at(i).second);
 			} else {
 				Optional<TenantEntryCachePayload<int64_t>> e = wait(cache->getByName(tenants->at(i).first));
@@ -172,8 +171,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		// Tenant delete & recreate
 		p.second.id() =
-		    p.second.id() +
-		    deterministicRandom()->randomInt(self->maxTenants + 500, self->maxTenants + 700);
+		    p.second.id() + deterministicRandom()->randomInt(self->maxTenants + 500, self->maxTenants + 700);
 		cache->put(p);
 		Optional<TenantEntryCachePayload<int64_t>> e1 = wait(cache->getById(p.second.id()));
 		entry = e1;
@@ -302,8 +300,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 			wait(cache->removeEntryByName(tenantList->at(idx).first));
 		}
 
-		state Optional<TenantEntryCachePayload<int64_t>> e =
-		    wait(cache->getById(tenantList->at(idx).second.id()));
+		state Optional<TenantEntryCachePayload<int64_t>> e = wait(cache->getById(tenantList->at(idx).second.id()));
 		ASSERT(!e.present());
 		state Optional<TenantEntryCachePayload<int64_t>> e1 =
 		    wait(cache->getByPrefix(tenantList->at(idx).second.prefix));
@@ -313,8 +310,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		// Ensure remove-entry is an idempotent operation
 		cache->removeEntryByName(tenantList->at(idx).first);
-		Optional<TenantEntryCachePayload<int64_t>> e3 =
-		    wait(cache->getById(tenantList->at(idx).second.id()));
+		Optional<TenantEntryCachePayload<int64_t>> e3 = wait(cache->getById(tenantList->at(idx).second.id()));
 		ASSERT(!e3.present());
 
 		return Void();

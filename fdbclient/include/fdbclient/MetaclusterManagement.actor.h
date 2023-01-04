@@ -1132,17 +1132,15 @@ struct CreateTenantImpl {
 				// The previous creation is permanently failed, so cleanup the tenant and create it again from scratch
 				// We don't need to remove it from the tenant map because we will overwrite the existing entry later in
 				// this transaction.
-				ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(
-				    tr, existingEntry.get().id());
+				ManagementClusterMetadata::tenantMetadata().tenantIdIndex.erase(tr, existingEntry.get().id());
 				ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
 				ManagementClusterMetadata::clusterTenantCount.atomicOp(
 				    tr, existingEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
 
 				ManagementClusterMetadata::clusterTenantIndex.erase(
 				    tr,
-				    Tuple::makeTuple(existingEntry.get().assignedCluster.get(),
-				                     self->tenantName,
-				                     existingEntry.get().id()));
+				    Tuple::makeTuple(
+				        existingEntry.get().assignedCluster.get(), self->tenantName, existingEntry.get().id()));
 
 				state DataClusterMetadata previousAssignedClusterMetadata =
 				    wait(getClusterTransaction(tr, existingEntry.get().assignedCluster.get()));
@@ -1265,8 +1263,7 @@ struct CreateTenantImpl {
 
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, self->tenantEntry);
-		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.set(
-		    tr, self->tenantEntry.id(), self->tenantName);
+		ManagementClusterMetadata::tenantMetadata().tenantIdIndex.set(tr, self->tenantEntry.id(), self->tenantName);
 		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
 		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
@@ -1282,9 +1279,7 @@ struct CreateTenantImpl {
 
 		// Updated indexes to include the new tenant
 		ManagementClusterMetadata::clusterTenantIndex.insert(
-		    tr,
-		    Tuple::makeTuple(
-		        self->tenantEntry.assignedCluster.get(), self->tenantName, self->tenantEntry.id()));
+		    tr, Tuple::makeTuple(self->tenantEntry.assignedCluster.get(), self->tenantName, self->tenantEntry.id()));
 
 		wait(setClusterFuture);
 
@@ -1765,8 +1760,7 @@ struct ConfigureTenantImpl {
 	ACTOR static Future<Void> updateDataCluster(ConfigureTenantImpl* self, Reference<ITransaction> tr) {
 		state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, self->tenantName));
 
-		if (!tenantEntry.present() ||
-		    tenantEntry.get().id() != self->updatedEntry.tenantMinimalMetadata.id ||
+		if (!tenantEntry.present() || tenantEntry.get().id() != self->updatedEntry.tenantMinimalMetadata.id ||
 		    tenantEntry.get().configurationSequenceNum >= self->updatedEntry.configurationSequenceNum) {
 			// If the tenant isn't in the metacluster, it must have been concurrently removed
 			return Void();
@@ -1785,8 +1779,7 @@ struct ConfigureTenantImpl {
 	                                                      Reference<typename DB::TransactionT> tr) {
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
-		if (!tenantEntry.present() ||
-		    tenantEntry.get().id() != self->updatedEntry.id() ||
+		if (!tenantEntry.present() || tenantEntry.get().id() != self->updatedEntry.id() ||
 		    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION ||
 		    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
 			return Void();
