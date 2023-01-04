@@ -684,7 +684,7 @@ public:
 	}
 
 	Future<Void> forgetVersionsBeforeAsync(Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield) {
-		ASSERT(newOldestVersion <= latestVersion);
+		ASSERT_LE(newOldestVersion, latestVersion);
 		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
 		auto upper = r;
 		--r;
