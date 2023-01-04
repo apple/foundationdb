@@ -1537,13 +1537,11 @@ void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Op
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
 
-	if (itr->first == FDBTransactionOptions::TIMEOUT) {
-		setTimeout(value);
-	}
-
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->setOption(option, value);
+	} else if (itr->first == FDBTransactionOptions::TIMEOUT) {
+		setTimeout(value);
 	}
 }
 

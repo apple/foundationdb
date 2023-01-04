@@ -5,7 +5,8 @@ import os
 import shutil
 import subprocess
 import sys
-from local_cluster import LocalCluster, TLSConfig, random_secret_string
+from local_cluster import LocalCluster, TLSConfig
+from test_util import random_alphanum_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
@@ -18,7 +19,8 @@ class TempCluster(LocalCluster):
         port: str = None,
         blob_granules_enabled: bool = False,
         tls_config: TLSConfig = None,
-        public_key_json_str: str = None,
+        authorization_kty: str = "",
+        authorization_keypair_id: str = "",
         remove_at_exit: bool = True,
         custom_config: dict = {},
         enable_tenants: bool = True,
@@ -26,7 +28,7 @@ class TempCluster(LocalCluster):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
-        tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
+        tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         tmp_dir.mkdir(parents=True)
         self.tmp_dir = tmp_dir
         self.remove_at_exit = remove_at_exit
@@ -41,7 +43,8 @@ class TempCluster(LocalCluster):
             blob_granules_enabled=blob_granules_enabled,
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
-            public_key_json_str=public_key_json_str,
+            authorization_kty=authorization_kty,
+            authorization_keypair_id=authorization_keypair_id,
             custom_config=custom_config,
         )
 
@@ -133,6 +136,25 @@ if __name__ == "__main__":
         type=str,
         default="Check.Valid=1",
     )
+    parser.add_argument(
+        "--authorization-kty",
+        help="Public/Private key pair type to be used in signing and verifying authorization tokens. Must be either unset (empty string), EC or RSA. Unset argument (default) disables authorization",
+        type=str,
+        choices=["", "EC", "RSA"],
+        default="",
+    )
+    parser.add_argument(
+        "--authorization-keypair-id",
+        help="Name of the public/private key pair to be used in signing and verifying authorization tokens. Setting this argument takes effect only with authorization enabled.",
+        type=str,
+        default="",
+    )
+    parser.add_argument(
+        "--no-remove-at-exit",
+        help="whether to remove the cluster directory upon exit",
+        action="store_true",
+        default=False,
+    )
     args = parser.parse_args()
 
     if args.disable_tenants:
@@ -151,43 +173,37 @@ if __name__ == "__main__":
         blob_granules_enabled=args.blob_granules_enabled,
         tls_config=tls_config,
         enable_tenants=enable_tenants,
+        authorization_kty=args.authorization_kty,
+        authorization_keypair_id=args.authorization_keypair_id,
+        remove_at_exit=not args.no_remove_at_exit,
     ) as cluster:
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
         print("data-dir: {}".format(cluster.data))
         print("cluster-file: {}".format(cluster.cluster_file))
         cmd_args = []
+        substitution_table = [
+            ("@CLUSTER_FILE@", str(cluster.cluster_file)),
+            ("@DATA_DIR@", str(cluster.data)),
+            ("@LOG_DIR@", str(cluster.log)),
+            ("@ETC_DIR@", str(cluster.etc)),
+            ("@TMP_DIR@", str(cluster.tmp_dir)),
+            ("@SERVER_CERT_FILE@", str(cluster.server_cert_file)),
+            ("@SERVER_KEY_FILE@", str(cluster.server_key_file)),
+            ("@SERVER_CA_FILE@", str(cluster.server_ca_file)),
+            ("@CLIENT_CERT_FILE@", str(cluster.client_cert_file)),
+            ("@CLIENT_KEY_FILE@", str(cluster.client_key_file)),
+            ("@CLIENT_CA_FILE@", str(cluster.client_ca_file))]
+
         for cmd in args.cmd:
-            if cmd == "@CLUSTER_FILE@":
-                cmd_args.append(str(cluster.cluster_file))
-            elif cmd == "@DATA_DIR@":
-                cmd_args.append(str(cluster.data))
-            elif cmd == "@LOG_DIR@":
-                cmd_args.append(str(cluster.log))
-            elif cmd == "@ETC_DIR@":
-                cmd_args.append(str(cluster.etc))
-            elif cmd == "@TMP_DIR@":
-                cmd_args.append(str(cluster.tmp_dir))
-            elif cmd == "@SERVER_CERT_FILE@":
-                cmd_args.append(str(cluster.server_cert_file))
-            elif cmd == "@SERVER_KEY_FILE@":
-                cmd_args.append(str(cluster.server_key_file))
-            elif cmd == "@SERVER_CA_FILE@":
-                cmd_args.append(str(cluster.server_ca_file))
-            elif cmd == "@CLIENT_CERT_FILE@":
-                cmd_args.append(str(cluster.client_cert_file))
-            elif cmd == "@CLIENT_KEY_FILE@":
-                cmd_args.append(str(cluster.client_key_file))
-            elif cmd == "@CLIENT_CA_FILE@":
-                cmd_args.append(str(cluster.client_ca_file))
-            elif cmd.startswith("@DATA_DIR@"):
-                cmd_args.append(str(cluster.data) + cmd[len("@DATA_DIR@") :])
-            else:
-                cmd_args.append(cmd)
+            for (placeholder, value) in substitution_table:
+                cmd = cmd.replace(placeholder, value)
+            cmd_args.append(cmd)
         env = dict(**os.environ)
         env["FDB_CLUSTER_FILE"] = env.get(
             "FDB_CLUSTER_FILE", cluster.cluster_file
         )
+        print("command: {}".format(cmd_args))
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
         ).returncode

@@ -35,6 +35,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -1045,6 +1046,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					}
 					bool degradedPeer = false;
 					bool disconnectedPeer = false;
+
+					// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
+					double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
@@ -1062,7 +1066,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						if (disconnectedPeer || degradedPeer) {
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Elapsed", now() - lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
 							    .detail("MaxLatency", peer->pingLatencies.max())
@@ -1093,7 +1097,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
 							    .detail("Satellite", true)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Elapsed", now() - lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
 							    .detail("MaxLatency", peer->pingLatencies.max())
@@ -1866,8 +1870,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+
+				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
+				if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+					encryptionKeyProvider =
+					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(dbInfo);
+				} else {
+					encryptionKeyProvider =
+					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
+				}
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -2410,7 +2421,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
 					backupWorkerCache.set(req.reqId, backupReady.getFuture());
 					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-					backupProcess = storageCache.removeOnReady(req.reqId, backupProcess);
+					backupProcess = backupWorkerCache.removeOnReady(req.reqId, backupProcess);
 					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
 					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
 					InitializeBackupReply reply(recruited, req.backupEpoch);
@@ -2561,8 +2572,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
+					if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+						encryptionKeyProvider =
+						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(
+						        dbInfo);
+					} else {
+						encryptionKeyProvider =
+						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
+					}
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
