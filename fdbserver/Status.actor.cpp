@@ -2466,22 +2466,28 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 			case BlobRestorePhase::INIT:
 				statusObj["blob_full_restore_phase"] = "Initializing";
 				break;
-			case BlobRestorePhase::LOAD_MANIFEST:
+			case BlobRestorePhase::STARTING_MIGRATOR:
+				statusObj["blob_full_restore_phase"] = "Starting migrator";
+				break;
+			case BlobRestorePhase::LOADING_MANIFEST:
 				statusObj["blob_full_restore_phase"] = "Loading manifest";
 				break;
-			case BlobRestorePhase::MANIFEST_DONE:
-				statusObj["blob_full_restore_phase"] = "Manifest loaded";
+			case BlobRestorePhase::LOADED_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Manifest is loaded";
 				break;
-			case BlobRestorePhase::MIGRATE:
+			case BlobRestorePhase::COPYING_DATA:
 				statusObj["blob_full_restore_phase"] = "Copying data";
-				statusObj["blob_full_restore_progress"] = status.get().progress;
+				statusObj["blob_full_restore_progress"] = status.get().status;
 				break;
-			case BlobRestorePhase::APPLY_MLOGS:
+			case BlobRestorePhase::APPLYING_MLOGS:
 				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
-				statusObj["blob_full_restore_progress"] = status.get().progress;
+				statusObj["blob_full_restore_progress"] = status.get().status;
 				break;
 			case BlobRestorePhase::DONE:
-				statusObj["blob_full_restore_phase"] = "Completed";
+				statusObj["blob_full_restore_phase"] = "Completed successfully";
+				break;
+			case BlobRestorePhase::ERROR:
+				statusObj["blob_full_restore_phase"] = "Completed with fatal error";
 				break;
 			default:
 				statusObj["blob_full_restore_phase"] = "Unexpected phase";

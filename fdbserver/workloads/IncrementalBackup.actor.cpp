@@ -121,11 +121,11 @@ struct IncrementalBackupWorkload : TestWorkload {
 				    .detail("ContiguousLogEndVersion",
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", v);
+				if (self->waitRetries != -1 && tries > self->waitRetries)
+					break;
 				if (!desc.contiguousLogEnd.present())
 					continue;
 				if (desc.contiguousLogEnd.get() >= v)
-					break;
-				if (self->waitRetries != -1 && tries > self->waitRetries)
 					break;
 				// Avoid spamming requests with a delay
 				wait(delay(5.0));

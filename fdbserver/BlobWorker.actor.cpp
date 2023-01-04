@@ -2134,7 +2134,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 				}
 			}
-
 			metadata->files = startState.existingFiles.get();
 			snapshotEligible = true;
 		}
@@ -2178,8 +2177,29 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		// No need to start Change Feed in full restore mode
-		if (bwData->isFullRestoreMode)
+		if (bwData->isFullRestoreMode) {
+			while (inFlightFiles.size() > 0) {
+				if (inFlightFiles.front().future.isReady()) {
+					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
+					if (inFlightFiles.front().snapshot) {
+						if (metadata->files.deltaFiles.empty()) {
+							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
+						} else {
+							ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
+						}
+						metadata->files.snapshotFiles.push_back(completedFile);
+						metadata->durableSnapshotVersion.set(completedFile.version);
+						pendingSnapshots--;
+					}
+					inFlightFiles.pop_front();
+					wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+				} else {
+					wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+				}
+			}
+			metadata->readable.send(Void());
 			return Void();
+		}
 
 		checkMergeCandidate = granuleCheckMergeCandidate(bwData,
 		                                                 metadata,
@@ -3626,12 +3646,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			state Reference<GranuleMetadata> metadata = m;
 			// state Version granuleBeginVersion = req.beginVersion;
 			// skip waiting for CF ready for recovery mode
-			if (!bwData->isFullRestoreMode) {
-				choose {
-					when(wait(metadata->readable.getFuture())) {}
-					when(wait(metadata->cancelled.getFuture())) {
-						throw wrong_shard_server();
-					}
+			choose {
+				when(wait(metadata->readable.getFuture())) {}
+				when(wait(metadata->cancelled.getFuture())) {
+					throw wrong_shard_server();
 				}
 			}
 
@@ -4035,7 +4053,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
 			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
 			Future<Optional<GranuleHistory>> fHistory = getLatestGranuleHistory(&tr, req.keyRange);
-
 			Optional<GranuleHistory> history = wait(fHistory);
 			info.history = history;
 
@@ -4137,6 +4154,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					if (info.existingFiles.get().snapshotFiles.empty()) {
 						ASSERT(info.existingFiles.get().deltaFiles.empty());
 						info.previousDurableVersion = invalidVersion;
+						info.doSnapshot = true;
 					} else if (info.existingFiles.get().deltaFiles.empty()) {
 						info.previousDurableVersion = info.existingFiles.get().snapshotFiles.back().version;
 					} else {
@@ -4162,8 +4180,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			// If anything in previousGranules, need to do the handoff logic and set
 			// ret.previousChangeFeedId, and the previous durable version will come from the previous
 			// granules
-			if (info.history.present() && info.history.get().value.parentVersions.size() > 0 &&
-			    !bwData->isFullRestoreMode) {
+			if (info.history.present() && info.history.get().value.parentVersions.size() > 0) {
 				CODE_PROBE(true, "Granule open found parent");
 				if (info.history.get().value.parentVersions.size() == 1) { // split
 					state KeyRangeRef parentRange(info.history.get().value.parentBoundaries[0],
@@ -4195,11 +4212,13 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 							info.changeFeedStartVersion = granuleSplitState.second;
 						} else if (granuleSplitState.first == BlobGranuleSplitState::Initialized) {
 							CODE_PROBE(true, "Granule open found granule in initialized state");
-							wait(updateGranuleSplitState(&tr,
-							                             info.splitParentGranule.get().first,
-							                             info.splitParentGranule.get().second,
-							                             info.granuleID,
-							                             BlobGranuleSplitState::Assigned));
+							if (!bwData->isFullRestoreMode) {
+								wait(updateGranuleSplitState(&tr,
+								                             info.splitParentGranule.get().first,
+								                             info.splitParentGranule.get().second,
+								                             info.granuleID,
+								                             BlobGranuleSplitState::Assigned));
+							}
 							// change feed was created as part of this transaction, changeFeedStartVersion
 							// will be set later
 						} else {

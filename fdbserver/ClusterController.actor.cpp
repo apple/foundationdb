@@ -2226,7 +2226,6 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 		TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
 		wait(self->db.serverInfo->onChange());
 	}
-
 	TraceEvent("CCMonitorConsistencyScan", self->id).log();
 	loop {
 		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
@@ -2375,11 +2374,12 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
 			if (blobRestoreCommand.present()) {
-				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
-				TraceEvent("WatchBlobRestoreCommand").detail("Progress", status.progress).detail("Phase", status.phase);
+				state Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
+				TraceEvent("WatchBlobRestore", self->id).detail("Phase", status.phase);
 				if (status.phase == BlobRestorePhase::INIT) {
-					self->db.blobRestoreEnabled.set(true);
 					if (self->db.blobGranulesEnabled.get()) {
+						wait(updateRestoreStatus(
+						    self->cx, normalKeys, BlobRestoreStatus(BlobRestorePhase::STARTING_MIGRATOR), {}));
 						const auto& blobManager = self->db.serverInfo->get().blobManager;
 						if (blobManager.present()) {
 							BlobManagerSingleton(blobManager)
@@ -2389,8 +2389,12 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 						if (blobMigrator.present()) {
 							BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
 						}
+					} else {
+						TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
+						wait(updateRestoreStatus(self->cx, normalKeys, BlobRestoreStatus(BlobRestorePhase::ERROR), {}));
 					}
 				}
+				self->db.blobRestoreEnabled.set(status.phase < BlobRestorePhase::DONE);
 			}
 
 			state Future<Void> watch = tr->watch(blobRestoreCommandKey);
@@ -2483,8 +2487,8 @@ ACTOR Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
 			loop {
 				choose {
 					when(wait(wfClient)) {
-						TraceEvent("CCBlobMigratorDied", self->id)
-						    .detail("MGID", self->db.serverInfo->get().blobMigrator.get().id());
+						UID mgID = self->db.serverInfo->get().blobMigrator.get().id();
+						TraceEvent("CCBlobMigratorDied", self->id).detail("MGID", mgID);
 						self->db.clearInterf(ProcessClass::BlobMigratorClass);
 						break;
 					}
