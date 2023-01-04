@@ -75,12 +75,12 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_network_set_option(FDBNetworkOption
                                                                 int value_length);
 
 #if FDB_API_VERSION >= 14
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_setup_network();
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_setup_network(void);
 #endif
 
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_run_network();
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_run_network(void);
 
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_stop_network();
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_stop_network(void);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*),
                                                                                 void* hook_parameter);
@@ -476,8 +476,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTr
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version);
 
-DLLEXPORT int fdb_get_max_api_version();
-DLLEXPORT const char* fdb_get_client_version();
+DLLEXPORT int fdb_get_max_api_version(void);
+DLLEXPORT const char* fdb_get_client_version(void);
 
 /* LEGACY API VERSIONS */
 
