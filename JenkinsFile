@@ -1,47 +1,91 @@
 timestamps {
-  node('regular-memory-node-c7') {
-    scmInfo = null
-    stage('checkout') {
-      scmInfo = checkout scm
-      println("${scmInfo}")
-    }
+    node('regular-memory-node-c7') {
 
-    stage('build and test') {
-      println("*** Starting FDB_Precommit Job **** ")
-      println("${scmInfo}")
-
-      def trigger_comment = "@fdb-ci precommit start"
-      
-      def build_trigger_cause = "${currentBuild.getBuildCauses()[0].shortDescription}"
-      println("Build Trigger Cause : ${build_trigger_cause}")
-
-      currentBuild.result = 'FAILURE'
-
-      if ("${build_trigger_cause}" == "GitHub pull request comment") {
-        def pr_comment = "${currentBuild.getBuildCauses()[0].commentBody}"
-        println("Latest Comment on PR : ${pr_comment}")
-        if ("${pr_comment}".contains("${trigger_comment}")) {
-          def j = build job: "FDB_BuildAndTest/FDB_Precommit",
-            parameters: [
-              string(name: 'ARCH', value: "x86_64"),
-	      string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
-              string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}"),
-              string(name: 'BUILD_TEST_PROFILE', value: 'precommit.yml')
-            ],
-            propagate: false,
-            wait: true
-
-          if ("${j.result}" == "SUCCESS") {
-            currentBuild.result = 'SUCCESS'
-          }
-
-          println("FDB_Precommit build job status: ${j.result}")
-        } else {
-            println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}.")
+        scmInfo = null
+        stage('checkout') {
+            scmInfo = checkout scm
+            println("${scmInfo}")
         }
-      } else {
-          println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}.")
-      }
+
+        stage('build and test') {
+            println("**** Starting FDB_Precommit Job **** ")
+            println("${scmInfo}")
+
+            def trigger_comment = "@fdb-ci precommit start"
+
+            def build_trigger_cause = "${currentBuild.getBuildCauses()[0].shortDescription}"
+            println("Build Trigger Cause : ${build_trigger_cause}")
+
+            if ("${build_trigger_cause}" == "GitHub pull request comment" &&
+                "${currentBuild.getBuildCauses()[0].commentBody}".contains("${trigger_comment}")) {
+
+                println("Latest Comment on PR : ${currentBuild.getBuildCauses()[0].commentBody}")
+
+                def profiles = [build_test_prerelease: "precommit_prerelease.yml",
+                            build_test_tsan: "precommit_tsan.yml",
+                            build_test_asan: "precommit_asan.yml",
+                            build_test_ubsan: "precommit_ubsan.yml"]
+
+                def params = [string(name: 'ARCH', value: "x86_64"),
+                            string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
+                            string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}")]
+
+                def deployments = [:]
+                def results = [:]
+
+                profiles.each() { k, v ->
+                    setBuildStatus(k, "Build And Test", "PENDING", currentBuild.absoluteUrl);
+                    deployments[k] = {
+                        results[k] = build job: 'FDB_BuildAndTest/FDB_Precommit',
+                                    parameters: params + [string('name': 'BUILD_TEST_PROFILE', value: v)],
+                                    propagate: false,
+                                    wait: true
+                    }
+                }
+                //Executing all build and test jobs in parallel
+                parallel deployments
+
+                currentBuild.result = 'SUCCESS'
+
+                // Check to make sure all builds are executed.
+                if (results.size() != profiles.size()) {
+                    currentBuild.result = 'FAILURE'
+                }
+
+                results.each() { k, v ->
+                    setBuildStatus(k, "Build", v.result, v.absoluteUrl);
+
+                    if ("${v.result}" != "SUCCESS") {
+                        // In case if any of the build or test fails we will mark current build as FAILURE
+                        currentBuild.result = 'FAILURE'
+                    }
+
+                    println("${k} result : ${v.result}")
+                }
+
+                println("FDB_Precommit build job status : ${currentBuild.result}.")
+
+            } else {
+                currentBuild.result = 'FAILURE'
+                println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}")
+            }
+        }
     }
-  }
+}
+
+void setBuildStatus(context, message, state, url) {
+    withCredentials([
+    usernamePassword(credentialsId: 'jenkins-snowflakedb-github-app',usernameVariable: 'GITHUB_USER',
+                     passwordVariable: 'GITHUB_TOKEN'),
+    ]){
+    step([
+        $class: "GitHubCommitStatusSetter",
+        contextSource: [$class: "ManuallyEnteredCommitContextSource", context: context],
+        errorHandlers: [[$class: "ChangingBuildStatusErrorHandler", result: "UNSTABLE"]],
+        reposSource: [$class: "ManuallyEnteredRepositorySource", url: "https://github.com/snowflakedb/foundationdb.git"],
+        statusBackrefSource: [$class: "ManuallyEnteredBackrefSource", backref: url],
+        statusResultSource: [ $class: "ConditionalStatusResultSource", results: [[$class: "AnyBuildResult",
+                             message: message, state: state]]]
+    ]);
+    }
 }
