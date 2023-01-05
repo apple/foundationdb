@@ -8743,8 +8743,9 @@ void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Ver
 			if (*itr >= startTenant && *itr < endTenant) {
 				// Trigger any watches on the prefix associated with the tenant.
 				Key tenantPrefix = TenantAPI::idToPrefix(itr.key());
-				watches.triggerRange(tenantPrefix, strinc(tenantPrefix));
 				TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
+				watches.sendError(tenantPrefix, strinc(tenantPrefix), tenant_removed());
+
 				tenantsToClear.insert(itr.key());
 				addMutationToMutationLog(mLV,
 				                         MutationRef(MutationRef::ClearRange,
