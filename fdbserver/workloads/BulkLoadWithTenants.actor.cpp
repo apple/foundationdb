@@ -18,15 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/SystemData.h"
+#include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "flow/IRandom.h"
+#include "flow/FastRef.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -40,6 +39,7 @@ struct BulkSetupWorkload : TestWorkload {
 	double minNumTenants;
 	std::vector<TenantName> tenantNames;
 	bool deleteTenants;
+	double testDuration;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
@@ -50,6 +50,7 @@ struct BulkSetupWorkload : TestWorkload {
 		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
 		deleteTenants = getOption(options, "deleteTenants"_sr, false);
 		ASSERT(minNumTenants <= maxNumTenants);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -67,22 +68,18 @@ struct BulkSetupWorkload : TestWorkload {
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
 		if (numTenantsToCreate > 0) {
 			std::vector<Future<Void>> tenantFutures;
+			state std::vector<TenantName> tenantNames;
 			for (int i = 0; i < numTenantsToCreate; i++) {
 				TenantMapEntry entry;
-				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
-				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
+				tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
 				TraceEvent("CreatingTenant")
-				    .detail("Tenant", workload->tenantNames.back())
+				    .detail("Tenant", tenantNames.back())
 				    .detail("TenantGroup", entry.tenantGroup);
-				tenantFutures.push_back(
-				    success(TenantAPI::createTenant(cx.getReference(), workload->tenantNames.back())));
+				tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenantNames.back())));
 			}
 			wait(waitForAll(tenantFutures));
+			workload->tenantNames = tenantNames;
 		}
-		return Void();
-	}
-
-	ACTOR static Future<Void> _start(BulkSetupWorkload* workload, Database cx) {
 		wait(bulkSetup(cx,
 		               workload,
 		               workload->nodeCount,
@@ -97,14 +94,21 @@ struct BulkSetupWorkload : TestWorkload {
 		               0,
 		               0,
 		               workload->tenantNames));
+		// We want to ensure that tenant deletion happens before the restore phase starts
 		if (workload->deleteTenants) {
+			state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
+			wait(tenantCache->init());
 			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenantNames.size() + 1);
 			if (numTenantsToDelete > 0) {
 				state int i;
 				for (i = 0; i < numTenantsToDelete; i++) {
 					state TenantName tenant = deterministicRandom()->randomChoice(workload->tenantNames);
+					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getByName(tenant));
+					ASSERT(payload.present());
+					state int64_t tenantId = payload.get().entry.id;
 					TraceEvent("BulkSetupTenantDeletionClearing")
-					    .detail("Tenant", tenant)
+					    .detail("TenantName", tenant)
+					    .detail("TenantId", tenantId)
 					    .detail("TotalNumTenants", workload->tenantNames.size());
 					// clear the tenant
 					state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
@@ -126,7 +130,8 @@ struct BulkSetupWorkload : TestWorkload {
 						}
 					}
 					TraceEvent("BulkSetupTenantDeletionDone")
-					    .detail("Tenant", tenant)
+					    .detail("TenantName", tenant)
+					    .detail("TenantId", tenantId)
 					    .detail("TotalNumTenants", workload->tenantNames.size());
 				}
 			}
@@ -134,16 +139,11 @@ struct BulkSetupWorkload : TestWorkload {
 		return Void();
 	}
 
-	Future<Void> start(Database const& cx) override {
-		if (clientId == 0) {
-			return _start(this, cx);
-		}
-		return Void();
-	}
+	Future<Void> start(Database const& cx) override { return Void(); }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			return _setup(this, cx);
+			return timeout(_setup(this, cx), testDuration, Void());
 		}
 		return Void();
 	}

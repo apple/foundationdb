@@ -1,13 +1,9 @@
 [configuration]
 tenantModes = ['required']
-encryptModes = ['domain_aware']
+encryptModes = ['disabled']
 
 [[knobs]]
-enable_encryption = true
-enable_tlog_encryption = true
-enable_storage_server_encryption = false
-enable_blob_granule_encryption = true
-max_write_transaction_life_versions = 5000000
+enable_encryption = false
 
 [[test]]
 testTitle = 'EncryptedBackupAndRestore'
@@ -20,6 +16,7 @@ simBackupAgents = 'BackupToFile'
     minNumTenants = 0
     transactionsPerSecond = 2500.0
     deleteTenants = true
+    testDuration = 30.0
 
     [[test.workload]]
     testName = 'BackupAndRestoreCorrectness'

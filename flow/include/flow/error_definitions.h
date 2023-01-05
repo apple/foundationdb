@@ -108,6 +108,7 @@ ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
 ERROR( future_released, 1102, "Future has been released" )
 ERROR( connection_leaked, 1103, "Connection object leaked" )
 ERROR( never_reply, 1104, "Never reply to the request" )
+ERROR( retry, 1105, "Retry operation" )
 
 ERROR( recruitment_failed, 1200, "Recruitment of a server failed" )   // Be careful, catching this will delete the data of a storage server or tlog permanently
 ERROR( move_to_removed_server, 1201, "Attempt to move keys to a storage server that was removed" )
@@ -140,6 +141,7 @@ ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocat
 ERROR( platform_error, 1500, "Platform error" )
 ERROR( large_alloc_failed, 1501, "Large block allocation failed" )
 ERROR( performance_counter_error, 1502, "QueryPerformanceCounter error" )
+ERROR( bad_allocator, 1503, "Null allocator was used to allocate memory" )
 
 ERROR( io_error, 1510, "Disk i/o operation failed" )
 ERROR( file_not_found, 1511, "File not found" )
@@ -210,6 +212,8 @@ ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
 ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
 ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
+ERROR( failed_to_create_checkpoint, 2046, "Failed to create a checkpoint" )
+ERROR( failed_to_restore_checkpoint, 2047, "Failed to restore a checkpoint" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -236,6 +240,7 @@ ERROR( client_lib_not_available, 2121, "Client library exists, but is not availa
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 ERROR( no_external_client_provided, 2123, "No external client library provided." )
 ERROR( all_external_clients_failed, 2124, "All external clients have failed." )
+ERROR( incompatible_client, 2125, "None of the available clients match the protocol version of the cluster." )
 
 ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )

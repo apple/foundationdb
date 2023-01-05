@@ -133,7 +133,9 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 	ACTOR static Future<Void> relocateShardReporter(MockDDTrackerShardEvaluatorWorkload* self,
 	                                                FutureStream<RelocateShard> input) {
 		loop choose {
-			when(RelocateShard rs = waitNext(input)) { ++self->rsReasonCounts[rs.reason]; }
+			when(RelocateShard rs = waitNext(input)) {
+				++self->rsReasonCounts[rs.reason];
+			}
 		}
 	}
 

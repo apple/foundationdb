@@ -24,4 +24,6 @@
 #include "flow/Arena.h"
 typedef StringRef TenantNameRef;
 typedef Standalone<TenantNameRef> TenantName;
+typedef StringRef TenantGroupNameRef;
+typedef Standalone<TenantGroupNameRef> TenantGroupName;
 #endif // FDBRPC_TENANTNAME_H

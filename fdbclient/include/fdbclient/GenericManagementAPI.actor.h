@@ -327,13 +327,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					for (auto kv : m) {
 						newConfig.set(kv.first, kv.second);
 					}
-					if (!newConfig.isValid()) {
-						return ConfigurationResult::INVALID_CONFIGURATION;
-					}
-					if (!isEncryptionAtRestModeConfigValid(oldConfig, m, creating)) {
-						return ConfigurationResult::INVALID_CONFIGURATION;
-					}
-					if (!isTenantModeModeConfigValid(oldConfig, newConfig)) {
+					if (!newConfig.isValid() || !isEncryptionAtRestModeConfigValid(oldConfig, m, creating) ||
+					    !isTenantModeModeConfigValid(oldConfig, newConfig)) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 
@@ -540,8 +535,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			}
 
 			if (!creating && resetPPWStats) {
-				wait(resetStorageWiggleMetrics(tr, PrimaryRegion(true)));
-				wait(resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
+				state StorageWiggleData wiggleData;
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(true)));
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
 			}
 
 			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));

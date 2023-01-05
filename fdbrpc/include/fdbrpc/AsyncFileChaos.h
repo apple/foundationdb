@@ -74,8 +74,8 @@ public:
 		// Wait for diskDelay before submitting the I/O
 		// Template types are being provided explicitly because they can't be automatically deduced for some reason.
 		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<int>(Void)>, int>(
-		    delay(diskDelay), [=, file = file](Void _) -> Future<int> { return file->read(data, length, offset); });
+		return mapAsync(delay(diskDelay),
+		                [=, file = file](Void _) -> Future<int> { return file->read(data, length, offset); });
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
@@ -115,20 +115,19 @@ public:
 
 		// Wait for diskDelay before submitting the I/O
 		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(getDelay()), [=, file = file](Void _) -> Future<Void> {
-			    if (pdata) {
-				    return map(holdWhile(arena, file->write(pdata, length, offset)),
-				               [corruptedBlock, file = file](auto res) {
-					               if (g_network->isSimulated()) {
-						               g_simulator->corruptedBlocks.emplace(file->getFilename(), corruptedBlock);
-					               }
-					               return res;
-				               });
-			    }
+		return mapAsync(delay(getDelay()), [=, file = file](Void _) -> Future<Void> {
+			if (pdata) {
+				return map(holdWhile(arena, file->write(pdata, length, offset)),
+				           [corruptedBlock, file = file](auto res) {
+					           if (g_network->isSimulated()) {
+						           g_simulator->corruptedBlocks.emplace(file->getFilename(), corruptedBlock);
+					           }
+					           return res;
+				           });
+			}
 
-			    return file->write(data, length, offset);
-		    });
+			return file->write(data, length, offset);
+		});
 	}
 
 	Future<Void> truncate(int64_t size) override {
@@ -138,17 +137,16 @@ public:
 
 		// Wait for diskDelay before submitting the I/O
 		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [size, file = file](Void _) -> Future<Void> {
-			    constexpr auto maxBlockValue =
-			        std::numeric_limits<decltype(g_simulator->corruptedBlocks)::key_type::second_type>::max();
-			    auto firstDeletedBlock =
-			        g_simulator->corruptedBlocks.lower_bound(std::make_pair(file->getFilename(), size / 4096));
-			    auto lastFileBlock =
-			        g_simulator->corruptedBlocks.upper_bound(std::make_pair(file->getFilename(), maxBlockValue));
-			    g_simulator->corruptedBlocks.erase(firstDeletedBlock, lastFileBlock);
-			    return file->truncate(size);
-		    });
+		return mapAsync(delay(diskDelay), [size, file = file](Void _) -> Future<Void> {
+			constexpr auto maxBlockValue =
+			    std::numeric_limits<decltype(g_simulator->corruptedBlocks)::key_type::second_type>::max();
+			auto firstDeletedBlock =
+			    g_simulator->corruptedBlocks.lower_bound(std::make_pair(file->getFilename(), size / 4096));
+			auto lastFileBlock =
+			    g_simulator->corruptedBlocks.upper_bound(std::make_pair(file->getFilename(), maxBlockValue));
+			g_simulator->corruptedBlocks.erase(firstDeletedBlock, lastFileBlock);
+			return file->truncate(size);
+		});
 	}
 
 	Future<Void> sync() override {
@@ -158,8 +156,7 @@ public:
 
 		// Wait for diskDelay before submitting the I/O
 		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-		    delay(diskDelay), [=, file = file](Void _) -> Future<Void> { return file->sync(); });
+		return mapAsync(delay(diskDelay), [=, file = file](Void _) -> Future<Void> { return file->sync(); });
 	}
 
 	Future<int64_t> size() const override {
@@ -169,8 +166,7 @@ public:
 
 		// Wait for diskDelay before submitting the I/O
 		// Capture file by value in case this is destroyed during the delay
-		return mapAsync<Void, std::function<Future<int64_t>(Void)>, int64_t>(
-		    delay(diskDelay), [=, file = file](Void _) -> Future<int64_t> { return file->size(); });
+		return mapAsync(delay(diskDelay), [=, file = file](Void _) -> Future<int64_t> { return file->size(); });
 	}
 
 	int64_t debugFD() const override { return file->debugFD(); }

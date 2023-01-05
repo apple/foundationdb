@@ -23,11 +23,17 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Metacluster.h"
+#include "fdbclient/Tenant.h"
+#include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/CodeProbe.h"
+#include "flow/EncryptUtils.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 FDB_DEFINE_BOOLEAN_PARAM(LockDB);
@@ -257,6 +263,10 @@ std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
 	    bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
 
+bool isSystemKey(KeyRef key) {
+	return key.size() && key[0] == systemKeys.begin[0];
+}
+
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                VectorRef<MutationRef>* result,
                                                VectorRef<Optional<MutationRef>>* encryptedResult,
@@ -266,8 +276,10 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Key removePrefix,
                                                Version version,
                                                Reference<KeyRangeMap<Version>> key_version,
-                                               Database cx) {
+                                               Database cx,
+                                               Reference<TenantEntryCache<Void>> tenantCache) {
 	try {
+		TraceEvent("Nim::here");
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
@@ -321,6 +333,24 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
 			}
 			ASSERT(!logValue.isEncrypted());
+
+			state EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+			if (isSystemKey(logValue.param1)) {
+				domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+			} else if (isSingleKeyMutation((MutationRef::Type)logValue.type) &&
+			           logValue.param1.size() >= TenantAPI::PREFIX_SIZE) {
+				StringRef prefix = logValue.param1.substr(0, TenantAPI::PREFIX_SIZE);
+				domainId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+			}
+			// TraceEvent("Nim::here").detail("DomainId", domainId);
+			if (domainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && domainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+				Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(domainId));
+				if (!payload.present()) {
+					TraceEvent(SevError, "TenantNotFound").detail("TenantId", domainId);
+					CODE_PROBE(true, "mutation log restore tenant not found");
+				}
+			}
+
 			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {
@@ -639,6 +669,8 @@ ACTOR Future<int> dumpData(Database cx,
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
+	state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
+	wait(tenantCache->init());
 	loop {
 		state CommitTransactionRequest req;
 		state Version newBeginVersion = invalidVersion;
@@ -662,7 +694,8 @@ ACTOR Future<int> dumpData(Database cx,
 				                          removePrefix,
 				                          group.groupKey,
 				                          keyVersion,
-				                          cx));
+				                          cx,
+				                          tenantCache));
 				newBeginVersion = group.groupKey + 1;
 				if (mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;

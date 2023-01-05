@@ -26,6 +26,7 @@
 #include <limits>
 #include <memory>
 #include <regex>
+#include <string>
 #include <unordered_set>
 #include <tuple>
 #include <utility>
@@ -1016,7 +1017,9 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					proxiesChangeTrigger->trigger();
 				}
 			}
-			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(actors.getResult())) {
+				UNSTOPPABLE_ASSERT(false);
+			}
 		}
 	}
 }
@@ -1498,9 +1501,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  int _apiVersion,
                                  IsSwitchable switchable,
                                  Optional<TenantName> defaultTenant)
-  : lockAware(lockAware), switchable(switchable), connectionRecord(connectionRecord), proxyProvisional(false),
-    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant),
-    internal(internal), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+  : dbId(deterministicRandom()->randomUniqueID()), lockAware(lockAware), switchable(switchable),
+    connectionRecord(connectionRecord), proxyProvisional(false), clientLocality(clientLocality),
+    enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant), internal(internal),
+    cc("TransactionMetrics", dbId.toString()), transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
@@ -1531,11 +1535,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), anyBGReads(false),
-    ccBG("BlobGranuleReadMetrics"), bgReadInputBytes("BGReadInputBytes", ccBG),
+    ccBG("BlobGranuleReadMetrics", dbId.toString()), bgReadInputBytes("BGReadInputBytes", ccBG),
     bgReadOutputBytes("BGReadOutputBytes", ccBG), bgReadSnapshotRows("BGReadSnapshotRows", ccBG),
     bgReadRowsCleared("BGReadRowsCleared", ccBG), bgReadRowsInserted("BGReadRowsInserted", ccBG),
     bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(), bgGranulesPerRequest(), usedAnyChangeFeeds(false),
-    ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    ccFeed("ChangeFeedClientMetrics", dbId.toString()), feedStreamStarts("FeedStreamStarts", ccFeed),
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
     feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
@@ -1546,8 +1550,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
-
-	dbId = deterministicRandom()->randomUniqueID();
 
 	TraceEvent("DatabaseContextCreated", dbId).backtrace();
 
@@ -2162,14 +2164,14 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 	}
 }
 
-void DatabaseContext::addWatch() {
+void DatabaseContext::increaseWatchCounter() {
 	if (outstandingWatches >= maxOutstandingWatches)
 		throw too_many_watches();
 
 	++outstandingWatches;
 }
 
-void DatabaseContext::removeWatch() {
+void DatabaseContext::decreaseWatchCounter() {
 	--outstandingWatches;
 	ASSERT(outstandingWatches >= 0);
 }
@@ -2379,25 +2381,6 @@ Database Database::createSimulatedExtraDatabase(std::string connectionString, Op
 	Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 	db->defaultTenant = defaultTenant;
 	return db;
-}
-
-Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
-	const auto it = watchMap.find(std::make_pair(tenantId, key));
-	if (it == watchMap.end())
-		return Reference<WatchMetadata>();
-	return it->second;
-}
-
-void DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
-	watchMap[std::make_pair(metadata->parameters->tenant.tenantId, metadata->parameters->key)] = metadata;
-}
-
-void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key) {
-	watchMap.erase(std::make_pair(tenantId, key));
-}
-
-void DatabaseContext::clearWatchMetadata() {
-	watchMap.clear();
 }
 
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
@@ -3379,7 +3362,6 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
 
-	span.addAttribute("key"_sr, key);
 	trState->cx->validateVersion(ver);
 
 	loop {
@@ -3421,7 +3403,9 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					    std::vector<Error>{ transaction_too_old(), future_version() });
 				}
 				choose {
-					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(wait(trState->cx->connectionFileChanged())) {
+						throw transaction_too_old();
+					}
 					when(GetValueReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
 					         locationInfo.locations,
@@ -3568,7 +3552,9 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			state GetKeyReply reply;
 			try {
 				choose {
-					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(wait(trState->cx->connectionFileChanged())) {
+						throw transaction_too_old();
+					}
 					when(GetKeyReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
 					         locationInfo.locations,
@@ -3732,7 +3718,9 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				                     TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
-				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) { wait(Never()); }
+				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) {
+					wait(Never());
+				}
 			}
 			if (watchValueID.present()) {
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After");
@@ -3914,6 +3902,49 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	return Void();
 }
 
+namespace {
+
+// NOTE: Since an ACTOR could receive multiple exceptions for a single catch clause, e.g. broken promise together with
+// operation cancelled, If the decreaseWatchRefCount is placed at the catch clause, it might be triggered for multiple
+// times. One could check if the SAV isSet, but seems a more intuitive way is to use RAII-style constructor/destructor
+// pair. Yet the object has to be constructed after a wait statement, so it must be trivially-constructible. This
+// requires move-assignment operator implemented.
+class WatchRefCountUpdater {
+	Database cx;
+	int64_t tenantID;
+	KeyRef key;
+	Version version;
+
+public:
+	WatchRefCountUpdater() = default;
+
+	WatchRefCountUpdater(const Database& cx_, const int64_t tenantID_, KeyRef key_, const Version& ver)
+	  : cx(cx_), tenantID(tenantID_), key(key_), version(ver) {}
+
+	WatchRefCountUpdater& operator=(WatchRefCountUpdater&& other) {
+		if (cx.getReference()) {
+			cx->decreaseWatchRefCount(tenantID, key, version);
+		}
+
+		cx = std::move(other.cx);
+		tenantID = std::move(other.tenantID);
+		key = std::move(other.key);
+		version = std::move(other.version);
+
+		cx->increaseWatchRefCount(tenantID, key, version);
+
+		return *this;
+	}
+
+	~WatchRefCountUpdater() {
+		if (cx.getReference()) {
+			cx->decreaseWatchRefCount(tenantID, key, version);
+		}
+	}
+};
+
+} // namespace
+
 ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  TenantInfo tenant,
                                  Key key,
@@ -3925,6 +3956,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<UID> debugID,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
+	state WatchRefCountUpdater watchRefCountUpdater(cx, tenant.tenantId, key, ver);
 
 	wait(getWatchFuture(cx,
 	                    makeReference<WatchParameters>(
@@ -4051,7 +4083,9 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 				state GetKeyValuesFamilyReply rep;
 				try {
 					choose {
-						when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+						when(wait(trState->cx->connectionFileChanged())) {
+							throw transaction_too_old();
+						}
 						when(GetKeyValuesFamilyReply _rep = wait(loadBalance(
 						         trState->cx.getPtr(),
 						         locations[shard].locations,
@@ -4259,7 +4293,6 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 	int64_t bytes = 0;
 	for (const MappedKeyValueRef& mappedKeyValue : result) {
 		bytes += mappedKeyValue.key.size() + mappedKeyValue.value.size();
-		bytes += sizeof(mappedKeyValue.boundaryAndExist);
 		auto& reqAndResult = mappedKeyValue.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
@@ -4726,7 +4759,7 @@ static Future<Void> tssStreamComparison(Request request,
 				}
 				when(wait(delay(sleepTime))) {
 					++tssData.metrics->tssTimeouts;
-					CODE_PROBE(true, "Got TSS timeout in stream comparison");
+					CODE_PROBE(true, "Got TSS timeout in stream comparison", probe::decoration::rare);
 				}
 			}
 		} catch (Error& e) {
@@ -4813,7 +4846,7 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 
 		if (tssData.present()) {
-			CODE_PROBE(true, "duplicating stream to TSS", probe::decoration::rare);
+			CODE_PROBE(true, "duplicating stream to TSS");
 			resetReply(req);
 			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream duplication
 			RequestStream<Request> tssRequestStream(tssData.get().endpoint);
@@ -4951,7 +4984,9 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 								return Void();
 							}
 
-							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) { rep = _rep; }
+							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) {
+								rep = _rep;
+							}
 						}
 						++trState->cx->transactionPhysicalReadsCompleted;
 					} catch (Error& e) {
@@ -5394,6 +5429,10 @@ ACTOR Future<Void> restartWatch(Database cx,
                                 TaskPriority taskID,
                                 Optional<UID> debugID,
                                 UseProvisionalProxies useProvisionalProxies) {
+	// Remove the reference count as the old watches should be all dropped when switching connectionFile.
+	// The tenantId should be the old one.
+	cx->deleteWatchMetadata(tenantInfo.tenantId, key, /* removeReferenceCount */ true);
+
 	// The ID of the tenant may be different on the cluster that we switched to, so obtain the new ID
 	if (tenantInfo.name.present()) {
 		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
@@ -5444,11 +5483,12 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 				loop {
 					choose {
 						// NativeAPI watchValue future finishes or errors
-						when(wait(watch->watchFuture)) { break; }
+						when(wait(watch->watchFuture)) {
+							break;
+						}
 
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
-							cx->clearWatchMetadata();
 							watch->watchFuture = restartWatch(cx,
 							                                  tenantInfo,
 							                                  watch->key,
@@ -5464,11 +5504,11 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 			}
 		}
 	} catch (Error& e) {
-		cx->removeWatch();
+		cx->decreaseWatchCounter();
 		throw;
 	}
 
-	cx->removeWatch();
+	cx->decreaseWatchCounter();
 	return Void();
 }
 
@@ -5479,7 +5519,7 @@ Future<Version> Transaction::getRawReadVersion() {
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
 
-	trState->cx->addWatch();
+	trState->cx->increaseWatchCounter();
 	watches.push_back(watch);
 	return ::watch(
 	    watch,
@@ -7037,7 +7077,9 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
 			choose {
-				when(wait(onProxiesChanged)) { onProxiesChanged = cx->onProxiesChanged(); }
+				when(wait(onProxiesChanged)) {
+					onProxiesChanged = cx->onProxiesChanged();
+				}
 				when(GetReadVersionReply v =
 				         wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies(
 				                                   flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES)),
@@ -7463,7 +7505,9 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				needToConnect = false;
 			}
 			choose {
-				when(wait(coordinator->onChange())) { needToConnect = true; }
+				when(wait(coordinator->onChange())) {
+					needToConnect = true;
+				}
 
 				when(ProtocolVersion pv = wait(protocolVersion)) {
 					if (!expectedVersion.present() || expectedVersion.get() != pv) {
@@ -8359,7 +8403,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 						if (!results.empty() && results.back().keyRange.end != chunk.keyRange.begin) {
 							ASSERT(results.back().keyRange.end > chunk.keyRange.begin);
 							ASSERT(results.back().keyRange.end <= chunk.keyRange.end);
-							CODE_PROBE(true, "Merge while reading granule range");
+							CODE_PROBE(true, "Merge while reading granule range", probe::decoration::rare);
 							while (!results.empty() && results.back().keyRange.begin >= chunk.keyRange.begin) {
 								// TODO: we can't easily un-depend the arenas for these guys, but that's ok as this
 								// should be rare
@@ -8603,9 +8647,10 @@ Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority) {
-	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(primary ? "primary/"_sr : "remote/"_sr);
-	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-	                                                                                          IncludeVersion());
+	state StorageWiggleData wiggleState;
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
+	    wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
 
@@ -8850,7 +8895,9 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 
 void Transaction::setTransactionID(UID id) {
 	ASSERT(getSize() == 0);
-	trState->spanContext = SpanContext(id, trState->spanContext.spanID);
+	trState->spanContext = SpanContext(id, trState->spanContext.spanID, trState->spanContext.m_Flags);
+	tr.spanContext = trState->spanContext;
+	span.context = trState->spanContext;
 }
 
 void Transaction::setToken(uint64_t token) {
@@ -8887,88 +8934,105 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 }
 
 ACTOR template <class T>
-static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointFormat format) {
+static Future<Void> createCheckpointImpl(T tr,
+                                         std::vector<KeyRange> ranges,
+                                         CheckpointFormat format,
+                                         Optional<UID> actionId) {
 	ASSERT(!tr->getTenant().present());
-	TraceEvent("CreateCheckpointTransactionBegin").detail("Range", range);
+	ASSERT(!ranges.empty());
+	ASSERT(actionId.present());
+	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Ranges", describe(ranges));
 
-	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, range));
+	// Only the first range is used to look up the location, since we assume all ranges are hosted by a single shard.
+	// The operation will fail on the storage server otherwise.
+	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, ranges[0]));
 	ASSERT(!keyServers.more);
 
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-	for (int i = 0; i < keyServers.size() - 1; ++i) {
-		KeyRangeRef shard(keyServers[i].key, keyServers[i + 1].key);
+	if (format == DataMoveRocksCF) {
 		std::vector<UID> src;
 		std::vector<UID> dest;
-		decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+		UID srcId;
+		UID destId;
+		decodeKeyServersValue(UIDtoTagMap, keyServers[0].value, src, dest, srcId, destId);
 
 		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
 		// An alternative is to choose a healthy replica.
-		const UID checkpointID = deterministicRandom()->randomUniqueID();
-		for (int idx = 0; idx < src.size(); ++idx) {
-			CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
-			checkpoint.setState(CheckpointMetaData::Pending);
-			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
-		}
+		const UID checkpointID = UID(srcId.first(), deterministicRandom()->randomUInt64());
+		CheckpointMetaData checkpoint(ranges, format, src, checkpointID, actionId.get());
+		checkpoint.setState(CheckpointMetaData::Pending);
+		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
 
-		TraceEvent("CreateCheckpointTransactionShard")
-		    .detail("Shard", shard)
-		    .detail("SrcServers", describe(src))
-		    .detail("ServerSelected", describe(src))
+		TraceEvent(SevDebug, "CreateCheckpointTransactionShard")
 		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
+		    .detail("CheckpointMetaData", checkpoint.toString())
 		    .detail("ReadVersion", tr->getReadVersion().get());
+	} else {
+		throw not_implemented();
 	}
 
 	return Void();
 }
 
-Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format) {
-	return holdWhile(tr, createCheckpointImpl(tr, range, format));
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> actionId) {
+	return holdWhile(tr, createCheckpointImpl(tr, ranges, format, actionId));
 }
 
-Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format) {
-	return createCheckpointImpl(tr, range, format);
+Future<Void> createCheckpoint(Transaction* tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> actionId) {
+	return createCheckpointImpl(tr, ranges, format, actionId);
 }
 
 // Gets CheckpointMetaData of the specific keyrange, version and format from one of the storage servers, if none of the
 // servers have the checkpoint, a checkpoint_not_found error is returned.
-ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpointRequest req,
+ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange range,
+                                                                      Version version,
+                                                                      CheckpointFormat format,
+                                                                      Optional<UID> actionId,
                                                                       Reference<LocationInfo> alternatives,
                                                                       double timeout) {
-	TraceEvent("GetCheckpointMetaDataInternalBegin")
-	    .detail("Range", req.range)
-	    .detail("Version", req.version)
-	    .detail("Format", static_cast<int>(req.format))
+	TraceEvent(SevDebug, "GetCheckpointMetaDataInternalBegin")
+	    .detail("Range", range)
+	    .detail("Version", version)
+	    .detail("Format", static_cast<int>(format))
 	    .detail("Locations", alternatives->description());
 
 	state std::vector<Future<ErrorOr<CheckpointMetaData>>> futures;
 	state int index = 0;
 	for (index = 0; index < alternatives->size(); ++index) {
 		// For each shard, all storage servers are checked, only one is required.
-		futures.push_back(errorOr(timeoutError(alternatives->getInterface(index).checkpoint.getReply(req), timeout)));
+		futures.push_back(errorOr(timeoutError(alternatives->getInterface(index).checkpoint.getReply(
+		                                           GetCheckpointRequest({ range }, version, format, actionId)),
+		                                       timeout)));
 	}
 
 	state Optional<Error> error;
 	wait(waitForAll(futures));
-	TraceEvent("GetCheckpointMetaDataInternalWaitEnd").detail("Range", req.range).detail("Version", req.version);
+	TraceEvent(SevDebug, "GetCheckpointMetaDataInternalWaitEnd").detail("Range", range).detail("Version", version);
 
 	for (index = 0; index < futures.size(); ++index) {
 		if (!futures[index].isReady()) {
 			error = timed_out();
-			TraceEvent("GetCheckpointMetaDataInternalSSTimeout")
-			    .detail("Range", req.range)
-			    .detail("Version", req.version)
+			TraceEvent(SevDebug, "GetCheckpointMetaDataInternalSSTimeout")
+			    .detail("Range", range)
+			    .detail("Version", version)
 			    .detail("StorageServer", alternatives->getInterface(index).uniqueID);
 			continue;
 		}
 
 		if (futures[index].get().isError()) {
 			const Error& e = futures[index].get().getError();
-			TraceEvent("GetCheckpointMetaDataInternalError")
+			TraceEvent(SevWarn, "GetCheckpointMetaDataInternalError")
 			    .errorUnsuppressed(e)
-			    .detail("Range", req.range)
-			    .detail("Version", req.version)
+			    .detail("Range", range)
+			    .detail("Version", version)
 			    .detail("StorageServer", alternatives->getInterface(index).uniqueID);
 			if (e.code() != error_code_checkpoint_not_found || !error.present()) {
 				error = e;
@@ -8982,26 +9046,28 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 	throw error.get();
 }
 
-ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                    KeyRange keys,
-                                                                    Version version,
-                                                                    CheckpointFormat format,
-                                                                    double timeout) {
-	state Span span("NAPI:GetCheckpoint"_loc);
+ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRange(Database cx,
+                                                                                   KeyRange range,
+                                                                                   Version version,
+                                                                                   CheckpointFormat format,
+                                                                                   Optional<UID> actionId,
+                                                                                   double timeout) {
+	state Span span("NAPI:GetCheckpointMetaDataForRange"_loc);
 	state int index = 0;
 	state std::vector<Future<CheckpointMetaData>> futures;
 
 	loop {
-		TraceEvent("GetCheckpointBegin")
-		    .detail("Range", keys.toString())
+		TraceEvent(SevDebug, "GetCheckpointMetaDataForRangeBegin")
+		    .detail("Range", range.toString())
 		    .detail("Version", version)
 		    .detail("Format", static_cast<int>(format));
+		futures.clear();
 
 		try {
 			state std::vector<KeyRangeLocationInfo> locations =
 			    wait(getKeyRangeLocations(cx,
 			                              TenantInfo(),
-			                              keys,
+			                              range,
 			                              CLIENT_KNOBS->TOO_MANY,
 			                              Reverse::False,
 			                              &StorageServerInterface::checkpoint,
@@ -9010,30 +9076,31 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 			                              UseProvisionalProxies::False,
 			                              latestVersion));
 
-			futures.clear();
 			for (index = 0; index < locations.size(); ++index) {
-				futures.push_back(
-				    getCheckpointMetaDataInternal(GetCheckpointRequest(version, locations[index].range, format),
-				                                  locations[index].locations,
-				                                  timeout));
-				TraceEvent("GetCheckpointShardBegin")
+				futures.push_back(getCheckpointMetaDataInternal(
+				    locations[index].range, version, format, actionId, locations[index].locations, timeout));
+				TraceEvent(SevDebug, "GetCheckpointShardBegin")
 				    .detail("Range", locations[index].range)
 				    .detail("Version", version)
 				    .detail("StorageServers", locations[index].locations->description());
 			}
 
 			choose {
-				when(wait(cx->connectionFileChanged())) { cx->invalidateCache(KeyRef(), keys); }
-				when(wait(waitForAll(futures))) { break; }
+				when(wait(cx->connectionFileChanged())) {
+					cx->invalidateCache(KeyRef(), range);
+				}
+				when(wait(waitForAll(futures))) {
+					break;
+				}
 				when(wait(delay(timeout))) {
-					TraceEvent("GetCheckpointTimeout").detail("Range", keys).detail("Version", version);
+					TraceEvent(SevWarn, "GetCheckpointTimeout").detail("Range", range).detail("Version", version);
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent("GetCheckpointError").errorUnsuppressed(e).detail("Range", keys.toString());
+			TraceEvent(SevWarn, "GetCheckpointError").errorUnsuppressed(e).detail("Range", range);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
-				cx->invalidateCache(KeyRef(), keys);
+				cx->invalidateCache(KeyRef(), range);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
 				throw;
@@ -9043,10 +9110,33 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 
 	std::vector<CheckpointMetaData> res;
 	for (index = 0; index < futures.size(); ++index) {
-		TraceEvent("GetCheckpointShardEnd").detail("Checkpoint", futures[index].get().toString());
+		TraceEvent(SevDebug, "GetCheckpointShardEnd").detail("Checkpoint", futures[index].get().toString());
 		res.push_back(futures[index].get());
 	}
 	return res;
+}
+
+ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
+                                                                    std::vector<KeyRange> ranges,
+                                                                    Version version,
+                                                                    CheckpointFormat format,
+                                                                    Optional<UID> actionId,
+                                                                    double timeout) {
+	state std::vector<Future<std::vector<CheckpointMetaData>>> futures;
+
+	for (const auto& range : ranges) {
+		futures.push_back(getCheckpointMetaDataForRange(cx, range, version, format, actionId, timeout));
+	}
+
+	std::vector<std::vector<CheckpointMetaData>> results = wait(getAll(futures));
+
+	std::unordered_set<CheckpointMetaData> checkpoints;
+
+	for (const auto& r : results) {
+		checkpoints.insert(r.begin(), r.end());
+	}
+
+	return std::vector<CheckpointMetaData>(checkpoints.begin(), checkpoints.end());
 }
 
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {
@@ -9456,6 +9546,9 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 				Version next = waitNext(data->get().ssStreamSummary.getFuture());
 				ssSummary.push_back(next);
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				if (e.code() != error_code_end_of_stream) {
 					data->get().complete();
 					if (e.code() != error_code_operation_cancelled) {
@@ -9605,15 +9698,11 @@ Version ChangeFeedData::getVersion() {
 // native api has consumed and processed, them, and then the fdb client has consumed all of the mutations.
 ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version version) {
 	// wait on SS to have sent up through version
-	int desired = 0;
-	int waiting = 0;
 	std::vector<Future<Void>> allAtLeast;
 	for (auto& it : self->storageData) {
 		if (it->version.get() < version) {
-			waiting++;
 			if (version > it->desired.get()) {
 				it->desired.set(version);
-				desired++;
 			}
 			allAtLeast.push_back(it->version.whenAtLeast(version));
 		}
@@ -9672,8 +9761,12 @@ ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Versio
 		// only allowed to use empty versions if you're caught up
 		Future<Void> waitEmptyVersion = (self->notAtLatest.get() == 0) ? changeFeedWaitLatest(self, version) : Never();
 		choose {
-			when(wait(waitEmptyVersion)) { break; }
-			when(wait(lastReturned)) { break; }
+			when(wait(waitEmptyVersion)) {
+				break;
+			}
+			when(wait(lastReturned)) {
+				break;
+			}
 			when(wait(self->refresh.getFuture())) {}
 			when(wait(self->notAtLatest.onChange())) {}
 		}
@@ -10934,11 +11027,12 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Key key = blobRestoreCommandKeyFor(range);
 			Optional<Value> value = wait(tr->get(key));
 			if (value.present()) {
 				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-				if (status.progress < 100) {
+				if (status.phase != BlobRestorePhase::DONE) {
 					return false; // stop if there is in-progress restore.
 				}
 			}
@@ -10966,7 +11060,7 @@ int64_t getMaxReadKeySize(KeyRef const& key) {
 }
 
 int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
-	int64_t tenantSize = hasRawAccess ? TenantMapEntry::PREFIX_SIZE : 0;
+	int64_t tenantSize = hasRawAccess ? TenantAPI::PREFIX_SIZE : 0;
 	return key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
 	                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT + tenantSize;
 }

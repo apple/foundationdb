@@ -92,6 +92,8 @@ static FILE* g_debugStream = stdout;
 #define TRACE                                                                                                          \
 	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
+static bool g_allowXOREncryptionInSimulation = true;
+
 using namespace std::string_view_literals;
 
 // Returns a string where every line in lines is prefixed with prefix
@@ -459,7 +461,13 @@ public:
 		// Since cursors can have async operations pending which modify their state they can't be copied cleanly
 		Cursor(const Cursor& other) = delete;
 
-		~Cursor() { writeOperations.cancel(); }
+		~Cursor() { cancel(); }
+
+		// Cancel outstanding operations.  Further use of cursor is not allowed.
+		void cancel() {
+			nextPageReader.cancel();
+			writeOperations.cancel();
+		}
 
 		// A read cursor can be initialized from a pop cursor
 		void initReadOnly(const Cursor& c, bool readExtents = false) {
@@ -921,7 +929,15 @@ public:
 public:
 	FIFOQueue() : pager(nullptr) {}
 
-	~FIFOQueue() { newTailPage.cancel(); }
+	~FIFOQueue() { cancel(); }
+
+	// Cancel outstanding operations.  Further use of queue is not allowed.
+	void cancel() {
+		headReader.cancel();
+		tailWriter.cancel();
+		headWriter.cancel();
+		newTailPage.cancel();
+	}
 
 	FIFOQueue(const FIFOQueue& other) = delete;
 	void operator=(const FIFOQueue& rhs) = delete;
@@ -2250,7 +2266,9 @@ public:
 							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
 						}
 					}
-					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
+					when(wait(remapRecoverActor)) {
+						remapRecoverActor = Never();
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream) {
@@ -2572,10 +2590,11 @@ public:
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
-		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
+		debug_printf("DWALPager(%s) op=%s %s %d ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysicalPage"),
 		             toString(pageIDs).c_str(),
+		             page->getEncodingType(),
 		             page->rawData());
 
 		// Set metadata before prewrite so it's in the pre-encrypted page in cache if the page is encrypted
@@ -2641,16 +2660,17 @@ public:
 		} else if (cacheEntry.reading()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the outstanding read to finish, then start the write
-			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-			    success(cacheEntry.readFuture), [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture = mapAsync(success(cacheEntry.readFuture),
+			                                  [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		}
+
 		// If the page is being written, wait for this write before issuing the new write to ensure the
 		// writes happen in the correct order
 		else if (cacheEntry.writing()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the previous write to finish, then start new write
-			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-			    cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture =
+			    mapAsync(cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		} else {
 			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		}
@@ -3626,6 +3646,13 @@ public:
 			f.cancel();
 		}
 		self->operations.clear();
+
+		debug_printf("DWALPager(%s) shutdown cancel queues\n", self->filename.c_str());
+		self->freeList.cancel();
+		self->delayedFreeList.cancel();
+		self->remapQueue.cancel();
+		self->extentFreeList.cancel();
+		self->extentUsedList.cancel();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->extentCache.clear());
@@ -6159,7 +6186,7 @@ private:
 		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
 		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
 			Error e = unexpected_encoding_type();
-			TraceEvent(SevError, "RedwoodBTreeUnexpectedNodeEncoding")
+			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
 			    .error(e)
 			    .detail("PhysicalPageID", page->getPhysicalPageID())
 			    .detail("IsEncrypted", page->isEncrypted())
@@ -6701,7 +6728,7 @@ private:
 		debug_print(addPrefix(context, update->toString()));
 
 		if (REDWOOD_DEBUG) {
-			int c = 0;
+			[[maybe_unused]] int c = 0;
 			auto i = mBegin;
 			while (1) {
 				debug_printf("%s Mutation %4d '%s':  %s\n",
@@ -7954,10 +7981,11 @@ public:
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
 		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
-			ASSERT(encryptionKeyProvider->expectedEncodingType() == EncodingType::AESEncryptionV1);
-			encodingType = EncodingType::AESEncryptionV1;
+			encodingType = FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ? EncodingType::AESEncryptionWithAuth
+			                                                             : EncodingType::AESEncryption;
+			ASSERT_EQ(encodingType, encryptionKeyProvider->expectedEncodingType());
 			m_keyProvider = encryptionKeyProvider;
-		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
+		} else if (g_allowXOREncryptionInSimulation && g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Simulation only. Deterministically enable encryption based on uid
 			encodingType = EncodingType::XOREncryption_TestOnly;
 			m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(filename);
@@ -10020,7 +10048,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
 	state unsigned int encryptionDomainMode =
 	    params.getInt("domainMode")
-	        .orDefault(deterministicRandom()->randomInt(0, RandomEncryptionKeyProvider::EncryptionDomainMode::MAX));
+	        .orDefault(deterministicRandom()->randomInt(
+	            0, RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode::MAX));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -10073,9 +10102,12 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state Reference<IPageEncryptionKeyProvider> keyProvider;
-	if (encodingType == EncodingType::AESEncryptionV1) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider>(
-		    RandomEncryptionKeyProvider::EncryptionDomainMode(encryptionDomainMode));
+	if (encodingType == EncodingType::AESEncryption) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryption>>(
+		    RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode(encryptionDomainMode));
+	} else if (encodingType == EncodingType::AESEncryptionWithAuth) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>(
+		    RandomEncryptionKeyProvider<AESEncryptionWithAuth>::EncryptionDomainMode(encryptionDomainMode));
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
@@ -10650,7 +10682,9 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 				if (entriesRead == m_extentQueue.numEntries)
 					break;
 			}
-			when(wait(queueRecoverActor)) { queueRecoverActor = Never(); }
+			when(wait(queueRecoverActor)) {
+				queueRecoverActor = Never();
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream) {
@@ -11220,9 +11254,13 @@ ACTOR Future<Void> sequentialInsert(IKeyValueStore* kvs, int prefixLen, int valu
 	return Void();
 }
 
-Future<Void> closeKVS(IKeyValueStore* kvs) {
+Future<Void> closeKVS(IKeyValueStore* kvs, bool dispose = false) {
 	Future<Void> closed = kvs->onClosed();
-	kvs->close();
+	if (dispose) {
+		kvs->dispose();
+	} else {
+		kvs->close();
+	}
 	return closed;
 }
 
@@ -11397,5 +11435,71 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	return Void();
+}
+
+namespace {
+void setAuthMode(EncodingType encodingType) {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	if (encodingType == AESEncryption) {
+		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ false }));
+	} else {
+		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ true }));
+		g_knobs.setKnob("encrypt_header_auth_token_algo", KnobValueRef::create(int{ 1 }));
+	}
+}
+} // anonymous namespace
+
+TEST_CASE("/redwood/correctness/EnforceEncodingType") {
+	state const std::vector<std::pair<EncodingType, EncodingType>> testCases = {
+		{ XXHash64, AESEncryption }, { AESEncryption, AESEncryptionWithAuth }
+	};
+	state const std::map<EncodingType, Reference<IPageEncryptionKeyProvider>> encryptionKeyProviders = {
+		{ XXHash64, makeReference<NullKeyProvider>() },
+		{ AESEncryption, makeReference<RandomEncryptionKeyProvider<AESEncryption>>() },
+		{ AESEncryptionWithAuth, makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>() }
+	};
+	state IKeyValueStore* kvs = nullptr;
+	g_allowXOREncryptionInSimulation = false;
+	for (const auto& testCase : testCases) {
+		state EncodingType initialEncodingType = testCase.first;
+		state EncodingType reopenEncodingType = testCase.second;
+		ASSERT_NE(initialEncodingType, reopenEncodingType);
+		ASSERT(ArenaPage::isEncodingTypeEncrypted(reopenEncodingType));
+		deleteFile("test.redwood-v1");
+		printf("Create KV store with encoding type %d\n", initialEncodingType);
+		setAuthMode(initialEncodingType);
+		kvs = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1,
+		                  "test.redwood-v1",
+		                  UID(),
+		                  0,
+		                  false,
+		                  false,
+		                  false,
+		                  encryptionKeyProviders.at(initialEncodingType));
+		wait(kvs->init());
+		kvs->set(KeyValueRef("foo"_sr, "bar"_sr));
+		wait(kvs->commit());
+		wait(closeKVS(kvs));
+		// Reopen
+		printf("Reopen KV store with encoding type %d\n", reopenEncodingType);
+		setAuthMode(reopenEncodingType);
+		kvs = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1,
+		                  "test.redwood-v1",
+		                  UID(),
+		                  0,
+		                  false,
+		                  false,
+		                  false,
+		                  encryptionKeyProviders.at(reopenEncodingType));
+		wait(kvs->init());
+		try {
+			Optional<Value> v = wait(kvs->readValue("foo"_sr));
+			UNREACHABLE();
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_unexpected_encoding_type);
+		}
+		wait(closeKVS(kvs, true /*dispose*/));
+	}
 	return Void();
 }
