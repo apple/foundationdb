@@ -10334,6 +10334,51 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	return Void();
 }
 
+void coalesceChangeFeedLocations(std::vector<KeyRangeLocationInfo>& locations) {
+	// only coalesce if same tenant
+	if (locations.front().tenantEntry.id != locations.back().tenantEntry.id) {
+		return;
+	}
+	std::vector<UID> teamUIDs;
+	bool anyToCoalesce = false;
+	teamUIDs.reserve(locations.size());
+	for (int i = 0; i < locations.size(); i++) {
+		ASSERT(locations[i].locations->size() > 0);
+		UID teamUID = locations[i].locations->getId(0);
+		for (int j = 1; j < locations[i].locations->size(); j++) {
+			UID locUID = locations[i].locations->getId(j);
+			teamUID = UID(teamUID.first() ^ locUID.first(), teamUID.second() ^ locUID.second());
+		}
+		if (!teamUIDs.empty() && teamUIDs.back() == teamUID) {
+			anyToCoalesce = true;
+		}
+		teamUIDs.push_back(teamUID);
+	}
+
+	if (!anyToCoalesce) {
+		return;
+	}
+
+	CODE_PROBE(true, "coalescing change feed locations");
+
+	// FIXME: there's technically a probability of "hash" collisions here, but it's extremely low. Could validate that
+	// two teams with the same xor are in fact the same, or fall back to not doing this if it gets a wrong shard server
+	// error or something
+
+	std::vector<KeyRangeLocationInfo> coalesced;
+	coalesced.reserve(locations.size());
+	coalesced.push_back(locations[0]);
+	for (int i = 1; i < locations.size(); i++) {
+		if (teamUIDs[i] == teamUIDs[i - 1]) {
+			coalesced.back().range = KeyRangeRef(coalesced.back().range.begin, locations[i].range.end);
+		} else {
+			coalesced.push_back(locations[i]);
+		}
+	}
+
+	locations = coalesced;
+}
+
 ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             Reference<ChangeFeedData> results,
                                             Key rangeID,
@@ -10373,6 +10418,10 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (locations.size() >= CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT) {
 				ASSERT_WE_THINK(false);
 				throw unknown_change_feed();
+			}
+
+			if (CLIENT_KNOBS->CHANGE_FEED_COALESCE_LOCATIONS && locations.size() > 1) {
+				coalesceChangeFeedLocations(locations);
 			}
 
 			state std::vector<int> chosenLocations(locations.size());
