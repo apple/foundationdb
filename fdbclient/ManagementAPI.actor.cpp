@@ -2541,6 +2541,7 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                bool async) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin");
 
 	loop {
 		while (!clusterInterface->get().present()) {

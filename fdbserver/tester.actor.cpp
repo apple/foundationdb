@@ -29,6 +29,8 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -1081,6 +1083,48 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	return Void();
 }
 
+ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state UID auditId;
+	TraceEvent("AuditStorageCorrectnessBegin");
+	if (cx.getPtr() == nullptr) {
+		TraceEvent("AuditStorageCorrectnessAborted");
+		return Void();
+	}
+
+	loop {
+		try {
+			TriggerAuditRequest req(AuditType::ValidateHA, allKeys);
+			req.async = true;
+			UID auditId_ = wait(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req));
+			auditId = auditId_;
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+			wait(delay(1));
+		}
+	}
+
+	cx = openDBOnServer(dbInfo);
+	loop {
+		try {
+			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+			if (auditState.getPhase() != AuditPhase::Complete) {
+				ASSERT(auditState.getPhase() == AuditPhase::Running);
+				wait(delay(30));
+			} else {
+				TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
+				ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				break;
+			}
+		} catch (Error& e) {
+			TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+			wait(delay(1));
+		}
+	}
+
+	return Void();
+}
+
 // Runs the consistency check workload, which verifies that the database is in a consistent state
 ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
@@ -1206,6 +1250,13 @@ ACTOR Future<bool> runTest(Database cx,
 				                  20000.0));
 			} catch (Error& e) {
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
+				ok = false;
+			}
+
+			try {
+				wait(timeoutError(auditStorageCorrectness(dbInfo), 20000.0));
+			} catch (Error& e) {
+				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform auditStorage check.");
 				ok = false;
 			}
 		}
@@ -2103,9 +2154,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) {
-			return Void();
-		}
+		when(wait(tests)) { return Void(); }
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();
