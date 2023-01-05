@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
@@ -332,7 +333,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		state Future<Void> status = statusLoop(cx, tag.toString());
-		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
@@ -341,8 +341,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
-			                               SERVER_KNOBS->ENABLE_ENCRYPTION &&
-			                                   configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
+			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
@@ -557,6 +556,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("PerformRestore", self->performRestore)
@@ -631,7 +631,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
-				state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 				try {
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       "file://simfdb/backups/"_sr,
@@ -640,8 +639,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       SERVER_KNOBS->ENABLE_ENCRYPTION &&
-					                                           configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
+					                                       true,
 					                                       StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
@@ -701,7 +699,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
 				Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges;
 				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (!SERVER_KNOBS->ENABLE_ENCRYPTION ||
+					if (!config.encryptionAtRestMode.isEncryptionEnabled() ||
 					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {
