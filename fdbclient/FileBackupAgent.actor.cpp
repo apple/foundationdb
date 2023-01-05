@@ -154,10 +154,10 @@ KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
 
-class RestoreConfig : public KeyBackedConfig {
+class RestoreConfig : public KeyBackedTaskConfig {
 public:
-	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfig(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
+	RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
+	RestoreConfig(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
 
 	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(__FUNCTION__sr); }
 	Future<StringRef> stateText(Reference<ReadYourWritesTransaction> tr) {
@@ -647,12 +647,13 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			Reference<BlobCipherKey> cipherKey = wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId()));
 			self->cipherKeys.textCipherKey = cipherKey;
 		}
-		EncryptBlobCipherAes265Ctr encryptor(self->cipherKeys.textCipherKey,
-		                                     self->cipherKeys.headerCipherKey,
-		                                     self->cipherKeys.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BACKUP);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    self->cipherKeys.textCipherKey,
+		    self->cipherKeys.headerCipherKey,
+		    self->cipherKeys.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BACKUP);
 		Arena arena;
 		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
 		auto encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, self->encryptHeader, arena);
@@ -1284,7 +1285,7 @@ ACTOR Future<Void> checkTaskVersion(Database cx, Reference<Task> task, StringRef
 		    .detail("TaskVersion", taskVersion)
 		    .detail("Name", name)
 		    .detail("Version", version);
-		if (KeyBackedConfig::TaskParams.uid().exists(task)) {
+		if (KeyBackedTaskConfig::TaskParams.uid().exists(task)) {
 			std::string msg = format("%s task version `%lu' is greater than supported version `%lu'",
 			                         task->params[Task::reservedTaskParamKeyType].toString().c_str(),
 			                         (unsigned long)taskVersion,
