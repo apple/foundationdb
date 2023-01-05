@@ -80,7 +80,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		 * and take the shortcut. */
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-		bool boundaryAndExist;
 	} FDBMappedKeyValue;
 
 #pragma pack(push, 4)
@@ -784,6 +783,8 @@ private:
 	// if we don't have an underlying database object to connect with.
 	void setTimeout(Optional<StringRef> value);
 
+	void resetTimeout();
+
 	// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
 	template <class T>
 	ThreadFuture<T> makeTimeout();
@@ -797,7 +798,7 @@ private:
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
-	void updateTransaction();
+	void updateTransaction(bool setPersistentOptions);
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
 
 	template <class T, class... Args>

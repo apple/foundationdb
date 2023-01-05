@@ -100,6 +100,9 @@ extern StringRef strinc(StringRef const& str, Arena& arena);
 extern Standalone<StringRef> addVersionStampAtEnd(StringRef const& str);
 extern StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena);
 
+// Return the number of combinations to choose k items out of n choices
+int nChooseK(int n, int k);
+
 template <typename Iter>
 StringRef concatenate(Iter b, Iter const& e, Arena& arena) {
 	int rsize = 0;
@@ -1137,7 +1140,7 @@ auto const& getReplyPromiseStream(Request const& r) {
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
 #define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
+// #define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {

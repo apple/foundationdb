@@ -113,6 +113,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigNode/Internal/versionedMutationKeyOrdering"
 
 class ConfigNodeImpl {
 	UID id;
+	FlowLock lock;
 	OnDemandStore kvStore;
 	CounterCollection cc;
 
@@ -218,6 +219,8 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> getChanges(ConfigNodeImpl* self, ConfigFollowerGetChangesRequest req) {
+		wait(self->lock.take());
+		state FlowLock::Releaser releaser(self->lock);
 		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastSeenVersion < lastCompactedVersion) {
 			++self->failedChangeRequests;
@@ -413,6 +416,8 @@ class ConfigNodeImpl {
 	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations,
 	                                          Version commitVersion,
 	                                          Version liveVersion = ::invalidVersion) {
+		wait(self->lock.take());
+		state FlowLock::Releaser releaser(self->lock);
 		Version latestVersion = 0;
 		int index = 0;
 		for (const auto& mutation : mutations) {
@@ -508,7 +513,9 @@ class ConfigNodeImpl {
 				when(ConfigTransactionGetKnobsRequest req = waitNext(cti->getKnobs.getFuture())) {
 					wait(getKnobs(self, req));
 				}
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}
@@ -792,7 +799,9 @@ class ConfigNodeImpl {
 					}
 					req.reply.send(Void());
 				}
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}

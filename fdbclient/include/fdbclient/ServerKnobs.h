@@ -186,9 +186,14 @@ public:
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
-	double CHECK_TEAM_DELAY;
-	double PERPETUAL_WIGGLE_DELAY;
-	bool PERPETUAL_WIGGLE_DISABLE_REMOVER;
+	double CHECK_TEAM_DELAY; // Perpetual wiggle check cluster team healthy
+	double PERPETUAL_WIGGLE_SMALL_LOAD_RATIO; // If the average load of storage server is less than this ratio * average
+	                                          // shard bytes, the perpetual wiggle won't consider the available space
+	                                          // load balance in the cluster
+	double PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO; // target min : average space load balance ratio after re-include
+	                                                 // before perpetual wiggle will start the next wiggle
+	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
+	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -264,6 +269,7 @@ public:
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
+	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
@@ -321,6 +327,7 @@ public:
 	int ROCKSDB_WRITER_THREAD_PRIORITY;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
+	int ROCKSDB_CHECKPOINT_READER_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
 	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
@@ -332,6 +339,8 @@ public:
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
 	double ROCKSDB_READ_RANGE_TIMEOUT;
+	double ROCKSDB_READ_CHECKPOINT_TIMEOUT;
+	int64_t ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE;
 	double ROCKSDB_READ_QUEUE_WAIT;
 	int ROCKSDB_READ_QUEUE_SOFT_MAX;
 	int ROCKSDB_READ_QUEUE_HARD_MAX;
@@ -1016,6 +1025,8 @@ public:
 
 	// Idempotency ids
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
+	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
+	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

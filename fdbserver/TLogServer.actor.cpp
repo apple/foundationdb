@@ -1445,7 +1445,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(TLogData* self,
@@ -1606,7 +1608,9 @@ ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Ve
 			// we want the caller to finish first, otherwise the data structure it is building might not be complete
 			wait(delay(0.0));
 		}
-		when(wait(delay(timeout))) { self->blockingPeekTimeouts += 1; }
+		when(wait(delay(timeout))) {
+			self->blockingPeekTimeouts += 1;
+		}
 	}
 	return Void();
 }
@@ -1618,6 +1622,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
                             Version& endVersion) {
 	ASSERT(!messages.getLength());
 
+	int versionCount = 0;
 	auto& deque = getVersionMessages(self, tag);
 	//TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", req.tag1).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
 
@@ -1648,6 +1653,23 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		DEBUG_TAGS_AND_MESSAGE(
 		    "TLogPeek", currentVersion, StringRef((uint8_t*)data + offset, messages.getLength() - offset), self->logId)
 		    .detail("PeekTag", tag);
+		versionCount++;
+	}
+
+	if (versionCount == 0) {
+		++self->emptyPeeks;
+	} else {
+		++self->nonEmptyPeeks;
+
+		// TODO (version vector) check if this should be included in "status details" json
+		if (self->peekVersionCounts.find(tag) == self->peekVersionCounts.end()) {
+			UID ssID = deterministicRandom()->randomUniqueID();
+			std::string s = "PeekVersionCounts " + tag.toString();
+			self->peekVersionCounts.try_emplace(
+			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		}
+		LatencySample& sample = self->peekVersionCounts.at(tag);
+		sample.addMeasurement(versionCount);
 	}
 }
 
@@ -2795,7 +2817,9 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+					break;
+				}
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -3276,7 +3300,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						} else {
@@ -3287,7 +3313,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -3636,7 +3664,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 						forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 					}
 				}
-				when(wait(error)) { throw internal_error(); }
+				when(wait(error)) {
+					throw internal_error();
+				}
 				when(wait(activeSharedChange)) {
 					if (activeSharedTLog->get() == tlogId) {
 						TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
@@ -3693,11 +3723,11 @@ struct DequeAllocator : std::allocator<T> {
 	template <typename U>
 	DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}
 
-	T* allocate(std::size_t n, std::allocator<void>::const_pointer hint = 0) {
+	T* allocate(std::size_t n) {
 		DequeAllocatorStats::allocatedBytes += n * sizeof(T);
 		// fprintf(stderr, "Allocating %lld objects for %lld bytes (total allocated: %lld)\n", n, n * sizeof(T),
 		// DequeAllocatorStats::allocatedBytes);
-		return std::allocator<T>::allocate(n, hint);
+		return std::allocator<T>::allocate(n);
 	}
 	void deallocate(T* p, std::size_t n) {
 		DequeAllocatorStats::allocatedBytes -= n * sizeof(T);

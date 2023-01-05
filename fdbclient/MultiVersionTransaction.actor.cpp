@@ -1210,7 +1210,7 @@ MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase>
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
   : db(db), tenant(tenant), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
-	updateTransaction();
+	updateTransaction(false);
 }
 
 void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options) {
@@ -1218,7 +1218,7 @@ void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTrans
 	std::copy(options.begin(), options.end(), std::back_inserter(persistentOptions));
 }
 
-void MultiVersionTransaction::updateTransaction() {
+void MultiVersionTransaction::updateTransaction(bool setPersistentOptions) {
 	TransactionInfo newTr;
 	if (tenant.present()) {
 		ASSERT(tenant.get());
@@ -1235,25 +1235,32 @@ void MultiVersionTransaction::updateTransaction() {
 		newTr.onChange = currentDb.onChange;
 	}
 
-	Optional<StringRef> timeout;
-	for (auto option : persistentOptions) {
-		if (option.first == FDBTransactionOptions::TIMEOUT) {
-			timeout = option.second.castTo<StringRef>();
-		} else if (newTr.transaction) {
-			newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
+	// When called from the constructor or from reset(), all persistent options are database options and therefore
+	// alredy set on newTr.transaction if it got created sucessfully. If newTr.transaction could not be created (i.e.,
+	// because no database with a matching version is present), the local timeout set in setTimeout() applies, so we
+	// need to set it.
+	if (setPersistentOptions || !newTr.transaction) {
+		Optional<StringRef> timeout;
+		for (auto option : persistentOptions) {
+			if (option.first == FDBTransactionOptions::TIMEOUT) {
+				timeout = option.second.castTo<StringRef>();
+			} else if (newTr.transaction) {
+				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
+			}
+		}
+
+		// Setting a timeout can immediately cause a transaction to fail. The only timeout
+		// that matters is the one most recently set, so we ignore any earlier set timeouts
+		// that might inadvertently fail the transaction.
+		if (timeout.present()) {
+			if (newTr.transaction) {
+				newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
+				resetTimeout();
+			} else {
+				setTimeout(timeout);
+			}
 		}
 	}
-
-	// Setting a timeout can immediately cause a transaction to fail. The only timeout
-	// that matters is the one most recently set, so we ignore any earlier set timeouts
-	// that might inadvertently fail the transaction.
-	if (timeout.present()) {
-		setTimeout(timeout);
-		if (newTr.transaction) {
-			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
-		}
-	}
-
 	lock.enter();
 	transaction = newTr;
 	lock.leave();
@@ -1561,19 +1568,17 @@ void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Op
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
 
-	if (itr->first == FDBTransactionOptions::TIMEOUT) {
-		setTimeout(value);
-	}
-
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->setOption(option, value);
+	} else if (itr->first == FDBTransactionOptions::TIMEOUT) {
+		setTimeout(value);
 	}
 }
 
 ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	if (e.code() == error_code_cluster_version_changed) {
-		updateTransaction();
+		updateTransaction(true);
 		return ThreadFuture<Void>(Void());
 	} else {
 		auto f = executeOperation(&ITransaction::onError, e);
@@ -1581,7 +1586,7 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 			if (ready.isError() && ready.getError().code() == error_code_cluster_version_changed) {
 				// In case of a cluster version change, upgrade (or downgrade) the transaction
 				// and let it to be retried independently of the original error
-				updateTransaction();
+				updateTransaction(true);
 				return ErrorOr<ThreadFuture<Void>>(Void());
 			}
 			// In all other cases forward the result of the inner onError call
@@ -1668,6 +1673,18 @@ void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 	}
 }
 
+// Removes timeout if set. This timeout only applies if we don't have an underlying database object to connect with.
+void MultiVersionTransaction::resetTimeout() {
+	ThreadFuture<Void> prevTimeout;
+	{ // lock scope
+		ThreadSpinLockHolder holder(timeoutLock);
+		prevTimeout = currentTimeout;
+		currentTimeout = ThreadFuture<Void>();
+	}
+	if (prevTimeout.isValid()) {
+		prevTimeout.cancel();
+	}
+}
 // Creates a ThreadFuture<T> that will signal an error if the transaction times out.
 template <class T>
 ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
@@ -1726,7 +1743,7 @@ void MultiVersionTransaction::reset() {
 	}
 
 	setDefaultOptions(db->dbState->transactionDefaultOptions);
-	updateTransaction();
+	updateTransaction(false);
 }
 
 MultiVersionTransaction::~MultiVersionTransaction() {
