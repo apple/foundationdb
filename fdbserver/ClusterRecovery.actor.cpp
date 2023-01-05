@@ -1081,15 +1081,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Recover transaction state store
 	// If it's the first recovery the encrypt mode is not yet avilable so create the txn state store with encryption
 	// disabled. This is fine since we will not write any data to disk using this txn store.
-	state EncryptionAtRestMode encryptModeForTxnStateStore = EncryptionAtRestMode::DISABLED;
+	state bool enableEncryptionForTxnStateStore = false;
 	if (self->controllerData && self->controllerData->encryptionAtRestMode.isValid() &&
 	    self->controllerData->encryptionAtRestMode.getFuture().isValid() &&
 	    self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
 		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
-		encryptModeForTxnStateStore = encryptMode;
+		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
 	}
-	TraceEvent("CRTxnStateStoreEncryptMode").detail("Mode", encryptModeForTxnStateStore.toString());
-	CODE_PROBE(encryptModeForTxnStateStore.isEncryptionEnabled(), "Enable encryption for txnStateStore");
+	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
@@ -1100,7 +1099,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	                                             false,
 	                                             false,
 	                                             true,
-	                                             encryptModeForTxnStateStore);
+	                                             enableEncryptionForTxnStateStore);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
