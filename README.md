@@ -91,7 +91,7 @@ files are precompiled with the actor compiler, an IDE will not be very useful as
 a user will only be presented with the generated code - which is not what she
 wants to edit and get IDE features for.
 
-The good news is, that it is possible to generate project files for editing
+The good news is that it is possible to generate project files for editing
 flow with a supported IDE. There is a CMake option called `OPEN_FOR_IDE` which
 will generate a project which can be opened in an IDE for editing. You won't be
 able to build this project, but you will be able to edit the files and get most
