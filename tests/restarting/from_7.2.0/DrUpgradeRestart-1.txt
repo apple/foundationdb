@@ -1,4 +1,5 @@
 extraDatabaseMode=Local
+allowDefaultTenant=false
 
 testTitle=DrUpgrade
 clearAfterTest=false
