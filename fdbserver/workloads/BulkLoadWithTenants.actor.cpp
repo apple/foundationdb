@@ -95,7 +95,8 @@ struct BulkSetupWorkload : TestWorkload {
 		               workload->tenantNames));
 		// We want to ensure that tenant deletion happens before the restore phase starts
 		if (workload->deleteTenants) {
-			state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
+			state Reference<TenantEntryCache<Void>> tenantCache =
+			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
 			wait(tenantCache->init());
 			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenantNames.size() + 1);
 			if (numTenantsToDelete > 0) {

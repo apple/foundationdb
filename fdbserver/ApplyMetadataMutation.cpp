@@ -496,7 +496,8 @@ private:
 		    &p.endVersion,
 		    commit,
 		    committedVersion,
-		    p.keyVersion);
+		    p.keyVersion,
+		    tenantMap);
 	}
 
 	void checkSetApplyMutationsKeyVersionMapRange(MutationRef m) {

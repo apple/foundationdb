@@ -562,12 +562,12 @@ public:
 		mapByTenantId[entry.id] = payload;
 		mapByTenantName[name] = payload;
 
-		TraceEvent(SevDebug, "TenantEntryCachePut")
-		    .detail("TenantName", name)
-		    .detail("TenantNameExisting", existingName)
-		    .detail("TenantID", entry.id)
-		    .detail("TenantIDExisting", existingId)
-		    .detail("TenantPrefix", pair.second.prefix);
+		// TraceEvent("TenantEntryCachePut")
+		//     .detail("TenantName", name)
+		//     .detail("TenantNameExisting", existingName)
+		//     .detail("TenantID", entry.id)
+		//     .detail("TenantIDExisting", existingId)
+		//     .detail("TenantPrefix", pair.second.prefix);
 
 		CODE_PROBE(idItr == mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache new entry");
 		CODE_PROBE(idItr != mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache entry name updated");

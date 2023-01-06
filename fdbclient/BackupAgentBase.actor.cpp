@@ -28,10 +28,8 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Metacluster.h"
-#include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
-#include "flow/EncryptUtils.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 FDB_DEFINE_BOOLEAN_PARAM(LockDB);
@@ -286,7 +284,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Version version,
                                                Reference<KeyRangeMap<Version>> key_version,
                                                Database cx,
-                                               Reference<TenantEntryCache<Void>> tenantCache) {
+                                               std::unordered_map<int64_t, TenantName>* tenantMap) {
 	try {
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
@@ -344,10 +342,11 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			ASSERT(!logValue.isEncrypted());
 
 			state EncryptCipherDomainId domainId = getEncryptDomainId(logValue);
-			if (domainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && domainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-				Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(domainId));
+			if (config.tenantMode == TenantMode::REQUIRED && domainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
+			    domainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
 				// If a tenant is not found for a given mutation then exclude it from the batch
-				if (config.tenantMode == TenantMode::REQUIRED && !payload.present()) {
+				ASSERT(tenantMap != nullptr);
+				if (tenantMap->find(domainId) == tenantMap->end()) {
 					// TODO (nwijetunga): Okay to log this?
 					TraceEvent("TenantNotFound").detail("Mutation", logValue.toString()).detail("TenantId", domainId);
 					CODE_PROBE(true, "mutation log restore tenant not found");
@@ -670,12 +669,11 @@ ACTOR Future<int> dumpData(Database cx,
                            Key rangeBegin,
                            PromiseStream<Future<Void>> addActor,
                            FlowLock* commitLock,
-                           Reference<KeyRangeMap<Version>> keyVersion) {
+                           Reference<KeyRangeMap<Version>> keyVersion,
+                           std::unordered_map<int64_t, TenantName>* tenantMap) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
-	state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
-	wait(tenantCache->init());
 	loop {
 		state CommitTransactionRequest req;
 		state Version newBeginVersion = invalidVersion;
@@ -700,7 +698,7 @@ ACTOR Future<int> dumpData(Database cx,
 				                          group.groupKey,
 				                          keyVersion,
 				                          cx,
-				                          tenantCache));
+				                          tenantMap));
 				newBeginVersion = group.groupKey + 1;
 				if (mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;
@@ -801,7 +799,8 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Version* endVersion,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion) {
+                                  Reference<KeyRangeMap<Version>> keyVersion,
+                                  std::unordered_map<int64_t, TenantName>* tenantMap) {
 	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
@@ -850,7 +849,8 @@ ACTOR Future<Void> applyMutations(Database cx,
 				                          ranges[idx].begin,
 				                          addActor,
 				                          &commitLock,
-				                          keyVersion));
+				                          keyVersion,
+				                          tenantMap));
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();
