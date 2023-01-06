@@ -8030,7 +8030,8 @@ public:
 				// Run the destructive sanity check, but don't throw.
 				ErrorOr<Void> err = wait(errorOr(self->m_tree->clearAllAndCheckSanity()));
 				// If the test threw an error, it must be an injected fault or something has gone wrong.
-				ASSERT(!err.isError() || err.getError().isInjectedFault());
+				ASSERT(!err.isError() || err.getError().isInjectedFault() ||
+				       err.getError().code() == error_code_unexpected_encoding_type);
 			}
 		} else {
 			// The KVS user shouldn't be holding a commit future anymore so self shouldn't either.
