@@ -2,6 +2,8 @@ testClass = "Backup"
 
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
+# required tenant mode is not supported for Disaster Recovery yet
+tenantModes = ['disabled', 'optional']
 
 [[test]]
 testTitle = 'BackupAndRestore'

@@ -699,7 +699,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
 				Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges;
 				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (!config.encryptionAtRestMode.isEncryptionEnabled() ||
+					if (config.tenantMode != TenantMode::REQUIRED ||
 					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {

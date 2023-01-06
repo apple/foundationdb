@@ -118,7 +118,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
 
-		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
+		if (config.tenantMode == TenantMode::REQUIRED) {
 			// restore system keys
 			VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
 			state std::vector<Future<Version>> restores;

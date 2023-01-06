@@ -23,7 +23,6 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -348,7 +347,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				ASSERT(tenantMap != nullptr);
 				if (tenantMap->find(domainId) == tenantMap->end()) {
 					// TODO (nwijetunga): Okay to log this?
-					TraceEvent("TenantNotFound").detail("Mutation", logValue.toString()).detail("TenantId", domainId);
+					TraceEvent(SevDebug, "TenantNotFound")
+					    .detail("Mutation", logValue.toString())
+					    .detail("TenantId", domainId);
 					CODE_PROBE(true, "mutation log restore tenant not found");
 					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 					continue;
