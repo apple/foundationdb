@@ -1696,11 +1696,11 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 9);
+			state int operation = deterministicRandom()->randomInt(0, 8);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
-				wait(deleteTenant(self, false));
+				wait(deleteTenant(self, deterministicRandom()->coinflip()));
 			} else if (operation == 2) {
 				wait(getTenant(self));
 			} else if (operation == 3) {
@@ -1713,8 +1713,6 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(getTenantGroup(self));
 			} else if (operation == 7) {
 				wait(listTenantGroups(self));
-			} else if (operation == 8) {
-				wait(deleteTenant(self, true));
 			}
 		}
 

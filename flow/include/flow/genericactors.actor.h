@@ -575,20 +575,20 @@ public:
 	void sendError(K const& begin, K const& end, Error const& e) {
 		if (begin >= end)
 			return;
-		std::vector<Promise<Void>> noDestroy = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
-		sendError(noDestroy, e);
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		sendError(ps, e);
 	}
 
 	void triggerAll() {
-		std::vector<Promise<Void>> noDestroy = swapRangePromises(items.begin(), items.end());
-		send(noDestroy);
+		std::vector<Promise<Void>> ps = swapRangePromises(items.begin(), items.end());
+		send(ps);
 	}
 
 	void triggerRange(K const& begin, K const& end) {
 		if (begin >= end)
 			return;
-		std::vector<Promise<Void>> noDestroy = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
-		send(noDestroy);
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		send(ps);
 	}
 
 	void trigger(K const& key) {
