@@ -622,6 +622,25 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	// set a random watch on a tenant
+	ACTOR static Future<ErrorOr<Void>> watchTenant(TenantManagementWorkload* self, TenantName tenant) {
+		try {
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dataDb, tenant));
+			loop {
+				try {
+					state Future<Void> watch = tr->watch(doubleToTestKey(deterministicRandom()->random01()));
+					wait(tr->commit());
+					wait(watch);
+					return Void();
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+			}
+		} catch (Error& e) {
+			return e;
+		}
+	}
+
 	// Deletes the tenant or tenant range using the specified operation type
 	ACTOR static Future<Void> deleteTenantImpl(Reference<ReadYourWritesTransaction> tr,
 	                                           TenantName beginTenant,
@@ -669,7 +688,7 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
+	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self, bool watchTenantCheck) {
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
@@ -717,6 +736,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Check whether each tenant is empty.
 		state int tenantIndex;
+		state std::vector<Future<ErrorOr<Void>>> watchFutures;
 		try {
 			if (alreadyExists || endTenant.present()) {
 				for (tenantIndex = 0; tenantIndex < tenants.size(); ++tenantIndex) {
@@ -734,6 +754,10 @@ struct TenantManagementWorkload : TestWorkload {
 							} catch (Error& e) {
 								wait(clearTr.onError(e));
 							}
+						}
+
+						if (watchTenantCheck) {
+							watchFutures.emplace_back(self->watchTenant(self, tenants[tenantIndex]));
 						}
 					}
 					// Otherwise, we will just report the current emptiness of the tenant
@@ -867,6 +891,15 @@ struct TenantManagementWorkload : TestWorkload {
 
 					self->createdTenants.erase(tenant);
 				}
+
+				// check for watch result
+				std::vector<ErrorOr<Void>> watchResults = wait(getAll(watchFutures));
+				bool watchCheckPass = std::all_of(watchResults.begin(), watchResults.end(), [](const ErrorOr<Void>& r) {
+					CODE_PROBE(r.isError(error_code_tenant_removed), "Watch Triggered because the tenant is deleted during watch");
+					return r.isError(error_code_tenant_removed) || r.isError(error_code_tenant_not_found);
+				});
+				ASSERT(watchCheckPass);
+
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_empty) {
@@ -1646,11 +1679,11 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 8);
+			state int operation = deterministicRandom()->randomInt(0, 9);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
-				wait(deleteTenant(self));
+				wait(deleteTenant(self, false));
 			} else if (operation == 2) {
 				wait(getTenant(self));
 			} else if (operation == 3) {
@@ -1663,6 +1696,8 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(getTenantGroup(self));
 			} else if (operation == 7) {
 				wait(listTenantGroups(self));
+			} else if (operation == 8) {
+				wait(deleteTenant(self, true));
 			}
 		}
 
