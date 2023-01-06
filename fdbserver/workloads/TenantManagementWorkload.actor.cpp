@@ -623,31 +623,33 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// set a random watch on a tenant
-	ACTOR static Future<ErrorOr<Void>> watchTenant(TenantManagementWorkload* self, TenantName tenant) {
-		try {
+	ACTOR static Future<Void> watchTenant(TenantManagementWorkload* self,
+	                                      TenantName tenant,
+	                                      std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>>* watches) {
+		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dataDb, tenant));
-			loop {
-				try {
-					state Future<Void> watch = tr->watch(doubleToTestKey(deterministicRandom()->random01()));
-					wait(tr->commit());
-					wait(watch);
-					return Void();
-				} catch (Error& e) {
-					wait(tr->onError(e));
-				}
+			try {
+				state Future<Void> watch = tr->watch(doubleToTestKey(deterministicRandom()->random01()));
+				wait(tr->commit());
+				watches->emplace_back(tenant, errorOr(watch));
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
-		} catch (Error& e) {
-			return e;
 		}
 	}
 
 	void checkWatchOnDeletedTenant(std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>>& watchFutures) {
 		for (auto& [t, f] : watchFutures) {
-			if (!(f.get().isError(error_code_tenant_removed) || f.get().isError(error_code_tenant_not_found))) {
-				TraceEvent(SevError, "WatchDeletedTenantCheckFailed").detail("Tenant", t);
+			auto& res = f.get();
+			if (res.isError(error_code_tenant_removed) || res.isError(error_code_tenant_not_found)) {
+				CODE_PROBE(res.isError(error_code_tenant_removed),
+				           "Watch Triggered because the tenant is deleted during watch");
+			} else {
+				TraceEvent(SevError, "WatchDeletedTenantCheckFailed")
+				    .detail("Tenant", t)
+				    .detail("IsError", res.isError() ? res.getError().what() : "Void()");
 			}
-			CODE_PROBE(f.get().isError(error_code_tenant_removed),
-			           "Watch Triggered because the tenant is deleted during watch");
 		}
 	}
 
@@ -715,7 +717,6 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self, bool watchTenantCheck) {
-		state ActorCollection actors;
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
@@ -773,9 +774,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 						// watch the tenant to be deleted
 						if (watchTenantCheck) {
-							watchFutures.emplace_back(tenants[tenantIndex],
-							                          self->watchTenant(self, tenants[tenantIndex]));
-							actors.add(ready(watchFutures.back().second));
+							wait(watchTenant(self, tenants[tenantIndex], &watchFutures));
 						}
 					}
 					// Otherwise, we will just report the current emptiness of the tenant
@@ -794,6 +793,7 @@ struct TenantManagementWorkload : TestWorkload {
 			return Void();
 		}
 
+		// Tenants deletion retry loop
 		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
@@ -911,7 +911,10 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 
 				// check for watch result
-				wait(actors.getResult());
+				state int wi = 0;
+				for (; wi < watchFutures.size(); ++wi) {
+					wait(ready(watchFutures[wi].second));
+				}
 				self->checkWatchOnDeletedTenant(watchFutures);
 
 				return Void();
