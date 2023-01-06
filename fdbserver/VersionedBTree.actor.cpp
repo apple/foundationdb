@@ -6150,7 +6150,7 @@ private:
 		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
 		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
 			Error e = unexpected_encoding_type();
-			TraceEvent(SevError, "RedwoodBTreeUnexpectedNodeEncoding")
+			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
 			    .error(e)
 			    .detail("PhysicalPageID", page->getPhysicalPageID())
 			    .detail("IsEncrypted", page->isEncrypted())

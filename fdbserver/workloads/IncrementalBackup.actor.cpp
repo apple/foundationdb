@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -121,11 +122,11 @@ struct IncrementalBackupWorkload : TestWorkload {
 				    .detail("ContiguousLogEndVersion",
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", v);
+				if (self->waitRetries != -1 && tries > self->waitRetries)
+					break;
 				if (!desc.contiguousLogEnd.present())
 					continue;
 				if (desc.contiguousLogEnd.get() >= v)
-					break;
-				if (self->waitRetries != -1 && tries > self->waitRetries)
 					break;
 				// Avoid spamming requests with a delay
 				wait(delay(5.0));
@@ -147,11 +148,11 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		addDefaultBackupRanges(backupRanges);
 
 		if (self->submitOnly) {
 			TraceEvent("IBackupSubmitAttempt").log();
-			state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 			try {
 				wait(self->backupAgent.submitBackup(cx,
 				                                    self->backupDir,
@@ -160,8 +161,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
-				                                        configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
+				                                    true,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));
@@ -234,7 +234,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			for (auto r : backupRanges) {
-				if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
+				if (!config.encryptionAtRestMode.isEncryptionEnabled() || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					KeyRangeRef normalKeyRange = r & normalKeys;
