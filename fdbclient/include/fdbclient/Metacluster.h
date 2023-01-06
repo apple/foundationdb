@@ -158,8 +158,7 @@ struct MetaclusterRegistrationEntry {
 		return ObjectReader::fromStringRef<MetaclusterRegistrationEntry>(value, IncludeVersion());
 	}
 	static Optional<MetaclusterRegistrationEntry> decode(Optional<Value> value) {
-		return value.map<MetaclusterRegistrationEntry>(
-		    [](ValueRef const& v) { return MetaclusterRegistrationEntry::decode(v); });
+		return value.map([](ValueRef const& v) { return MetaclusterRegistrationEntry::decode(v); });
 	}
 
 	std::string toString() const {
