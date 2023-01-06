@@ -23,17 +23,15 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Metacluster.h"
-#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
-#include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 FDB_DEFINE_BOOLEAN_PARAM(LockDB);
@@ -267,6 +265,17 @@ bool isSystemKey(KeyRef key) {
 	return key.size() && key[0] == systemKeys.begin[0];
 }
 
+EncryptCipherDomainId getEncryptDomainId(MutationRef m) {
+	EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+	if (isSystemKey(m.param1)) {
+		domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+	} else if (isSingleKeyMutation((MutationRef::Type)m.type) && m.param1.size() >= TenantAPI::PREFIX_SIZE) {
+		StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
+		domainId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+	}
+	return domainId;
+}
+
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                VectorRef<MutationRef>* result,
                                                VectorRef<Optional<MutationRef>>* encryptedResult,
@@ -279,7 +288,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Database cx,
                                                Reference<TenantEntryCache<Void>> tenantCache) {
 	try {
-		TraceEvent("Nim::here");
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
@@ -301,6 +309,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			throw restore_missing_data();
 
 		state int originalOffset = offset;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 
 		while (consumed < totalBytes) {
 			uint32_t type = 0;
@@ -334,20 +343,16 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			}
 			ASSERT(!logValue.isEncrypted());
 
-			state EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
-			if (isSystemKey(logValue.param1)) {
-				domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-			} else if (isSingleKeyMutation((MutationRef::Type)logValue.type) &&
-			           logValue.param1.size() >= TenantAPI::PREFIX_SIZE) {
-				StringRef prefix = logValue.param1.substr(0, TenantAPI::PREFIX_SIZE);
-				domainId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-			}
-			// TraceEvent("Nim::here").detail("DomainId", domainId);
+			state EncryptCipherDomainId domainId = getEncryptDomainId(logValue);
 			if (domainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && domainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
 				Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(domainId));
-				if (!payload.present()) {
-					TraceEvent(SevError, "TenantNotFound").detail("TenantId", domainId);
+				// If a tenant is not found for a given mutation then exclude it from the batch
+				if (config.tenantMode == TenantMode::REQUIRED && !payload.present()) {
+					// TODO (nwijetunga): Okay to log this?
+					TraceEvent("TenantNotFound").detail("Mutation", logValue.toString()).detail("TenantId", domainId);
 					CODE_PROBE(true, "mutation log restore tenant not found");
+					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+					continue;
 				}
 			}
 

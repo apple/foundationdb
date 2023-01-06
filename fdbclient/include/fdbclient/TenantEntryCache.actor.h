@@ -562,7 +562,7 @@ public:
 		mapByTenantId[entry.id] = payload;
 		mapByTenantName[name] = payload;
 
-		TraceEvent("TenantEntryCachePut")
+		TraceEvent(SevDebug, "TenantEntryCachePut")
 		    .detail("TenantName", name)
 		    .detail("TenantNameExisting", existingName)
 		    .detail("TenantID", entry.id)
