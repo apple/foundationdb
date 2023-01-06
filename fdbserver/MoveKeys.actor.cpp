@@ -1297,7 +1297,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						dataMove.setPhase(DataMoveMetaData::Deleting);
 						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
 						wait(tr.commit());
-						throw data_move_cancelled();
+						throw movekeys_conflict();
 					}
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 						TraceEvent(SevVerbose, "StartMoveShardsDataMove", relocationIntervalId)
@@ -1313,7 +1313,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					begin = dataMove.ranges.front().end;
 				} else {
 					if (cancelDataMove) {
-						throw data_move_cancelled();
+						throw movekeys_conflict();
 					}
 					dataMove = DataMoveMetaData();
 					dataMove.id = dataMoveId;
