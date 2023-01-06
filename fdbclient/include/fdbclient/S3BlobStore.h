@@ -153,7 +153,7 @@ public:
 		double expirationTime;
 	};
 	std::queue<ReusableConnection> connectionPool;
-	Future<ReusableConnection> connect();
+	Future<ReusableConnection> connect(bool* reusingConn);
 	void returnConnection(ReusableConnection& conn);
 
 	std::string host;

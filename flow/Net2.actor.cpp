@@ -546,6 +546,7 @@ private:
 		if (error)
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
+			    .detail("PeerAddr", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
 	}
@@ -553,6 +554,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -560,6 +562,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1166,6 +1169,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1173,6 +1177,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
