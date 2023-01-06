@@ -28,7 +28,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
@@ -183,24 +183,14 @@ Future<Void> StorageWiggler::resetStats() {
 	metrics.reset();
 	return runRYWTransaction(
 	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
+		    return wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
 	    });
 }
 
 Future<Void> StorageWiggler::restoreStats() {
-	auto& metricsRef = metrics;
-	auto assignFunc = [&metricsRef](Optional<StorageWiggleMetrics> v) {
-		if (v.present()) {
-			metricsRef = v.get();
-		}
-		return Void();
-	};
-	auto readFuture =
-	    runRYWTransaction(teamCollection->dbContext(),
-	                      [this](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<StorageWiggleMetrics>> {
-		                      return loadStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()));
-	                      });
-	return map(readFuture, assignFunc);
+	auto readFuture = wiggleData.storageWiggleMetrics(PrimaryRegion(teamCollection->isPrimary()))
+	                      .getD(teamCollection->dbContext().getReference(), Snapshot::False, metrics);
+	return store(metrics, readFuture);
 }
 
 Future<Void> StorageWiggler::startWiggle() {
@@ -210,7 +200,7 @@ Future<Void> StorageWiggler::startWiggle() {
 	}
 	return runRYWTransaction(
 	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
 	    });
 }
 
@@ -228,7 +218,7 @@ Future<Void> StorageWiggler::finishWiggle() {
 	}
 	return runRYWTransaction(
 	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
 	    });
 }
 
