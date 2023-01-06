@@ -22,8 +22,6 @@
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 
-#include <cstddef>
-#include <stdint.h>
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
@@ -38,6 +36,10 @@
 
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
+
+#include <array>
+#include <cstddef>
+#include <stdint.h>
 
 typedef uint32_t LogicalPageID;
 typedef uint32_t PhysicalPageID;
@@ -101,6 +103,16 @@ enum EncodingType : uint8_t {
 	AESEncryptionWithAuth = 3,
 	MAX_ENCODING_TYPE = 4
 };
+
+inline bool isEncodingTypeEncrypted(EncodingType encoding) {
+	constexpr std::array encryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth, XOREncryption_TestOnly };
+	return std::count(encryptedEncodingTypes.begin(), encryptedEncodingTypes.end(), encoding) > 0;
+}
+
+inline bool isEncodingTypeAESEncrypted(EncodingType encoding) {
+	constexpr std::array aesEncryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth };
+	return std::count(aesEncryptedEncodingTypes.begin(), aesEncryptedEncodingTypes.end(), encoding) > 0;
+}
 
 enum PageType : uint8_t {
 	HeaderPage = 0,
@@ -615,11 +627,6 @@ public:
 
 	const Arena& getArena() const { return arena; }
 
-	static bool isEncodingTypeEncrypted(EncodingType t) {
-		return t == EncodingType::AESEncryption || t == EncodingType::AESEncryptionWithAuth ||
-		       t == EncodingType::XOREncryption_TestOnly;
-	}
-
 	// Returns true if the page's encoding type employs encryption
 	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
 
@@ -707,10 +714,15 @@ public:
 	ArbitraryObject extra;
 };
 
+class IPageEncryptionKeyProvider;
+
 // This API is probably too customized to the behavior of DWALPager and probably needs some changes to be more generic.
 class IPager2 : public IClosable {
 public:
 	virtual std::string getName() const = 0;
+
+	// Set an encryption key provider.
+	virtual void setEncryptionKeyProvider(Reference<IPageEncryptionKeyProvider> keyProvider) = 0;
 
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
 	virtual Reference<ArenaPage> newPageBuffer(size_t blocks = 1) = 0;

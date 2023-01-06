@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H)
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H
 #include "fdbserver/IPageEncryptionKeyProvider.actor.g.h"
@@ -68,12 +69,8 @@ public:
 	// Expected encoding type being used with the encryption key provider.
 	virtual EncodingType expectedEncodingType() const = 0;
 
-	// Checks whether encryption should be enabled. If not, the encryption key provider will not be used by
-	// the pager, and instead the default non-encrypted encoding type (XXHash64) is used.
-	virtual bool enableEncryption() const = 0;
-
-	// Whether encryption domain is enabled.
-	virtual bool enableEncryptionDomain() const { return false; }
+	// Whether domain-aware encryption is enabled.
+	virtual bool isDomainAware() const { return false; }
 
 	// Get an encryption key from given encoding header.
 	virtual Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) { throw not_implemented(); }
@@ -99,7 +96,7 @@ public:
 
 	// Check if a key fits in an encryption domain.
 	bool keyFitsInDomain(int64_t domainId, const KeyRef& key, bool canUseDefaultDomain) {
-		ASSERT(enableEncryptionDomain());
+		ASSERT(isDomainAware());
 		int64_t keyDomainId;
 		size_t prefixLength;
 		std::tie(keyDomainId, prefixLength) = getEncryptionDomain(key);
@@ -110,11 +107,10 @@ public:
 
 // The null key provider is useful to simplify page decoding.
 // It throws an error for any key info requested.
-class NullKeyProvider : public IPageEncryptionKeyProvider {
+class NullEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
-	virtual ~NullKeyProvider() {}
+	virtual ~NullEncryptionKeyProvider() {}
 	EncodingType expectedEncodingType() const override { return EncodingType::XXHash64; }
-	bool enableEncryption() const override { return false; }
 };
 
 // Key provider for dummy XOR encryption scheme
@@ -138,8 +134,6 @@ public:
 	virtual ~XOREncryptionKeyProvider_TestOnly() {}
 
 	EncodingType expectedEncodingType() const override { return EncodingType::XOREncryption_TestOnly; }
-
-	bool enableEncryption() const override { return true; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
 
@@ -188,9 +182,7 @@ public:
 
 	EncodingType expectedEncodingType() const override { return encodingType; }
 
-	bool enableEncryption() const override { return true; }
-
-	bool enableEncryptionDomain() const override { return mode > 1; }
+	bool isDomainAware() const override { return mode > 0; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
 		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
@@ -284,26 +276,29 @@ private:
 template <EncodingType encodingType,
           typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth, bool>::type =
               true>
-class TenantAwareEncryptionKeyProvider : public IPageEncryptionKeyProvider {
+class AESEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
 	using EncodingHeader = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
 
 	const StringRef systemKeysPrefix = systemKeys.begin;
 
-	TenantAwareEncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db) : db(db) {}
+	AESEncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db, EncryptionAtRestMode encryptionMode)
+	  : db(db), encryptionMode(encryptionMode) {
+		ASSERT(encryptionMode != EncryptionAtRestMode::DISABLED);
+		ASSERT(db.isValid());
+	}
 
-	virtual ~TenantAwareEncryptionKeyProvider() = default;
+	virtual ~AESEncryptionKeyProvider() = default;
 
 	EncodingType expectedEncodingType() const override { return encodingType; }
 
-	bool enableEncryption() const override {
-		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION);
+	bool isDomainAware() const override {
+		// Regardless of encryption mode, system keys always encrypted using system key space domain.
+		// Because of this, AESEncryptionKeyProvider always appears to be domain-aware.
+		return true;
 	}
 
-	bool enableEncryptionDomain() const override { return SERVER_KNOBS->REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; }
-
-	ACTOR static Future<EncryptionKey> getEncryptionKey(TenantAwareEncryptionKeyProvider* self,
-	                                                    const void* encodingHeader) {
+	ACTOR static Future<EncryptionKey> getEncryptionKey(AESEncryptionKeyProvider* self, const void* encodingHeader) {
 		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
 		TextAndHeaderCipherKeys cipherKeys =
 		    wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
@@ -320,9 +315,8 @@ public:
 		return getLatestEncryptionKey(getDefaultEncryptionDomainId());
 	}
 
-	ACTOR static Future<EncryptionKey> getLatestEncryptionKey(TenantAwareEncryptionKeyProvider* self,
-	                                                          int64_t domainId) {
-
+	ACTOR static Future<EncryptionKey> getLatestEncryptionKey(AESEncryptionKeyProvider* self, int64_t domainId) {
+		ASSERT(self->encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE || domainId < 0);
 		TextAndHeaderCipherKeys cipherKeys =
 		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey encryptionKey;
@@ -340,6 +334,10 @@ public:
 		// System key.
 		if (key.startsWith(systemKeysPrefix)) {
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, systemKeysPrefix.size() };
+		}
+		// Cluster-aware encryption.
+		if (encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE) {
+			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
 		if (key.size() < TenantAPI::PREFIX_SIZE) {
@@ -362,6 +360,7 @@ public:
 
 private:
 	Reference<AsyncVar<ServerDBInfo> const> db;
+	EncryptionAtRestMode encryptionMode;
 };
 
 #include "flow/unactorcompiler.h"
