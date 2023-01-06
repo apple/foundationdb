@@ -123,7 +123,6 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
-	bool isEncryptionEnabled = false;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	TenantMode tenantMode;
@@ -147,7 +146,6 @@ struct ClientDBInfo {
 		           forward,
 		           history,
 		           tenantMode,
-		           isEncryptionEnabled,
 		           encryptKeyProxy,
 		           clusterId,
 		           clusterType,

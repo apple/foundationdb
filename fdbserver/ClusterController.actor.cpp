@@ -135,7 +135,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
 			dbInfo.client.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
-			dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
@@ -949,7 +948,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
 	    db->clientInfo->get().tenantMode != db->config.tenantMode ||
-	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
 	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
 	    db->clientInfo->get().clusterType != db->clusterType ||
 	    db->clientInfo->get().metaclusterName != db->metaclusterName ||
@@ -962,7 +960,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("ReqCPs", req.commitProxies)
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
 		    .detail("ReqTenantMode", db->config.tenantMode.toString())
-		    .detail("EncryptionEnabled", SERVER_KNOBS->ENABLE_ENCRYPTION)
 		    .detail("ClusterId", db->serverInfo->get().client.clusterId)
 		    .detail("ClientClusterId", db->clientInfo->get().clusterId)
 		    .detail("ClusterType", db->clientInfo->get().clusterType)
@@ -974,7 +971,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		ClientDBInfo clientInfo;
 		clientInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
-		clientInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
