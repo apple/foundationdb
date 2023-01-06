@@ -138,6 +138,8 @@ bool canReplyWith(Error e) {
 	case error_code_server_overloaded:
 	case error_code_change_feed_popped:
 	case error_code_tenant_name_required:
+	case error_code_tenant_removed:
+	case error_code_tenant_not_found:
 	case error_code_unknown_tenant:
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
