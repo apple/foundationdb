@@ -3534,8 +3534,7 @@ void merge(Arena& arena,
 static inline void copyOptionalValue(Arena* a,
                                      GetValueReqAndResultRef& getValue,
                                      const Optional<Value>& optionalValue) {
-	std::function<StringRef(Value)> contents = [](Value value) { return value.contents(); };
-	getValue.result = optionalValue.map(contents);
+	getValue.result = optionalValue.castTo<ValueRef>();
 	if (optionalValue.present()) {
 		a->dependsOn(optionalValue.get().arena());
 	}
