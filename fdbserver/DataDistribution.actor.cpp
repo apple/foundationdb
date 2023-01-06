@@ -563,7 +563,7 @@ public:
 	}
 };
 
-ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageState auditStates);
+ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStorageState auditStates);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
                                              std::shared_ptr<DDAudit> audit,
@@ -620,7 +620,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			for (const auto& auditState : self->initData->auditStates) {
 				TraceEvent("ResumingAuditStorage", self->ddId).detail("AuditID", auditState.id);
-				self->addActor.send(doAuditStorage(self, auditState));
+				self->addActor.send(resumeAuditStorage(self, auditState));
 			}
 
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
@@ -1375,7 +1375,7 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
-ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageState auditState) {
+ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStorageState auditState) {
 	if (auditState.getPhase() == AuditPhase::Complete) {
 		return Void();
 	}
@@ -1408,7 +1408,7 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageS
 			wait(persistAuditState(self->txnProcessor->context(), auditState));
 		} else if (e.code() != error_code_actor_cancelled) {
 			wait(delay(30));
-			self->addActor.send(doAuditStorage(self, auditState));
+			self->addActor.send(resumeAuditStorage(self, auditState));
 		}
 	}
 
@@ -1430,7 +1430,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 						auditState.id = currentAudit->id;
 						auditState.range = currentAudit->range;
 						auditState.setPhase(AuditPhase::Running);
-						audit = it->second.front();
+						audit = currentAudit;
 						break;
 					}
 				}
@@ -1446,32 +1446,30 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
 				self->audits[req.getType()].push_back(audit);
 				audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));
-				TraceEvent(SevDebug, "DDAuditStorageBegin", self->ddId)
-				    .detail("AuditID", audit->id)
-				    .detail("Range", req.range)
-				    .detail("AuditType", req.type);
 				// Simulate restarting.
 				if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
 					throw operation_failed();
 				}
 			}
 
+			ASSERT(audit != nullptr);
+			TraceEvent(SevInfo, "DDAuditStorageScheduled", self->ddId)
+			    .detail("AuditID", audit->id)
+			    .detail("Range", req.range)
+			    .detail("AuditType", req.type);
+
 			if (req.async && !req.reply.isSet()) {
 				req.reply.send(audit->id);
 			}
 
 			wait(audit->actors.getResult());
-			TraceEvent(SevDebug, "DDAuditStorageEnd", self->ddId)
+			TraceEvent(SevInfo, "DDAuditStorageSuccess", self->ddId)
 			    .detail("AuditID", audit->id)
 			    .detail("Range", req.range)
 			    .detail("AuditType", req.type);
 			auditState.setPhase(AuditPhase::Complete);
 			wait(persistAuditState(self->txnProcessor->context(), auditState));
 			if (!req.async && !req.reply.isSet()) {
-				TraceEvent(SevDebug, "DDAuditStorageReply", self->ddId)
-				    .detail("AuditID", audit->id)
-				    .detail("Range", req.range)
-				    .detail("AuditType", req.type);
 				req.reply.send(audit->id);
 			}
 		} catch (Error& e) {
@@ -1506,7 +1504,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
                                              std::shared_ptr<DDAudit> audit,
                                              KeyRange range) {
-	TraceEvent(SevDebug, "DDLoadAndDispatchAuditRangeBegin", self->ddId)
+	TraceEvent(SevInfo, "DDLoadAndDispatchAuditRangeBegin", self->ddId)
 	    .detail("AuditID", audit->id)
 	    .detail("Range", range)
 	    .detail("AuditType", audit->type);
@@ -1539,7 +1537,7 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
                                          std::shared_ptr<DDAudit> audit,
                                          KeyRange range) {
-	TraceEvent(SevDebug, "DDScheduleAuditForRangeBegin", self->ddId)
+	TraceEvent(SevInfo, "DDScheduleAuditForRangeBegin", self->ddId)
 	    .detail("AuditID", audit->id)
 	    .detail("Range", range)
 	    .detail("AuditType", audit->type);

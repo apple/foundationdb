@@ -43,6 +43,8 @@ struct AuditStorageState {
 
 	AuditStorageState() = default;
 	AuditStorageState(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)) {}
+	AuditStorageState(UID id, KeyRange range, AuditType type)
+	  : id(id), range(range), type(static_cast<uint8_t>(type)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

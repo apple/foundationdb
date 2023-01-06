@@ -1104,7 +1104,7 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 		}
 	}
 
-	cx = openDBOnServer(dbInfo);
+	state Database cx = openDBOnServer(dbInfo);
 	loop {
 		try {
 			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
@@ -2154,7 +2154,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) { return Void(); }
+		when(wait(tests)) {
+			return Void();
+		}
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();
