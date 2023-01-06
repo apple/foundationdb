@@ -515,11 +515,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
 
-		if (newState.oldTLogData.size() && configuration.repopulateRegionAntiQuorum > 0 &&
-		    self->logSystem->remoteStorageRecovered()) {
-			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid).log();
-			self->recruitmentStalled->set(true);
-		}
 		self->registrationTrigger.trigger();
 
 		if (finalUpdate) {
