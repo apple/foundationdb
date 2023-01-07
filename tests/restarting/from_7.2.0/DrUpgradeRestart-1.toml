@@ -1,5 +1,6 @@
 [configuration]
 extraDatabaseMode = "Local"
+disableEncryption = true
 # DR is not currently supported in required tenant mode
 tenantModes = ['disabled', 'optional']
 
