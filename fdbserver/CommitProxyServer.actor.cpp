@@ -1155,24 +1155,29 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
-inline int64_t extractTenantIdFromStringRef(StringRef s) {
+inline int64_t extractTenantIdFromKeyRef(StringRef s) {
 	if (s.size() < TenantAPI::PREFIX_SIZE) {
 		return TenantInfo::INVALID_TENANT;
 	}
-	// Parse mutation key to determine mutation encryption domain
+	// Parse mutation key to determine tenant prefix
 	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
 	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 }
 
 int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
 	ASSERT(!isSystemKey(m.param1));
+
+	// The first 8 bytes of the key of this OP is also an 8-byte number
+	if(m.type == MutationRef::SetVersionstampedKey) {
+		return TenantInfo::INVALID_TENANT;
+	}
+
 	ASSERT(isSingleKeyMutation((MutationRef::Type)m.type));
 
-	return extractTenantIdFromStringRef(m.param1);
+	return extractTenantIdFromKeyRef(m.param1);
 }
 
 // Return true if a single-key mutation is associated with a valid tenant id or a system key
-// FIXME(xwang): handle clear range properly
 bool validTenantAccess(MutationRef m) {
 	if (isSystemKey(m.param1))
 		return true;
@@ -1186,8 +1191,8 @@ bool validTenantAccess(MutationRef m) {
 	} else {
 		// For clear range, we allow raw access
 		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
-		auto beginTenantId = extractTenantIdFromStringRef(m.param1);
-		auto endTenantId = extractTenantIdFromStringRef(m.param2);
+		auto beginTenantId = extractTenantIdFromKeyRef(m.param1);
+		auto endTenantId = extractTenantIdFromKeyRef(m.param2);
 		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
 	}
 	return true;
@@ -1203,7 +1208,7 @@ bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* cons
 	}
 
 	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
-	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED) {
+	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
 		return true;
 	}
 
