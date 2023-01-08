@@ -122,6 +122,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	int maxClearSize;
 	double initialKeyDensity;
 	bool useSystemKeys;
+	bool writeSystemKeys = false; // whether we really write to a system key in the workload
 	KeyRange conflictRange;
 	unsigned int operationId;
 	int64_t maximumTotalData;
@@ -182,8 +183,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		minNode = std::max(minNode, nodes - newNodes);
 		nodes = newNodes;
 
-		if (useSystemKeys) {
+		if (useSystemKeys && deterministicRandom()->coinflip()) {
 			keyPrefixes[-1] = "\xff\x01";
+			writeSystemKeys = true;
 		}
 
 		maxClearSize = 1 << deterministicRandom()->randomInt(0, 20);
@@ -375,7 +377,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								break;
 							} catch (Error& e) {
 								if (e.code() == error_code_illegal_tenant_access) {
-									ASSERT(!self->useSystemKeys);
+									ASSERT(!self->writeSystemKeys);
 									ASSERT_EQ(tenantNum, -1);
 									self->illegalTenantAccess = true;
 									break;
@@ -393,7 +395,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 				loop {
 					try {
-						wait(self->randomTransaction(self) && delay(self->numOps * .001));
+						wait(self->randomTransaction(self, cx) && delay(self->numOps * .001));
 					} catch (Error& e) {
 						if (e.code() != error_code_not_committed)
 							throw e;
@@ -409,7 +411,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> randomTransaction(FuzzApiCorrectnessWorkload* self) {
+	ACTOR Future<Void> randomTransaction(FuzzApiCorrectnessWorkload* self, Database cx) {
 		state Reference<ITransaction> tr;
 		state bool readYourWritesDisabled = deterministicRandom()->coinflip();
 		state bool readAheadDisabled = deterministicRandom()->coinflip();
@@ -494,6 +496,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					throw not_committed();
 				} else if (e.code() == error_code_illegal_tenant_access) {
 					ASSERT_EQ(tenantNum, -1);
+					ASSERT_EQ(cx->getTenantMode(), TenantMode::REQUIRED);
 					return Void();
 				}
 
