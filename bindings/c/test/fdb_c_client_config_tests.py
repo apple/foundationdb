@@ -7,6 +7,7 @@ import sys
 import os
 import glob
 import unittest
+import json
 
 from threading import Thread
 import time
@@ -86,13 +87,16 @@ class ClientConfigTest:
         self.tmp_dir = self.test_dir.joinpath("tmp")
         self.tmp_dir.mkdir(parents=True)
         self.disable_local_client = False
+        self.disable_client_bypass = False
         self.ignore_external_client_failures = False
         self.fail_incompatible_client = True
         self.api_version = None
         self.expected_error = None
         self.transaction_timeout = None
         self.test_cluster_file = self.cluster.cluster_file
+        self.print_status = False
         self.port_provider = PortProvider()
+        self.status_json = None
 
     def create_external_lib_dir(self, versions):
         self.external_lib_dir = self.test_dir.joinpath("extclients")
@@ -130,6 +134,10 @@ class ClientConfigTest:
                 print(f.read(), file=sys.stderr)
             print(">>>>>>>>>>>>>>>>>>>> End of {}:".format(log_file), file=sys.stderr)
 
+    def check_initialization_state(self, expected_state):
+        self.tc.assertIsNotNone(self.status_json)
+        self.tc.assertEqual(expected_state, self.status_json["InitializationState"])
+
     def exec(self):
         cmd_args = [self.cluster.client_config_tester_bin, "--cluster-file", self.test_cluster_file]
 
@@ -141,6 +149,9 @@ class ClientConfigTest:
 
         if self.disable_local_client:
             cmd_args += ["--disable-local-client"]
+
+        if self.disable_client_bypass:
+            cmd_args += ["--disable-client-bypass"]
 
         if self.external_lib_path is not None:
             cmd_args += ["--external-client-library", self.external_lib_path]
@@ -163,11 +174,25 @@ class ClientConfigTest:
         if self.transaction_timeout is not None:
             cmd_args += ["--transaction-timeout", str(self.transaction_timeout)]
 
+        if self.print_status:
+            cmd_args += ["--print-status"]
+
         print("\nExecuting test command: {}".format(" ".join([str(c) for c in cmd_args])), file=sys.stderr)
         try:
-            tester_proc = subprocess.Popen(cmd_args, stdout=sys.stdout, stderr=sys.stderr)
-            tester_retcode = tester_proc.wait()
-            self.tc.assertEqual(0, tester_retcode)
+            tester_proc = subprocess.Popen(cmd_args, stdout=subprocess.PIPE, stderr=sys.stderr)
+            out, _ = tester_proc.communicate()
+            self.tc.assertEqual(0, tester_proc.returncode)
+            if self.print_status:
+                # Parse the output as status json
+                try:
+                    self.status_json = json.loads(out)
+                except json.JSONDecodeError as e:
+                    print("Error '{}' parsing output {}".format(e, out.decode()), file=sys.stderr)
+                self.tc.assertIsNotNone(self.status_json)
+                print("Status: ", self.status_json, file=sys.stderr)
+            else:
+                # Otherwise redirect the output to the console
+                print(out.decode(), file=sys.stderr)
         finally:
             self.cleanup()
 
@@ -188,28 +213,43 @@ class ClientConfigTests(unittest.TestCase):
     def test_local_client_only(self):
         # Local client only
         test = ClientConfigTest(self)
+        test.print_status = True
         test.exec()
+
+    def test_disable_mvc_bypass(self):
+        # Local client only
+        test = ClientConfigTest(self)
+        test.print_status = True
+        test.disable_client_bypass = True
+        test.exec()
+        test.check_initialization_state("created")
 
     def test_single_external_client_only(self):
         # Single external client only
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(CURRENT_VERSION)
         test.disable_local_client = True
         test.exec()
+        test.check_initialization_state("created")
 
     def test_same_local_and_external_client(self):
         # Same version local & external client
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(CURRENT_VERSION)
         test.exec()
+        test.check_initialization_state("created")
 
     def test_multiple_external_clients(self):
         # Multiple external clients, normal case
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.disable_local_client = True
         test.api_version = api_version_from_str(PREV2_RELEASE_VERSION)
         test.exec()
+        test.check_initialization_state("created")
 
     def test_no_external_client_support_api_version(self):
         # Multiple external clients, API version supported by none of them
@@ -242,28 +282,33 @@ class ClientConfigTests(unittest.TestCase):
     def test_one_external_client_wrong_api_version_ignore(self):
         # Multiple external clients;  API version unsupported by one of them; Ignore failures
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.ignore_external_client_failures = True
         test.exec()
+        test.check_initialization_state("created")
 
     def test_external_client_not_matching_cluster_version(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(PREV_RELEASE_VERSION)
         test.disable_local_client = True
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.transaction_timeout = 5000
         test.expected_error = 2125  # Incompatible client
         test.exec()
+        test.check_initialization_state("incompatible")
 
     def test_external_client_not_matching_cluster_version_ignore(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version;
         # Ignore incompatible client
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(PREV_RELEASE_VERSION)
         test.disable_local_client = True
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
@@ -271,10 +316,12 @@ class ClientConfigTests(unittest.TestCase):
         test.transaction_timeout = 100
         test.expected_error = 1031  # Timeout
         test.exec()
+        test.check_initialization_state("incompatible")
 
     def test_cannot_connect_to_coordinator(self):
         # Testing a cluster file with a valid address, but no server behind it
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(CURRENT_VERSION)
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
@@ -282,10 +329,12 @@ class ClientConfigTests(unittest.TestCase):
         test.create_cluster_file_with_wrong_port()
         test.expected_error = 1031  # Timeout
         test.exec()
+        test.check_initialization_state("initializing")
 
     def test_invalid_cluster_file(self):
         # Testing with an invalid cluster file
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(CURRENT_VERSION)
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
@@ -293,6 +342,7 @@ class ClientConfigTests(unittest.TestCase):
         test.create_invalid_cluster_file()
         test.expected_error = 2104  # Connection string invalid
         test.exec()
+        test.check_initialization_state("initialization_failed")
 
 
 # Client configuration tests using a cluster of previous release version
@@ -309,9 +359,11 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
     def test_external_client(self):
         # Using an external client to connect
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(PREV_RELEASE_VERSION)
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.exec()
+        test.check_initialization_state("created")
 
     def test_external_client_unsupported_api(self):
         # Leaving an unsupported API version
@@ -323,11 +375,13 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
     def test_external_client_unsupported_api_ignore(self):
         # Leaving an unsupported API version, ignore failures
         test = ClientConfigTest(self)
+        test.print_status = True
         test.create_external_lib_path(PREV_RELEASE_VERSION)
         test.transaction_timeout = 5000
         test.expected_error = 2125  # Incompatible client
         test.ignore_external_client_failures = True
         test.exec()
+        test.check_initialization_state("incompatible")
 
 
 # Client configuration tests using a separate cluster for each test
@@ -339,6 +393,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
         self.cluster.setup()
         try:
             test = ClientConfigTest(self)
+            test.print_status = True
             test.create_external_lib_path(CURRENT_VERSION)
             test.transaction_timeout = 10000
             test.fail_incompatible_client = False
@@ -350,6 +405,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             t = Thread(target=upgrade, args=(self.cluster,))
             t.start()
             test.exec()
+            test.check_initialization_state("created")
             t.join()
         finally:
             self.cluster.tear_down()

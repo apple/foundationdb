@@ -720,6 +720,9 @@ public:
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
+	// Get client-side status information
+	Standalone<StringRef> getClientStatus();
+
 private:
 	using WatchMapKey = std::pair<int64_t, Key>;
 	using WatchMapKeyHasher = boost::hash<WatchMapKey>;

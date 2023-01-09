@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -38,6 +40,8 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
+
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -792,6 +796,22 @@ ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, O
 	});
 }
 
+ThreadFuture<Standalone<StringRef>> DLDatabase::getClientStatus() {
+	if (!api->databaseGetClientStatus) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->databaseGetClientStatus(db);
+	return toThreadFuture<Standalone<StringRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const uint8_t* str;
+		int strLength;
+		FdbCApi::fdb_error_t error = api->futureGetKey(f, &str, &strLength);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Standalone<StringRef>(StringRef(str, strLength), Arena());
+	});
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -902,7 +922,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_verify_blob_range",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-
+	loadClientFunction(&api->databaseGetClientStatus,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_get_client_status",
+	                   headerVersion >= ApiVersion::withGetClientStatus().version());
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
 	loadClientFunction(&api->tenantPurgeBlobGranules,
@@ -2026,6 +2050,24 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
 }
 
+ThreadFuture<Standalone<StringRef>> MultiVersionDatabase::getClientStatus() {
+	auto stateRef = dbState;
+	auto db = stateRef->db;
+	if (!db.isValid()) {
+		return onMainThread([stateRef] { return Future<Standalone<StringRef>>(stateRef->getClientStatus(""_sr)); });
+	} else {
+		// If a database is created first retrieve its status
+		auto f = db->getClientStatus();
+		auto statusFuture = abortableFuture(f, dbState->dbVar->get().onChange);
+		return flatMapThreadFuture<Standalone<StringRef>, Standalone<StringRef>>(
+		    statusFuture, [stateRef](ErrorOr<Standalone<StringRef>> dbContextStatus) {
+			    return onMainThread([stateRef, dbContextStatus] {
+				    return Future<Standalone<StringRef>>(stateRef->getClientStatus(dbContextStatus));
+			    });
+		    });
+	}
+}
+
 MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord const& connectionRecord,
                                                    Reference<IDatabase> versionMonitorDb)
   : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))),
@@ -2307,6 +2349,44 @@ void MultiVersionDatabase::DatabaseState::close() {
 
 		self->legacyVersionMonitors.clear();
 	});
+}
+
+namespace {
+
+const char* inializationStateToString(MultiVersionDatabase::InitializationState initState) {
+	switch (initState) {
+	case MultiVersionDatabase::InitializationState::INITIALIZING:
+		return "initializing";
+	case MultiVersionDatabase::InitializationState::INITIALIZATION_FAILED:
+		return "initialization_failed";
+	case MultiVersionDatabase::InitializationState::CREATED:
+		return "created";
+	case MultiVersionDatabase::InitializationState::INCOMPATIBLE:
+		return "incompatible";
+	case MultiVersionDatabase::InitializationState::CLOSED:
+		return "closed";
+	}
+}
+
+} // namespace
+
+Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
+    ErrorOr<Standalone<StringRef>> dbContextStatus) {
+	json_spirit::mObject statusObj;
+	statusObj["InitializationState"] = inializationStateToString(initializationState);
+	if (initializationState == InitializationState::INITIALIZATION_FAILED) {
+		statusObj["InitializationError"] = initializationError.code();
+	}
+	if (initializationState == InitializationState::CREATED) {
+		if (dbContextStatus.isError()) {
+			statusObj["ErrorRetrievingDatabaseStatus"] = dbContextStatus.getError().code();
+		} else {
+			json_spirit::mValue dbContextStatusVal;
+			json_spirit::read_string(dbContextStatus.get().toString(), dbContextStatusVal);
+			statusObj["DatabaseStatus"] = dbContextStatusVal;
+		}
+	}
+	return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
 }
 
 // Starts the connection monitor by creating a database object at an old version.
