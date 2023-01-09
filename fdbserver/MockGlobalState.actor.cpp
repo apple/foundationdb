@@ -100,7 +100,7 @@ public:
 		if (req.tenantInfo.hasTenant()) {
 			// TODO(xwang) add support for tenant test, search for tenant entry
 			Optional<TenantMapEntry> entry;
-			Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+			Optional<Key> tenantPrefix = entry.map(&TenantMapEntry::prefix);
 			if (tenantPrefix.present()) {
 				UNREACHABLE();
 				// req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
