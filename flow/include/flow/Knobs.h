@@ -152,6 +152,7 @@ public:
 	std::string OTEL_UDP_EMISSION_ADDR;
 	int STATSD_UDP_EMISSION_PORT;
 	int OTEL_UDP_EMISSION_PORT;
+	bool METRICS_EMIT_DDSKETCH;
 
 	// run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;

@@ -28,7 +28,9 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include <cstddef>
+#ifndef WIN32
 #include <sys/socket.h>
+#endif
 #include "flow/actorcompiler.h"
 #include "flow/network.h"
 

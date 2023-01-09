@@ -27,7 +27,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 

@@ -40,6 +40,8 @@ struct CheckpointFile {
 	CheckpointFile() = default;
 	CheckpointFile(std::string path, KeyRange range, int64_t size) : path(path), range(range), size(size) {}
 
+	bool isValid() const { return !path.empty(); }
+
 	std::string toString() const {
 		return "CheckpointFile:\nFile Name: " + this->path + "\nRange: " + range.toString() +
 		       "\nSize: " + std::to_string(size) + "\n";
@@ -241,6 +243,30 @@ struct RocksDBCheckpoint {
 	}
 };
 
+struct RocksDBCheckpointKeyValues {
+	constexpr static FileIdentifier file_identifier = 13804349;
+	std::vector<CheckpointFile> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
+	std::vector<KeyRange> ranges; // The ranges we want to fetch.
+
+	RocksDBCheckpointKeyValues(std::vector<KeyRange> ranges) : ranges(ranges) {}
+	RocksDBCheckpointKeyValues() = default;
+
+	CheckpointFormat format() const { return RocksDBKeyValues; }
+
+	std::string toString() const {
+		std::string res = "RocksDBKeyValuesCheckpoint: [Target Ranges]: " + describe(ranges) + " [Fetched Files]: ";
+		for (const auto& file : fetchedFiles) {
+			res += file.toString();
+		}
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, fetchedFiles, ranges);
+	}
+};
+
 // Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
 // If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
 // can be continued, in case of crash.
@@ -255,11 +281,15 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 // Clean up on-disk files associated with checkpoint.
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 
-ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
+ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
+                                              const CheckpointAsKeyValues checkpointAsKeyValues,
+                                              UID logID);
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 
 RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint);
+
+RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(const CheckpointMetaData& checkpoint);
 
 #include "flow/unactorcompiler.h"
 

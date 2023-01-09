@@ -8647,9 +8647,10 @@ Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority) {
-	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(primary ? "primary/"_sr : "remote/"_sr);
-	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-	                                                                                          IncludeVersion());
+	state StorageWiggleData wiggleState;
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
+	    wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
 
@@ -9545,6 +9546,9 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 				Version next = waitNext(data->get().ssStreamSummary.getFuture());
 				ssSummary.push_back(next);
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				if (e.code() != error_code_end_of_stream) {
 					data->get().complete();
 					if (e.code() != error_code_operation_cancelled) {
@@ -11023,11 +11027,12 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Key key = blobRestoreCommandKeyFor(range);
 			Optional<Value> value = wait(tr->get(key));
 			if (value.present()) {
 				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-				if (status.progress < 100) {
+				if (status.phase != BlobRestorePhase::DONE) {
 					return false; // stop if there is in-progress restore.
 				}
 			}
