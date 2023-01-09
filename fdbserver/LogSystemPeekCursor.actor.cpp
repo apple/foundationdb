@@ -418,7 +418,9 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 					//TraceEvent("SPC_GetMoreB", self->randomID).detail("Has", self->hasMessage()).detail("End", res.end).detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when(wait(self->interf->onChange())) { self->onlySpilled = false; }
+				when(wait(self->interf->onChange())) {
+					self->onlySpilled = false;
+				}
 			}
 		}
 	} catch (Error& e) {

@@ -373,7 +373,7 @@ template <class T>
 constexpr bool is_vector_like = vector_like_traits<T>::value;
 
 template <class T>
-constexpr bool is_vector_of_union_like = is_vector_like<T>&& is_union_like<typename vector_like_traits<T>::value_type>;
+constexpr bool is_vector_of_union_like = is_vector_like<T> && is_union_like<typename vector_like_traits<T>::value_type>;
 
 template <class T>
 constexpr bool is_struct_like = struct_like_traits<T>::value;
@@ -470,8 +470,8 @@ template <class T>
 constexpr int fb_size = is_struct_like<T> ? struct_size(typename struct_like_traits<T>::types{}) : fb_scalar_size<T>;
 
 template <class T>
-constexpr int fb_align = is_struct_like<T> ? align_helper(typename struct_like_traits<T>::types{})
-                                           : AlignToPowerOfTwo(fb_scalar_size<T>);
+constexpr int fb_align =
+    is_struct_like<T> ? align_helper(typename struct_like_traits<T>::types{}) : AlignToPowerOfTwo(fb_scalar_size<T>);
 
 template <class T>
 struct _SizeOf {

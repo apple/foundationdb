@@ -651,7 +651,9 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
 	loop {
 		choose {
-			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(deserializer)) {
+				UNSTOPPABLE_ASSERT(false);
+			}
 			when(wait(knownLeader->onChange())) {
 				if (knownLeader->get().present()) {
 					outKnownLeader->set(knownLeader->get().get().clientInterface);
