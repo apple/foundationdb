@@ -1082,9 +1082,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// If it's the first recovery the encrypt mode is not yet avilable so create the txn state store with encryption
 	// disabled. This is fine since we will not write any data to disk using this txn store.
 	state bool enableEncryptionForTxnStateStore = false;
-	if (self->controllerData && self->controllerData->encryptionAtRestMode.isValid() &&
-	    self->controllerData->encryptionAtRestMode.getFuture().isValid() &&
-	    self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
+	if (self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
 		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
 		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
 	}
