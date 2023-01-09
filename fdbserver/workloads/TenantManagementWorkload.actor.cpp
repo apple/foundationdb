@@ -623,15 +623,13 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// set a random watch on a tenant
-	ACTOR static Future<Void> watchTenant(TenantManagementWorkload* self,
-	                                      TenantName tenant,
-	                                      std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>>* watches) {
+	ACTOR static Future<Void> watchTenant(TenantManagementWorkload* self, TenantName tenant) {
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dataDb, tenant));
 			try {
 				state Future<Void> watch = tr->watch(doubleToTestKey(deterministicRandom()->random01()));
 				wait(tr->commit());
-				watches->emplace_back(tenant, errorOr(watch));
+				wait(watch);
 				return Void();
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -774,7 +772,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 						// watch the tenant to be deleted
 						if (watchTenantCheck) {
-							wait(watchTenant(self, tenants[tenantIndex], &watchFutures));
+							watchFutures.emplace_back(tenants[tenantIndex],
+							                          errorOr(watchTenant(self, tenants[tenantIndex])));
 						}
 					}
 					// Otherwise, we will just report the current emptiness of the tenant
