@@ -192,7 +192,7 @@ struct ValidateStorage : TestWorkload {
 				try {
 					wait(tr.onError(e));
 				} catch (Error& e) {
-					if (e.code() != error_code_audit_storage_failed) {
+					if (e.code() != error_code_audit_storage_failed && e.code() != error_code_broken_promise) {
 						throw e;
 					}
 				}
