@@ -28,7 +28,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TCInfo.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
@@ -573,6 +573,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
 
 	DDTeamCollection const* teamCollection;
+	StorageWiggleData wiggleData; // the wiggle related data persistent in database
+
 	StorageWiggleMetrics metrics;
 	AsyncVar<bool> stopWiggleSignal;
 	// data structures

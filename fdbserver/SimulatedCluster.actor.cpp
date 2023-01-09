@@ -2067,6 +2067,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           TestConfig testConfig,
                           ProtocolVersion protocolVersion,
                           TenantMode tenantMode) {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	if (testConfig.logAntiQuorum != -1) {
@@ -2099,6 +2100,20 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			}
 		}
 	}
+	// TODO: remove knob hanlding once we move off from encrypption knobs to db config
+	if (simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DISABLED) {
+		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
+		CODE_PROBE(true, "Disabled encryption in simulation");
+	} else {
+		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ true }));
+		g_knobs.setKnob(
+		    "redwood_split_encrypted_pages_by_tenant",
+		    KnobValueRef::create(bool{ simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE }));
+		CODE_PROBE(simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE,
+		           "Enabled cluster-aware encryption in simulation");
+		CODE_PROBE(simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE,
+		           "Enabled domain-aware encryption in simulation");
+	}
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", simconfig.db.encryptionAtRestMode.toString());
 
 	g_simulator->blobGranulesEnabled = simconfig.db.blobGranulesEnabled;
@@ -2108,18 +2123,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	if (testConfig.disableRemoteKVS) {
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS");
-	}
-	// TODO: Remove this code once encryption knobs are removed
-	if (testConfig.disableEncryption) {
-		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisableEncryption");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {

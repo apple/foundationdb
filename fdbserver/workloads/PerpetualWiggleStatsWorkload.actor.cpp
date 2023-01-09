@@ -169,7 +169,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		self->lastMetrics = getRandomWiggleMetrics();
 		auto& lastMetrics = self->lastMetrics;
 		wait(success(runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			return updateStorageWiggleMetrics(tr, lastMetrics, PrimaryRegion(true));
+			StorageWiggleData wiggleData;
+			return wiggleData.updateStorageWiggleMetrics(tr, lastMetrics, PrimaryRegion(true));
 		})));
 		return Void();
 	}

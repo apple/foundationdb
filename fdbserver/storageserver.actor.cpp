@@ -3534,8 +3534,7 @@ void merge(Arena& arena,
 static inline void copyOptionalValue(Arena* a,
                                      GetValueReqAndResultRef& getValue,
                                      const Optional<Value>& optionalValue) {
-	std::function<StringRef(Value)> contents = [](Value value) { return value.contents(); };
-	getValue.result = optionalValue.map(contents);
+	getValue.result = optionalValue.castTo<ValueRef>();
 	if (optionalValue.present()) {
 		a->dependsOn(optionalValue.get().arena());
 	}
@@ -6285,6 +6284,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Tra
 
 // Read keys from blob storage if they exist. Fail back to tryGetRange, which reads keys
 // from storage servers with locally attached disks
+
 ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
                                        Transaction* tr,
                                        KeyRange keys,
@@ -6321,7 +6321,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		    .detail("Error", e.what());
 		tr->reset();
 		tr->setVersion(fetchVersion);
-		throw;
+		results.sendError(e);
 	}
 	return Void();
 }
@@ -7229,8 +7229,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				KeyRange range = wait(getRestoringRange(data->cx, keys));
-				hold = tryGetRangeFromBlob(results, &tr, range, fetchVersion, data->blobConn);
+				std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
+				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
+				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
+				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
+				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
+					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, fetchVersion, data->blobConn);
+				} else {
+					hold = tryGetRange(results, &tr, keys);
+				}
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 			}
@@ -7295,7 +7302,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed &&
 				    e.code() != error_code_transaction_too_old && e.code() != error_code_future_version &&
-				    e.code() != error_code_process_behind && e.code() != error_code_server_overloaded) {
+				    e.code() != error_code_process_behind && e.code() != error_code_server_overloaded &&
+				    e.code() != error_code_blob_granule_request_failed &&
+				    e.code() != error_code_blob_granule_transaction_too_old) {
 					throw;
 				}
 				lastError = e;
