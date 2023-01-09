@@ -29,6 +29,7 @@
 #include <fstream>
 #include <map>
 #include <new>
+#include <optional>
 #if defined(__linux__)
 #include <pthread.h>
 #endif
@@ -52,6 +53,7 @@
 #include <unordered_map>
 #include "fdbclient/zipf.h"
 
+#include "admin_server.hpp"
 #include "async.hpp"
 #include "future.hpp"
 #include "logger.hpp"
@@ -61,6 +63,7 @@
 #include "utils.hpp"
 #include "shm.hpp"
 #include "stats.hpp"
+#include "tenant.hpp"
 #include "time.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -94,49 +97,50 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 	// Create Tenant Transaction
 	int tenant_id = (id == -1) ? urand(0, args.active_tenants - 1) : id;
 	Transaction tr;
-	std::string tenantStr;
+	std::string tenant_name;
 	// If provided tenants array, use it
 	if (tenants) {
 		tr = tenants[tenant_id].createTransaction();
 	} else {
-		tenantStr = "tenant" + std::to_string(tenant_id);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		Tenant t = db.openTenant(tenant_name);
+		tenant_name = getTenantNameByIndex(tenant_id);
+		Tenant t = db.openTenant(toBytesRef(tenant_name));
 		tr = t.createTransaction();
 	}
-	if (!args.authorization_tokens.empty()) {
+	if (args.enable_token_based_authorization) {
+		assert(!args.authorization_tokens.empty());
 		// lookup token based on tenant name and, if found, set authz token to transaction
-		if (tenantStr.empty())
-			tenantStr = "tenant" + std::to_string(tenant_id);
-		auto tokenMapItr = args.authorization_tokens.find(tenantStr);
-		if (tokenMapItr != args.authorization_tokens.end()) {
-			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, tokenMapItr->second);
+		if (tenant_name.empty())
+			tenant_name = getTenantNameByIndex(tenant_id);
+		auto token_map_iter = args.authorization_tokens.find(tenant_name);
+		if (token_map_iter != args.authorization_tokens.end()) {
+			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, token_map_iter->second);
 		} else {
-			logr.warn("Authorization token map is not empty, but could not find token for tenant '{}'", tenantStr);
+			logr.error("could not find token for tenant '{}'", tenant_name);
+			exit(1);
 		}
 	}
 	return tr;
 }
 
-uint64_t byteswapHelper(uint64_t input) {
-	uint64_t output = 0;
-	for (int i = 0; i < 8; ++i) {
-		output <<= 8;
-		output += input & 0xFF;
-		input >>= 8;
+int cleanupTenants(ipc::AdminServer& server, Arguments const& args, int db_id) {
+	for (auto tenant_id = 0; tenant_id < args.total_tenants;) {
+		const auto tenant_id_end = std::min(args.tenant_batch_size, args.total_tenants - tenant_id);
+		auto res = server.send(ipc::BatchDeleteTenantRequest{ args.cluster_files[db_id], tenant_id, tenant_id_end });
+		if (res.error_message) {
+			logr.error("{}", *res.error_message);
+			return -1;
+
+		} else {
+			logr.debug("deleted tenant [{}:{})", tenant_id, tenant_id_end);
+			tenant_id = tenant_id_end;
+		}
 	}
-
-	return output;
+	return 0;
 }
 
-void computeTenantPrefix(ByteString& s, uint64_t id) {
-	uint64_t swapped = byteswapHelper(id);
-	BytesRef temp = reinterpret_cast<const uint8_t*>(&swapped);
-	memcpy(&s[0], temp.data(), 8);
-}
-
-/* cleanup database */
-int cleanup(Database db, Arguments const& args) {
+/* cleanup database (no tenant-awareness) */
+int cleanupNormalKeyspace(Database db, Arguments const& args) {
+	assert(args.total_tenants == 0 && args.active_tenants == 0);
 	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
 	auto genprefix = [&args](ByteString& s) {
 		const auto padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
@@ -156,103 +160,17 @@ int cleanup(Database db, Arguments const& args) {
 	auto watch = Stopwatch(StartAtCtor{});
 
 	Transaction tx = db.createTransaction();
-	if (args.total_tenants == 0) {
-		while (true) {
-			tx.clearRange(beginstr, endstr);
-			auto future_commit = tx.commit();
-			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
-			if (rc == FutureRC::OK) {
-				break;
-			} else if (rc == FutureRC::RETRY) {
-				// tx already reset
-				continue;
-			} else {
-				return -1;
-			}
-		}
-	} else {
-		int batch_size = args.tenant_batch_size;
-		int batches = (args.total_tenants + batch_size - 1) / batch_size;
-		// First loop to clear all tenant key ranges
-		for (int batch = 0; batch < batches; ++batch) {
-			fdb::TypedFuture<fdb::future_var::ValueRef> tenantResults[batch_size];
-			// Issue all tenant reads first
-			Transaction getTx = db.createTransaction();
-			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
-				tenantResults[i - (batch * batch_size)] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
-			}
-			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
-			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
-			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
-				while (true) {
-					const auto rc = waitAndHandleError(getTx, tenantResults[i - (batch * batch_size)], "GET_TENANT");
-					if (rc == FutureRC::OK) {
-						// Read the tenant metadata for the prefix and issue a range clear
-						if (tenantResults[i - (batch * batch_size)].get().has_value()) {
-							ByteString val(tenantResults[i - (batch * batch_size)].get().value());
-							rapidjson::Document doc;
-							const char* metadata = reinterpret_cast<const char*>(val.c_str());
-							doc.Parse(metadata);
-							if (!doc.HasParseError()) {
-								// rapidjson does not decode the prefix as the same byte string that
-								// was passed as input. This is because we use a non-standard encoding.
-								// The encoding will likely change in the future.
-								// For a workaround, we take the id and compute the prefix on our own
-								rapidjson::Value& docVal = doc["id"];
-								uint64_t id = docVal.GetUint64();
-								ByteString tenantPrefix(8, '\0');
-								computeTenantPrefix(tenantPrefix, id);
-								ByteString tenantPrefixEnd = strinc(tenantPrefix);
-								tx.clearRange(toBytesRef(tenantPrefix), toBytesRef(tenantPrefixEnd));
-							}
-						}
-						break;
-					} else if (rc == FutureRC::RETRY) {
-						continue;
-					} else {
-						// Abort
-						return -1;
-					}
-				}
-			}
-			auto future_commit = tx.commit();
-			const auto rc = waitAndHandleError(tx, future_commit, "TENANT_COMMIT_CLEANUP");
-			if (rc == FutureRC::OK) {
-				// Keep going with reset transaction if commit was successful
-				tx.reset();
-			} else if (rc == FutureRC::RETRY) {
-				// We want to retry this batch, so decrement the number
-				// and go back through the loop to get the same value
-				// Transaction is already reset
-				--batch;
-			} else {
-				// Abort
-				return -1;
-			}
-		}
-		// Second loop to delete the tenants
-		tx.reset();
-		for (int batch = 0; batch < batches; ++batch) {
-			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
-				Tenant::deleteTenant(tx, toBytesRef(tenant_name));
-			}
-			auto future_commit = tx.commit();
-			const auto rc = waitAndHandleError(tx, future_commit, "DELETE_TENANT");
-			if (rc == FutureRC::OK) {
-				// Keep going with reset transaction if commit was successful
-				tx.reset();
-			} else if (rc == FutureRC::RETRY) {
-				// We want to retry this batch, so decrement the number
-				// and go back through the loop to get the same value
-				// Transaction is already reset
-				--batch;
-			} else {
-				// Abort
-				return -1;
-			}
+	while (true) {
+		tx.clearRange(beginstr, endstr);
+		auto future_commit = tx.commit();
+		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
+		if (rc == FutureRC::OK) {
+			break;
+		} else if (rc == FutureRC::RETRY) {
+			// tx already reset
+			continue;
+		} else {
+			return -1;
 		}
 	}
 
@@ -261,12 +179,10 @@ int cleanup(Database db, Arguments const& args) {
 }
 
 /* populate database */
-int populate(Database db,
-             Arguments const& args,
-             int worker_id,
-             int thread_id,
-             int thread_tps,
-             ThreadStatistics& stats) {
+int populate(Database db, const ThreadArgs& thread_args, int thread_tps, ThreadStatistics& stats) {
+	Arguments const& args = *thread_args.args;
+	const auto worker_id = thread_args.worker_id;
+	const auto thread_id = thread_args.thread_id;
 	auto xacts = 0;
 	auto keystr = ByteString{};
 	auto valstr = ByteString{};
@@ -279,96 +195,10 @@ int populate(Database db,
 	auto watch_tx = Stopwatch(watch_total.getStart());
 	auto watch_trace = Stopwatch(watch_total.getStart());
 
-	if (args.total_tenants > 0) {
-		Transaction systemTx = db.createTransaction();
-		// Have one thread create all the tenants, then let the rest help with data population
-		if (worker_id == 0 && thread_id == 0) {
-			int batch_size = args.tenant_batch_size;
-			int batches = (args.total_tenants + batch_size - 1) / batch_size;
-			for (int batch = 0; batch < batches; ++batch) {
-				while (1) {
-					for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-						std::string tenant_str = "tenant" + std::to_string(i);
-						Tenant::createTenant(systemTx, toBytesRef(tenant_str));
-					}
-					auto future_commit = systemTx.commit();
-					const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
-					if (rc == FutureRC::OK) {
-						// Keep going with reset transaction if commit was successful
-						systemTx.reset();
-						break;
-					} else if (rc == FutureRC::RETRY) {
-						// We want to retry this batch. Transaction is already reset
-					} else {
-						// Abort
-						return -1;
-					}
-				}
-
-				Tenant tenants[batch_size];
-				fdb::TypedFuture<fdb::future_var::Bool> blobbifyResults[batch_size];
-
-				// blobbify tenant ranges explicitly
-				// FIXME: skip if database not configured for blob granules?
-				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-					std::string tenant_str = "tenant" + std::to_string(i);
-					BytesRef tenant_name = toBytesRef(tenant_str);
-					tenants[i] = db.openTenant(tenant_name);
-					std::string rangeEnd = "\xff";
-					blobbifyResults[i - (batch * batch_size)] =
-					    tenants[i].blobbifyRange(BytesRef(), toBytesRef(rangeEnd));
-				}
-
-				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-					while (true) {
-						// not technically an operation that's part of systemTx, but it works
-						const auto rc =
-						    waitAndHandleError(systemTx, blobbifyResults[i - (batch * batch_size)], "BLOBBIFY_TENANT");
-						if (rc == FutureRC::OK) {
-							if (!blobbifyResults[i - (batch * batch_size)].get()) {
-								fmt::print("Blobbifying tenant {0} failed!\n", i);
-								return -1;
-							}
-							break;
-						} else if (rc == FutureRC::RETRY) {
-							continue;
-						} else {
-							// Abort
-							return -1;
-						}
-					}
-				}
-
-				systemTx.reset();
-			}
-		} else {
-			std::string last_tenant_name = "tenant" + std::to_string(args.total_tenants - 1);
-			while (true) {
-				auto result = Tenant::getTenant(systemTx, toBytesRef(last_tenant_name));
-				const auto rc = waitAndHandleError(systemTx, result, "GET_TENANT");
-				if (rc == FutureRC::OK) {
-					// If we get valid tenant metadata, the main thread has finished
-					if (result.get().has_value()) {
-						break;
-					}
-					systemTx.reset();
-				} else if (rc == FutureRC::RETRY) {
-					continue;
-				} else {
-					// Abort
-					return -1;
-				}
-				usleep(1000);
-			}
-		}
-	}
-	// mimic typical tenant usage: keep tenants in memory
-	// and create transactions as needed
+	// tenants are assumed to have been generated by populateTenants() at main process, pre-fork
 	Tenant tenants[args.active_tenants];
 	for (int i = 0; i < args.active_tenants; ++i) {
-		std::string tenantStr = "tenant" + std::to_string(i);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		tenants[i] = db.openTenant(tenant_name);
+		tenants[i] = db.openTenant(toBytesRef(getTenantNameByIndex(i)));
 	}
 	int populate_iters = args.active_tenants > 0 ? args.active_tenants : 1;
 	// Each tenant should have the same range populated
@@ -499,9 +329,9 @@ transaction_begin:
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
+				future_rc = waitAndHandleError(tx, f, opTable[op].name(), args.isAnyTimeoutEnabled());
 			} else {
-				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.transaction_timeout > 0);
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.isAnyTimeoutEnabled());
 			}
 			updateErrorStatsRunMode(stats, f.error(), op);
 		}
@@ -547,7 +377,7 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.transaction_timeout > 0);
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
 		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
@@ -617,9 +447,7 @@ int runWorkload(Database db,
 	// and create transactions as needed
 	Tenant tenants[args.active_tenants];
 	for (int i = 0; i < args.active_tenants; ++i) {
-		std::string tenantStr = "tenant" + std::to_string(i);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		tenants[i] = db.openTenant(tenant_name);
+		tenants[i] = db.openTenant(toBytesRef(getTenantNameByIndex(i)));
 	}
 
 	/* main transaction loop */
@@ -642,6 +470,7 @@ int runWorkload(Database db,
 
 		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
 			Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
+			setTransactionTimeoutIfEnabled(args, tx);
 
 			/* enable transaction trace */
 			if (dotrace) {
@@ -807,7 +636,7 @@ void runAsyncWorkload(Arguments const& args,
 }
 
 /* mako worker thread */
-void workerThread(ThreadArgs& thread_args) {
+void workerThread(const ThreadArgs& thread_args) {
 	const auto& args = *thread_args.args;
 	const auto parent_id = thread_args.parent_id;
 	const auto worker_id = thread_args.worker_id;
@@ -845,12 +674,12 @@ void workerThread(ThreadArgs& thread_args) {
 	}
 
 	if (args.mode == MODE_CLEAN) {
-		auto rc = cleanup(database, args);
+		auto rc = cleanupNormalKeyspace(database, args);
 		if (rc < 0) {
 			logr.error("cleanup failed");
 		}
 	} else if (args.mode == MODE_BUILD) {
-		auto rc = populate(database, args, worker_id, thread_id, thread_tps, stats);
+		auto rc = populate(database, thread_args, thread_tps, stats);
 		if (rc < 0) {
 			logr.error("populate failed");
 		}
@@ -873,111 +702,8 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 	auto err = Error{};
 	/* Everything starts from here */
-
-	selectApiVersion(args.api_version);
-
-	/* enable distributed tracing */
-	switch (args.distributed_tracer_client) {
-	case DistributedTracerClient::NETWORK_LOSSY:
-		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
-		break;
-	case DistributedTracerClient::LOG_FILE:
-		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
-		break;
-	}
-	if (err) {
-		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
-	}
-
-	if (args.tls_certificate_file.has_value()) {
-		network::setOption(FDB_NET_OPTION_TLS_CERT_PATH, args.tls_certificate_file.value());
-	}
-
-	if (args.tls_key_file.has_value()) {
-		network::setOption(FDB_NET_OPTION_TLS_KEY_PATH, args.tls_key_file.value());
-	}
-
-	if (args.tls_ca_file.has_value()) {
-		network::setOption(FDB_NET_OPTION_TLS_CA_PATH, args.tls_ca_file.value());
-	}
-
-	/* enable flatbuffers if specified */
-	if (args.flatbuffers) {
-#ifdef FDB_NET_OPTION_USE_FLATBUFFERS
-		logr.debug("Using flatbuffers");
-		err = network::setOptionNothrow(FDB_NET_OPTION_USE_FLATBUFFERS,
-		                                BytesRef(&args.flatbuffers, sizeof(args.flatbuffers)));
-		if (err) {
-			logr.error("network::setOption(USE_FLATBUFFERS): {}", err.what());
-		}
-#else
-		logr.info("flatbuffers is not supported in FDB API version {}", FDB_API_VERSION);
-#endif
-	}
-
-	/* Set client logr group */
-	if (args.log_group[0] != '\0') {
-		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(toBytePtr(args.log_group)));
-		if (err) {
-			logr.error("network::setOption(FDB_NET_OPTION_TRACE_LOG_GROUP): {}", err.what());
-		}
-	}
-
-	/* enable tracing if specified */
-	if (args.trace) {
-		logr.debug("Enable Tracing in {} ({})",
-		           (args.traceformat == 0) ? "XML" : "JSON",
-		           (args.tracepath[0] == '\0') ? "current directory" : args.tracepath);
-		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_ENABLE, BytesRef(toBytePtr(args.tracepath)));
-		if (err) {
-			logr.error("network::setOption(TRACE_ENABLE): {}", err.what());
-		}
-		if (args.traceformat == 1) {
-			err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_FORMAT, BytesRef(toBytePtr("json")));
-			if (err) {
-				logr.error("network::setOption(FDB_NET_OPTION_TRACE_FORMAT): {}", err.what());
-			}
-		}
-	}
-
-	/* enable knobs if specified */
-	if (args.knobs[0] != '\0') {
-		auto knobs = std::string_view(args.knobs);
-		const auto delim = std::string_view(", ");
-		while (true) {
-			knobs.remove_prefix(std::min(knobs.find_first_not_of(delim), knobs.size()));
-			auto knob = knobs.substr(0, knobs.find_first_of(delim));
-			if (knob.empty())
-				break;
-			logr.debug("Setting client knob: {}", knob);
-			err = network::setOptionNothrow(FDB_NET_OPTION_KNOB, toBytesRef(knob));
-			if (err) {
-				logr.error("network::setOption({}): {}", knob, err.what());
-			}
-			knobs.remove_prefix(knob.size());
-		}
-	}
-
-	if (args.client_threads_per_version > 0) {
-		err = network::setOptionNothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, args.client_threads_per_version);
-		if (err) {
-			logr.error("network::setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}",
-			           args.client_threads_per_version,
-			           err.what());
-			// let's exit here since we do not want to confuse users
-			// that mako is running with multi-threaded client enabled
-			return -1;
-		}
-	}
-
-	if (args.disable_client_bypass) {
-		err = network::setOptionNothrow(FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
-		if (err) {
-			logr.error("network::setOption (FDB_NET_OPTION_DISABLE_CLIENT_BYPASS): {}",
-			           args.disable_client_bypass,
-			           err.what());
-			return -1;
-		}
+	if (args.setGlobalOptions() < 0) {
+		return -1;
 	}
 
 	/* Network thread must be setup before doing anything */
@@ -997,19 +723,33 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	pthread_setname_np(network_thread.native_handle(), "mako_network");
 #endif
 
+	// prevent any exception from unwinding stack without joining the network thread
+	auto network_thread_guard = ExitGuard([&network_thread]() {
+		/* stop the network thread */
+		logr.debug("network::stop()");
+		auto err = network::stop();
+		if (err) {
+			logr.error("network::stop(): {}", err.what());
+		}
+
+		/* wait for the network thread to join */
+		logr.debug("waiting for network thread to join");
+		network_thread.join();
+	});
+
 	/*** let's party! ***/
 
 	auto databases = std::vector<fdb::Database>(args.num_databases);
 	/* set up database for worker threads */
 	for (auto i = 0; i < args.num_databases; i++) {
-		size_t cluster_index = args.num_fdb_clusters <= 1 ? 0 : i % args.num_fdb_clusters;
+		int cluster_index = i % args.num_fdb_clusters;
 		databases[i] = Database(args.cluster_files[cluster_index]);
 		logr.debug("creating database at cluster {}", args.cluster_files[cluster_index]);
 		if (args.disable_ryw) {
 			databases[i].setOption(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
 		}
-		if (args.transaction_timeout > 0 && args.mode == MODE_RUN) {
-			databases[i].setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, args.transaction_timeout);
+		if (args.transaction_timeout_db > 0 && args.mode == MODE_RUN) {
+			databases[i].setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, args.transaction_timeout_db);
 		}
 	}
 
@@ -1066,18 +806,6 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			thread.join();
 		shm.header().stopcount.fetch_add(args.num_threads);
 	}
-
-	/* stop the network thread */
-	logr.debug("network::stop()");
-	err = network::stop();
-	if (err) {
-		logr.error("network::stop(): {}", err.what());
-	}
-
-	/* wait for the network thread to join */
-	logr.debug("waiting for network thread to join");
-	network_thread.join();
-
 	return 0;
 }
 
@@ -1119,7 +847,9 @@ Arguments::Arguments() {
 	streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
 	txntrace = 0;
 	txntagging = 0;
+	memset(cluster_files, 0, sizeof(cluster_files));
 	memset(txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
+	enable_token_based_authorization = false;
 	for (auto i = 0; i < MAX_OP; i++) {
 		txnspec.ops[i][OP_COUNT] = 0;
 	}
@@ -1131,8 +861,123 @@ Arguments::Arguments() {
 	bg_materialize_files = false;
 	bg_file_path[0] = '\0';
 	distributed_tracer_client = 0;
-	transaction_timeout = 0;
+	transaction_timeout_db = 0;
+	transaction_timeout_tx = 0;
 	num_report_files = 0;
+}
+
+int Arguments::setGlobalOptions() const {
+	selectApiVersion(api_version);
+	auto err = Error{};
+	/* enable distributed tracing */
+	switch (distributed_tracer_client) {
+	case DistributedTracerClient::NETWORK_LOSSY:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
+		break;
+	case DistributedTracerClient::LOG_FILE:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
+		break;
+	}
+	if (err) {
+		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
+	}
+
+	if (tls_certificate_file.has_value() && (logr.isFor(ProcKind::ADMIN) || !isAuthorizationEnabled())) {
+		logr.debug("TLS certificate file: {}", tls_certificate_file.value());
+		network::setOption(FDB_NET_OPTION_TLS_CERT_PATH, tls_certificate_file.value());
+	}
+
+	if (tls_key_file.has_value() && (logr.isFor(ProcKind::ADMIN) || !isAuthorizationEnabled())) {
+		logr.debug("TLS key file: {}", tls_key_file.value());
+		network::setOption(FDB_NET_OPTION_TLS_KEY_PATH, tls_key_file.value());
+	}
+
+	if (tls_ca_file.has_value()) {
+		logr.debug("TLS CA file: {}", tls_ca_file.value());
+		network::setOption(FDB_NET_OPTION_TLS_CA_PATH, tls_ca_file.value());
+	}
+
+	/* enable flatbuffers if specified */
+	if (flatbuffers) {
+#ifdef FDB_NET_OPTION_USE_FLATBUFFERS
+		logr.debug("Using flatbuffers");
+		err = network::setOptionNothrow(FDB_NET_OPTION_USE_FLATBUFFERS, BytesRef(&flatbuffers, sizeof(flatbuffers)));
+		if (err) {
+			logr.error("network::setOption(USE_FLATBUFFERS): {}", err.what());
+		}
+#else
+		logr.info("flatbuffers is not supported in FDB API version {}", FDB_API_VERSION);
+#endif
+	}
+
+	/* Set client logr group */
+	if (log_group[0] != '\0') {
+		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(toBytePtr(log_group)));
+		if (err) {
+			logr.error("network::setOption(FDB_NET_OPTION_TRACE_LOG_GROUP): {}", err.what());
+		}
+	}
+
+	/* enable tracing if specified */
+	if (trace) {
+		logr.debug("Enable Tracing in {} ({})",
+		           (traceformat == 0) ? "XML" : "JSON",
+		           (tracepath[0] == '\0') ? "current directory" : tracepath);
+		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_ENABLE, BytesRef(toBytePtr(tracepath)));
+		if (err) {
+			logr.error("network::setOption(TRACE_ENABLE): {}", err.what());
+		}
+		if (traceformat == 1) {
+			err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_FORMAT, BytesRef(toBytePtr("json")));
+			if (err) {
+				logr.error("network::setOption(FDB_NET_OPTION_TRACE_FORMAT): {}", err.what());
+			}
+		}
+	}
+
+	/* enable knobs if specified */
+	if (knobs[0] != '\0') {
+		auto k = std::string_view(knobs);
+		const auto delim = std::string_view(", ");
+		while (true) {
+			k.remove_prefix(std::min(k.find_first_not_of(delim), k.size()));
+			auto knob = k.substr(0, k.find_first_of(delim));
+			if (knob.empty())
+				break;
+			logr.debug("Setting client knob: {}", knob);
+			err = network::setOptionNothrow(FDB_NET_OPTION_KNOB, toBytesRef(knob));
+			if (err) {
+				logr.error("network::setOption({}): {}", knob, err.what());
+			}
+			k.remove_prefix(knob.size());
+		}
+	}
+
+	if (client_threads_per_version > 0) {
+		err = network::setOptionNothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, client_threads_per_version);
+		if (err) {
+			logr.error("network::setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}",
+			           client_threads_per_version,
+			           err.what());
+			// let's exit here since we do not want to confuse users
+			// that mako is running with multi-threaded client enabled
+			return -1;
+		}
+	}
+
+	if (disable_client_bypass) {
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+		if (err) {
+			logr.error(
+			    "network::setOption (FDB_NET_OPTION_DISABLE_CLIENT_BYPASS): {}", disable_client_bypass, err.what());
+			return -1;
+		}
+	}
+	return 0;
+}
+
+bool Arguments::isAnyTimeoutEnabled() const {
+	return (transaction_timeout_tx > 0 || transaction_timeout_db > 0);
 }
 
 /* parse transaction specification */
@@ -1321,9 +1166,24 @@ void usage() {
 	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 	printf(
 	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
+	printf("%-24s %s\n", "    --tls_key_file=PATH", "Location of TLS key file");
+	printf("%-24s %s\n", "    --tls_ca_file=PATH", "Location of TLS CA file");
+	printf("%-24s %s\n", "    --tls_certificate_file=PATH", "Location of TLS certificate file");
 	printf("%-24s %s\n",
-	       "    --transaction_timeout=DURATION",
-	       "Duration in milliseconds after which a transaction times out in run mode.");
+	       "    --enable_token_based_authorization",
+	       "Make worker thread connect to server as untrusted clients to access tenant data");
+	printf("%-24s %s\n",
+	       "    --authorization_keypair_id",
+	       "ID of the public key in the public key set which will verify the authorization tokens generated by Mako");
+	printf("%-24s %s\n",
+	       "    --authorization_private_key_pem",
+	       "PEM-encoded private key with which Mako will sign generated tokens");
+	printf("%-24s %s\n",
+	       "    --transaction_timeout_db=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode. Set as database option.");
+	printf("%-24s %s\n",
+	       "    --transaction_timeout_tx=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode. Set as transaction option");
 }
 
 /* parse benchmark paramters */
@@ -1335,6 +1195,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
+			/* options requiring an argument */
 			{ "api_version", required_argument, NULL, 'a' },
 			{ "cluster", required_argument, NULL, 'c' },
 			{ "num_databases", required_argument, NULL, 'd' },
@@ -1365,28 +1226,32 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
 			{ "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			{ "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			/* no args */
+			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
+			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
+			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
+			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
+			{ "tls_certificate_file", required_argument, NULL, ARG_TLS_CERTIFICATE_FILE },
+			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
+			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
+			{ "authorization_keypair_id", required_argument, NULL, ARG_AUTHORIZATION_KEYPAIR_ID },
+			{ "authorization_private_key_pem_file", required_argument, NULL, ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE },
+			{ "transaction_timeout_tx", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_TX },
+			{ "transaction_timeout_db", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_DB },
+			/* options which may or may not have an argument */
+			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
+			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
+			/* options without an argument */
 			{ "help", no_argument, NULL, 'h' },
 			{ "zipf", no_argument, NULL, 'z' },
 			{ "commitget", no_argument, NULL, ARG_COMMITGET },
 			{ "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
 			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
 			{ "trace", no_argument, NULL, ARG_TRACE },
-			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
-			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			{ "version", no_argument, NULL, ARG_VERSION },
-			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
 			{ "disable_client_bypass", no_argument, NULL, ARG_DISABLE_CLIENT_BYPASS },
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
-			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
-			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
-			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
-			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
-			{ "tls_certificate_file", required_argument, NULL, ARG_TLS_CERTIFICATE_FILE },
-			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
-			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
-			{ "authorization_token_file", required_argument, NULL, ARG_AUTHORIZATION_TOKEN_FILE },
-			{ "transaction_timeout", required_argument, NULL, ARG_TRANSACTION_TIMEOUT },
+			{ "enable_token_based_authorization", no_argument, NULL, ARG_ENABLE_TOKEN_BASED_AUTHORIZATION },
 			{ NULL, 0, NULL, 0 }
 		};
 
@@ -1612,6 +1477,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
+			break;
 		case ARG_EXPORT_PATH:
 			SET_OPT_ARG_IF_PRESENT();
 			if (!optarg) {
@@ -1641,38 +1507,24 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_TLS_CA_FILE:
 			args.tls_ca_file = std::string(optarg);
 			break;
-		case ARG_AUTHORIZATION_TOKEN_FILE: {
-			std::string tokenFilename(optarg);
-			std::ifstream ifs(tokenFilename);
+		case ARG_AUTHORIZATION_KEYPAIR_ID:
+			args.keypair_id = optarg;
+			break;
+		case ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE: {
+			std::string pem_filename(optarg);
+			std::ifstream ifs(pem_filename);
 			std::ostringstream oss;
 			oss << ifs.rdbuf();
-			rapidjson::Document d;
-			d.Parse(oss.str().c_str());
-			if (d.HasParseError()) {
-				logr.error("Failed to parse authorization token JSON file '{}': {} at offset {}",
-				           tokenFilename,
-				           GetParseError_En(d.GetParseError()),
-				           d.GetErrorOffset());
-				return -1;
-			} else if (!d.IsObject()) {
-				logr.error("Authorization token JSON file '{}' must contain a JSON object", tokenFilename);
-				return -1;
-			}
-			for (auto itr = d.MemberBegin(); itr != d.MemberEnd(); ++itr) {
-				if (!itr->value.IsString()) {
-					logr.error("Token '{}' is not a string", itr->name.GetString());
-					return -1;
-				}
-				args.authorization_tokens.insert_or_assign(
-				    std::string(itr->name.GetString(), itr->name.GetStringLength()),
-				    std::string(itr->value.GetString(), itr->value.GetStringLength()));
-			}
-			logr.info("Added {} tenant authorization tokens to map from file '{}'",
-			          args.authorization_tokens.size(),
-			          tokenFilename);
+			args.private_key_pem = oss.str();
 		} break;
-		case ARG_TRANSACTION_TIMEOUT:
-			args.transaction_timeout = atoi(optarg);
+		case ARG_TRANSACTION_TIMEOUT_TX:
+			args.transaction_timeout_tx = atoi(optarg);
+			break;
+		case ARG_TRANSACTION_TIMEOUT_DB:
+			args.transaction_timeout_db = atoi(optarg);
+			break;
+		case ARG_ENABLE_TOKEN_BASED_AUTHORIZATION:
+			args.enable_token_based_authorization = true;
 			break;
 		}
 	}
@@ -1761,14 +1613,14 @@ int Arguments::validate() {
 				return -1;
 			}
 		}
-		if (transaction_timeout < 0) {
-			logr.error("--transaction_timeout must be a non-negative integer");
+		if (transaction_timeout_db < 0 || transaction_timeout_tx < 0) {
+			logr.error("--transaction_timeout_[tx|db] must be a non-negative integer");
 			return -1;
 		}
 	}
 
-	if (mode != MODE_RUN && transaction_timeout != 0) {
-		logr.error("--transaction_timeout only supported in run mode");
+	if (mode != MODE_RUN && (transaction_timeout_db != 0 || transaction_timeout_tx != 0)) {
+		logr.error("--transaction_timeout_[tx|db] only supported in run mode");
 		return -1;
 	}
 
@@ -1802,10 +1654,40 @@ int Arguments::validate() {
 		return -1;
 	}
 
-	if (!authorization_tokens.empty() && !tls_ca_file.has_value()) {
-		logr.warn("Authorization tokens are being used without explicit TLS CA file configured");
+	if (enable_token_based_authorization) {
+		if (active_tenants <= 0 || total_tenants <= 0) {
+			logr.error("--enable_token_based_authorization must be used with at least one tenant");
+			return -1;
+		}
+		if (!private_key_pem.has_value() || !keypair_id.has_value()) {
+			logr.error("--enable_token_based_authorization must be used with --authorization_keypair_id and "
+			           "--authorization_private_key_pem_file");
+			return -1;
+		}
+		if (!tls_key_file.has_value() || !tls_certificate_file.has_value() || !tls_ca_file.has_value()) {
+			logr.error(
+			    "token-based authorization is enabled without explicit TLS parameter(s) (certificate, key, CA).");
+			return -1;
+		}
 	}
 	return 0;
+}
+
+bool Arguments::isAuthorizationEnabled() const noexcept {
+	return mode != MODE_CLEAN && enable_token_based_authorization && active_tenants > 0 && tls_ca_file.has_value() &&
+	       private_key_pem.has_value();
+}
+
+void Arguments::generateAuthorizationTokens() {
+	assert(active_tenants > 0);
+	assert(keypair_id.has_value());
+	assert(private_key_pem.has_value());
+	authorization_tokens.clear();
+	logr.info("generating authorization tokens to be used by worker threads");
+	auto stopwatch = Stopwatch(StartAtCtor{});
+	authorization_tokens = generateAuthorizationTokenMap(active_tenants, keypair_id.value(), private_key_pem.value());
+	assert(authorization_tokens.size() == active_tenants);
+	logr.info("generated {} tokens in {:6.3f} seconds", active_tenants, toDoubleSeconds(stopwatch.stop().diff()));
 }
 
 void printStats(Arguments const& args, ThreadStatistics const* stats, double const duration_sec, FILE* fp) {
@@ -2381,7 +2263,8 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"txntagging_prefix\": \"%s\",", args.txntagging_prefix);
 		fmt::fprintf(fp, "\"streaming_mode\": %d,", args.streaming_mode);
 		fmt::fprintf(fp, "\"disable_ryw\": %d,", args.disable_ryw);
-		fmt::fprintf(fp, "\"transaction_timeout\": %d,", args.transaction_timeout);
+		fmt::fprintf(fp, "\"transaction_timeout_db\": %d,", args.transaction_timeout_db);
+		fmt::fprintf(fp, "\"transaction_timeout_tx\": %d,", args.transaction_timeout_tx);
 		fmt::fprintf(fp, "\"json_output_path\": \"%s\"", args.json_output_path);
 		fmt::fprintf(fp, "},\"samples\": [");
 	}
@@ -2475,6 +2358,27 @@ ThreadStatistics mergeSketchReport(Arguments& args) {
 	return stats;
 }
 
+int populateTenants(ipc::AdminServer& admin, const Arguments& args) {
+	const auto num_dbs = std::min(args.num_fdb_clusters, args.num_databases);
+	logr.info("populating {} tenants for {} database(s)", args.total_tenants, num_dbs);
+	auto stopwatch = Stopwatch(StartAtCtor{});
+	for (auto i = 0; i < num_dbs; i++) {
+		for (auto tenant_id = 0; tenant_id < args.total_tenants;) {
+			const auto tenant_id_end = tenant_id + std::min(args.tenant_batch_size, args.total_tenants - tenant_id);
+			auto res = admin.send(ipc::BatchCreateTenantRequest{ args.cluster_files[i], tenant_id, tenant_id_end });
+			if (res.error_message) {
+				logr.error("cluster {}: {}", i + 1, *res.error_message);
+				return -1;
+			} else {
+				logr.debug("created tenants [{}:{}) for cluster {}", tenant_id, tenant_id_end, i + 1);
+				tenant_id = tenant_id_end;
+			}
+		}
+	}
+	logr.info("populated tenants in {:6.3f} seconds", toDoubleSeconds(stopwatch.stop().diff()));
+	return 0;
+}
+
 int main(int argc, char* argv[]) {
 	setlinebuf(stdout);
 
@@ -2500,10 +2404,22 @@ int main(int argc, char* argv[]) {
 		args.seconds = 30; // default value accodring to documentation
 	}
 
+	// if no cluster file is passed, fall back to default parameters
+	// (envvar, 'fdb.cluster' or platform-dependent path)
+	if (args.num_fdb_clusters == 0) {
+		args.num_fdb_clusters = 1;
+	}
+
 	rc = args.validate();
+
 	if (rc < 0)
 		return -1;
+
 	logr.setVerbosity(args.verbose);
+
+	if (args.isAuthorizationEnabled()) {
+		args.generateAuthorizationTokens();
+	}
 
 	if (args.mode == MODE_CLEAN) {
 		/* cleanup will be done from a single thread */
@@ -2521,6 +2437,46 @@ int main(int argc, char* argv[]) {
 		ThreadStatistics stats = mergeSketchReport(args);
 		printThreadStats(stats, args, NULL, true);
 		return 0;
+	}
+
+	if (args.total_tenants > 0 && (args.mode == MODE_BUILD || args.mode == MODE_CLEAN)) {
+
+		// below construction fork()s internally
+		auto server = ipc::AdminServer(args);
+
+		if (!server.isClient()) {
+			// admin server has finished running. exit immediately
+			return 0;
+		} else {
+			auto res = server.send(ipc::PingRequest{});
+			if (res.error_message) {
+				logr.error("admin server setup failed: {}", *res.error_message);
+				return -1;
+			} else {
+				logr.info("admin server ready");
+			}
+		}
+		// Use admin server to request tenant creation or deletion.
+		// This is necessary when tenant authorization is enabled,
+		// in which case the worker threads connect to database as untrusted clients,
+		// as which they wouldn't be allowed to create/delete tenants on their own.
+		// Although it is possible to allow worker threads to create/delete
+		// tenants in a authorization-disabled mode, use the admin server anyway for simplicity.
+		if (args.mode == MODE_CLEAN) {
+			// short-circuit tenant cleanup
+			const auto num_dbs = std::min(args.num_fdb_clusters, args.num_databases);
+			for (auto db_id = 0; db_id < num_dbs; db_id++) {
+				if (cleanupTenants(server, args, db_id) < 0) {
+					return -1;
+				}
+			}
+			return 0;
+		} else if (args.mode == MODE_BUILD) {
+			// handle population of tenants before-fork
+			if (populateTenants(server, args) < 0) {
+				return -1;
+			}
+		}
 	}
 
 	const auto pid_main = getpid();

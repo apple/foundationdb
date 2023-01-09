@@ -1174,8 +1174,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 	ASSERT(currentLockValue.present());
 	int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
 	if (currentEpoch != bmData->epoch) {
-		ASSERT(currentEpoch > bmData->epoch);
-
 		if (BM_DEBUG) {
 			fmt::print(
 			    "BM {0} found new epoch {1} > {2} in lock check\n", bmData->id.toString(), currentEpoch, bmData->epoch);
@@ -2104,7 +2102,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 			for (; i < blobGranuleMapping.size() - 1; i++) {
 				if (!blobGranuleMapping[i].value.size()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: No valid granule data for range [{1} - {2}) \n",
+						fmt::print("ERROR: No valid granule data for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
@@ -2115,7 +2113,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 				state UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
 				if (workerId == UID()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: Invalid Blob Worker ID for range [{1} - {2}) \n",
+						fmt::print("ERROR: Invalid Blob Worker ID for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
@@ -3547,16 +3545,27 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
-		BlobRestoreStatus initStatus(BlobRestorePhase::LOAD_MANIFEST);
-		wait(updateRestoreStatus(bmData->db, normalKeys, initStatus));
-
-		wait(loadManifest(bmData->db, bmData->bstore));
-
-		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
-		wait(updateEpoch(bmData, epoc + 1));
-
-		BlobRestoreStatus completedStatus(BlobRestorePhase::MANIFEST_DONE);
-		wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus));
+		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(bmData->db, normalKeys));
+		ASSERT(status.present());
+		state BlobRestorePhase phase = status.get().phase;
+		if (phase == BlobRestorePhase::STARTING_MIGRATOR || phase == BlobRestorePhase::LOADING_MANIFEST) {
+			wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestoreStatus(LOADING_MANIFEST), {}));
+			try {
+				wait(loadManifest(bmData->db, bmData->bstore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
+				wait(updateEpoch(bmData, epoc + 1));
+				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
+				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
+			} catch (Error& e) {
+				if (e.code() != error_code_restore_missing_data) {
+					throw e; // retryable errors
+				}
+				// terminate blob restore for non-retryable errors
+				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
+				BlobRestoreStatus error(BlobRestorePhase::ERROR, e.code());
+				wait(updateRestoreStatus(bmData->db, normalKeys, error, {}));
+			}
+		}
 	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -4035,7 +4044,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 
 	// wait until existing blob workers have been acknowledged so we don't break recruitment invariants
 	loop choose {
-		when(wait(self->startRecruiting.onTrigger())) { break; }
+		when(wait(self->startRecruiting.onTrigger())) {
+			break;
+		}
 	}
 
 	loop {
@@ -4072,7 +4083,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				}
 
 				// when the CC changes, so does the request stream so we need to restart recruiting here
-				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
+				when(wait(recruitBlobWorker->onChange())) {
+					fCandidateWorker = Future<RecruitBlobWorkerReply>();
+				}
 
 				// signal used to restart the loop and try to recruit the next blob worker
 				when(wait(self->restartRecruiting.onTrigger())) {}
@@ -5306,10 +5319,6 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 }
 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
-	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
-		return Void();
-	}
-
 	bmData->initBStore();
 	loop {
 		wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
@@ -5318,8 +5327,8 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	}
 }
 
-// Simulation validation that multiple blob managers aren't started with the same epoch
-static std::map<int64_t, UID> managerEpochsSeen;
+// Simulation validation that multiple blob managers aren't started with the same epoch within same cluster
+static std::map<std::pair<std::string, int64_t>, UID> managerEpochsSeen;
 
 ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int64_t epoch, UID dbgid) {
 	loop {
@@ -5334,15 +5343,18 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
 	if (g_network->isSimulated()) {
-		bool managerEpochAlreadySeen = managerEpochsSeen.count(epoch);
+		std::string clusterId = dbInfo->get().clusterInterface.id().shortString();
+		auto clusterEpoc = std::make_pair(clusterId, epoch);
+		bool managerEpochAlreadySeen = managerEpochsSeen.count(clusterEpoc);
 		if (managerEpochAlreadySeen) {
 			TraceEvent(SevError, "DuplicateBlobManagersAtEpoch")
+			    .detail("ClusterId", clusterId)
 			    .detail("Epoch", epoch)
 			    .detail("BMID1", bmInterf.id())
-			    .detail("BMID2", managerEpochsSeen.at(epoch));
+			    .detail("BMID2", managerEpochsSeen.at(clusterEpoc));
 		}
 		ASSERT(!managerEpochAlreadySeen);
-		managerEpochsSeen[epoch] = bmInterf.id();
+		managerEpochsSeen[clusterEpoc] = bmInterf.id();
 	}
 	state Reference<BlobManagerData> self =
 	    makeReference<BlobManagerData>(bmInterf.id(),
@@ -5386,7 +5398,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			self->addActor.send(backupManifest(self));
 		}
 
-		if (BUGGIFY) {
+		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));
 		}
 

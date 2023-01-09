@@ -20,7 +20,7 @@
 #ifndef FDBSERVER_ICLOSABLE_H
 #define FDBSERVER_ICLOSABLE_H
 #pragma once
-
+#include "flow/flow.h"
 class IClosable {
 public:
 	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors,

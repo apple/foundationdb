@@ -327,8 +327,12 @@ TEST_CASE("fdbserver/SimKmsConnector") {
 	state SimKmsConnector connector("SimKmsConnector");
 
 	loop choose {
-		when(wait(connector.connectorCore(inf))) { throw internal_error(); }
-		when(wait(testRunWorkload(inf, maxEncryptKeys))) { break; }
+		when(wait(connector.connectorCore(inf))) {
+			throw internal_error();
+		}
+		when(wait(testRunWorkload(inf, maxEncryptKeys))) {
+			break;
+		}
 	}
 	return Void();
 }

@@ -26,6 +26,7 @@
 #include <limits>
 #include <memory>
 #include <regex>
+#include <string>
 #include <unordered_set>
 #include <tuple>
 #include <utility>
@@ -1500,9 +1501,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  int _apiVersion,
                                  IsSwitchable switchable,
                                  Optional<TenantName> defaultTenant)
-  : lockAware(lockAware), switchable(switchable), connectionRecord(connectionRecord), proxyProvisional(false),
-    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant),
-    internal(internal), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+  : dbId(deterministicRandom()->randomUniqueID()), lockAware(lockAware), switchable(switchable),
+    connectionRecord(connectionRecord), proxyProvisional(false), clientLocality(clientLocality),
+    enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant), internal(internal),
+    cc("TransactionMetrics", dbId.toString()), transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
@@ -1533,11 +1535,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), anyBGReads(false),
-    ccBG("BlobGranuleReadMetrics"), bgReadInputBytes("BGReadInputBytes", ccBG),
+    ccBG("BlobGranuleReadMetrics", dbId.toString()), bgReadInputBytes("BGReadInputBytes", ccBG),
     bgReadOutputBytes("BGReadOutputBytes", ccBG), bgReadSnapshotRows("BGReadSnapshotRows", ccBG),
     bgReadRowsCleared("BGReadRowsCleared", ccBG), bgReadRowsInserted("BGReadRowsInserted", ccBG),
     bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(), bgGranulesPerRequest(), usedAnyChangeFeeds(false),
-    ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    ccFeed("ChangeFeedClientMetrics", dbId.toString()), feedStreamStarts("FeedStreamStarts", ccFeed),
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
     feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
@@ -1548,8 +1550,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
-
-	dbId = deterministicRandom()->randomUniqueID();
 
 	TraceEvent("DatabaseContextCreated", dbId).backtrace();
 
@@ -3395,7 +3395,6 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
 
-	span.addAttribute("key"_sr, key);
 	trState->cx->validateVersion(ver);
 
 	loop {
@@ -4327,7 +4326,6 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 	int64_t bytes = 0;
 	for (const MappedKeyValueRef& mappedKeyValue : result) {
 		bytes += mappedKeyValue.key.size() + mappedKeyValue.value.size();
-		bytes += sizeof(mappedKeyValue.boundaryAndExist);
 		auto& reqAndResult = mappedKeyValue.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
@@ -8682,9 +8680,10 @@ Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority) {
-	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(primary ? "primary/"_sr : "remote/"_sr);
-	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-	                                                                                          IncludeVersion());
+	state StorageWiggleData wiggleState;
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
+	    wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
 
@@ -8929,7 +8928,9 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 
 void Transaction::setTransactionID(UID id) {
 	ASSERT(getSize() == 0);
-	trState->spanContext = SpanContext(id, trState->spanContext.spanID);
+	trState->spanContext = SpanContext(id, trState->spanContext.spanID, trState->spanContext.m_Flags);
+	tr.spanContext = trState->spanContext;
+	span.context = trState->spanContext;
 }
 
 void Transaction::setToken(uint64_t token) {
@@ -9578,6 +9579,9 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 				Version next = waitNext(data->get().ssStreamSummary.getFuture());
 				ssSummary.push_back(next);
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				if (e.code() != error_code_end_of_stream) {
 					data->get().complete();
 					if (e.code() != error_code_operation_cancelled) {
@@ -9727,15 +9731,11 @@ Version ChangeFeedData::getVersion() {
 // native api has consumed and processed, them, and then the fdb client has consumed all of the mutations.
 ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version version) {
 	// wait on SS to have sent up through version
-	int desired = 0;
-	int waiting = 0;
 	std::vector<Future<Void>> allAtLeast;
 	for (auto& it : self->storageData) {
 		if (it->version.get() < version) {
-			waiting++;
 			if (version > it->desired.get()) {
 				it->desired.set(version);
-				desired++;
 			}
 			allAtLeast.push_back(it->version.whenAtLeast(version));
 		}
@@ -11060,11 +11060,12 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Key key = blobRestoreCommandKeyFor(range);
 			Optional<Value> value = wait(tr->get(key));
 			if (value.present()) {
 				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-				if (status.progress < 100) {
+				if (status.phase != BlobRestorePhase::DONE) {
 					return false; // stop if there is in-progress restore.
 				}
 			}
@@ -11092,7 +11093,7 @@ int64_t getMaxReadKeySize(KeyRef const& key) {
 }
 
 int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
-	int64_t tenantSize = hasRawAccess ? TenantMapEntry::PREFIX_SIZE : 0;
+	int64_t tenantSize = hasRawAccess ? TenantAPI::PREFIX_SIZE : 0;
 	return key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
 	                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT + tenantSize;
 }

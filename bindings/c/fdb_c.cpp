@@ -481,10 +481,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 	}
 
 	return (
-	    FDBFuture*)(mapThreadFuture<ProtocolVersion,
-	                                uint64_t>(DB(db)->getServerProtocol(expected), [](ErrorOr<ProtocolVersion> result) {
-		                return result.map<uint64_t>([](ProtocolVersion pv) { return pv.versionWithFlags(); });
-	                }).extractPtr());
+	    FDBFuture*)(mapThreadFuture<ProtocolVersion, uint64_t>(
+	                    DB(db)->getServerProtocol(expected),
+	                    [](ErrorOr<ProtocolVersion> result) { return result.map(&ProtocolVersion::versionWithFlags); })
+	                    .extractPtr());
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_purge_blob_granules(FDBDatabase* db,
