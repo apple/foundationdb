@@ -4405,9 +4405,10 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		return Void();
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
-			if (!bwData->shuttingDown) {
+			if (!bwData->shuttingDown && !isSelfReassign) {
 				// the cancelled was because the granule open was cancelled, not because the whole blob
 				// worker was.
+				ASSERT(!req.reply.isSet());
 				req.reply.sendError(granule_assignment_conflict());
 			}
 			throw e;
@@ -5048,11 +5049,20 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				ASSERT(false);
 				throw internal_error();
 			}
-			when(wait(selfRemoved || self->simInjectFailure.getFuture())) {
+			when(wait(selfRemoved)) {
 				if (BW_DEBUG) {
 					printf("Blob worker detected removal. Exiting...\n");
 				}
 				TraceEvent("BlobWorkerRemoved", self->id);
+				break;
+			}
+			when(wait(self->simInjectFailure.getFuture())) {
+				// wait to let triggering actor finish to prevent weird shutdown races
+				wait(delay(0));
+				if (BW_DEBUG) {
+					printf("Blob worker simulation injected failure. Exiting...\n");
+				}
+				TraceEvent("BlobWorkerSimRemoved", self->id);
 				break;
 			}
 			when(wait(self->fatalError.getFuture())) {

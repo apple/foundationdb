@@ -68,7 +68,15 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// Failure injection workloads like Rollback, Attrition and so on are interfering with the test.
+		// In particular, the test aims to test special keys' functions on monitoring and managing the cluster.
+		// It expects the FDB cluster is healthy and not doing unexpected configuration changes.
+		// All changes should come from special keys' operations' outcome.
+		// Consequently, we disable all failure injection workloads in backgroud for this test
+		out.insert("all");
+	}
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
