@@ -86,7 +86,7 @@ If a transaction learns that it has been in-flight so long that its idempotency 
 
 ## Optimization to reduce storage server load
 
-Evan pointed out that in normal operation that idempotency id mutations wouldn't need to go to a storage server at all! They could be stored in the log system and only long-lived ids would need to be spilled to storage servers.
+Evan pointed out that in normal operation, idempotency id mutations wouldn't need to go to a storage server at all! They could be stored in the log system and only long-lived ids would need to be spilled to storage servers.
 
 The basic design would be something like this
 
