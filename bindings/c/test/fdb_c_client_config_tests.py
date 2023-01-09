@@ -136,7 +136,33 @@ class ClientConfigTest:
 
     def check_initialization_state(self, expected_state):
         self.tc.assertIsNotNone(self.status_json)
+        self.tc.assertTrue("InitializationState" in self.status_json)
         self.tc.assertEqual(expected_state, self.status_json["InitializationState"])
+
+    def check_available_clients(self, expected_clients):
+        self.tc.assertIsNotNone(self.status_json)
+        self.tc.assertTrue("AvailableClients" in self.status_json)
+        actual_clients = [client["ReleaseVersion"] for client in self.status_json["AvailableClients"]]
+        self.tc.assertEqual(set(expected_clients), set(actual_clients))
+
+    def check_protocol_version_not_set(self):
+        self.tc.assertIsNotNone(self.status_json)
+        self.tc.assertFalse("ProtocolVersion" in self.status_json)
+
+    def check_current_client(self, expected_client):
+        self.tc.assertIsNotNone(self.status_json)
+        self.tc.assertTrue("AvailableClients" in self.status_json)
+        self.tc.assertTrue("ProtocolVersion" in self.status_json)
+        matching_clients = [
+            client["ReleaseVersion"]
+            for client in self.status_json["AvailableClients"]
+            if client["ProtocolVersion"] == self.status_json["ProtocolVersion"]
+        ]
+        if expected_client is None:
+            self.tc.assertEqual(0, len(matching_clients))
+        else:
+            self.tc.assertEqual(1, len(matching_clients))
+            self.tc.assertEqual(expected_client, matching_clients[0])
 
     def exec(self):
         cmd_args = [self.cluster.client_config_tester_bin, "--cluster-file", self.test_cluster_file]
@@ -223,6 +249,8 @@ class ClientConfigTests(unittest.TestCase):
         test.disable_client_bypass = True
         test.exec()
         test.check_initialization_state("created")
+        test.check_available_clients([CURRENT_VERSION])
+        test.check_current_client(CURRENT_VERSION)
 
     def test_single_external_client_only(self):
         # Single external client only
@@ -232,6 +260,8 @@ class ClientConfigTests(unittest.TestCase):
         test.disable_local_client = True
         test.exec()
         test.check_initialization_state("created")
+        test.check_available_clients([CURRENT_VERSION])
+        test.check_current_client(CURRENT_VERSION)
 
     def test_same_local_and_external_client(self):
         # Same version local & external client
@@ -240,6 +270,8 @@ class ClientConfigTests(unittest.TestCase):
         test.create_external_lib_path(CURRENT_VERSION)
         test.exec()
         test.check_initialization_state("created")
+        test.check_available_clients([CURRENT_VERSION])
+        test.check_current_client(CURRENT_VERSION)
 
     def test_multiple_external_clients(self):
         # Multiple external clients, normal case
@@ -250,6 +282,8 @@ class ClientConfigTests(unittest.TestCase):
         test.api_version = api_version_from_str(PREV2_RELEASE_VERSION)
         test.exec()
         test.check_initialization_state("created")
+        test.check_available_clients([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
+        test.check_current_client(CURRENT_VERSION)
 
     def test_no_external_client_support_api_version(self):
         # Multiple external clients, API version supported by none of them
@@ -289,6 +323,8 @@ class ClientConfigTests(unittest.TestCase):
         test.ignore_external_client_failures = True
         test.exec()
         test.check_initialization_state("created")
+        test.check_available_clients([CURRENT_VERSION])
+        test.check_current_client(CURRENT_VERSION)
 
     def test_external_client_not_matching_cluster_version(self):
         # Trying to connect to a cluster having only
@@ -302,6 +338,8 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2125  # Incompatible client
         test.exec()
         test.check_initialization_state("incompatible")
+        test.check_available_clients([PREV_RELEASE_VERSION])
+        test.check_current_client(None)
 
     def test_external_client_not_matching_cluster_version_ignore(self):
         # Trying to connect to a cluster having only
@@ -317,6 +355,8 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 1031  # Timeout
         test.exec()
         test.check_initialization_state("incompatible")
+        test.check_available_clients([PREV_RELEASE_VERSION])
+        test.check_current_client(None)
 
     def test_cannot_connect_to_coordinator(self):
         # Testing a cluster file with a valid address, but no server behind it
@@ -330,6 +370,8 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 1031  # Timeout
         test.exec()
         test.check_initialization_state("initializing")
+        test.check_available_clients([CURRENT_VERSION])
+        test.check_protocol_version_not_set()
 
     def test_invalid_cluster_file(self):
         # Testing with an invalid cluster file
@@ -343,6 +385,8 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2104  # Connection string invalid
         test.exec()
         test.check_initialization_state("initialization_failed")
+        test.check_available_clients([CURRENT_VERSION])
+        test.check_protocol_version_not_set()
 
 
 # Client configuration tests using a cluster of previous release version
@@ -364,6 +408,8 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.exec()
         test.check_initialization_state("created")
+        test.check_available_clients([PREV_RELEASE_VERSION, CURRENT_VERSION])
+        test.check_current_client(PREV_RELEASE_VERSION)
 
     def test_external_client_unsupported_api(self):
         # Leaving an unsupported API version
@@ -382,6 +428,8 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.ignore_external_client_failures = True
         test.exec()
         test.check_initialization_state("incompatible")
+        test.check_available_clients([CURRENT_VERSION])
+        test.check_current_client(None)
 
 
 # Client configuration tests using a separate cluster for each test
@@ -406,6 +454,8 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             t.start()
             test.exec()
             test.check_initialization_state("created")
+            test.check_available_clients([CURRENT_VERSION])
+            test.check_current_client(CURRENT_VERSION)
             t.join()
         finally:
             self.cluster.tear_down()

@@ -20,6 +20,7 @@
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #ifdef ADDRESS_SANITIZER
@@ -2376,6 +2377,20 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 	statusObj["InitializationState"] = inializationStateToString(initializationState);
 	if (initializationState == InitializationState::INITIALIZATION_FAILED) {
 		statusObj["InitializationError"] = initializationError.code();
+	}
+	json_spirit::mArray clientArr;
+	for (auto [protocolVersion, client] : this->clients) {
+		json_spirit::mObject clientDesc;
+		clientDesc["ProtocolVersion"] = format("%llx", client->protocolVersion.version());
+		clientDesc["ReleaseVersion"] = client->releaseVersion;
+		clientDesc["ThreadIndex"] = client->threadIndex;
+		clientArr.push_back(clientDesc);
+	}
+	statusObj["AvailableClients"] = clientArr;
+	statusObj["ConnectionRecord"] = connectionRecord.toString();
+	statusObj["ClusterId"] = clusterId;
+	if (dbProtocolVersion.present()) {
+		statusObj["ProtocolVersion"] = format("%llx", dbProtocolVersion.get().version());
 	}
 	if (initializationState == InitializationState::CREATED) {
 		if (dbContextStatus.isError()) {
