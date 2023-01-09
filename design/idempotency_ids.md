@@ -84,6 +84,20 @@ If a transaction learns that it did in fact _not_ commit, the commit future will
 
 If a transaction learns that it has been in-flight so long that its idempotency id could have been expired, then it will fail with a new, non-retriable error. It is expected that this will be rare enough that crashing the application is acceptable.
 
+## Optimization to reduce storage server load
+
+Evan pointed out that in normal operation that idempotency id mutations wouldn't need to go to a storage server at all! They could be stored in the log system and only long-lived ids would need to be spilled to storage servers.
+
+The basic design would be something like this
+
+1. Add a new pseudo tag for idempotency id mutations
+1. Write idempotency ids to this new pseudo tag atomically with their transactions
+1. Maintain an in-memory map of idempotency ids on proxies. Clients who lose their connection while their commit request is in-flight can ask the proxy for the commit status.
+1. Clients know which proxy they sent their CommitTransactionRequest to, and so they know where to send the expire request. The expire request would simply remove the id from the in-memory map
+1. Proxies spill older ids to storage servers using the current design, to manage memory usage for the in-memory map. Proxies track the version they've spilled to.
+1. The first proxy would pop the pseudo tag according to the min version any proxy has spilled to
+1. On recovery, in-flight idempotency ids could be assigned to the first proxy, or they could be spilled to storage servers
+
 # Considerations
 
 - Additional storage space on the cluster for the idempotency ids.
