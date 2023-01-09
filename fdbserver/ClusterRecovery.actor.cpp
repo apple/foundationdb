@@ -515,11 +515,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
 
-		if (newState.oldTLogData.size() && configuration.repopulateRegionAntiQuorum > 0 &&
-		    self->logSystem->remoteStorageRecovered()) {
-			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid).log();
-			self->recruitmentStalled->set(true);
-		}
 		self->registrationTrigger.trigger();
 
 		if (finalUpdate) {
@@ -967,7 +962,6 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("RequiredResolvers", 1)
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-
 		// The cluster's EncryptionAtRest status is now readable.
 		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
 			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest(self->configuration));
@@ -1080,7 +1074,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
-	bool enableEncryptionForTxnStateStore = isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION);
+	// If it's the first recovery the encrypt mode is not yet avilable so create the txn state store with encryption
+	// disabled. This is fine since we will not write any data to disk using this txn store.
+	state bool enableEncryptionForTxnStateStore = false;
+	if (self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
+		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
+		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
+	}
 	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
@@ -1107,7 +1107,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// transactions will be committed at a lower version.
 	Optional<Standalone<StringRef>> requiredCommitVersion =
 	    wait(self->txnStateStore->readValue(minRequiredCommitVersionKey));
-
 	Version minRequiredCommitVersion = -1;
 	if (requiredCommitVersion.present()) {
 		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());

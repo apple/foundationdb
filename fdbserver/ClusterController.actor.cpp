@@ -135,7 +135,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
 			dbInfo.client.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
-			dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
@@ -523,7 +522,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	WorkerDetails newEKPWorker;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	EncryptionAtRestMode encryptMode = self->db.config.encryptionAtRestMode;
+	if (encryptMode.isEncryptionEnabled()) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
 
@@ -542,7 +542,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (encryptMode.isEncryptionEnabled()) {
 		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
@@ -577,7 +577,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	bool ekpHealthy = true;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (encryptMode.isEncryptionEnabled()) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxySingleton>(
 		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
 	}
@@ -608,7 +608,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (encryptMode.isEncryptionEnabled()) {
 		currEKPProcessId = ekpSingleton.getInterface().locality.processId();
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
@@ -624,7 +624,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		}
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (encryptMode.isEncryptionEnabled()) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
 	}
@@ -643,7 +643,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (!encryptMode.isEncryptionEnabled()) {
 		ASSERT(currColocMap[currEKPProcessId] == 0);
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
@@ -665,7 +665,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get() &&
 		           newColocMap[newMGProcessId] < currColocMap[currMGProcessId]) {
 			mgSingleton.recruit(*self);
-		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
+		} else if (encryptMode.isEncryptionEnabled() && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
 			ekpSingleton.recruit(*self);
 		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
 			csSingleton.recruit(*self);
@@ -949,7 +949,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
 	    db->clientInfo->get().tenantMode != db->config.tenantMode ||
-	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
 	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
 	    db->clientInfo->get().clusterType != db->clusterType ||
 	    db->clientInfo->get().metaclusterName != db->metaclusterName ||
@@ -962,7 +961,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("ReqCPs", req.commitProxies)
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
 		    .detail("ReqTenantMode", db->config.tenantMode.toString())
-		    .detail("EncryptionEnabled", SERVER_KNOBS->ENABLE_ENCRYPTION)
 		    .detail("ClusterId", db->serverInfo->get().client.clusterId)
 		    .detail("ClientClusterId", db->clientInfo->get().clusterId)
 		    .detail("ClusterType", db->clientInfo->get().clusterType)
@@ -974,7 +972,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		ClientDBInfo clientInfo;
 		clientInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
-		clientInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
@@ -1243,7 +1240,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    self, w, currSingleton, registeringSingleton, self->recruitingBlobMigratorID);
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && req.encryptKeyProxyInterf.present()) {
+	if (self->db.config.encryptionAtRestMode.isEncryptionEnabled() && req.encryptKeyProxyInterf.present()) {
 		auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().encryptKeyProxy);
 		auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
 		haltRegisteringOrCurrentSingleton<EncryptKeyProxySingleton>(
@@ -2324,6 +2321,10 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 }
 
 ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
+	state EncryptionAtRestMode encryptMode = wait(self->encryptionAtRestMode.getFuture());
+	if (!encryptMode.isEncryptionEnabled()) {
+		return Void();
+	}
 	state SingletonRecruitThrottler recruitThrottler;
 	loop {
 		if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
@@ -2914,9 +2915,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	}
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		self.addActor.send(monitorEncryptKeyProxy(&self));
-	}
+	self.addActor.send(monitorEncryptKeyProxy(&self));
 	self.addActor.send(
 	    clusterWatchDatabase(&self, &self.db, coordinators, recoveredDiskFiles)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
@@ -3119,21 +3118,6 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      LocalityData locality,
                                      ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
-
-	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
-	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of
-	// encryption keys created and managed by external KeyManagementService (KMS).
-	//
-	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the
-	// new CC before recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
-
-	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		wait(recoveredDiskFiles);
-		TraceEvent("RecoveredDiskFiles").log();
-	} else {
-		TraceEvent("RecoveredDiskFiles_Deferred").log();
-	}
-
 	state bool hasConnected = false;
 	loop {
 		try {
@@ -3571,8 +3555,10 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	data.degradationInfo.degradedServers.insert(satelliteTlog);
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.degradedServers.clear();
+
+	// Trigger recovery when satellite Tlog is disconnected.
 	data.degradationInfo.disconnectedServers.insert(satelliteTlog);
-	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.disconnectedServers.clear();
 
 	// No recovery when remote tlog is degraded.
