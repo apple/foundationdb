@@ -223,7 +223,7 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid([db]() { db->delref(); });
 }
 
-ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) {
+ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {
 	Tenant* tenant = this->tenant = Tenant::allocateOnForeignThread();
 	onMainThreadVoid([tenant, db, name]() { new (tenant) Tenant(db->db, name); });
 }
