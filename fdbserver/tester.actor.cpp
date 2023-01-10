@@ -1086,10 +1086,6 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state UID auditId;
 	TraceEvent("AuditStorageCorrectnessBegin");
-	if (cx.getPtr() == nullptr) {
-		TraceEvent("AuditStorageCorrectnessAborted");
-		return Void();
-	}
 
 	loop {
 		try {
