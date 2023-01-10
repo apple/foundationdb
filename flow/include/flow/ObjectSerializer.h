@@ -67,22 +67,6 @@ struct LoadContext {
 	}
 };
 
-template <class Ar, class Allocator>
-struct SaveContext {
-	Ar* ar;
-	Allocator allocator;
-
-	SaveContext(Ar* ar, const Allocator& allocator) : ar(ar), allocator(allocator) {}
-
-	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
-
-	void addArena(Arena& arena) {}
-
-	uint8_t* allocate(size_t s) { return allocator(s); }
-
-	SaveContext& context() { return *this; }
-};
-
 template <class ReaderImpl>
 class _ObjectReader {
 protected:
@@ -208,7 +192,8 @@ class ObjectWriter {
 
 			pObjectWriter->size = size + (pObjectWriter->writeProtocolVersion ? sizeof(uint64_t) : 0);
 			if (pObjectWriter->customAllocator != nullptr) {
-				pObjectWriter->data = pObjectWriter->customAllocator(pObjectWriter->size, pObjectWriter->customAllocatorContext);
+				pObjectWriter->data =
+				    pObjectWriter->customAllocator(pObjectWriter->size, pObjectWriter->customAllocatorContext);
 			} else {
 				pObjectWriter->data = new (pObjectWriter->arena) uint8_t[pObjectWriter->size];
 			}
@@ -229,6 +214,23 @@ class ObjectWriter {
 
 	friend class AllocateFunctor;
 
+	class SaveContext {
+	private:
+		ObjectWriter* ar;
+		AllocateFunctor allocator;
+
+	public:
+		SaveContext(ObjectWriter* ar, const AllocateFunctor& allocator) : ar(ar), allocator(allocator) {}
+
+		ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
+
+		void addArena(Arena& arena) {}
+
+		uint8_t* allocate(size_t s) { return allocator(s); }
+
+		SaveContext& context() { return *this; }
+	};
+
 public:
 	template <class VersionOptions>
 	explicit ObjectWriter(VersionOptions vo) : customAllocator(nullptr) {
@@ -245,7 +247,7 @@ public:
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
 		ASSERT(data == nullptr); // object serializer can only serialize one object
 		AllocateFunctor allocator(this);
-		SaveContext<ObjectWriter, AllocateFunctor> context(this, allocator);
+		SaveContext context(this, allocator);
 		save_members(context, file_identifier, items...);
 		ASSERT(allocator.getNumAllocations() == 1);
 	}
