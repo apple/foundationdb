@@ -2366,6 +2366,9 @@ const char* inializationStateToString(MultiVersionDatabase::InitializationState 
 		return "incompatible";
 	case MultiVersionDatabase::InitializationState::CLOSED:
 		return "closed";
+	default:
+		ASSERT(false);
+		return "invalid_state";
 	}
 }
 
