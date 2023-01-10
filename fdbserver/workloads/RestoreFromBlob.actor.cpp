@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -54,9 +55,10 @@ struct RestoreFromBlobWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, RestoreFromBlobWorkload* self) {
 		state FileBackupAgent backupAgent;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 
 		wait(delay(self->restoreAfter));
-		if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
 			// restore system keys followed by user keys
 			wait(success(backupAgent.restore(
 			    cx, {}, self->backupTag, self->backupURL, {}, getSystemBackupRanges(), self->waitForComplete)));

@@ -222,7 +222,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 		try {
 			loaded.tlsCertBytes = readFileBytes(certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 		} catch (Error& e) {
-			fprintf(stderr, "Error reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
+			fprintf(stderr, "Warning: Error reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
 			throw;
 		}
 	} else {
@@ -234,7 +234,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 		try {
 			loaded.tlsKeyBytes = readFileBytes(keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 		} catch (Error& e) {
-			fprintf(stderr, "Error reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
+			fprintf(stderr, "Warning: Error reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
 			throw;
 		}
 	} else {
@@ -246,7 +246,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 		try {
 			loaded.tlsCABytes = readFileBytes(CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 		} catch (Error& e) {
-			fprintf(stderr, "Error reading TLS CA [%s]: %s\n", CAPath.c_str(), e.what());
+			fprintf(stderr, "Warning: Error reading TLS CA [%s]: %s\n", CAPath.c_str(), e.what());
 			throw;
 		}
 	} else {
@@ -315,13 +315,13 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 		wait(waitForAll(reads));
 	} catch (Error& e) {
 		if (certIdx != -1 && reads[certIdx].isError()) {
-			fprintf(stderr, "Failure reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
+			fprintf(stderr, "Warning: Error reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
 		} else if (keyIdx != -1 && reads[keyIdx].isError()) {
-			fprintf(stderr, "Failure reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
+			fprintf(stderr, "Warning: Error reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
 		} else if (caIdx != -1 && reads[caIdx].isError()) {
-			fprintf(stderr, "Failure reading TLS Key [%s]: %s\n", CAPath.c_str(), e.what());
+			fprintf(stderr, "Warning: Error reading TLS Key [%s]: %s\n", CAPath.c_str(), e.what());
 		} else {
-			fprintf(stderr, "Failure reading TLS needed file: %s\n", e.what());
+			fprintf(stderr, "Warning: Error reading TLS needed file: %s\n", e.what());
 		}
 
 		throw;

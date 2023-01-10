@@ -7,11 +7,13 @@ import sys
 import os
 import glob
 import unittest
+
 from threading import Thread
 import time
 from fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION
 from binary_download import FdbBinaryDownloader
-from local_cluster import LocalCluster, PortProvider, random_secret_string
+from local_cluster import LocalCluster, PortProvider
+from test_util import random_alphanum_string
 
 args = None
 downloader = None
@@ -38,7 +40,7 @@ class TestCluster(LocalCluster):
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
-        self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
+        self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         print("Creating temp dir {}".format(self.tmp_dir), file=sys.stderr)
         self.tmp_dir.mkdir(parents=True)
         self.version = version
@@ -77,7 +79,7 @@ class ClientConfigTest:
         self.cluster = tc.cluster
         self.external_lib_dir = None
         self.external_lib_path = None
-        self.test_dir = self.cluster.tmp_dir.joinpath(random_secret_string(16))
+        self.test_dir = self.cluster.tmp_dir.joinpath(random_alphanum_string(16))
         self.test_dir.mkdir(parents=True)
         self.log_dir = self.test_dir.joinpath("log")
         self.log_dir.mkdir(parents=True)
@@ -110,13 +112,13 @@ class ClientConfigTest:
         self.tc.assertTrue(self.external_lib_path.exists(), "{} does not exist".format(self.external_lib_path))
 
     def create_cluster_file_with_wrong_port(self):
-        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_secret_string(16)))
+        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_alphanum_string(16)))
         port = self.cluster.port_provider.get_free_port()
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@127.0.0.1:{}".format(port))
 
     def create_invalid_cluster_file(self):
-        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_secret_string(16)))
+        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_alphanum_string(16)))
         port = self.cluster.port_provider.get_free_port()
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@")

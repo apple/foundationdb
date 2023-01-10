@@ -245,7 +245,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ALL_DATA_REMOVED_DELAY,                                1.0 );
 	init( INITIAL_FAILURE_REACTION_DELAY,                       30.0 ); if( randomize && BUGGIFY ) INITIAL_FAILURE_REACTION_DELAY = 0.0;
 	init( CHECK_TEAM_DELAY,                                     30.0 );
-	init( PERPETUAL_WIGGLE_DELAY,                               50.0 );
+	// This is a safety knob to avoid busy spinning and the case a small cluster don't have enough space when excluding and including too fast. The basic idea is let PW wait for the re-included storage to take on data before wiggling the next one.
+	// This knob's ideal value would vary by cluster based on its size and disk type. In the meanwhile, the wiggle will also wait until the storage load is almost (85%) balanced.
+	init( PERPETUAL_WIGGLE_DELAY,                                 60 );
+	init( PERPETUAL_WIGGLE_SMALL_LOAD_RATIO,                      10 );
+	init( PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO,             0.85 );
 	init( PERPETUAL_WIGGLE_DISABLE_REMOVER,                     true );
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
@@ -303,6 +307,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL,            10 ); if( randomize && BUGGIFY ) TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL,             300 );
 	init( CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL,            5 ); if( randomize && BUGGIFY ) CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL = deterministicRandom()->randomInt(1, 10);
+	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -388,6 +393,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
 	init( ROCKSDB_READ_PARALLELISM,                                4 );
+	init( ROCKSDB_CHECKPOINT_READER_PARALLELISM,                   4 );
 	// If true, do not process and store RocksDB logs
 	init( ROCKSDB_MUTE_LOGS,                                    true );
 	// Use a smaller memtable in simulation to avoid OOMs.
@@ -407,6 +413,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_VALUE_TIMEOUT,                            5.0 ); if (isSimulated) ROCKSDB_READ_VALUE_TIMEOUT = 5 * 60;
 	init( ROCKSDB_READ_VALUE_PREFIX_TIMEOUT,                     5.0 ); if (isSimulated) ROCKSDB_READ_VALUE_PREFIX_TIMEOUT = 5 * 60;
 	init( ROCKSDB_READ_RANGE_TIMEOUT,                            5.0 ); if (isSimulated) ROCKSDB_READ_RANGE_TIMEOUT = 5 * 60;
+	init( ROCKSDB_READ_CHECKPOINT_TIMEOUT,                      60.0 ); if (isSimulated) ROCKSDB_READ_CHECKPOINT_TIMEOUT = 5 * 60;
+	init( ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE,           2 << 20 ); // 2M
 	init( ROCKSDB_READ_QUEUE_WAIT,                               1.0 );
 	init( ROCKSDB_READ_QUEUE_HARD_MAX,                          1000 );
 	init( ROCKSDB_READ_QUEUE_SOFT_MAX,                           500 );
@@ -1031,7 +1039,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_FULL_RESTORE_MODE,                              false );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,      isSimulated ?  1.0 : 5.0);
 	init( BLOB_MANIFEST_RW_ROWS,             isSimulated ?  10 : 1000);
-	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/fdbblob/mlogs" : "");
+	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/backups/" : "");
+	init( BLOB_MIGRATOR_ERROR_RETRIES,        20);
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
@@ -1053,6 +1062,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
 	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
 	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
+	init( REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,  "");
 	init( REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,           "");
 	// Details to fetch validation token from a localhost file
 	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
@@ -1062,6 +1072,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
 	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.
 	init( IDEMPOTENCY_ID_IN_MEMORY_LIFETIME,                       10);
+	// Attempt to clean old idempotency ids automatically this often
+ 	init( IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL,                10);
+	// Don't clean idempotency ids younger than this
+ 	init( IDEMPOTENCY_IDS_MIN_AGE_SECONDS,              3600 * 24 * 7);
 
 	// clang-format on
 

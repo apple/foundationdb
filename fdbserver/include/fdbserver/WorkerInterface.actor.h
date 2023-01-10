@@ -725,10 +725,12 @@ struct InitializeCommitProxyRequest {
 	Version recoveryTransactionVersion;
 	bool firstProxy;
 	ReplyPromise<CommitProxyInterface> reply;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
+		serializer(
+		    ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply, encryptMode);
 	}
 };
 
@@ -1154,7 +1156,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
 ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
                                      ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId);

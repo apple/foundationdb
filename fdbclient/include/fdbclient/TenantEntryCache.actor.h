@@ -29,7 +29,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Knobs.h"
