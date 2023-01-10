@@ -176,6 +176,7 @@ add_swift_to_cxx_header_gen_target(
   "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/Flow_CheckedContinuation.h"
   SOURCES
    "${CMAKE_CURRENT_SOURCE_DIR}/FlowCheckedContinuation.swift"
+   "${CMAKE_CURRENT_SOURCE_DIR}/flow_optional_support.swift"
    FLAGS
 -Xcc -std=c++17 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
 # Important: This is needed to avoid including headers that depends on this generated header.
