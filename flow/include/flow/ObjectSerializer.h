@@ -199,38 +199,55 @@ class ObjectWriter {
 	}
 	ProtocolVersion mProtocolVersion;
 
+	class AllocateFunctor {
+	public:
+		AllocateFunctor(ObjectWriter* pObjectWriter) : pObjectWriter(pObjectWriter) {}
+
+		uint8_t* operator()(const size_t size) {
+			++numAllocations;
+
+			pObjectWriter->size = size + (pObjectWriter->writeProtocolVersion ? sizeof(uint64_t) : 0);
+			if (pObjectWriter->customAllocator != nullptr) {
+				pObjectWriter->data = pObjectWriter->customAllocator(pObjectWriter->size, pObjectWriter->customAllocatorContext);
+			} else {
+				pObjectWriter->data = new (pObjectWriter->arena) uint8_t[pObjectWriter->size];
+			}
+			if (pObjectWriter->writeProtocolVersion) {
+				auto v = pObjectWriter->protocolVersion().versionWithFlags();
+				memcpy(pObjectWriter->data, &v, sizeof(uint64_t));
+				return pObjectWriter->data + sizeof(uint64_t);
+			}
+			return pObjectWriter->data;
+		}
+
+		int getNumAllocations() const { return numAllocations; }
+
+	private:
+		ObjectWriter* pObjectWriter;
+		int numAllocations;
+	};
+
+	friend class AllocateFunctor;
+
 public:
 	template <class VersionOptions>
-	ObjectWriter(VersionOptions vo) {
+	explicit ObjectWriter(VersionOptions vo) : customAllocator(nullptr) {
 		vo.write(*this);
 	}
+
 	template <class VersionOptions>
-	explicit ObjectWriter(std::function<uint8_t*(size_t)> customAllocator, VersionOptions vo)
-	  : customAllocator(customAllocator) {
+	explicit ObjectWriter(uint8_t* (*customAllocator_)(size_t, void*), void* customAllocatorContext_, VersionOptions vo)
+	  : customAllocator(customAllocator_), customAllocatorContext(customAllocatorContext_) {
 		vo.write(*this);
 	}
+
 	template <class... Items>
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
-		int allocations = 0;
-		auto allocator = [this, &allocations](size_t size_) {
-			++allocations;
-			this->size = writeProtocolVersion ? size_ + sizeof(uint64_t) : size_;
-			if (customAllocator) {
-				data = customAllocator(this->size);
-			} else {
-				data = new (arena) uint8_t[this->size];
-			}
-			if (writeProtocolVersion) {
-				auto v = protocolVersion().versionWithFlags();
-				memcpy(data, &v, sizeof(uint64_t));
-				return data + sizeof(uint64_t);
-			}
-			return data;
-		};
 		ASSERT(data == nullptr); // object serializer can only serialize one object
-		SaveContext<ObjectWriter, decltype(allocator)> context(this, allocator);
+		AllocateFunctor allocator(this);
+		SaveContext<ObjectWriter, AllocateFunctor> context(this, allocator);
 		save_members(context, file_identifier, items...);
-		ASSERT(allocations == 1);
+		ASSERT(allocator.getNumAllocations() == 1);
 	}
 
 	template <class Item>
@@ -260,7 +277,8 @@ public:
 
 private:
 	Arena arena;
-	std::function<uint8_t*(size_t)> customAllocator;
+	uint8_t* (*customAllocator)(size_t, void*);
+	void* customAllocatorContext;
 	uint8_t* data = nullptr;
 	int size = 0;
 };

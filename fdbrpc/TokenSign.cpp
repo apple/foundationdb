@@ -177,7 +177,10 @@ namespace authz::flatbuffers {
 
 SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey) {
 	auto ret = SignedTokenRef{};
-	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
+	auto writer = ObjectWriter(
+	    +[](size_t len, void* pArena) { return new (*reinterpret_cast<Arena*>(pArena)) uint8_t[len]; },
+	    &arena,
+	    IncludeVersion());
 	writer.serialize(token);
 	auto tokenStr = writer.toStringRef();
 	auto sig = privateKey.sign(arena, tokenStr, *::EVP_sha256());
@@ -547,7 +550,10 @@ TEST_CASE("/fdbrpc/TokenSign/FlatBuffer") {
 		// try tampering with signed token by adding one more tenant
 		tokenSpec.tenants.push_back(arena,
 		                            genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
-		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
+		auto writer = ObjectWriter(
+		    +[](size_t len, void* pArena) { return new (*reinterpret_cast<Arena*>(pArena)) uint8_t[len]; },
+		    &arena,
+		    IncludeVersion());
 		writer.serialize(tokenSpec);
 		signedToken.token = writer.toStringRef();
 		const auto verifyExpectFail = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
