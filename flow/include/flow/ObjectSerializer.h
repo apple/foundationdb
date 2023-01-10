@@ -237,6 +237,9 @@ public:
 		vo.write(*this);
 	}
 
+	// NOTE: It is known that clang compiler will spend long time on instantiating std::function objects when there is
+	// capture. By downgrading it to a function pointer, the compile time can be reduced. The trade is an additional
+	// void* must be used to carry the captured environment.
 	template <class VersionOptions>
 	explicit ObjectWriter(uint8_t* (*customAllocator_)(size_t, void*), void* customAllocatorContext_, VersionOptions vo)
 	  : customAllocator(customAllocator_), customAllocatorContext(customAllocatorContext_) {
