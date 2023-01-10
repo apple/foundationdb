@@ -266,6 +266,9 @@ EncryptCipherDomainId getEncryptDomainId(MutationRef m) {
 	EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 	if (isSystemKey(m.param1)) {
 		domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+	} else if (m.type ==
+	           MutationRef::SetVersionstampedKey) { // The first 8 bytes of the key of this OP is also an 8-byte number
+		return TenantInfo::INVALID_TENANT;
 	} else if (isSingleKeyMutation((MutationRef::Type)m.type) && m.param1.size() >= TenantAPI::PREFIX_SIZE) {
 		StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
 		domainId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
@@ -346,7 +349,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				// If a tenant is not found for a given mutation then exclude it from the batch
 				ASSERT(tenantMap != nullptr);
 				if (tenantMap->find(domainId) == tenantMap->end()) {
-					// TODO (nwijetunga): Okay to log this?
+					// TODO (nwijetunga): Okay to log mutation here?
 					TraceEvent(SevDebug, "TenantNotFound")
 					    .detail("Mutation", logValue.toString())
 					    .detail("TenantId", domainId);
