@@ -419,6 +419,24 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
 
 	/**
+	 * Runs {@link #getId()} on the default executor.
+	 *
+	 * @return a future with the tenant ID
+	 */
+	CompletableFuture<Long> getId() {
+		return getId(getExecutor());
+	}
+
+	/**
+	 * Returns the tenant ID of this tenant.
+	 *
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 *
+	 * @return a future with the tenant ID
+	 */
+	CompletableFuture<Long> getId(Executor e);
+
+	/**
 	 * Close the {@code Tenant} object and release any associated resources. This must be called at
 	 *  least once after the {@code Tenant} object is no longer in use. This can be called multiple
 	 *  times, but care should be taken that it is not in use in another thread at the time of the call.

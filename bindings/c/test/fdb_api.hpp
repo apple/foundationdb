@@ -691,6 +691,7 @@ public:
 	                                                                       KeyRef end,
 	                                                                       int rangeLimit) = 0;
 	virtual TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) = 0;
+	virtual TypedFuture<future_var::Int64> getId() = 0;
 	virtual TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin,
 	                                                          KeyRef end,
 	                                                          int64_t version,
@@ -777,6 +778,12 @@ public:
 			throw std::runtime_error("verifyBlobRange() from null tenant");
 		return native::fdb_tenant_verify_blob_range(
 		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
+	}
+
+	TypedFuture<future_var::Int64> getId() override {
+		if (!tenant)
+			throw std::runtime_error("getId() from null tenant");
+		return native::fdb_tenant_get_id(tenant.get());
 	}
 
 	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) override {
