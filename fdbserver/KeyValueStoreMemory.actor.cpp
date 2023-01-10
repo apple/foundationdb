@@ -46,7 +46,7 @@ public:
 	                    bool disableSnapshot,
 	                    bool replaceContent,
 	                    bool exactRecovery,
-	                    EncryptionAtRestMode encryptMode);
+	                    bool enableEncryption);
 
 	// IClosable
 	Future<Void> getError() const override { return log->getError(); }
@@ -401,7 +401,7 @@ private:
 	int64_t memoryLimit; // The upper limit on the memory used by the store (excluding, possibly, some clear operations)
 	std::vector<std::pair<KeyValueMapPair, uint64_t>> dataSets;
 
-	EncryptionAtRestMode encryptMode;
+	bool enableEncryption;
 	TextAndHeaderCipherKeys cipherKeys;
 	Future<Void> refreshCipherKeysActor;
 
@@ -472,7 +472,7 @@ private:
 	IDiskQueue::location log_op(OpType op, StringRef v1, StringRef v2) {
 		// Metadata op types to be excluded from encryption.
 		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
-		if (!encryptMode.isEncryptionEnabled() || metaOps.count(op) > 0) {
+		if (!enableEncryption || metaOps.count(op) > 0) {
 			OpHeader h = { (int)op, v1.size(), v2.size() };
 			log->push(StringRef((const uint8_t*)&h, sizeof(h)));
 			log->push(v1);
@@ -517,7 +517,7 @@ private:
 		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
 		if (metaOps.count((OpType)h->op) == 0) {
 			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
-			ASSERT_EQ(h->op == OpEncrypted, self->encryptMode.isEncryptionEnabled());
+			ASSERT_EQ(h->op == OpEncrypted, self->enableEncryption);
 		}
 		state int remainingBytes = h->len1 + h->len2 + 1;
 		if (h->op == OpEncrypted) {
@@ -583,7 +583,8 @@ private:
 						Standalone<StringRef> data = wait(self->log->readNext(sizeof(OpHeader)));
 						if (data.size() != sizeof(OpHeader)) {
 							if (data.size()) {
-								CODE_PROBE(true, "zero fill partial header in KeyValueStoreMemory");
+								CODE_PROBE(
+								    true, "zero fill partial header in KeyValueStoreMemory", probe::decoration::rare);
 								memset(&h, 0, sizeof(OpHeader));
 								memcpy(&h, data.begin(), data.size());
 								zeroFillSize = sizeof(OpHeader) - data.size() + h.len1 + h.len2 + 1;
@@ -735,11 +736,11 @@ private:
 
 				// Make sure cipher keys are ready before recovery finishes. The semiCommit below also require cipher
 				// keys.
-				if (self->encryptMode.isEncryptionEnabled()) {
+				if (self->enableEncryption) {
 					wait(updateCipherKeys(self));
 				}
 
-				CODE_PROBE(self->encryptMode.isEncryptionEnabled() && self->uncommittedBytes() > 0,
+				CODE_PROBE(self->enableEncryption && self->uncommittedBytes() > 0,
 				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled",
 				           probe::decoration::rare);
 				self->semiCommit();
@@ -997,11 +998,11 @@ KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log,
                                                     bool disableSnapshot,
                                                     bool replaceContent,
                                                     bool exactRecovery,
-                                                    EncryptionAtRestMode encryptMode)
+                                                    bool enableEncryption)
   : type(storeType), id(id), log(log), db(db), committedWriteBytes(0), overheadWriteBytes(0), currentSnapshotEnd(-1),
     previousSnapshotEnd(-1), committedDataSize(0), transactionSize(0), transactionIsLarge(false), resetSnapshot(false),
     disableSnapshot(disableSnapshot), replaceContent(replaceContent), firstCommitWithSnapshot(true), snapshotCount(0),
-    memoryLimit(memoryLimit), encryptMode(encryptMode) {
+    memoryLimit(memoryLimit), enableEncryption(enableEncryption) {
 	// create reserved buffer for radixtree store type
 	this->reserved_buffer =
 	    (storeType == KeyValueStoreType::MEMORY) ? nullptr : new uint8_t[CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT];
@@ -1011,7 +1012,7 @@ KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log,
 	recovering = recover(this, exactRecovery);
 	snapshotting = snapshot(this);
 	commitActors = actorCollection(addActor.getFuture());
-	if (encryptMode.isEncryptionEnabled()) {
+	if (enableEncryption) {
 		refreshCipherKeysActor = refreshCipherKeys(this);
 	}
 }
@@ -1029,25 +1030,11 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	// SOMEDAY: update to use DiskQueueVersion::V2 with xxhash3 checksum for FDB >= 7.2
 	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V1);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
-		return new KeyValueStoreMemory<radix_tree>(log,
-		                                           Reference<AsyncVar<ServerDBInfo> const>(),
-		                                           logID,
-		                                           memoryLimit,
-		                                           storeType,
-		                                           false,
-		                                           false,
-		                                           false,
-		                                           EncryptionAtRestMode::DISABLED);
+		return new KeyValueStoreMemory<radix_tree>(
+		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType, false, false, false, false);
 	} else {
-		return new KeyValueStoreMemory<IKeyValueContainer>(log,
-		                                                   Reference<AsyncVar<ServerDBInfo> const>(),
-		                                                   logID,
-		                                                   memoryLimit,
-		                                                   storeType,
-		                                                   false,
-		                                                   false,
-		                                                   false,
-		                                                   EncryptionAtRestMode::DISABLED);
+		return new KeyValueStoreMemory<IKeyValueContainer>(
+		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType, false, false, false, false);
 	}
 }
 
@@ -1058,10 +1045,9 @@ IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                        bool disableSnapshot,
                                        bool replaceContent,
                                        bool exactRecovery,
-                                       EncryptionAtRestMode encryptMode) {
+                                       bool enableEncryption) {
 	// ServerDBInfo is required if encryption is to be enabled, or the KV store instance have been encrypted.
-	ASSERT(!encryptMode.isEncryptionEnabled() || db.isValid());
-	TraceEvent("KeyValueStoreMemoryEncryptMode").detail("LogID", logID).detail("Mode", encryptMode.toString());
+	ASSERT(!enableEncryption || db.isValid());
 	return new KeyValueStoreMemory<IKeyValueContainer>(queue,
 	                                                   db,
 	                                                   logID,
@@ -1070,5 +1056,5 @@ IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
 	                                                   disableSnapshot,
 	                                                   replaceContent,
 	                                                   exactRecovery,
-	                                                   encryptMode);
+	                                                   enableEncryption);
 }

@@ -253,7 +253,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		}
 
 		choose {
-			when(wait(self->version.whenAtLeast(req.prevVersion))) { break; }
+			when(wait(self->version.whenAtLeast(req.prevVersion))) {
+				break;
+			}
 			when(wait(self->checkNeededVersion.onTrigger())) {}
 		}
 	}
@@ -368,7 +370,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				                       self->encryptMode.isEncryptionEnabled() ? &cipherKeys : nullptr,
 				                       self->encryptMode);
 			}
-			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery", probe::decoration::rare);
+			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
@@ -475,7 +477,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			CODE_PROBE(true, "No outstanding batches for version on proxy");
+			CODE_PROBE(true, "No outstanding batches for version on proxy", probe::decoration::rare);
 			req.reply.send(Never());
 		}
 	} else {
@@ -683,8 +685,8 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore =
-		    keyValueStoreLogSystem(self->logAdapter, db, resolver.id(), 2e9, true, true, true, self->encryptMode);
+		self->txnStateStore = keyValueStoreLogSystem(
+		    self->logAdapter, db, resolver.id(), 2e9, true, true, true, self->encryptMode.isEncryptionEnabled());
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));
@@ -750,7 +752,9 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 		TraceEvent("ResolverEncryptionAtRestMode").detail("Mode", initReq.encryptMode.toString());
 		state Future<Void> core = resolverCore(resolver, initReq, db);
 		loop choose {
-			when(wait(core)) { return Void(); }
+			when(wait(core)) {
+				return Void();
+			}
 			when(wait(checkRemoved(db, initReq.recoveryCount, resolver))) {}
 		}
 	} catch (Error& e) {

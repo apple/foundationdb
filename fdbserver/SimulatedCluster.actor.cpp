@@ -2047,7 +2047,9 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setConfigDB(testConfig);
 }
 
-bool validEncryptAndTenantMode(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
+bool validateEncryptAndTenantModePair(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
+	// Domain aware encryption is only allowed when the tenant mode is required. Other encryption modes (disabled or
+	// cluster aware) are allowed regardless of the tenant mode
 	if (encryptMode.mode == EncryptionAtRestMode::DISABLED || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
 		return true;
 	}
@@ -2065,6 +2067,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           TestConfig testConfig,
                           ProtocolVersion protocolVersion,
                           TenantMode tenantMode) {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	if (testConfig.logAntiQuorum != -1) {
@@ -2080,7 +2083,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			// Get the subset of valid encrypt modes given the tenant mode
 			for (int i = 0; i < testConfig.encryptModes.size(); i++) {
 				EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromString(testConfig.encryptModes.at(i));
-				if (validEncryptAndTenantMode(encryptMode, tenantMode)) {
+				if (validateEncryptAndTenantModePair(encryptMode, tenantMode)) {
 					validEncryptModes.push_back(encryptMode);
 				}
 			}
@@ -2097,6 +2100,20 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			}
 		}
 	}
+	// TODO: remove knob hanlding once we move off from encrypption knobs to db config
+	if (simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DISABLED) {
+		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
+		CODE_PROBE(true, "Disabled encryption in simulation");
+	} else {
+		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ true }));
+		g_knobs.setKnob(
+		    "redwood_split_encrypted_pages_by_tenant",
+		    KnobValueRef::create(bool{ simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE }));
+		CODE_PROBE(simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE,
+		           "Enabled cluster-aware encryption in simulation");
+		CODE_PROBE(simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE,
+		           "Enabled domain-aware encryption in simulation");
+	}
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", simconfig.db.encryptionAtRestMode.toString());
 
 	g_simulator->blobGranulesEnabled = simconfig.db.blobGranulesEnabled;
@@ -2106,18 +2123,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	if (testConfig.disableRemoteKVS) {
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS");
-	}
-	// TODO: Remove this code once encryption knobs are removed
-	if (testConfig.disableEncryption) {
-		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
-		g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisableEncryption");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
@@ -2371,7 +2379,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    .detail("ConfigString", startingConfigString);
 
 	bool requiresExtraDBMachines = !g_simulator->extraDatabases.empty() && !useLocalDatabase;
-	int assignedMachines = 0, nonVersatileMachines = 0;
+	int assignedMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
@@ -2425,10 +2433,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
-				if (processClass ==
-				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
-					nonVersatileMachines++;
-				}
+
 				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
 					possible_ss++;
 				}
@@ -2440,11 +2445,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			if (machine >= machines) {
 				if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					storageCacheMachines--;
 				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
 					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					blobWorkerMachines--;
 				}
 			}

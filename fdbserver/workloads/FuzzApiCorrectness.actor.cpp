@@ -24,6 +24,8 @@
 #include <sstream>
 
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
@@ -134,6 +136,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	std::set<TenantName> createdTenants;
 	int numTenants;
 	int numTenantGroups;
+	int minTenantNum = -1;
 
 	// Map from tenant number to key prefix
 	std::map<int, std::string> keyPrefixes;
@@ -224,6 +227,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		if (clientId == 0) {
 			return _setup(cx, this);
 		}
+
 		return Void();
 	}
 
@@ -240,13 +244,19 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (i < self->numTenants) {
 				TenantMapEntry entry;
 				entry.tenantGroup = self->getTenantGroup(i);
-				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
 				self->createdTenants.insert(tenantName);
 			}
 		}
-
 		wait(waitForAll(tenantFutures));
+
+		// When domain-aware encryption is enabled, writing random keys without specifying tenant may cause Redwood to
+		// create too many pages.
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		if (config.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
+			self->minTenantNum = 0;
+		}
+
 		return Void();
 	}
 
@@ -314,7 +324,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		                              (self->getKeyForIndex(-1, nodesPerTenant).size() + self->valueSizeRange.second));
 		try {
 			loop {
-				state int tenantNum = -1;
+				state int tenantNum = self->minTenantNum;
 				for (; tenantNum < self->numTenants; ++tenantNum) {
 					state int i = 0;
 					wait(self->writeBarrier(self->db));
@@ -388,7 +398,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		state std::vector<Future<Void>> operations;
 		state int waitLocation = 0;
 
-		state int tenantNum = deterministicRandom()->randomInt(-1, self->tenants.size());
+		state int tenantNum = deterministicRandom()->randomInt(self->minTenantNum, self->tenants.size());
 		if (tenantNum == -1) {
 			tr = self->db->createTransaction();
 		} else {

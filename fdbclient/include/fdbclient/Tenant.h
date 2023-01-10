@@ -30,10 +30,14 @@
 #include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"
 
-typedef StringRef TenantNameRef;
-typedef Standalone<TenantNameRef> TenantName;
-typedef StringRef TenantGroupNameRef;
-typedef Standalone<TenantGroupNameRef> TenantGroupName;
+FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+
+namespace TenantAPI {
+Key idToPrefix(int64_t id);
+int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
+
+constexpr static int PREFIX_SIZE = sizeof(int64_t);
+} // namespace TenantAPI
 
 // Represents the various states that a tenant could be in.
 // In a standalone cluster, a tenant should only ever be in the READY state.
@@ -61,17 +65,10 @@ enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, R
 
 // Represents the lock state the tenant could be in.
 // Can be used in conjunction with the other tenant states above.
-enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
-
-constexpr int TENANT_PREFIX_SIZE = sizeof(int64_t);
-
-FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+enum class TenantLockState : uint8_t { UNLOCKED, READ_ONLY, LOCKED };
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
-
-	static Key idToPrefix(int64_t id);
-	static int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceTenantId = EnforceValidTenantId::True);
 
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
@@ -81,10 +78,10 @@ struct TenantMapEntry {
 
 	int64_t id = -1;
 	Key prefix;
+	TenantName tenantName;
 	TenantState tenantState = TenantState::READY;
 	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
 	Optional<TenantGroupName> tenantGroup;
-	bool encrypted = false;
 	Optional<ClusterName> assignedCluster;
 	int64_t configurationSequenceNum = 0;
 	Optional<TenantName> renamePair;
@@ -92,11 +89,9 @@ struct TenantMapEntry {
 	// Can be set to an error string if the tenant is in the ERROR state
 	std::string error;
 
-	constexpr static int PREFIX_SIZE = sizeof(id);
-
 	TenantMapEntry();
-	TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted);
-	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup, bool encrypted);
+	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState);
+	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
 
 	void setId(int64_t id);
 	std::string toJson() const;
@@ -113,17 +108,17 @@ struct TenantMapEntry {
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           id,
+		           tenantName,
 		           tenantState,
 		           tenantLockState,
 		           tenantGroup,
-		           encrypted,
 		           assignedCluster,
 		           configurationSequenceNum,
 		           renamePair,
 		           error);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
-				prefix = idToPrefix(id);
+				prefix = TenantAPI::idToPrefix(id);
 			}
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 		}
@@ -209,32 +204,4 @@ struct TenantMetadata {
 
 	static Key tenantMapPrivatePrefix();
 };
-
-typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
-
-// A set of tenant names that is generally expected to have one item in it. The set can have more than one item in it
-// during certain periods when the set is being updated (e.g. while restoring a backup), but it is expected to have
-// one item at the end. It is not possible to use the set while it contains more than one item.
-struct TenantNameUniqueSet {
-	std::unordered_set<TenantName> tenantNames;
-
-	// Returns the single tenant name stored in the set
-	// It is an error to call this function if the set holds more than one name
-	TenantName get() const {
-		ASSERT(tenantNames.size() == 1);
-		return *tenantNames.begin();
-	}
-
-	void insert(TenantName const& name) { tenantNames.insert(name); }
-
-	// Removes a tenant name from the set. Returns true if the set is now empty.
-	bool remove(TenantName const& name) {
-		auto itr = tenantNames.find(name);
-		ASSERT(itr != tenantNames.end());
-		tenantNames.erase(itr);
-		return tenantNames.empty();
-	}
-};
-typedef VersionedMap<Key, TenantNameUniqueSet> TenantPrefixIndex;
-
 #endif

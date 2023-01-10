@@ -124,6 +124,8 @@ description is not currently required but encouraged.
             description="Retain temporary external client library copies that are created for enabling multi-threading." />
     <Option name="ignore_external_client_failures" code="68"
             description="Ignore the failure to initialize some of the external clients" />
+    <Option name="fail_incompatible_client" code="69"
+            description="Fail with an error if there is no client matching the server version the client is connecting to" />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
@@ -207,8 +209,7 @@ description is not currently required but encouraged.
             defaultFor="23"/>
     <Option name="transaction_automatic_idempotency" code="506"
             description="Set a random idempotency id for all transactions. See the transaction option description for more information. This feature is in development and not ready for general use." 
-            defaultFor="505"
-            hidden="true"/>
+            defaultFor="505" />
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
             defaultFor="1100"/>
@@ -288,8 +289,7 @@ description is not currently required but encouraged.
             description="Associate this transaction with this ID for the purpose of checking whether or not this transaction has already committed. Must be at least 16 bytes and less than 256 bytes. This feature is in development and not ready for general use. Unless the automatic_idempotency option is set after this option, the client will not automatically attempt to remove this id from the cluster after a successful commit."
             hidden="true" />
     <Option name="automatic_idempotency" code="505"
-            description="Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future. This feature is in development and not ready for general use."
-            hidden="true" />
+            description="Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future. This feature is in development and not ready for general use." />
     <Option name="snapshot_ryw_enable" code="600"
             description="Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior." />
     <Option name="snapshot_ryw_disable" code="601"

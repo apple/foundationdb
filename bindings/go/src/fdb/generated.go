@@ -261,6 +261,11 @@ func (o NetworkOptions) SetIgnoreExternalClientFailures() error {
 	return o.setOpt(68, nil)
 }
 
+// Fail with an error if there is no client matching the server version the client is connecting to
+func (o NetworkOptions) SetFailIncompatibleClient() error {
+	return o.setOpt(69, nil)
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
@@ -400,6 +405,11 @@ func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
 // Deprecated. Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
 func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
 	return o.setOpt(505, nil)
+}
+
+// Set a random idempotency id for all transactions. See the transaction option description for more information. This feature is in development and not ready for general use.
+func (o DatabaseOptions) SetTransactionAutomaticIdempotency() error {
+	return o.setOpt(506, nil)
 }
 
 // Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information.
@@ -564,6 +574,11 @@ func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
 // Parameter: value in bytes
 func (o TransactionOptions) SetSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
+}
+
+// Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future. This feature is in development and not ready for general use.
+func (o TransactionOptions) SetAutomaticIdempotency() error {
+	return o.setOpt(505, nil)
 }
 
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.

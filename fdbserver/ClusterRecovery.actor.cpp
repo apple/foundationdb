@@ -74,7 +74,9 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 			}
 			return Void();
 		}
-		when(wait(switchedState)) { return Void(); }
+		when(wait(switchedState)) {
+			return Void();
+		}
 	}
 }
 
@@ -202,6 +204,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
+		    .detail("EncryptMode", req.encryptMode.toString())
 		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
@@ -513,11 +516,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
 
-		if (newState.oldTLogData.size() && configuration.repopulateRegionAntiQuorum > 0 &&
-		    self->logSystem->remoteStorageRecovered()) {
-			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid).log();
-			self->recruitmentStalled->set(true);
-		}
 		self->registrationTrigger.trigger();
 
 		if (finalUpdate) {
@@ -919,8 +917,12 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
-		when(wait(waitCommitProxyFailure)) { throw worker_removed(); }
-		when(wait(waitGrvProxyFailure)) { throw worker_removed(); }
+		when(wait(waitCommitProxyFailure)) {
+			throw worker_removed();
+		}
+		when(wait(waitGrvProxyFailure)) {
+			throw worker_removed();
+		}
 	}
 }
 
@@ -1073,14 +1075,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
-	state EncryptionAtRestMode encryptModeForTxnStateStore = EncryptionAtRestMode::DISABLED;
-	if (self->controllerData && self->controllerData->encryptionAtRestMode.isValid() &&
-	    self->controllerData->encryptionAtRestMode.getFuture().isValid() &&
-	    self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
+	// If it's the first recovery the encrypt mode is not yet avilable so create the txn state store with encryption
+	// disabled. This is fine since we will not write any data to disk using this txn store.
+	state bool enableEncryptionForTxnStateStore = false;
+	if (self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
 		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
-		encryptModeForTxnStateStore = encryptMode;
+		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
 	}
-	CODE_PROBE(encryptModeForTxnStateStore.isEncryptionEnabled(), "Enable encryption for txnStateStore");
+	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
@@ -1091,7 +1093,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	                                             false,
 	                                             false,
 	                                             true,
-	                                             encryptModeForTxnStateStore);
+	                                             enableEncryptionForTxnStateStore);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
@@ -1129,10 +1131,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
 			self->recoveryTransactionVersion = minRequiredCommitVersion;
-	}
 
-	if (BUGGIFY) {
-		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
+		// Test randomly increasing the recovery version by a large number.
+		// When the version epoch is enabled, versions stay in sync with time.
+		// An offline cluster could see a large version jump when it comes back
+		// online, so test this behavior in simulation.
+		if (BUGGIFY) {
+			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
+		}
 	}
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERING_EVENT_NAME).c_str(),
@@ -1579,8 +1585,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 				break;
 			}
 			when(wait(oldLogSystems->onChange())) {}
-			when(wait(reg)) { throw internal_error(); }
-			when(wait(recoverAndEndEpoch)) { throw internal_error(); }
+			when(wait(reg)) {
+				throw internal_error();
+			}
+			when(wait(recoverAndEndEpoch)) {
+				throw internal_error();
+			}
 		}
 	}
 

@@ -97,10 +97,10 @@ public:
 class MockStorageServerImpl {
 public:
 	ACTOR static Future<Void> waitMetricsTenantAware(MockStorageServer* self, WaitMetricsRequest req) {
-		if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
+		if (req.tenantInfo.hasTenant()) {
 			// TODO(xwang) add support for tenant test, search for tenant entry
 			Optional<TenantMapEntry> entry;
-			Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+			Optional<Key> tenantPrefix = entry.map(&TenantMapEntry::prefix);
 			if (tenantPrefix.present()) {
 				UNREACHABLE();
 				// req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
@@ -193,22 +193,22 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 	auto ranges = serverKeys.intersectingRanges(range);
 
 	if (ranges.empty()) {
-		CODE_PROBE(true, "new shard is adding to server");
+		CODE_PROBE(true, "new shard is adding to server", probe::decoration::rare);
 		serverKeys.insert(range, ShardInfo{ status, 0 });
 		return;
 	}
 
 	// change the old status
 	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
-		CODE_PROBE(true, "Implicitly split single shard to 3 pieces", probe::decoration::rare);
+		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
 	} else {
 		if (ranges.begin().begin() < range.begin) {
-			CODE_PROBE(true, "Implicitly split begin range to 2 pieces", probe::decoration::rare);
+			CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
 			twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
 		}
 		if (ranges.end().begin() > range.end) {
-			CODE_PROBE(true, "Implicitly split end range to 2 pieces", probe::decoration::rare);
+			CODE_PROBE(true, "Implicitly split end range to 2 pieces");
 			auto lastRange = ranges.end();
 			--lastRange;
 			twoWayShardSplitting(lastRange.range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
@@ -228,7 +228,7 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 			it.value() = ShardInfo{ status, newSize };
 		} else if ((oldStatus == MockShardStatus::COMPLETED || oldStatus == MockShardStatus::FETCHED) &&
 		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
-			CODE_PROBE(true, "Shard already on server", probe::decoration::rare);
+			CODE_PROBE(true, "Shard already on server");
 		} else {
 			TraceEvent(SevError, "MockShardStatusTransitionError", id)
 			    .detail("From", oldStatus)

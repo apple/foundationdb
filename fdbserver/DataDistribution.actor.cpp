@@ -27,7 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
@@ -182,24 +182,14 @@ Future<Void> StorageWiggler::resetStats() {
 	metrics.reset();
 	return runRYWTransaction(
 	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
+		    return wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
 	    });
 }
 
 Future<Void> StorageWiggler::restoreStats() {
-	auto& metricsRef = metrics;
-	auto assignFunc = [&metricsRef](Optional<StorageWiggleMetrics> v) {
-		if (v.present()) {
-			metricsRef = v.get();
-		}
-		return Void();
-	};
-	auto readFuture =
-	    runRYWTransaction(teamCollection->dbContext(),
-	                      [this](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<StorageWiggleMetrics>> {
-		                      return loadStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()));
-	                      });
-	return map(readFuture, assignFunc);
+	auto readFuture = wiggleData.storageWiggleMetrics(PrimaryRegion(teamCollection->isPrimary()))
+	                      .getD(teamCollection->dbContext().getReference(), Snapshot::False, metrics);
+	return store(metrics, readFuture);
 }
 
 Future<Void> StorageWiggler::startWiggle() {
@@ -209,7 +199,7 @@ Future<Void> StorageWiggler::startWiggle() {
 	}
 	return runRYWTransaction(
 	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
 	    });
 }
 
@@ -227,7 +217,7 @@ Future<Void> StorageWiggler::finishWiggle() {
 	}
 	return runRYWTransaction(
 	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
 	    });
 }
 
@@ -626,7 +616,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
-			self->physicalShardCollection = makeReference<PhysicalShardCollection>();
+			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
 			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
@@ -723,7 +713,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
-			    getUnhealthyRelocationCount });
+			    getUnhealthyRelocationCount,
+			    getAverageShardBytes });
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
@@ -744,7 +735,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                processingWiggle,
 				                                getShardMetrics,
 				                                removeFailedServer,
-				                                getUnhealthyRelocationCount });
+				                                getUnhealthyRelocationCount,
+				                                getAverageShardBytes });
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(remoteTeamCollection,
@@ -1558,9 +1550,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
-					CODE_PROBE(true,
-					           "Data distributor received a duplicate ongoing snapshot request",
-					           probe::decoration::rare);
+					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;

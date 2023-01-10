@@ -768,7 +768,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(Reference<LogData> self,
@@ -1582,7 +1584,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 							logData->queueCommittedVersion.set(qe.version);
 
 							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
-								CODE_PROBE(true, "Flush excess data during TLog queue recovery");
+								CODE_PROBE(
+								    true, "Flush excess data during TLog queue recovery", probe::decoration::rare);
 								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
 								    .detail("BytesInput", self->bytesInput)
 								    .detail("BytesDurable", self->bytesDurable)
@@ -1591,13 +1594,17 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
