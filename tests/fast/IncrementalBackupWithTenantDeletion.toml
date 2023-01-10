@@ -25,7 +25,6 @@ simBackupAgents = 'BackupToFile'
     minNumTenants = 0
     transactionsPerSecond = 3000.0
     deleteTenants = true
-    testDuration = 30.0
 
     [[test.workload]]
     testName = 'IncrementalBackup'
