@@ -93,8 +93,7 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
-                                        ServerCoordinators coordinators,
-                                        Future<Void> recoveredDiskFiles) {
+                                        ServerCoordinators coordinators) {
 	state MasterInterface iMaster;
 	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
@@ -2903,7 +2902,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
                                          ConfigDBType configDBType,
-                                         Future<Void> recoveredDiskFiles,
                                          Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state ClusterControllerData self(interf, locality, coordinators, clusterId);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
@@ -2916,8 +2914,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
 	self.addActor.send(monitorEncryptKeyProxy(&self));
-	self.addActor.send(
-	    clusterWatchDatabase(&self, &self.db, coordinators, recoveredDiskFiles)); // Start the master database
+	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
@@ -3061,7 +3058,6 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
                                      ConfigDBType configDBType,
-                                     Future<Void> recoveredDiskFiles,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 	loop {
 		state ClusterControllerFullInterface cci;
@@ -3091,8 +3087,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(
-				    cci, leaderFail, coordinators, locality, configDBType, recoveredDiskFiles, clusterId));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType, clusterId));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -3114,7 +3109,6 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
                                      ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
@@ -3122,14 +3116,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	loop {
 		try {
 			ServerCoordinators coordinators(connRecord, configDBType);
-			wait(clusterController(coordinators,
-			                       currentCC,
-			                       hasConnected,
-			                       asyncPriorityInfo,
-			                       locality,
-			                       configDBType,
-			                       recoveredDiskFiles,
-			                       clusterId));
+			wait(clusterController(
+			    coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType, clusterId));
 			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)

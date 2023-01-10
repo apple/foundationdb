@@ -1968,18 +1968,6 @@ int main(int argc, char* argv[]) {
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
-			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
 			if (SERVER_KNOBS->REMOTE_KV_STORE) {
 				fprintf(stderr,
 				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
