@@ -890,7 +890,8 @@ public:
 		ObjectWriter writer(
 		    +[](size_t size, void* pPacketWriter) {
 			    return (*reinterpret_cast<PacketWriter*>(pPacketWriter)).writeBytes(size);
-		    }, &w,
+		    },
+		    &w,
 		    AssumeVersion(w.protocolVersion()));
 		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
