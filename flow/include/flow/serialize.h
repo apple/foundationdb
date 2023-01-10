@@ -887,7 +887,11 @@ class MakeSerializeSource : public ISerializeSource {
 public:
 	using value_type = V;
 	void serializePacketWriter(PacketWriter& w) const override {
-		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
+		ObjectWriter writer(
+		    +[](size_t size, void* pPacketWriter) {
+			    return (*reinterpret_cast<PacketWriter*>(pPacketWriter)).writeBytes(size);
+		    }, &w,
+		    AssumeVersion(w.protocolVersion()));
 		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
 	virtual value_type const& get() const = 0;
