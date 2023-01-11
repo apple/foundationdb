@@ -11069,12 +11069,6 @@ int64_t getMaxClearKeySize(KeyRef const& key) {
 	return getMaxKeySize(key);
 }
 
-// Get client-side status information
-Standalone<StringRef> DatabaseContext::getClientStatus() {
-	json_spirit::mObject statusObj;
-	return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
-}
-
 namespace NativeAPI {
 
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(

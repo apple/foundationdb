@@ -20,6 +20,7 @@
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
@@ -41,8 +42,6 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
-
-#include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -2055,6 +2054,9 @@ ThreadFuture<Standalone<StringRef>> MultiVersionDatabase::getClientStatus() {
 	auto stateRef = dbState;
 	auto db = stateRef->db;
 	if (!db.isValid()) {
+		db = stateRef->versionMonitorDb;
+	}
+	if (!db.isValid()) {
 		return onMainThread([stateRef] { return Future<Standalone<StringRef>>(stateRef->getClientStatus(""_sr)); });
 	} else {
 		// If a database is created first retrieve its status
@@ -2395,7 +2397,7 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 	if (dbProtocolVersion.present()) {
 		statusObj["ProtocolVersion"] = format("%llx", dbProtocolVersion.get().version());
 	}
-	if (initializationState == InitializationState::CREATED) {
+	if (initializationState != InitializationState::INITIALIZATION_FAILED) {
 		if (dbContextStatus.isError()) {
 			statusObj["ErrorRetrievingDatabaseStatus"] = dbContextStatus.getError().code();
 		} else {
