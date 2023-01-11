@@ -246,6 +246,7 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
+		req.encryptMode = getEncryptionAtRest(self->configuration);
 		TraceEvent("ResolverReplies", self->dbgid).detail("WorkerID", recr.resolvers[i].id());
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.resolvers[i].resolver.getReplyUnlessFailedFor(
