@@ -110,7 +110,6 @@ struct BlobRestoreWorkload : TestWorkload {
 		}
 	}
 
-	//
 	ACTOR static Future<Void> copyToOriginalDb(Database cx, BlobRestoreWorkload* self) {
 		state RangeResult data;
 
