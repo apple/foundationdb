@@ -1,7 +1,7 @@
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
 # DR is not currently supported in required tenant mode
-	tenantModes = ['disabled', 'optional']
+tenantModes = ['disabled', 'optional']
 
 [[test]]
 testTitle = 'BackupAndRestore'
