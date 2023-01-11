@@ -1169,8 +1169,7 @@ int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
 	ASSERT(!isSystemKey(m.param1));
 
 	// The first 8 bytes of the key of this OP is also an 8-byte number
-	if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 &&
-	    parseGetVersionStampKetOffset(m.param1) < 8) {
+	if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 && parseVersionstampOffset(m.param1) < 8) {
 		return TenantInfo::INVALID_TENANT;
 	}
 

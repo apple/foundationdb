@@ -255,7 +255,7 @@ static void placeVersionstamp(uint8_t* destination, Version version, uint16_t tr
 	memcpy(destination + sizeof(version), &transactionNumber, sizeof(transactionNumber));
 }
 
-inline int32_t parseGetVersionStampKetOffset(StringRef& key) {
+inline int32_t parseVersionstampOffset(StringRef& key) {
 	ASSERT_GE(key.size(), 4);
 	int32_t pos;
 	memcpy(&pos, key.end() - sizeof(int32_t), sizeof(int32_t));
@@ -272,7 +272,7 @@ inline KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef& key, Vers
 	if (begin.size() < 4)
 		throw client_invalid_operation();
 
-	auto pos = parseGetVersionStampKetOffset(begin);
+	int32_t pos = parseVersionstampOffset(begin);
 	begin = begin.substr(0, begin.size() - 4);
 	end = end.substr(0, end.size() - 3);
 	mutateString(end)[end.size() - 1] = 0;
@@ -290,7 +290,7 @@ inline void transformVersionstampKey(StringRef& key, Version version, uint16_t t
 	if (key.size() < 4)
 		throw client_invalid_operation();
 
-	auto pos = parseGetVersionStampKetOffset(key);
+	int32_t pos = parseVersionstampOffset(key);
 	if (pos < 0 || pos + 10 > key.size())
 		throw client_invalid_operation();
 
@@ -302,7 +302,7 @@ inline void transformVersionstampMutation(MutationRef& mutation,
                                           Version version,
                                           uint16_t transactionNumber) {
 	if ((mutation.*param).size() >= 4) {
-		auto pos = parseGetVersionStampKetOffset(mutation.*param);
+		int32_t pos = parseVersionstampOffset(mutation.*param);
 		mutation.*param = (mutation.*param).substr(0, (mutation.*param).size() - 4);
 
 		if (pos >= 0 && pos + 10 <= (mutation.*param).size()) {
