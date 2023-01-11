@@ -57,6 +57,8 @@
 #include "flow/FileIdentifier.h"
 #include "flow/WriteOnlySet.h"
 
+#include "SwiftModules/Flow_CheckedContinuation.h"
+
 #include "pthread.h"
 
 #include <boost/version.hpp>
@@ -805,9 +807,64 @@ public:
 template <class T>
 class Promise;
 
-template <class T>
-class SWIFT_SENDABLE Future {
+template<class T>
+class
+//SWIFT_CONFORMS_TO(flow_swift, FlowCallbackForSwiftContinuationT)
+FlowCallbackForSwiftContinuation : Callback<T> {
 public:
+	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
+	using AssociatedFuture = Future<T>;
+
+private:
+ 	SwiftCC continuationInstance;
+
+public:
+	FlowCallbackForSwiftContinuation() :
+	    continuationInstance(SwiftCC::init()) {}
+
+	void set(const void * _Nonnull pointerToContinuationInstance,
+			 Future<T> f,
+			 const void * _Nonnull thisPointer) {
+		// Verify Swift did not make a copy of the `self` value for this method
+		// call.
+		assert(this == thisPointer);
+
+		// FIXME: Propagate `SwiftCC` to Swift using forward
+		// interop, without relying on passing it via a `void *`
+		// here. That will let us avoid this hack.
+		const void *_Nonnull opaqueStorage = pointerToContinuationInstance;
+		static_assert(sizeof(SwiftCC) == sizeof(const void *));
+		const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC *>(&opaqueStorage));
+		// Set the continuation instance.
+		continuationInstance.set(ccCopy);
+		// Add this callback to the future.
+		f.addCallbackAndClear(this);
+	}
+
+	void fire(const T &value) override {
+		Callback<T>::remove();
+		Callback<T>::next = nullptr;
+		continuationInstance.resume(value);
+	}
+	void error(Error error) override {
+		Callback<T>::remove();
+		Callback<T>::next = nullptr;
+		continuationInstance.resumeThrowing(error);
+	}
+	void unwait() override {
+		// TODO(swift): implement
+	}
+};
+
+template <class T>
+class
+SWIFT_SENDABLE
+SWIFT_CONFORMS_TO(flow_swift, FlowFutureOps)
+Future {
+public:
+	using Element = T;
+	using FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuation<T>;
+
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
 
@@ -870,13 +927,13 @@ public:
 			sav->cancel();
 	}
 
-	void addCallbackAndClear(Callback<T>* cb) {
+	void addCallbackAndClear(Callback<T>* _Nonnull cb) {
 		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addCallbackAndDelFutureRef(cb);
 		sav = 0;
 	}
 
-	void addYieldedCallbackAndClear(Callback<T>* cb) {
+	void addYieldedCallbackAndClear(Callback<T>* _Nonnull cb) {
     // printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addYieldedCallbackAndDelFutureRef(cb);
 		sav = 0;

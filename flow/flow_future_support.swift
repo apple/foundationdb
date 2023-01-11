@@ -9,10 +9,10 @@ import Flow
 extension FlowCallbackForSwiftContinuationCInt: FlowCallbackForSwiftContinuationT {
     public typealias AssociatedFuture = FutureCInt
 }
-extension FutureCInt: _FlowFutureOps {
-    public typealias Element = CInt
-    public typealias FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuationCInt
-}
+//extension FutureCInt: FlowFutureOps {
+//    public typealias Element = CInt
+//    public typealias FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuationCInt
+//}
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Void
@@ -21,10 +21,10 @@ extension FutureCInt: _FlowFutureOps {
 extension FlowCallbackForSwiftContinuationVoid: FlowCallbackForSwiftContinuationT {
     public typealias AssociatedFuture = FutureVoid
 }
-extension FutureVoid: _FlowFutureOps {
-    public typealias Element = Void
-    public typealias FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuationVoid
-}
+//extension FutureVoid: FlowFutureOps {
+//    public typealias Element = Void
+//    public typealias FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuationVoid
+//}
 
 // ==== ---------------------------------------------------------------------------------- ==== //
 // ==== Add further conformances here that should be shared for all Flow importing modules ==== //

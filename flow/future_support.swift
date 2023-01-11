@@ -3,7 +3,7 @@ import Flow
 // ==== ---------------------------------------------------------------------------------------------------------------
 
 public protocol FlowCallbackForSwiftContinuationT {
-    associatedtype AssociatedFuture: _FlowFutureOps
+    associatedtype AssociatedFuture: FlowFutureOps
     typealias Element = AssociatedFuture.Element
 
     init()
@@ -13,7 +13,7 @@ public protocol FlowCallbackForSwiftContinuationT {
                       _ thisPointer: UnsafeRawPointer)
 }
 
-public protocol _FlowFutureOps {
+public protocol FlowFutureOps {
     /// Element type of the future
     associatedtype Element
     associatedtype FlowCallbackForSwiftContinuation: FlowCallbackForSwiftContinuationT
@@ -28,7 +28,7 @@ public protocol _FlowFutureOps {
     var waitValue: Element { mutating get async throws }
 }
 
-extension _FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture {
+extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture {
     public var waitValue: Element {
         mutating get async throws {
             guard !self.isReady() else {

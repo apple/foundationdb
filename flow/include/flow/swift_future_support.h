@@ -52,47 +52,47 @@ using FutureStreamFutureVoid = FutureStream<Future<Void>>;
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
-template<class T>
-class FlowCallbackForSwiftContinuation : Callback<T> {
-    using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
-    SwiftCC continuationInstance;
-public:
-    void set(const void * _Nonnull pointerToContinuationInstance,
-             Future<T> f,
-             const void * _Nonnull thisPointer) {
-        // Verify Swift did not make a copy of the `self` value for this method
-        // call.
-        assert(this == thisPointer);
-
-        // FIXME: Propagate `SwiftCC` to Swift using forward
-        // interop, without relying on passing it via a `void *`
-        // here. That will let us avoid this hack.
-        const void *_Nonnull opaqueStorage = pointerToContinuationInstance;
-        static_assert(sizeof(SwiftCC) == sizeof(const void *));
-        const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC *>(&opaqueStorage));
-        // Set the continuation instance.
-        continuationInstance.set(ccCopy);
-        // Add this callback to the future.
-        f.addCallbackAndClear(this);
-    }
-
-    FlowCallbackForSwiftContinuation() : continuationInstance(SwiftCC::init()) {
-    }
-
-    void fire(const T &value) override {
-        Callback<T>::remove();
-        Callback<T>::next = nullptr;
-        continuationInstance.resume(value);
-    }
-    void error(Error error) override {
-        Callback<T>::remove();
-        Callback<T>::next = nullptr;
-        continuationInstance.resumeThrowing(error);
-    }
-    void unwait() override {
-        // TODO(swift): implement
-    }
-};
+//template<class T>
+//class FlowCallbackForSwiftContinuation : Callback<T> {
+//    using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
+//    SwiftCC continuationInstance;
+//public:
+//    void set(const void * _Nonnull pointerToContinuationInstance,
+//             Future<T> f,
+//             const void * _Nonnull thisPointer) {
+//        // Verify Swift did not make a copy of the `self` value for this method
+//        // call.
+//        assert(this == thisPointer);
+//
+//        // FIXME: Propagate `SwiftCC` to Swift using forward
+//        // interop, without relying on passing it via a `void *`
+//        // here. That will let us avoid this hack.
+//        const void *_Nonnull opaqueStorage = pointerToContinuationInstance;
+//        static_assert(sizeof(SwiftCC) == sizeof(const void *));
+//        const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC *>(&opaqueStorage));
+//        // Set the continuation instance.
+//        continuationInstance.set(ccCopy);
+//        // Add this callback to the future.
+//        f.addCallbackAndClear(this);
+//    }
+//
+//    FlowCallbackForSwiftContinuation() : continuationInstance(SwiftCC::init()) {
+//    }
+//
+//    void fire(const T &value) override {
+//        Callback<T>::remove();
+//        Callback<T>::next = nullptr;
+//        continuationInstance.resume(value);
+//    }
+//    void error(Error error) override {
+//        Callback<T>::remove();
+//        Callback<T>::next = nullptr;
+//        continuationInstance.resumeThrowing(error);
+//    }
+//    void unwait() override {
+//        // TODO(swift): implement
+//    }
+//};
 
 // TODO(swift): Conform these to FlowCallbackForSwiftContinuationT automatically
 using FlowCallbackForSwiftContinuationCInt = FlowCallbackForSwiftContinuation<int>;

@@ -231,7 +231,7 @@ inline void save(Archive& ar, const Arena& p) {
 //    don't intend to use std::optional directly.
 template <class T>
 class
-SWIFT_CONFORMS_TO(flow_swift,FlowOptionalProtocol)
+SWIFT_CONFORMS_TO(flow_swift, FlowOptionalProtocol)
 Optional : public ComposedIdentifier<T, 4> {
 public:
     using Wrapped = T;

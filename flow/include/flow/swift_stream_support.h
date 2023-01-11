@@ -113,7 +113,7 @@ private:
 	    resumeWithError(throwing) {}
 
 public:
-	static SwiftContinuationSingleCallbackCInt* _Nonnull make(void* continuationBox,
+	static SwiftContinuationSingleCallbackCInt* _Nonnull make(void* _Nonnull continuationBox,
 	                                                    void (*_Nonnull returning)(void* _Nonnull, int),
 	                                                    void (*_Nonnull throwing)(void* _Nonnull, Error)) {
 		return new SwiftContinuationSingleCallbackCInt(continuationBox, returning, throwing);

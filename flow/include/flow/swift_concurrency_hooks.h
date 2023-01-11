@@ -288,7 +288,7 @@ SWIFT_CC(swift)
 void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
                                   void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
 
-inline void installSwiftConcurrencyHooks(bool isSimulator, INetwork* net) {
+inline void installSwiftConcurrencyHooks(bool isSimulator, INetwork* _Nonnull net) {
 	printf("[c++] net        = %p\n", net);
 	printf("[c++] g_network  = %p\n", g_network);
 	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
