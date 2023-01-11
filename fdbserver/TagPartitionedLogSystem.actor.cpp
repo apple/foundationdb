@@ -3049,6 +3049,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		}
 
 		wait(waitForAll(satelliteInitializationReplies) || oldRouterRecruitment);
+		TraceEvent("PrimarySatelliteTLogInitializationComplete").log();
 
 		for (int i = 0; i < satelliteInitializationReplies.size(); i++) {
 			logSystem->tLogs[1]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
@@ -3066,6 +3067,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	}
 
 	wait(waitForAll(initializationReplies) || oldRouterRecruitment);
+	TraceEvent("PrimaryTLogInitializationComplete", logSystem->getDebugID()).log();
 
 	for (int i = 0; i < initializationReplies.size(); i++) {
 		logSystem->tLogs[0]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
