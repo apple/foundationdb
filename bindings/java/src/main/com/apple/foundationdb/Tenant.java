@@ -423,7 +423,7 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	 *
 	 * @return a future with the tenant ID
 	 */
-	CompletableFuture<Long> getId() {
+	default CompletableFuture<Long> getId() {
 		return getId(getExecutor());
 	}
 

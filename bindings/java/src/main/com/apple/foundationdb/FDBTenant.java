@@ -202,7 +202,7 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	public CompletableFuture<Long> getId(Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureInt64(Tenant_getId(), e);
+			return new FutureInt64(Tenant_getId(getPtr()), e);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -231,5 +231,5 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private native long Tenant_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Tenant_listBlobbifiedRanges(long cPtr, byte[] beginKey, byte[] endKey, int rangeLimit);
 	private native long Tenant_verifyBlobRange(long cPtr, byte[] beginKey, byte[] endKey, long version);
-	private native long Tenant_getId();
+	private native long Tenant_getId(long cPtr);
 }
