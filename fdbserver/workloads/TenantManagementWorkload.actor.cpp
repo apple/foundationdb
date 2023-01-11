@@ -207,7 +207,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	// send test parameters from meta-cluster
+	// send test parameters from metacluster
 	ACTOR static Future<Void> sendTestParameters(Database cx, TenantManagementWorkload* self) {
 		// Communicates test parameters to all other clients by storing it in a key
 		fmt::print("Sending test parameters ...\n");
@@ -228,8 +228,8 @@ struct TenantManagementWorkload : TestWorkload {
 	// only the first client will do this setup
 	ACTOR static Future<Void> firstClientSetup(Database cx, TenantManagementWorkload* self) {
 		if (self->useMetacluster) {
-			fmt::print("Create meta-cluster and register data cluster ... \n");
-			// Configure the meta-cluster (this changes the tenant mode)
+			fmt::print("Create metacluster and register data cluster ... \n");
+			// Configure the metacluster (this changes the tenant mode)
 			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
 
 			DataClusterEntry entry;

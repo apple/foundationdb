@@ -377,7 +377,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								break;
 							} catch (Error& e) {
 								if (e.code() == error_code_illegal_tenant_access) {
-									ASSERT(!self->writeSystemKeys);
+									ASSERT(!self->writeSystemKeys && self->useSystemKeys);
 									ASSERT_EQ(tenantNum, -1);
 									self->illegalTenantAccess = true;
 									break;
