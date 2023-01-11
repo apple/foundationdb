@@ -106,6 +106,7 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 }
 
 TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode);
+int64_t extractTenantIdFromMutation(MutationRef m);
 
 // Returns true if the specified ID has already been deleted and false if not. If the ID is old enough
 // that we no longer keep tombstones for it, an error is thrown.

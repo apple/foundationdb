@@ -23,11 +23,13 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/EncryptionUtils.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Metacluster.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -326,13 +328,12 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			}
 			ASSERT(!logValue.isEncrypted());
 
-			state EncryptCipherDomainId domainId = getEncryptDomainId(logValue);
-			if (config.tenantMode == TenantMode::REQUIRED && domainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
-			    domainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+			if (config.tenantMode == TenantMode::REQUIRED && !isSystemKey(logValue.param1)) {
 				// If a tenant is not found for a given mutation then exclude it from the batch
+				int64_t tenantId = TenantAPI::extractTenantIdFromMutation(logValue);
 				ASSERT(tenantMap != nullptr);
-				if (tenantMap->find(domainId) == tenantMap->end()) {
-					TraceEvent("TenantNotFound").detail("Version", version).detail("TenantId", domainId);
+				if (tenantMap->find(tenantId) == tenantMap->end()) {
+					TraceEvent("TenantNotFound").detail("Version", version).detail("TenantId", tenantId);
 					CODE_PROBE(true, "mutation log restore tenant not found");
 					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 					continue;

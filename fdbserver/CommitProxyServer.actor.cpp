@@ -28,7 +28,6 @@
 #include "fdbclient/BuildIdempotencyIdMutations.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/EncryptionUtils.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/Knobs.h"
@@ -887,18 +886,49 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 
 namespace {
 EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitData, MutationRef m) {
+	EncryptCipherDomainId domainId = INVALID_ENCRYPT_DOMAIN_ID;
+
 	// Possible scenarios:
 	// 1. Encryption domain (Tenant details) weren't explicitly provided, extract Tenant details using
 	// TenantPrefix (first 8 bytes of FDBKey)
 	// 2. Encryption domain isn't available, leverage 'default encryption domain'
 
-	EncryptCipherDomainId domainId = getEncryptDomainId(m);
-	if (domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID || domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-		return domainId;
+	if (isSystemKey(m.param1)) {
+		// Encryption domain == FDB SystemKeyspace encryption domain
+		domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+	} else if (commitData->tenantMap.empty() || commitData->encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE ||
+	           m.type == MutationRef::SetVersionstampedKey) {
+		// Cluster serves no-tenants; use 'default encryption domain'
+	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		ASSERT_NE((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
+
+		if (m.param1.size() >= TenantAPI::PREFIX_SIZE) {
+			// Parse mutation key to determine mutation encryption domain
+			StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
+			int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+			if (commitData->tenantMap.count(tenantId)) {
+				domainId = tenantId;
+			} else {
+				// Leverage 'default encryption domain'
+			}
+		}
+	} else {
+		// ClearRange is the 'only' MultiKey transaction allowed
+		ASSERT_EQ((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
+
+		// FIXME: Handle Clear-range transaction, actions needed:
+		// 1. Transaction range can spawn multiple encryption domains (tenants)
+		// 2. Transaction can be a multi-key transaction spawning multiple tenants
+		// For now fallback to 'default encryption domain'
+
+		CODE_PROBE(true, "ClearRange mutation encryption");
 	}
-	if (commitData->encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE || !commitData->tenantMap.count(domainId)) {
+
+	// Unknown tenant, fallback to fdb default encryption domain
+	if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
+		domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+
 		CODE_PROBE(true, "Default domain mutation encryption");
-		return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 	}
 
 	return domainId;

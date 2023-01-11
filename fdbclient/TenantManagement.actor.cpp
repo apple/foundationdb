@@ -37,4 +37,24 @@ TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMo
 	}
 }
 
+int64_t extractTenantIdFromMutation(MutationRef m) {
+	ASSERT(!isSystemKey(m.param1));
+
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		// The first 8 bytes of the key of this OP is also an 8-byte number
+		if (m.type == MutationRef::SetVersionstampedKey) {
+			return TenantInfo::INVALID_TENANT;
+		}
+	} else {
+		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
+	}
+
+	if (m.param1.size() < TenantAPI::PREFIX_SIZE) {
+		return TenantInfo::INVALID_TENANT;
+	}
+	// Parse mutation key to determine tenant prefix
+	StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
+	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+}
+
 } // namespace TenantAPI
