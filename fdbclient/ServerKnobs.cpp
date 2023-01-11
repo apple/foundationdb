@@ -117,6 +117,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEEK_BATCHING_EMPTY_MSG,                             false ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG = true;
 	init( PEEK_BATCHING_EMPTY_MSG_INTERVAL,                    0.001 ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG_INTERVAL = 0.01;
 	init( POP_FROM_LOG_DELAY,                                      1 ); if ( randomize && BUGGIFY ) POP_FROM_LOG_DELAY = 0;
+	init( TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS,             120 );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
