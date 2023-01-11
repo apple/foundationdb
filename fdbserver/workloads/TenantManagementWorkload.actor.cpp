@@ -68,8 +68,7 @@ struct TenantManagementWorkload : TestWorkload {
 	int64_t maxId = -1;
 
 	const Key keyName = "key"_sr;
-	const Key testParametersKey =
-	    "test_parameters"_sr; // nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
+	const Key testParametersKey = nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	const ClusterName dataClusterName = "cluster1"_sr;

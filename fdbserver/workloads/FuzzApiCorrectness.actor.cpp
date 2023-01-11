@@ -272,7 +272,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (useSystemKeys) { // there must be illegal access during data load
+		if (writeSystemKeys) { // there must be illegal access during data load
 			return illegalTenantAccess;
 		}
 		return success;
