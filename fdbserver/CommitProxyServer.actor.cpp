@@ -893,8 +893,10 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 	// 2. Encryption domain isn't available, leverage 'default encryption domain'
 
 	EncryptCipherDomainId domainId = getEncryptDomainId(m);
-	if (domainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && domainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID &&
-	    !commitData->tenantMap.count(domainId)) {
+	if (domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID || domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+		return domainId;
+	}
+	if (commitData->encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE || !commitData->tenantMap.count(domainId)) {
 		CODE_PROBE(true, "Default domain mutation encryption");
 		return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 	}
