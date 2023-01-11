@@ -272,7 +272,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (writeSystemKeys) { // there must be illegal access during data load
+		if (!writeSystemKeys) { // there must be illegal access during data load
 			return illegalTenantAccess;
 		}
 		return success;
@@ -377,7 +377,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								break;
 							} catch (Error& e) {
 								if (e.code() == error_code_illegal_tenant_access) {
-									ASSERT(!self->writeSystemKeys && self->useSystemKeys);
+									ASSERT(!self->writeSystemKeys);
 									ASSERT_EQ(tenantNum, -1);
 									self->illegalTenantAccess = true;
 									break;
