@@ -948,7 +948,7 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_tenant_verify_blob_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantGetId, lib, fdbCPath, "fdb_tenant_get_id", headerVersion >= 720);
+	loadClientFunction(&api->tenantGetId, lib, fdbCPath, "fdb_tenant_get_id", headerVersion >= 730);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);

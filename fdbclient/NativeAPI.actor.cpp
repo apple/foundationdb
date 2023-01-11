@@ -2407,13 +2407,8 @@ Tenant::Tenant(DatabaseContext* cx, TenantName name) : name(name) {
 	id = fetchTenantId(cx, name);
 }
 
-ACTOR Future<int64_t> waitTenantGetIdActor(Future<int64_t> idFuture) {
-	state int64_t res = wait(idFuture);
-	return res;
-}
-
 Future<int64_t> Tenant::getId() {
-	return waitTenantGetIdActor(id);
+	return id;
 }
 
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
