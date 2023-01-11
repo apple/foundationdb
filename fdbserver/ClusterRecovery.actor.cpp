@@ -213,6 +213,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 	}
 
 	std::vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	TraceEvent("CommitProxyInitializationComplete", self->dbgid).log();
 	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->commitProxies[0] is the firstCommitProxy.
 	self->commitProxies = newRecruits;
 
@@ -234,6 +235,7 @@ ACTOR Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFro
 	}
 
 	std::vector<GrvProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	TraceEvent("GrvProxyInitializationComplete", self->dbgid).log();
 	self->grvProxies = newRecruits;
 	return Void();
 }
@@ -254,6 +256,7 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 	}
 
 	std::vector<ResolverInterface> newRecruits = wait(getAll(initializationReplies));
+	TraceEvent("ResolverInitializationComplete", self->dbgid).log();
 	self->resolvers = newRecruits;
 
 	return Void();

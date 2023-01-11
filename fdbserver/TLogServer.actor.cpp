@@ -2805,6 +2805,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = beginVersion;
 	state Version lastVer = 0;
+	state double startTime = now();
 
 	if (endVersion.present()) {
 		TraceEvent("TLogRestoreReplicationFactor", self->dbgid)
@@ -2827,6 +2828,11 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
 					dbInfoChange = logData->logSystem->onChange();
+				}
+				when(wait(delay(SERVER_KNOBS->TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS))) {
+					TraceEvent(SevWarn, "TLogPullAsyncDataSlow", logData->logId)
+					    .detail("Elapsed", now() - startTime)
+					    .detail("Version", logData->version.get());
 				}
 			}
 		}
