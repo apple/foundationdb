@@ -3352,8 +3352,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			wait(onReady);
 
 			// keep this as not state variable so it is freed after sending to reduce memory
-			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, feedInfo, req, false, atLatest, doFilterMutations, commonFeedPrefixLength, &feedDiskReadState);
+			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture = getChangeFeedMutations(
+			    data, feedInfo, req, false, atLatest, doFilterMutations, commonFeedPrefixLength, &feedDiskReadState);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -3387,8 +3387,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					clientVersions.erase(req.id);
 					removeUID = false;
 				} else {
-					clientVersions[req.id] =
-					    feedReply.mutations.back().version;
+					clientVersions[req.id] = feedReply.mutations.back().version;
 				}
 			}
 
