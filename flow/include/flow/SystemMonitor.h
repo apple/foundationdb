@@ -30,6 +30,7 @@ struct SystemMonitorMachineState {
 	Optional<Standalone<StringRef>> dcId;
 	Optional<Standalone<StringRef>> zoneId;
 	Optional<Standalone<StringRef>> machineId;
+	Optional<Standalone<StringRef>> datahallId;
 	Optional<IPAddress> ip;
 
 	double monitorStartTime;
@@ -40,8 +41,10 @@ struct SystemMonitorMachineState {
 	                          Optional<Standalone<StringRef>> const& dcId,
 	                          Optional<Standalone<StringRef>> const& zoneId,
 	                          Optional<Standalone<StringRef>> const& machineId,
+	                          Optional<Standalone<StringRef>> const& datahallId,
 	                          IPAddress const& ip)
-	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
+	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), datahallId(datahallId), ip(ip),
+	    monitorStartTime(0) {}
 };
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState);

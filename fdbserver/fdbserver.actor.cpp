@@ -501,9 +501,10 @@ void skipListTest();
 Future<Void> startSystemMonitor(std::string dataFolder,
                                 Optional<Standalone<StringRef>> dcId,
                                 Optional<Standalone<StringRef>> zoneId,
-                                Optional<Standalone<StringRef>> machineId) {
+                                Optional<Standalone<StringRef>> machineId,
+                                Optional<Standalone<StringRef>> datahallId) {
 	initializeSystemMonitorMachineState(
-	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip));
+	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, datahallId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
 	return recurring(&systemMonitor, SERVER_KNOBS->SYSTEM_MONITOR_FREQUENCY, TaskPriority::FlushTrace);
@@ -2276,14 +2277,16 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::Test) {
 			TraceEvent("NonSimulationTest").detail("TestFile", opts.testFile);
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(
 			    opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(), opts.localities));
 			g_network->run();
 		} else if (role == ServerRole::ConsistencyCheck) {
 			setupRunLoopProfiler();
 
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_CONSISTENCY_CHECK,
 			                       TEST_HERE,
@@ -2294,7 +2297,8 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::UnitTests) {
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_UNIT_TESTS,
 			                       TEST_HERE,
