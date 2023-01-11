@@ -23,6 +23,7 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/EncryptionUtils.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -258,24 +259,6 @@ std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
 	    bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
 
-bool isSystemKey(KeyRef key) {
-	return key.size() && key[0] == systemKeys.begin[0];
-}
-
-EncryptCipherDomainId getEncryptDomainId(MutationRef m) {
-	EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
-	if (isSystemKey(m.param1)) {
-		domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-	} else if (m.type ==
-	           MutationRef::SetVersionstampedKey) { // The first 8 bytes of the key of this OP is also an 8-byte number
-		return TenantInfo::INVALID_TENANT;
-	} else if (isSingleKeyMutation((MutationRef::Type)m.type) && m.param1.size() >= TenantAPI::PREFIX_SIZE) {
-		StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
-		domainId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-	}
-	return domainId;
-}
-
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                VectorRef<MutationRef>* result,
                                                VectorRef<Optional<MutationRef>>* encryptedResult,
@@ -349,10 +332,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				// If a tenant is not found for a given mutation then exclude it from the batch
 				ASSERT(tenantMap != nullptr);
 				if (tenantMap->find(domainId) == tenantMap->end()) {
-					// TODO (nwijetunga): Okay to log mutation here?
-					TraceEvent(SevDebug, "TenantNotFound")
-					    .detail("Mutation", logValue.toString())
-					    .detail("TenantId", domainId);
+					TraceEvent("TenantNotFound").detail("Version", version).detail("TenantId", domainId);
 					CODE_PROBE(true, "mutation log restore tenant not found");
 					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 					continue;
@@ -661,20 +641,20 @@ Future<Void> readCommitted(Database cx,
 	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
 }
 
-ACTOR Future<int> dumpData(Database cx,
-                           PromiseStream<RCGroup> results,
-                           Reference<FlowLock> lock,
-                           Key uid,
-                           Key addPrefix,
-                           Key removePrefix,
-                           PublicRequestStream<CommitTransactionRequest> commit,
-                           NotifiedVersion* committedVersion,
-                           Optional<Version> endVersion,
-                           Key rangeBegin,
-                           PromiseStream<Future<Void>> addActor,
-                           FlowLock* commitLock,
-                           Reference<KeyRangeMap<Version>> keyVersion,
-                           std::unordered_map<int64_t, TenantName>* tenantMap) {
+ACTOR Future<int> kvMutationLogToTransactions(Database cx,
+                                              PromiseStream<RCGroup> results,
+                                              Reference<FlowLock> lock,
+                                              Key uid,
+                                              Key addPrefix,
+                                              Key removePrefix,
+                                              PublicRequestStream<CommitTransactionRequest> commit,
+                                              NotifiedVersion* committedVersion,
+                                              Optional<Version> endVersion,
+                                              Key rangeBegin,
+                                              PromiseStream<Future<Void>> addActor,
+                                              FlowLock* commitLock,
+                                              Reference<KeyRangeMap<Version>> keyVersion,
+                                              std::unordered_map<int64_t, TenantName>* tenantMap) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
@@ -841,20 +821,21 @@ ACTOR Future<Void> applyMutations(Database cx,
 
 			maxBytes = std::max<int>(maxBytes * CLIENT_KNOBS->APPLY_MAX_DECAY_RATE, CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES);
 			for (idx = 0; idx < ranges.size(); ++idx) {
-				int bytes = wait(dumpData(cx,
-				                          results[idx],
-				                          locks[idx],
-				                          uid,
-				                          addPrefix,
-				                          removePrefix,
-				                          commit,
-				                          committedVersion,
-				                          idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
-				                          ranges[idx].begin,
-				                          addActor,
-				                          &commitLock,
-				                          keyVersion,
-				                          tenantMap));
+				int bytes =
+				    wait(kvMutationLogToTransactions(cx,
+				                                     results[idx],
+				                                     locks[idx],
+				                                     uid,
+				                                     addPrefix,
+				                                     removePrefix,
+				                                     commit,
+				                                     committedVersion,
+				                                     idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
+				                                     ranges[idx].begin,
+				                                     addActor,
+				                                     &commitLock,
+				                                     keyVersion,
+				                                     tenantMap));
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();

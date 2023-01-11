@@ -105,10 +105,6 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
 
-inline bool isSystemKey(KeyRef key) {
-	return key.size() && key[0] == systemKeys.begin[0];
-}
-
 inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	for (auto const& m : mutations) {
 
