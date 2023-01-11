@@ -921,6 +921,13 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
+	state std::vector<VersionIndexerInterface>::const_iterator vi;
+	state std::vector<VersionIndexerInterface> versionIndexers = db->get().versionIndexers;
+	for (vi = versionIndexers.begin(); vi != versionIndexers.end(); ++vi) {
+		roles.addRole("version_indexer", *vi);
+		wait(yield());
+	}
+
 	if (configuration.present() && configuration.get().blobGranulesEnabled) {
 		for (auto blobWorker : blobWorkers) {
 			roles.addRole("blob_worker", blobWorker);

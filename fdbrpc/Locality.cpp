@@ -139,6 +139,24 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		default:
 			return ProcessClass::WorstFit;
 		}
+	case ProcessClass::VersionIndexer:
+		switch (_class) {
+		case ProcessClass::VersionIndexerClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
 	case ProcessClass::LogRouter:
 		switch (_class) {
 		case ProcessClass::LogRouterClass:
@@ -187,6 +205,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::MasterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::VersionIndexerClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
@@ -336,4 +356,31 @@ LBDistance::Type loadBalanceDistance(LocalityData const& loc1, LocalityData cons
 		return LBDistance::SAME_DC;
 	}
 	return LBDistance::DISTANT;
+}
+
+StringRef to_string(ProcessClass::ClusterRole role) {
+	// clang-format off
+	switch (role) {
+	case ProcessClass::Storage:           return "Storage"_sr;
+	case ProcessClass::TLog:              return "TLog"_sr;
+	case ProcessClass::CommitProxy:       return "CommitProxy"_sr;
+	case ProcessClass::GrvProxy:          return "GrvProxy"_sr;
+	case ProcessClass::Master:            return "Master"_sr;
+	case ProcessClass::Resolver:          return "Resolver"_sr;
+	case ProcessClass::LogRouter:         return "LogRouter"_sr;
+	case ProcessClass::ClusterController: return "ClusterController"_sr;
+	case ProcessClass::DataDistributor:   return "DataDistributor"_sr;
+	case ProcessClass::Ratekeeper:        return "Ratekeeper"_sr;
+	case ProcessClass::ConsistencyScan:   return "ConsistencyScan"_sr;
+	case ProcessClass::BlobManager:       return "BlobManager"_sr;
+	case ProcessClass::BlobWorker:        return "BlobWorker"_sr;
+	case ProcessClass::StorageCache:      return "StorageCache"_sr;
+	case ProcessClass::Backup:            return "Backup"_sr;
+	case ProcessClass::EncryptKeyProxy:   return "EncryptKeyProxy"_sr;
+	case ProcessClass::VersionIndexer:    return "VersionIndexer"_sr;
+	case ProcessClass::Worker:            return "Worker"_sr;
+	case ProcessClass::NoRole:            return "NoRole"_sr;
+	}
+	// clang-format on
+	UNSTOPPABLE_ASSERT(false);
 }

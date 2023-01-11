@@ -733,7 +733,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	bool shouldSpillByReference(Tag t) const { return !shouldSpillByValue(t); }
 
 	void unblockWaitingPeeks() {
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		if (/*SERVER_KNOBS->ENABLE_VERSION_VECTOR &&*/ true) {
 			for (auto& iter : waitingTags) {
 				TraceEvent("UnblockWaitingPeeks", tLogData->dbgid)
 				    .detail("LogId", logId)
@@ -1534,7 +1534,7 @@ void commitMessages(TLogData* self,
 				} else {
 					txsBytes += tagData->versionMessages.back().second.expectedSize();
 				}
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+				if (/*SERVER_KNOBS->ENABLE_VERSION_VECTOR &&*/ true) {
 					auto iter = logData->waitingTags.find(tag);
 					if (iter != logData->waitingTags.end()) {
 						auto promise = iter->second;
@@ -1835,7 +1835,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 		auto tagData = logData->getTagData(reqTag);
 		bool tagRecovered = tagData && !tagData->unpoppedRecovered;
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
+		if (/*SERVER_KNOBS->ENABLE_VERSION_VECTOR &&*/ poppedVer <= reqBegin &&
 		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
 		    !reqReturnIfBlocked && tagRecovered) {
 			state double startTime = now();
@@ -2132,6 +2132,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
+	state UID streamID = deterministicRandom()->randomUniqueID();
 	req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
 	loop {
 		state TLogPeekStreamReply reply;
@@ -2155,6 +2156,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
 			    .detail("Tag", req.tag)
+			    .detail("StreamID", streamID)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {

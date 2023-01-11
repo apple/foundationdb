@@ -806,7 +806,8 @@ private:
 				TraceEvent("ServerTagRemove")
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
-				    .detail("Server", decodeServerTagKey(kv.key));
+				    .detail("Server", decodeServerTagKey(kv.key))
+				    .detail("ToCommit", toCommit != nullptr);
 				if (!forResolver) {
 					logSystem->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;

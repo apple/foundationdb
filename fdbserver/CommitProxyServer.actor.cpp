@@ -1577,6 +1577,40 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	return Void();
 }
 
+// Send the version and the set of tags we are writing to to the version indexers. This can be made asynchronous in the
+// future, but for now it isn't in order to simplify the implementation.
+Future<Void> informVersionIndexers(CommitBatchContext* self) {
+	const auto& versionIndexers = self->pProxyCommitData->db->get().versionIndexers;
+	// If there are no version indexers configured, then we don't have to wait for them.
+	if (versionIndexers.empty()) {
+		return Future<Void>(Void());
+	}
+
+	VersionIndexerCommitRequest req;
+	req.commitVersion = self->commitVersion;
+	req.previousVersion = self->prevVersion;
+	req.minKnownCommittedVersion = self->pProxyCommitData->minKnownCommittedVersion;
+	const std::unordered_set<Tag>& tags = self->toCommit.getWrittenTags();
+	req.tags.reserve(tags.size());
+	req.tags.insert(req.tags.end(), tags.begin(), tags.end());
+
+	std::vector<Future<Void>> resp;
+	resp.reserve(versionIndexers.size());
+	for (const auto& vi : versionIndexers) {
+		req.reply = ReplyPromise<Void>();
+		resp.emplace_back(vi.commit.getReply(req));
+	}
+
+	return waitForAll(resp);
+}
+
+// A helper function. We need to wait on logging and on the version indexers to acknowledge the write. However, we are
+// only interested in the result from the tlogs.
+ACTOR Future<Version> loggingComplete(Future<Version> logging, Future<Void> versionIndexersInformed) {
+	wait(versionIndexersInformed && success(logging));
+	return logging.get();
+}
+
 ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	state double postResolutionStart = now();
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
@@ -1766,14 +1800,16 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 		tpcvMap = self->tpcvMap;
 	}
-	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
-	                                                          self->commitVersion,
-	                                                          pProxyCommitData->committedVersion.get(),
-	                                                          pProxyCommitData->minKnownCommittedVersion,
-	                                                          self->toCommit,
-	                                                          span.context,
-	                                                          self->debugID,
-	                                                          tpcvMap);
+	self->loggingComplete =
+	    loggingComplete(pProxyCommitData->logSystem->push(self->prevVersion,
+	                                                      self->commitVersion,
+	                                                      pProxyCommitData->committedVersion.get(),
+	                                                      pProxyCommitData->minKnownCommittedVersion,
+	                                                      self->toCommit,
+	                                                      span.context,
+	                                                      self->debugID,
+	                                                      tpcvMap),
+	                    informVersionIndexers(self));
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);

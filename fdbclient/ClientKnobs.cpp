@@ -195,6 +195,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
 	init( DEFAULT_AUTO_GRV_PROXIES,                  1 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
+	init( DEFAULT_AUTO_VERSION_INDEXERS,             0 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
 	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
 	init( DEFAULT_MAX_GRV_PROXIES,                   4 );

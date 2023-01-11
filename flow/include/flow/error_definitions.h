@@ -136,6 +136,7 @@ ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of a
 ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
 ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
+ERROR( version_indexer_failed, 1226, "Master terminating because version indexer failed");
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

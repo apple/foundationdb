@@ -171,6 +171,8 @@ public:
 				return true;
 			case ProcessClass::ResolutionClass:
 				return false;
+			case ProcessClass::VersionIndexerClass:
+				return false;
 			case ProcessClass::CommitProxyClass:
 				return false;
 			case ProcessClass::GrvProxyClass:

@@ -35,8 +35,8 @@ public:
 	int logAntiQuorum = -1;
 	// Set true to simplify simulation configs for easier debugging
 	bool simpleConfig = false;
-	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType, machineCount,
-	    coordinators;
+	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, versionIndexerCount,
+	    storageEngineType, machineCount, coordinators;
 };
 
 DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig);
