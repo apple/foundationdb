@@ -668,7 +668,9 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	actors.add(waitFailureServer(resolver.waitFailure.getFuture()));
 	actors.add(traceRole(Role::RESOLVER, resolver.id()));
 
-	TraceEvent("ResolverInit", resolver.id()).detail("RecoveryCount", initReq.recoveryCount);
+	TraceEvent("ResolverInit", resolver.id())
+	    .detail("RecoveryCount", initReq.recoveryCount)
+	    .detail("EncryptMode", initReq.encryptMode.toString());
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(initReq.masterLifetime.isEqual(db->get().masterLifetime) &&
@@ -749,7 +751,6 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
                             InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
-		TraceEvent("ResolverEncryptionAtRestMode").detail("Mode", initReq.encryptMode.toString());
 		state Future<Void> core = resolverCore(resolver, initReq, db);
 		loop choose {
 			when(wait(core)) {

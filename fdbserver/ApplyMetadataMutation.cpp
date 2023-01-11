@@ -1333,7 +1333,6 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version version,
                             Version popVersion,
                             bool initialCommit) {
-	TraceEvent("ApplyMetadataMutationsEncryptMode").detail("Mode", encryptMode.toString());
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
@@ -1354,7 +1353,6 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
                             EncryptionAtRestMode encryptMode) {
-	TraceEvent("ApplyMetadataMutationsEncryptMode").detail("Mode", encryptMode.toString());
 	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, pCipherKeys, encryptMode).apply();
 }
 
