@@ -233,6 +233,8 @@ class ObjectWriter {
 	};
 
 public:
+	typedef uint8_t* (*CustomAllocatorFunc_t)(const size_t, void*);
+
 	template <class VersionOptions>
 	explicit ObjectWriter(VersionOptions vo) : customAllocator(nullptr), customAllocatorContext(nullptr) {
 		vo.write(*this);
@@ -242,7 +244,7 @@ public:
 	// capture. By downgrading it to a function pointer, the compile time can be reduced. The trade is an additional
 	// void* must be used to carry the captured environment.
 	template <class VersionOptions>
-	explicit ObjectWriter(uint8_t* (*customAllocator_)(size_t, void*), void* customAllocatorContext_, VersionOptions vo)
+	explicit ObjectWriter(CustomAllocatorFunc_t customAllocator_, void* customAllocatorContext_, VersionOptions vo)
 	  : customAllocator(customAllocator_), customAllocatorContext(customAllocatorContext_) {
 		vo.write(*this);
 	}
@@ -283,7 +285,7 @@ public:
 
 private:
 	Arena arena;
-	uint8_t* (*customAllocator)(size_t, void*) = nullptr;
+	CustomAllocatorFunc_t customAllocator = nullptr;
 	void* customAllocatorContext = nullptr;
 	uint8_t* data = nullptr;
 	int size = 0;
