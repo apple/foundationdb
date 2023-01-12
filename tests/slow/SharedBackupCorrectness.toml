@@ -1,6 +1,6 @@
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
-# required tenant mode is not supported for Disaster Recovery yet
+# DR is not currently supported in required tenant mode
 tenantModes = ['disabled', 'optional']
 
 [[test]]

@@ -370,7 +370,10 @@ private:
 			// no need to apply mutation logs if granule is already on that version
 			if (granule.version < maxLogVersion) {
 				ranges.push_back(ranges.arena(), granule.keyRange);
-				beginVersions.push_back(beginVersions.arena(), granule.version + 1);
+				// Blob granule ends at granule.version(inclusive), so we need to apply mutation logs
+				// after granule.version(exclusive).
+				beginVersions.push_back(beginVersions.arena(), granule.version);
+				TraceEvent("ApplyMutationLogVersion").detail("GID", granule.granuleID).detail("Ver", granule.version);
 			}
 		}
 		Optional<RestorableFileSet> restoreSet =
@@ -503,7 +506,7 @@ private:
 				choose {
 					when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 						dprint("Unsupported SplitRangeRequest\n");
-						req.reply.sendError(unsupported_operation());
+						req.reply.sendError(broken_promise());
 					}
 					when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
 						self->actors_.add(processStorageQueuingMetricsRequest(req));

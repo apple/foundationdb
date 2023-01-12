@@ -20,6 +20,7 @@
 
 #include <string>
 #include <map>
+#include "fdbclient/Atomic.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
@@ -42,7 +43,8 @@ int64_t extractTenantIdFromMutation(MutationRef m) {
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		// The first 8 bytes of the key of this OP is also an 8-byte number
-		if (m.type == MutationRef::SetVersionstampedKey) {
+		if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 &&
+		    parseVersionstampOffset(m.param1) < 8) {
 			return TenantInfo::INVALID_TENANT;
 		}
 	} else {

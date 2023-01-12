@@ -203,13 +203,11 @@ struct EndpointFailureInfo {
 };
 
 struct KeyRangeLocationInfo {
-	TenantMapEntry tenantEntry;
 	KeyRange range;
 	Reference<LocationInfo> locations;
 
 	KeyRangeLocationInfo() {}
-	KeyRangeLocationInfo(TenantMapEntry tenantEntry, KeyRange range, Reference<LocationInfo> locations)
-	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
+	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
 
 struct OverlappingChangeFeedsInfo {
@@ -260,22 +258,17 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantNameRef>& tenant,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const TenantInfo& tenant,
 	                                                 const KeyRef&,
 	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const Optional<TenantNameRef>& tenant,
+	bool getCachedLocations(const TenantInfo& tenant,
 	                        const KeyRangeRef&,
 	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
-	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
-	Reference<LocationInfo> setCachedLocation(const Optional<TenantNameRef>& tenant,
-	                                          const TenantMapEntry& tenantEntry,
-	                                          const KeyRangeRef&,
-	                                          const std::vector<struct StorageServerInterface>&);
-	void invalidateCachedTenant(const TenantNameRef& tenant);
-	void invalidateCache(const KeyRef& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
-	void invalidateCache(const KeyRef& tenantPrefix, const KeyRangeRef& keys);
+	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
+	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -496,10 +489,8 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	int tenantCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
-	std::unordered_map<TenantName, TenantMapEntry> tenantCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
@@ -562,6 +553,8 @@ public:
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
 	Counter transactionStatusRequests;
+	Counter transactionTenantLookupRequests;
+	Counter transactionTenantLookupRequestsCompleted;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
@@ -712,6 +705,8 @@ public:
 	void getLatestCommitVersion(const StorageServerInterface& ssi,
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
+
+	TenantMode getTenantMode() const { return clientInfo->get().tenantMode; }
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
