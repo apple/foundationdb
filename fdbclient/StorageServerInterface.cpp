@@ -133,7 +133,6 @@ static void traceKeyValuesSummary(TraceEvent& event,
                                   Version version,
                                   int limit,
                                   int limitBytes,
-                                  int matchIndex,
                                   size_t ssSize,
                                   bool ssMore,
                                   size_t tssSize,
@@ -146,23 +145,8 @@ static void traceKeyValuesSummary(TraceEvent& event,
 	    .detail("Version", version)
 	    .detail("Limit", limit)
 	    .detail("LimitBytes", limitBytes)
-	    .detail("MatchIndex", matchIndex == -1 ? "NA" : std::to_string(matchIndex))
 	    .detail("SSReplySummary", ssSummaryString)
 	    .detail("TSSReplySummary", tssSummaryString);
-}
-
-static void traceKeyValuesSummary(TraceEvent& event,
-                                  const KeySelectorRef& begin,
-                                  const KeySelectorRef& end,
-                                  Optional<TenantNameRef> tenant,
-                                  Version version,
-                                  int limit,
-                                  int limitBytes,
-                                  size_t ssSize,
-                                  bool ssMore,
-                                  size_t tssSize,
-                                  bool tssMore) {
-	traceKeyValuesSummary(event, begin, end, tenant, version, limit, limitBytes, -1, ssSize, ssMore, tssSize, tssMore);
 }
 
 static void traceKeyValuesDiff(TraceEvent& event,

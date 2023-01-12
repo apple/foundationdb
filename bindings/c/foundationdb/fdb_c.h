@@ -516,7 +516,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range_v2(FDBT
                                                                             int iteration,
                                                                             fdb_bool_t snapshot,
                                                                             fdb_bool_t reverse,
-                                                                            int matchIndex);
+                                                                            uint8_t const* mapped_range_params,
+                                                                            int mapped_range_params_length);
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
                                    int key_name_length,

@@ -1531,7 +1531,7 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getMappedRangeV2(JNIEnv*
                                                                          jint iteration,
                                                                          jboolean snapshot,
                                                                          jboolean reverse,
-                                                                         jint matchIndex) {
+                                                                         jbyteArray mappedRangeParams) {
 	if (!tPtr || !keyBeginBytes || !keyEndBytes || !mapperBytes) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -1540,9 +1540,17 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getMappedRangeV2(JNIEnv*
 	uint8_t* barrBegin;
 	uint8_t* barrEnd;
 	uint8_t* barrMapper;
+	uint8_t* barrMrp;
 	if (!getBytes(jenv, barrBegin, barrEnd, barrMapper, keyBeginBytes, keyEndBytes, mapperBytes)) {
 		return 0;
 	}
+	barrMrp = (uint8_t*)jenv->GetByteArrayElements(mappedRangeParams, JNI_NULL);
+	if (!barrMrp) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return false;
+	}
+
 	FDBFuture* f;
 	FDBTransaction* tr = (FDBTransaction*)tPtr;
 	f = fdb_transaction_get_mapped_range_v2(tr,
@@ -1562,7 +1570,8 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getMappedRangeV2(JNIEnv*
 	                                        iteration,
 	                                        snapshot,
 	                                        reverse,
-	                                        matchIndex);
+	                                        barrMrp,
+	                                        jenv->GetArrayLength(mappedRangeParams));
 
 	jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
 	jenv->ReleaseByteArrayElements(keyEndBytes, (jbyte*)barrEnd, JNI_ABORT);

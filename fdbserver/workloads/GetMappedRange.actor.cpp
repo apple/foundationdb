@@ -284,13 +284,17 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					}
 					return std::make_pair(result.size(), result.more);
 				} else {
+					uint8_t tmp[6] = { 0x01, 0x01, 0x00, 0x00, 0x00, 0x00 };
+					tmp[2] = matchIndex;
+					StringRef str(tmp, 6);
+					Key mrp(str);
 					MappedRangeResultV2 result = wait(tr->getMappedRangeV2(beginSelector,
 					                                                       endSelector,
 					                                                       mapper,
+					                                                       mrp,
 					                                                       GetRangeLimits(limit, byteLimit),
 					                                                       self->snapshot,
-					                                                       Reverse::False,
-					                                                       matchIndex));
+					                                                       Reverse::False));
 
 					if (validate<MappedRangeResultV2, MappedKeyValueRefV2>(
 					        result, limit, expectedBeginId, self, matchIndex, allMissing)) {

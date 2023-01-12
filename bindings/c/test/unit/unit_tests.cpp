@@ -369,7 +369,8 @@ GetMappedRangeResultV2 get_mapped_range_v2(fdb::Transaction& tr,
                                            int iteration,
                                            fdb_bool_t snapshot,
                                            fdb_bool_t reverse,
-                                           int matchIndex) {
+                                           const uint8_t* mapped_range_params,
+                                           int mapped_range_params_length) {
 	fdb::MappedKeyValueArrayFutureV2 f1 = tr.get_mapped_range_v2(begin_key_name,
 	                                                             begin_key_name_length,
 	                                                             begin_or_equal,
@@ -386,7 +387,8 @@ GetMappedRangeResultV2 get_mapped_range_v2(fdb::Transaction& tr,
 	                                                             iteration,
 	                                                             snapshot,
 	                                                             reverse,
-	                                                             matchIndex);
+	                                                             mapped_range_params,
+	                                                             mapped_range_params_length);
 	fdb_error_t err = wait_future(f1);
 	if (err) {
 		return GetMappedRangeResultV2{ {}, false, err };
@@ -1077,7 +1079,7 @@ GetMappedRangeResultV2 getMappedIndexEntriesInternalV2(int beginId,
                                                        int endId,
                                                        fdb::Transaction& tr,
                                                        std::string mapper,
-                                                       int matchIndex) {
+                                                       std::string mrp) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
 	return get_mapped_range_v2(
@@ -1092,7 +1094,8 @@ GetMappedRangeResultV2 getMappedIndexEntriesInternalV2(int beginId,
 	    /* iteration */ 0,
 	    /* snapshot */ false,
 	    /* reverse */ 0,
-	    matchIndex);
+	    (const uint8_t*)mrp.c_str(),
+	    mrp.size());
 }
 
 GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, bool allMissing) {
@@ -1108,7 +1111,7 @@ GetMappedRangeResultV2 getMappedIndexEntries(int beginId,
                                              bool allMissing) {
 	std::string mapper =
 	    Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
-	return getMappedIndexEntriesInternalV2(beginId, endId, tr, mapper, matchIndex);
+	return getMappedIndexEntriesInternalV2(beginId, endId, tr, mapper, mapper);
 }
 
 TEST_CASE("versionstamp_unit_test") {
@@ -1362,7 +1365,8 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 	    /* iteration */ 0,
 	    /* snapshot */ true, // Set snapshot to true
 	    /* reverse */ 0,
-	    MATCH_INDEX_ALL);
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size());
 	ASSERT(result.err == error_code_unsupported_operation);
 }
 
@@ -1382,7 +1386,8 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
 	    /* iteration */ 0,
 	    /* snapshot */ false,
 	    /* reverse */ 0,
-	    MATCH_INDEX_ALL);
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size());
 	ASSERT(result.err == error_code_unsupported_operation);
 }
 

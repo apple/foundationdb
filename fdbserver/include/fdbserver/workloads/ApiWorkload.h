@@ -61,10 +61,10 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	virtual Future<MappedRangeResultV2> getMappedRangeV2(KeySelector& begin,
 	                                                     KeySelector& end,
 	                                                     Key& mapper,
+	                                                     Key& mrp,
 	                                                     GetRangeLimits limits,
 	                                                     Snapshot snapshot,
-	                                                     Reverse reverse,
-	                                                     int matchIndex) = 0;
+	                                                     Reverse reverse) = 0;
 	// Gets the key from the database specified by a given key selector
 	virtual Future<Key> getKey(KeySelectorRef& key) = 0;
 
@@ -142,11 +142,11 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	Future<MappedRangeResultV2> getMappedRangeV2(KeySelector& begin,
 	                                             KeySelector& end,
 	                                             Key& mapper,
+	                                             Key& mrp,
 	                                             GetRangeLimits limits,
 	                                             Snapshot snapshot,
-	                                             Reverse reverse,
-	                                             int matchIndex) override {
-		return transaction.getMappedRangeV2(begin, end, mapper, limits, snapshot, reverse, matchIndex);
+	                                             Reverse reverse) override {
+		return transaction.getMappedRangeV2(begin, end, mapper, mrp, limits, snapshot, reverse);
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -227,12 +227,12 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	Future<MappedRangeResultV2> getMappedRangeV2(KeySelector& begin,
 	                                             KeySelector& end,
 	                                             Key& mapper,
+	                                             Key& mrp,
 	                                             GetRangeLimits limits,
 	                                             Snapshot snapshot,
-	                                             Reverse reverse,
-	                                             int matchIndex) override {
+	                                             Reverse reverse) override {
 		return unsafeThreadFutureToFuture(
-		    transaction->getMappedRangeV2(begin, end, mapper, limits, snapshot, reverse, matchIndex));
+		    transaction->getMappedRangeV2(begin, end, mapper, mrp, limits, snapshot, reverse));
 	}
 
 	// Gets the key from the database specified by a given key selector

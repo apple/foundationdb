@@ -160,10 +160,10 @@ public:
 	ThreadFuture<MappedRangeResultV2> getMappedRangeV2(const KeySelectorRef& begin,
 	                                                   const KeySelectorRef& end,
 	                                                   const StringRef& mapper,
+	                                                   const StringRef& mrp,
 	                                                   GetRangeLimits limits,
 	                                                   bool snapshot,
-	                                                   bool reverse,
-	                                                   int matchIndex) override;
+	                                                   bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;

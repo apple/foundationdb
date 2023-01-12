@@ -855,7 +855,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	                                                 byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 	                                                 byte[] mapper, // Nonnull
 	                                                 int rowLimit, int targetBytes, int streamingMode, int iteration,
-	                                                 boolean isSnapshot, boolean reverse, int matchIndex);
+	                                                 boolean isSnapshot, boolean reverse, byte[] matchIndex);
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);

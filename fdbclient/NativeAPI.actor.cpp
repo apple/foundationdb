@@ -4029,13 +4029,13 @@ PublicRequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRange
 }
 
 template <class GetKeyValuesFamilyRequest>
-void setMatchIndex(GetKeyValuesFamilyRequest& req, int matchIndex) {
+void setMrp(GetKeyValuesFamilyRequest& req, Key mrp) {
 	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
 		// do nothing;
 	} else if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
 		// do nothing;
 	} else if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequestV2>::value) {
-		req.matchIndex = matchIndex;
+		req.mrp = mrp;
 	} else {
 		UNREACHABLE();
 	}
@@ -4046,10 +4046,10 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
                                         Version version,
                                         KeyRange keys,
                                         Key mapper,
+                                        Key mrp,
                                         GetRangeLimits limits,
                                         Reverse reverse,
-                                        UseTenant useTenant,
-                                        int matchIndex) {
+                                        UseTenant useTenant) {
 	state RangeResultFamily output;
 	// TODO - ljoswiak parent or link?
 	state Span span("NAPI:getExactRange"_loc, trState->spanContext);
@@ -4082,7 +4082,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
 
-			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
+			setMrp(req, mrp);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
@@ -4260,10 +4260,10 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
                                            KeySelector begin,
                                            KeySelector end,
                                            Key mapper,
+                                           Key mrp,
                                            GetRangeLimits limits,
                                            Reverse reverse,
-                                           UseTenant useTenant,
-                                           int matchIndex) {
+                                           UseTenant useTenant) {
 	if (version == latestVersion) {
 		state Transaction transaction(trState->cx);
 		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
@@ -4287,7 +4287,7 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 	// or allKeys.begin exists in the database/tenant and will be part of the conflict range anyways
 
 	RangeResultFamily _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse, useTenant, matchIndex));
+	    trState, version, KeyRangeRef(b, e), mapper, mrp, limits, reverse, useTenant));
 	RangeResultFamily r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
@@ -4429,12 +4429,12 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
                                    KeySelector begin,
                                    KeySelector end,
                                    Key mapper,
+                                   Key mrp,
                                    GetRangeLimits limits,
                                    Promise<std::pair<Key, Key>> conflictRange,
                                    Snapshot snapshot,
                                    Reverse reverse,
-                                   UseTenant useTenant = UseTenant::True,
-                                   int matchIndex = MATCH_INDEX_ALL) {
+                                   UseTenant useTenant = UseTenant::True) {
 	//	state using RangeResultRefFamily = typename RangeResultFamily::RefType;
 	state GetRangeLimits originalLimits(limits);
 	state KeySelector originalBegin = begin;
@@ -4485,7 +4485,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			state GetKeyValuesFamilyRequest req;
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
-			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
+			setMrp(req, mrp);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.options = trState->readOptions;
 			req.version = readVersion;
@@ -4670,10 +4670,10 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						        originalBegin,
 						        originalEnd,
 						        mapper,
+						        mrp,
 						        originalLimits,
 						        reverse,
-						        useTenant,
-						        matchIndex));
+						        useTenant));
 						getRangeFinished(
 						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
 						return result;
@@ -4710,10 +4710,10 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						        originalBegin,
 						        originalEnd,
 						        mapper,
+						        mrp,
 						        originalLimits,
 						        reverse,
-						        useTenant,
-						        matchIndex));
+						        useTenant));
 						getRangeFinished(
 						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
 						return result;
@@ -5297,6 +5297,7 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
 	                                                                     begin,
 	                                                                     end,
 	                                                                     ""_sr,
+	                                                                     ""_sr,
 	                                                                     limits,
 	                                                                     Promise<std::pair<Key, Key>>(),
 	                                                                     Snapshot::True,
@@ -5697,10 +5698,10 @@ template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class 
 Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin,
                                                         const KeySelector& end,
                                                         const Key& mapper,
+                                                        const Key& mrp,
                                                         GetRangeLimits limits,
                                                         Snapshot snapshot,
-                                                        Reverse reverse,
-                                                        int matchIndex) {
+                                                        Reverse reverse) {
 	++trState->cx->transactionLogicalReads;
 	increaseCounterForRequest<GetKeyValuesFamilyRequest>(trState->cx);
 
@@ -5741,7 +5742,7 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
 	}
 
 	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, getReadVersion(), b, e, mapper, limits, conflictRange, snapshot, reverse, UseTenant::True, matchIndex);
+	    trState, getReadVersion(), b, e, mapper, mrp, limits, conflictRange, snapshot, reverse, UseTenant::True);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
@@ -5750,7 +5751,7 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           Snapshot snapshot,
                                           Reverse reverse) {
 	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
-	    begin, end, ""_sr, limits, snapshot, reverse, MATCH_INDEX_ALL);
+	    begin, end, ""_sr, ""_sr, limits, snapshot, reverse);
 }
 
 Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
@@ -5759,23 +5760,19 @@ Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
                                                       GetRangeLimits limits,
                                                       Snapshot snapshot,
                                                       Reverse reverse) {
-	TraceEvent("Hfu5 Transaction::getMappedRange");
-	std::cout << "Hfu5 Transaction::getMappedRange" << std::endl;
 	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
-	    begin, end, mapper, limits, snapshot, reverse, MATCH_INDEX_ALL);
+	    begin, end, mapper, ""_sr, limits, snapshot, reverse);
 }
 
 Future<MappedRangeResultV2> Transaction::getMappedRangeV2(const KeySelector& begin,
                                                           const KeySelector& end,
                                                           const Key& mapper,
+                                                          const Key& mrp,
                                                           GetRangeLimits limits,
                                                           Snapshot snapshot,
-                                                          Reverse reverse,
-                                                          int matchIndex) {
-	TraceEvent("Hfu5 Transaction::getMappedRangeV2").detail("MatchIndex", matchIndex);
-	std::cout << "Hfu5 Transaction::getMappedRangeV2" << std::endl;
+                                                          Reverse reverse) {
 	return getRangeInternal<GetMappedKeyValuesRequestV2, GetMappedKeyValuesReplyV2, MappedRangeResultV2>(
-	    begin, end, mapper, limits, snapshot, reverse, matchIndex);
+	    begin, end, mapper, mrp, limits, snapshot, reverse);
 }
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           const KeySelector& end,

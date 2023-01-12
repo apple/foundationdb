@@ -195,16 +195,14 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 ThreadFuture<MappedRangeResultV2> DLTransaction::getMappedRangeV2(const KeySelectorRef& begin,
                                                                   const KeySelectorRef& end,
                                                                   const StringRef& mapper,
+                                                                  const StringRef& mrp,
                                                                   GetRangeLimits limits,
                                                                   bool snapshot,
-                                                                  bool reverse,
-                                                                  int matchIndex) {
+                                                                  bool reverse) {
 
 	if (!api->transactiongetMappedRangeV2) {
 		return unsupported_operation();
 	}
-	TraceEvent("Hfu5 DLTransaction::getMappedRangeV2").detail("MatchIndex", matchIndex);
-	std::cout << "Hfu5 DLTransaction::getMappedRangeV2" << std::endl;
 	FdbCApi::FDBFuture* f = api->transactiongetMappedRangeV2(tr,
 	                                                         begin.getKey().begin(),
 	                                                         begin.getKey().size(),
@@ -222,7 +220,8 @@ ThreadFuture<MappedRangeResultV2> DLTransaction::getMappedRangeV2(const KeySelec
 	                                                         0,
 	                                                         snapshot,
 	                                                         reverse,
-	                                                         matchIndex);
+	                                                         mrp.begin(),
+	                                                         mrp.size());
 	return toThreadFuture<MappedRangeResultV2>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBMappedKeyValueV2* kvms;
 		int count;
@@ -1410,18 +1409,18 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
 ThreadFuture<MappedRangeResultV2> MultiVersionTransaction::getMappedRangeV2(const KeySelectorRef& begin,
                                                                             const KeySelectorRef& end,
                                                                             const StringRef& mapper,
+                                                                            const StringRef& mrp,
                                                                             GetRangeLimits limits,
                                                                             bool snapshot,
-                                                                            bool reverse,
-                                                                            int matchIndex) {
+                                                                            bool reverse) {
 	return executeOperation(&ITransaction::getMappedRangeV2,
 	                        begin,
 	                        end,
 	                        mapper,
+	                        mrp,
 	                        std::forward<GetRangeLimits>(limits),
 	                        std::forward<bool>(snapshot),
-	                        std::forward<bool>(reverse),
-	                        std::forward<int>(matchIndex));
+	                        std::forward<bool>(reverse));
 }
 
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {

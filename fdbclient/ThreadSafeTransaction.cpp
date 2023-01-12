@@ -443,19 +443,17 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
 ThreadFuture<MappedRangeResultV2> ThreadSafeTransaction::getMappedRangeV2(const KeySelectorRef& begin,
                                                                           const KeySelectorRef& end,
                                                                           const StringRef& mapper,
+                                                                          const StringRef& mrp,
                                                                           GetRangeLimits limits,
                                                                           bool snapshot,
-                                                                          bool reverse,
-                                                                          int matchIndex) {
+                                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 	Key h = mapper;
 	ISingleThreadTransaction* tr = this->tr;
-	TraceEvent("Hfu5 ThreadSafeTransaction::getMappedRangeV2").detail("MatchIndex", matchIndex);
-	std::cout << "Hfu5 ThreadSafeTransaction::getMappedRangeV2" << std::endl;
-	return onMainThread([tr, b, e, h, limits, snapshot, reverse, matchIndex]() -> Future<MappedRangeResultV2> {
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse, mrp]() -> Future<MappedRangeResultV2> {
 		tr->checkDeferredError();
-		return tr->getMappedRangeV2(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse }, matchIndex);
+		return tr->getMappedRangeV2(b, e, h, mrp, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 

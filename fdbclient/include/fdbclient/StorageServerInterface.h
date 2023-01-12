@@ -512,9 +512,9 @@ struct GetMappedKeyValuesRequestV2 : TimedRequest {
 	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	KeyRef mapper;
+	KeyRef mrp;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	int matchIndex;
 	Optional<TagSet> tags;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReplyV2> reply;
@@ -532,6 +532,7 @@ struct GetMappedKeyValuesRequestV2 : TimedRequest {
 		           begin,
 		           end,
 		           mapper,
+		           mrp,
 		           version,
 		           limit,
 		           limitBytes,
@@ -541,7 +542,6 @@ struct GetMappedKeyValuesRequestV2 : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
-		           matchIndex,
 		           arena);
 	}
 };

@@ -366,20 +366,20 @@ public:
 	[[nodiscard]] Future<MappedRangeResultV2> getMappedRangeV2(const KeySelector& begin,
 	                                                           const KeySelector& end,
 	                                                           const Key& mapper,
+	                                                           const Key& mrp,
 	                                                           GetRangeLimits limits,
 	                                                           Snapshot = Snapshot::False,
-	                                                           Reverse = Reverse::False,
-	                                                           int matchIndex = MATCH_INDEX_ALL);
+	                                                           Reverse = Reverse::False);
 
 private:
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
 	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
 	                                           const KeySelector& end,
 	                                           const Key& mapper,
+	                                           const Key& mrp,
 	                                           GetRangeLimits limits,
 	                                           Snapshot snapshot,
-	                                           Reverse reverse,
-	                                           int matchIndex);
+	                                           Reverse reverse);
 
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large

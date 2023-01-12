@@ -4193,6 +4193,7 @@ ACTOR template <class Req>
 Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
                                                   StringRef prefix,
                                                   Version version,
+                                                  bool fetchLocalOnly,
                                                   Arena* a,
                                                   // To provide span context, tags, debug ID to underlying lookups.
                                                   Req* pOriginalReq) {
@@ -4247,7 +4248,7 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 	}
 
 	++data->counters.quickGetKeyValuesMiss;
-	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
+	if (fetchLocalOnly) {
 		// todo: retain tenant name here, now compiling error
 		state Transaction tr(data->cx);
 		tr.setVersion(version);
@@ -4826,6 +4827,36 @@ void setLocal(MappedKV* kvm, int local) {
 	}
 }
 
+const int code_int = 1;
+// const int code_bool = 2;
+// const int code_string = 3;
+
+void fillParams(GetMappedKeyValuesRequest* req, int* matchIndex) {
+	*matchIndex = MATCH_INDEX_ALL;
+}
+void parseMatchIndex(KeyRef mrp, int* matchIndex, int version) {
+	int pos = 0;
+	if (version == 1) {
+		pos = 1;
+	}
+	if (mrp[pos] != code_int) {
+		// err
+		TraceEvent("Hfu5ErrorParsingMatchIndex");
+		return;
+	}
+	std::memcpy(matchIndex, mrp.begin() + pos + 1, sizeof(int));
+}
+
+void fillParams(GetMappedKeyValuesRequestV2* req, int* matchIndex) {
+	KeyRef mrp = req->mrp;
+	int v = mrp[0];
+	if (v > 1) {
+		TraceEvent("Hfu5ErrorVersionNotSupport");
+		return;
+	}
+	parseMatchIndex(mrp, matchIndex, v);
+}
+
 // Issues a secondary query (either range and point read) and fills results into "kvm".
 ACTOR template <class Req, class MappedKV>
 Future<Void> mapSubquery(StorageServer* data,
@@ -4833,6 +4864,7 @@ Future<Void> mapSubquery(StorageServer* data,
                          Req* pOriginalReq,
                          Arena* pArena,
                          int matchIndex,
+                         bool fetchLocalOnly,
                          bool isRangeQuery,
                          KeyValueRef* it,
                          MappedKV* kvm,
@@ -4841,7 +4873,8 @@ Future<Void> mapSubquery(StorageServer* data,
 		// Use the mappedKey as the prefix of the range query.
 		// if MappedKV is MappedKeyValueRefV2, then set it
 		try {
-			GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
+			GetRangeReqAndResultRef getRange =
+			    wait(quickGetKeyValues(data, mappedKey, version, fetchLocalOnly, pArena, pOriginalReq));
 			if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
 			    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) ||
 			    matchIndex == MATCH_INDEX_ALL || std::is_same<Req, GetMappedKeyValuesRequest>::value) {
@@ -4898,7 +4931,6 @@ Future<Reply> mapKeyValues(StorageServer* data,
                            StringRef mapper,
                            // To provide span context, tags, debug ID to underlying lookups.
                            Req* pOriginalReq,
-                           int matchIndex,
                            int* remainingLimitBytes) {
 	state Reply result;
 	result.version = input.version;
@@ -4918,11 +4950,14 @@ Future<Reply> mapKeyValues(StorageServer* data,
 	}
 	state std::vector<Optional<Tuple>> vt;
 	state bool isRangeQuery = false;
+	state int matchIndex;
+	state bool fetchLocalOnly = false;
+	fillParams(pOriginalReq, &matchIndex);
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
 	state int sz = input.data.size();
-	TraceEvent("Hfu5 mapKeyValues").detail("Size", sz);
-	std::cout << "Hfu5 mapKeyValues " << sz << std::endl;
+	TraceEvent("Hfu5 mapKeyValues").detail("Size", sz).detail("MatchIndex", matchIndex);
+	std::cout << "Hfu5 mapKeyValues sz: " << sz << " matchindex: " << matchIndex << std::endl;
 	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
 	state std::vector<MappedKV> kvms(k);
 	state std::vector<Future<Void>> subqueries;
@@ -4947,9 +4982,17 @@ Future<Reply> mapKeyValues(StorageServer* data,
 
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
-
-			subqueries.push_back(mapSubquery(
-			    data, input.version, pOriginalReq, &result.arena, matchIndex, isRangeQuery, it, kvm, mappedKey));
+			int fetchLocalOnly = false;
+			subqueries.push_back(mapSubquery(data,
+			                                 input.version,
+			                                 pOriginalReq,
+			                                 &result.arena,
+			                                 matchIndex,
+			                                 fetchLocalOnly,
+			                                 isRangeQuery,
+			                                 it,
+			                                 kvm,
+			                                 mappedKey));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -5161,14 +5204,6 @@ TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
 	return Void();
 }
 
-int getMatchIndex(GetMappedKeyValuesRequest req) {
-	return MATCH_INDEX_ALL;
-}
-
-int getMatchIndex(GetMappedKeyValuesRequestV2 req) {
-	return req.matchIndex;
-}
-
 // Most of the actor is copied from getKeyValuesQ. I tried to use templates but things become nearly impossible after
 // combining actor shenanigans with template shenanigans.
 ACTOR template <class Req, class Reply, class MappedKV>
@@ -5319,9 +5354,8 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, Req req)
 			state Reply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
-				int matchIndex = getMatchIndex(req);
 				Reply _r = wait(mapKeyValues<Req, Reply, MappedKV>(
-				    data, getKeyValuesReply, req.mapper, &req, matchIndex, &remainingLimitBytes));
+				    data, getKeyValuesReply, req.mapper, &req, &remainingLimitBytes));
 				r = _r;
 			} catch (Error& e) {
 				// catch txn_too_old here if prefetch runs for too long, and returns it back to client

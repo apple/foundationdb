@@ -814,7 +814,8 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range_v2(FDBTransacti
                                                                     int iteration,
                                                                     fdb_bool_t snapshot,
                                                                     fdb_bool_t reverse,
-                                                                    int matchIndex) {
+                                                                    uint8_t const* mapped_range_params,
+                                                                    int mapped_range_params_length) {
 	std::cout << "Hfu5 fdb_c::getMappedRangeV2" << std::endl;
 	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
 	if (r != nullptr)
@@ -825,10 +826,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range_v2(FDBTransacti
 	                        KeySelectorRef(KeyRef(begin_key_name, begin_key_name_length), begin_or_equal, begin_offset),
 	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
 	                        StringRef(mapper_name, mapper_name_length),
+	                        StringRef(mapped_range_params, mapped_range_params_length),
 	                        GetRangeLimits(limit, target_bytes),
 	                        snapshot,
-	                        reverse,
-	                        matchIndex)
+	                        reverse)
 	                    .extractPtr());
 }
 

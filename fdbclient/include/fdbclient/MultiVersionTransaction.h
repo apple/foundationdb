@@ -325,7 +325,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                          int iteration,
 	                                          fdb_bool_t snapshot,
 	                                          fdb_bool_t reverse,
-	                                          int matchIndex);
+	                                          uint8_t const* mrp,
+	                                          int mrp_length);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
 
 	void (*transactionSet)(FDBTransaction* tr,
@@ -493,10 +494,10 @@ public:
 	ThreadFuture<MappedRangeResultV2> getMappedRangeV2(const KeySelectorRef& begin,
 	                                                   const KeySelectorRef& end,
 	                                                   const StringRef& mapper,
+	                                                   const StringRef& mrp,
 	                                                   GetRangeLimits limits,
 	                                                   bool snapshot,
-	                                                   bool reverse,
-	                                                   int matchIndex) override;
+	                                                   bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
@@ -726,10 +727,10 @@ public:
 	ThreadFuture<MappedRangeResultV2> getMappedRangeV2(const KeySelectorRef& begin,
 	                                                   const KeySelectorRef& end,
 	                                                   const StringRef& mapper,
+	                                                   const StringRef& mrp,
 	                                                   GetRangeLimits limits,
 	                                                   bool snapshot,
-	                                                   bool reverse,
-	                                                   int matchIndex) override;
+	                                                   bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 

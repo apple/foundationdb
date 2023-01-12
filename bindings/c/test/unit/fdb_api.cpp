@@ -343,7 +343,8 @@ MappedKeyValueArrayFutureV2 Transaction::get_mapped_range_v2(const uint8_t* begi
                                                              int iteration,
                                                              fdb_bool_t snapshot,
                                                              fdb_bool_t reverse,
-                                                             int matchIndex) {
+                                                             uint8_t const* mapped_range_params,
+                                                             int mapped_range_params_length) {
 	return MappedKeyValueArrayFutureV2(fdb_transaction_get_mapped_range_v2(tr_,
 	                                                                       begin_key_name,
 	                                                                       begin_key_name_length,
@@ -361,7 +362,8 @@ MappedKeyValueArrayFutureV2 Transaction::get_mapped_range_v2(const uint8_t* begi
 	                                                                       iteration,
 	                                                                       snapshot,
 	                                                                       reverse,
-	                                                                       matchIndex));
+	                                                                       mapped_range_params,
+	                                                                       mapped_range_params_length));
 }
 
 EmptyFuture Transaction::watch(std::string_view key) {
