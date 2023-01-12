@@ -2814,6 +2814,8 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	}
 
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
+		// When we just processed some data, we reset the warning start time.
+		state double lastPullAsyncDataWarningTime = now();
 		loop {
 			choose {
 				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
@@ -2827,10 +2829,12 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					}
 					dbInfoChange = logData->logSystem->onChange();
 				}
-				when(wait(delay(SERVER_KNOBS->TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS))) {
+				when(wait(delay(lastPullAsyncDataWarningTime + SERVER_KNOBS->TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS -
+				                now()))) {
 					TraceEvent(SevWarn, "TLogPullAsyncDataSlow", logData->logId)
 					    .detail("Elapsed", now() - startTime)
 					    .detail("Version", logData->version.get());
+					lastPullAsyncDataWarningTime = now();
 				}
 			}
 		}
