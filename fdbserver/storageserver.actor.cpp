@@ -10174,12 +10174,12 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self,
 	state Error error = success();
 	state bool timedout = false;
 
-	if (tenantPrefix.present()) {
-		// TraceEvent(SevDebug, "AKWaitMetricsResult")
-		//     .detail("Prefix", tenantPrefix.get())
-		//     .detail("Bytes", metrics.bytes)
-		//     .detail("QuickCondition", (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)));
-	}
+	// if (tenantPrefix.present()) {
+	// 	TraceEvent(SevDebug, "AKWaitMetricsResult")
+	// 	    .detail("Preifx", tenantPrefix.get())
+	// 	    .detail("Metrics", metrics.toString())
+	// 	    .detail("QuickCondition", (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)));
+	// }
 
 	if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
 		CODE_PROBE(true, "ShardWaitMetrics return case 1 (quickly)");
@@ -10286,10 +10286,10 @@ ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsReques
 	Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
 	Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 	if (tenantPrefix.present()) {
-		req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
+		req.keys = req.keys.withPrefix(tenantPrefix.get());
 	}
-
 	if (!self->isReadable(req.keys)) {
+		CODE_PROBE(true, "waitMetricsTenantAware wrong_shard_server()");
 		// TraceEvent(SevWarn, "AKWaitMetricsRequestWrongShard2")
 		//     .detail("ServerID", self->thisServerID)
 		//     .detail("TenantId", req.tenantInfo.tenantId)

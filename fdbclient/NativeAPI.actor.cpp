@@ -7598,7 +7598,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		// 	TraceEvent(SevWarn, "AKNative1", debugId)
 		// 	    .detail("TenantId", tenantInfo.tenantId)
 		// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-		// 	    .detail("Bytes", m.bytes);
+		// 	    .detail("Metrics", m.toString());
 		// }
 		return m;
 	} catch (Error& e) {
