@@ -622,6 +622,8 @@ class Tester:
                     if self.tenant != None:
                         self.tenant.get_id().wait()
                         inst.push(b"GOT_TENANT_ID")
+                    else:
+                        inst.push(b"NO_ACTIVE_TENANT")
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)

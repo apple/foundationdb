@@ -514,6 +514,16 @@ public class AsyncStackTester {
 			inst.context.setTenant(Optional.empty());
 			return AsyncUtil.DONE;
 		}
+		else if (op == StackOperation.TENANT_GET_ID) {
+			if (inst.context.tenant.isPresent()) {
+				return inst.context.tenant.get().getId().thenAcceptAsync(id -> {
+					inst.push("GOT_TENANT_ID".getBytes());
+				}, FDB.DEFAULT_EXECUTOR);
+			} else {
+				inst.push("NO_ACTIVE_TENANT".getBytes());
+				return AsyncUtil.DONE;
+			}
+		}
 		else if (op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);
 			return inst.context.db.runAsync(tr -> {
