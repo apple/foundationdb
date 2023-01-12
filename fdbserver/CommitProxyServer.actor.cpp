@@ -1079,6 +1079,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
 				                       /* pToCommit= */ nullptr,
 				                       /* pCipherKeys= */ nullptr,
+				                       EncryptionAtRestMode::DISABLED,
 				                       self->forceRecovery,
 				                       /* version= */ self->commitVersion,
 				                       /* popVersion= */ 0,
@@ -1179,6 +1180,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
 				                       pProxyCommitData->encryptMode.isEncryptionEnabled() ? &self->cipherKeys
 				                                                                           : nullptr,
+				                       pProxyCommitData->encryptMode,
 				                       self->forceRecovery,
 				                       self->commitVersion,
 				                       self->commitVersion + 1,
@@ -2786,6 +2788,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       pContext->pCommitData->encryptMode.isEncryptionEnabled() ? &cipherKeys : nullptr,
+		                       pContext->pCommitData->encryptMode,
 		                       confChanges,
 		                       /* version= */ 0,
 		                       /* popVersion= */ 0,
