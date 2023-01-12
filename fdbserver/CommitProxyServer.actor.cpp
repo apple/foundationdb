@@ -427,6 +427,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 					if ((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) &&
 					    batch.size()) {
+						commitData->triggerCommit.set(false);
 						out.send({ std::move(batch), batchBytes });
 						lastBatch = now();
 						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
@@ -439,8 +440,18 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					commitData->commitBatchesMemBytesCount += bytes;
 				}
 				when(wait(timeout)) {}
+				when(wait(commitData->triggerCommit.onChange())) {
+					ASSERT(commitData->triggerCommit.get());
+					double commitTime = lastBatch + SERVER_KNOBS->COMMIT_TRIGGER_DELAY;
+					if (now() > commitTime) {
+						break;
+					}
+
+					timeout = timeout || delayJittered(commitTime - now(), TaskPriority::ProxyCommitBatcher);
+				}
 			}
 		}
+		commitData->triggerCommit.set(false);
 		out.send({ std::move(batch), batchBytes });
 		lastBatch = now();
 	}
@@ -2121,6 +2132,10 @@ ACTOR static Future<Void> doTenantIdRequest(GetTenantIdRequest req, ProxyCommitD
 	state Future<Void> futureVersionDelay = minTenantVersion > commitData->stats.lastCommitVersionAssigned + 1
 	                                            ? delay(SERVER_KNOBS->FUTURE_VERSION_DELAY)
 	                                            : Never();
+
+	if (minTenantVersion > commitData->version.get()) {
+		commitData->triggerCommit.set(true);
+	}
 
 	choose {
 		// Wait until we are sure that we've received metadata updates through minTenantVersion
