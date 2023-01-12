@@ -4820,25 +4820,39 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
-template <class MappedKV>
-void setLocal(MappedKV* kvm, int local) {
-	if constexpr (std::is_same<MappedKV, MappedKeyValueRefV2>::value) {
-		kvm->local = local;
-	}
-}
+std::unordered_map<int, int> matchIndexPosForVersions = { std::make_pair(2, 1) };
+std::unordered_map<int, int> localPosForVersions = { std::make_pair(2, 1) };
+std::set<int> supportedVersions{ 2 };
 
 const int code_int = 1;
-// const int code_bool = 2;
-// const int code_string = 3;
+const int code_bool = 2;
 
-void fillParams(GetMappedKeyValuesRequest* req, int* matchIndex) {
-	*matchIndex = MATCH_INDEX_ALL;
+void fillKVM(int getMappedRangeProtocolVersion, MappedKeyValueRef* kvm, int local) {
+	return;
 }
+
+void setLocal(int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local) {
+	uint8_t* replyBytes[MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH];
+	memset(replyBytes, 0, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
+	replyBytes[0] = getMappedRangeProtocolVersion;
+	replyBytes[1] = code_bool;
+	std::memcpy(replyBytes + 2, local, sizeof(bool));
+
+	*kvm->mappedKeyValueResponseBytes = StringRef(replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
+}
+
+void fillKVM(int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local) {
+	setLocal(getMappedRangeProtocolVersion, kvm, local);
+}
+
+// returns protocol version for getMappedRange
+int parseParams(GetMappedKeyValuesRequest* req, int* matchIndex) {
+	*matchIndex = MATCH_INDEX_ALL;
+	return 0;
+}
+
 void parseMatchIndex(KeyRef mrp, int* matchIndex, int version) {
-	int pos = 0;
-	if (version == 1) {
-		pos = 1;
-	}
+	int pos = matchIndexPosForVersions[version];
 	if (mrp[pos] != code_int) {
 		// err
 		TraceEvent("Hfu5ErrorParsingMatchIndex");
@@ -4847,14 +4861,15 @@ void parseMatchIndex(KeyRef mrp, int* matchIndex, int version) {
 	std::memcpy(matchIndex, mrp.begin() + pos + 1, sizeof(int));
 }
 
-void fillParams(GetMappedKeyValuesRequestV2* req, int* matchIndex) {
+int parseParams(GetMappedKeyValuesRequestV2* req, int* matchIndex) {
 	KeyRef mrp = req->mrp;
 	int v = mrp[0];
-	if (v > 1) {
+	if (v > *supportedVersions.rbegin()) {
 		TraceEvent("Hfu5ErrorVersionNotSupport");
 		return;
 	}
 	parseMatchIndex(mrp, matchIndex, v);
+	return v;
 }
 
 // Issues a secondary query (either range and point read) and fills results into "kvm".
@@ -4883,7 +4898,7 @@ Future<Void> mapSubquery(StorageServer* data,
 			}
 			kvm->reqAndResult = getRange;
 		} catch (Error& e) {
-			setLocal(kvm, e.code() != error_code_quick_get_key_values_miss);
+			fillKVM(getMappedRangeProtocolVersion, kvm, e.code() != error_code_quick_get_key_values_miss);
 			if (e.code() != error_code_quick_get_key_values_miss) {
 				TraceEvent("MapSubQueryError").error(e);
 			}
@@ -4952,7 +4967,7 @@ Future<Reply> mapKeyValues(StorageServer* data,
 	state bool isRangeQuery = false;
 	state int matchIndex;
 	state bool fetchLocalOnly = false;
-	fillParams(pOriginalReq, &matchIndex);
+	state int getMappedRangeProtocolVersion = parseParams(pOriginalReq, &matchIndex);
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
 	state int sz = input.data.size();
@@ -4975,7 +4990,7 @@ Future<Reply> mapKeyValues(StorageServer* data,
 			// Clear key value to the default.
 			kvm->key = ""_sr;
 			kvm->value = ""_sr;
-			setLocal(kvm, true);
+			fillKVM(getMappedRangeProtocolVersion, kvm, true);
 			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());

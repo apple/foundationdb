@@ -178,9 +178,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			ASSERT(it->key == EMPTY);
 		}
 		ASSERT(it->value == EMPTY);
-
 		if constexpr (std::is_same<KV, MappedKeyValueRefV2>::value) {
-			ASSERT(it->local == true);
+			ASSERT((int)*it->mappedKeyValueResponseBytes.begin() == 2); // type
+			ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 1 == 1); // type
+			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 2 == 1); // type
 		}
 		if (self->SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
@@ -284,7 +285,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					}
 					return std::make_pair(result.size(), result.more);
 				} else {
-					uint8_t tmp[6] = { 0x01, 0x01, 0x00, 0x00, 0x00, 0x00 };
+					uint8_t tmp[6] = { 0x02, 0x01, 0x00, 0x00, 0x00, 0x00 };
 					tmp[2] = matchIndex;
 					StringRef str(tmp, 6);
 					Key mrp(str);

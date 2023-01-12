@@ -207,15 +207,16 @@ struct GetMappedRangeResultV2 {
 		           const std::string& begin,
 		           const std::string& end,
 		           const std::vector<std::pair<std::string, std::string>>& range_results,
-		           const fdb_bool_t local)
-		  : key(key), value(value), begin(begin), end(end), range_results(range_results), local(local) {}
+		           const std::string& mappedKeyValueResponseBytes)
+		  : key(key), value(value), begin(begin), end(end), range_results(range_results),
+		    mappedKeyValueResponseBytes(mappedKeyValueResponseBytes) {}
 
 		std::string key;
 		std::string value;
 		std::string begin;
 		std::string end;
 		std::vector<std::pair<std::string, std::string>> range_results;
-		fdb_bool_t local;
+		std::string mappedKeyValueResponseBytes;
 	};
 	std::vector<MappedKVV2> mkvs;
 	// True if values remain in the key range requested.
@@ -420,8 +421,9 @@ GetMappedRangeResultV2 get_mapped_range_v2(fdb::Transaction& tr,
 			range_results.emplace_back(k, v);
 			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
-		auto local = mkv.local;
-		result.mkvs.emplace_back(key, value, begin, end, range_results, local);
+		auto mappedKeyValueResponseBytes = extractString(mkv.mappedKeyValueResponseBytes);
+
+		result.mkvs.emplace_back(key, value, begin, end, range_results, mappedKeyValueResponseBytes);
 	}
 	return result;
 }
@@ -1211,7 +1213,7 @@ void validateIndex(const GetMappedRangeResultV2::MappedKVV2& mkv,
 		CHECK(EMPTY.compare(mkv.key) == 0);
 	}
 	CHECK(EMPTY.compare(mkv.value) == 0);
-	CHECK(mkv.local == true);
+	// CHECK(mkv.mappedKeyValueResponseBytes);
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {

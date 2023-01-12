@@ -153,6 +153,7 @@ const int MATCH_INDEX_ALL = 0;
 const int MATCH_INDEX_NONE = 1;
 const int MATCH_INDEX_MATCHED_ONLY = 2;
 const int MATCH_INDEX_UNMATCHED_ONLY = 3;
+const int MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH = 128;
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
@@ -870,12 +871,12 @@ struct MappedKeyValueRefV2 : KeyValueRef {
 	MappedReqAndResultRef reqAndResult;
 
 	// use int for less mess about memory alignment
-	int local;
+	KeyRef mappedKeyValueResponseBytes;
 
 	MappedKeyValueRefV2() = default;
 	MappedKeyValueRefV2(Arena& a, const MappedKeyValueRefV2& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
-		local = copyFrom.local;
+		mappedKeyValueResponseBytes = copyFrom.mappedKeyValueResponseBytes;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -889,7 +890,7 @@ struct MappedKeyValueRefV2 : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRefV2& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult && local == rhs.local;
+		       reqAndResult == rhs.reqAndResult && mappedKeyValueResponseBytes == rhs.mappedKeyValueResponseBytes;
 	}
 	bool operator!=(const MappedKeyValueRefV2& rhs) const { return !(rhs == *this); }
 
@@ -899,7 +900,7 @@ struct MappedKeyValueRefV2 : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult, local);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult, mappedKeyValueResponseBytes);
 	}
 };
 
