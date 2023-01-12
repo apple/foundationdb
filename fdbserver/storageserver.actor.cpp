@@ -933,12 +933,12 @@ public:
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
 
 	KeyRangeMap<std::vector<Reference<ChangeFeedInfo>>> keyChangeFeed;
-	std::map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
+	std::unordered_map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
 	Deque<std::pair<std::vector<Key>, Version>> changeFeedVersions;
 	std::map<UID, PromiseStream<Key>> changeFeedDestroys;
 	std::set<Key> currentChangeFeeds;
 	std::set<Key> fetchingChangeFeeds;
-	std::unordered_map<NetworkAddress, std::map<UID, Version>> changeFeedClientVersions;
+	std::unordered_map<NetworkAddress, std::unordered_map<UID, Version>> changeFeedClientVersions;
 	std::unordered_map<Key, Version> changeFeedCleanupDurable;
 	int64_t activeFeedQueries = 0;
 	int64_t changeFeedMemoryBytes = 0;
@@ -2434,7 +2434,8 @@ MutationsAndVersionRef filterMutationsInverted(Arena& arena, MutationsAndVersion
 MutationsAndVersionRef filterMutations(Arena& arena,
                                        MutationsAndVersionRef const& m,
                                        KeyRange const& range,
-                                       bool inverted) {
+                                       bool inverted,
+                                       int commonPrefixLength) {
 	if (m.mutations.size() == 1 && m.mutations.back().param1 == lastEpochEndPrivateKey) {
 		return m;
 	}
@@ -2446,22 +2447,28 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 	Optional<VectorRef<MutationRef>> modifiedMutations;
 	for (int i = 0; i < m.mutations.size(); i++) {
 		if (m.mutations[i].type == MutationRef::SetValue) {
-			if (modifiedMutations.present() && range.contains(m.mutations[i].param1)) {
+			bool inRange = range.begin.compareSuffix(m.mutations[i].param1, commonPrefixLength) <= 0 &&
+			               m.mutations[i].param1.compareSuffix(range.end, commonPrefixLength) < 0;
+			if (modifiedMutations.present() && inRange) {
 				modifiedMutations.get().push_back(arena, m.mutations[i]);
 			}
-			if (!modifiedMutations.present() && !range.contains(m.mutations[i].param1)) {
+			if (!modifiedMutations.present() && !inRange) {
 				modifiedMutations = m.mutations.slice(0, i);
 				arena.dependsOn(range.arena());
 			}
 		} else {
 			ASSERT(m.mutations[i].type == MutationRef::ClearRange);
+			// param1 < range.begin || param2 > range.end
 			if (!modifiedMutations.present() &&
-			    (m.mutations[i].param1 < range.begin || m.mutations[i].param2 > range.end)) {
+			    (m.mutations[i].param1.compareSuffix(range.begin, commonPrefixLength) < 0 ||
+			     m.mutations[i].param2.compareSuffix(range.end, commonPrefixLength) > 0)) {
 				modifiedMutations = m.mutations.slice(0, i);
 				arena.dependsOn(range.arena());
 			}
 			if (modifiedMutations.present()) {
-				if (m.mutations[i].param1 < range.end && range.begin < m.mutations[i].param2) {
+				// param1 < range.end && range.begin < param2
+				if (m.mutations[i].param1.compareSuffix(range.end, commonPrefixLength) < 0 &&
+				    range.begin.compareSuffix(m.mutations[i].param2, commonPrefixLength) < 0) {
 					modifiedMutations.get().push_back(arena,
 					                                  MutationRef(MutationRef::ClearRange,
 					                                              std::max(range.begin, m.mutations[i].param1),
@@ -2543,9 +2550,12 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
 
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
+                                                                            Reference<ChangeFeedInfo> feedInfo,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
                                                                             bool atLatest,
+                                                                            bool doFilterMutations,
+                                                                            int commonFeedPrefixLength,
                                                                             UID streamUID, /* for debugging */
                                                                             FeedDiskReadState* feedDiskReadState) {
 	state ChangeFeedStreamReply reply;
@@ -2577,12 +2587,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		throw wrong_shard_server();
 	}
 
-	auto feed = data->uidChangeFeed.find(req.rangeID);
-	if (feed == data->uidChangeFeed.end()) {
+	if (feedInfo->removing) {
 		throw unknown_change_feed();
 	}
-
-	state Reference<ChangeFeedInfo> feedInfo = feed->second;
 
 	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
 	// waiting for the results
@@ -2590,8 +2597,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version dequeKnownCommit = data->knownCommittedVersion.get();
 	state Version emptyVersion = feedInfo->emptyVersion;
 	state Version durableValidationVersion = std::min(data->durableVersion.get(), feedInfo->durableFetchVersion.get());
+	state Version lastMemoryVersion = invalidVersion;
+	state Version lastMemoryKnownCommitted = invalidVersion;
 	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
-	state bool doFilterMutations = !req.range.contains(feedInfo->range);
 	state bool doValidation = EXPENSIVE_VALIDATION;
 
 	if (DEBUG_CF_TRACE) {
@@ -2626,14 +2634,18 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				break;
 			}
 			MutationsAndVersionRef m = *it;
+
+			remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
 			if (doFilterMutations) {
-				m = filterMutations(memoryReply.arena, *it, req.range, inverted);
+				m = filterMutations(memoryReply.arena, *it, req.range, inverted, commonFeedPrefixLength);
 			}
 			if (m.mutations.size()) {
 				memoryReply.arena.dependsOn(it->arena());
 				memoryReply.mutations.push_back(memoryReply.arena, m);
-				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
 			}
+
+			lastMemoryVersion = m.version;
+			lastMemoryKnownCommitted = m.knownCommittedVersion;
 			it++;
 		}
 	}
@@ -2725,7 +2737,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 			MutationsAndVersionRef m = MutationsAndVersionRef(mutations, version, knownCommittedVersion);
 			if (doFilterMutations) {
-				m = filterMutations(reply.arena, m, req.range, inverted);
+				m = filterMutations(reply.arena, m, req.range, inverted, commonFeedPrefixLength);
 			}
 			if (m.mutations.size()) {
 				reply.arena.dependsOn(mutations.arena());
@@ -2812,9 +2824,15 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			reply.mutations.append(reply.arena, it, totalCount);
 			// If still empty, that means disk results were filtered out, but skipped all memory results. Add an empty,
 			// either the last version from disk
-			if (reply.mutations.empty() && res.size()) {
-				CODE_PROBE(true, "Change feed adding empty version after disk + memory filtered");
-				reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
+			if (reply.mutations.empty()) {
+				if (res.size() || (lastMemoryVersion != invalidVersion && remainingLimitBytes <= 0)) {
+					CODE_PROBE(true, "Change feed adding empty version after disk + memory filtered");
+					if (res.empty()) {
+						lastVersion = lastMemoryVersion;
+						lastKnownCommitted = lastMemoryKnownCommitted;
+					}
+					reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
+				}
 			}
 		} else if (reply.mutations.empty() || reply.mutations.back().version < lastVersion) {
 			CODE_PROBE(true, "Change feed adding empty version after disk filtered");
@@ -2823,6 +2841,14 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	} else {
 		reply = memoryReply;
 		*feedDiskReadState = FeedDiskReadState::NORMAL;
+
+		// if we processed memory results that got entirely or mostly filtered, but we're not caught up, add an empty at
+		// the end
+		if ((reply.mutations.empty() || reply.mutations.back().version < lastMemoryVersion) &&
+		    remainingLimitBytes <= 0) {
+			CODE_PROBE(true, "Memory feed adding empty version after memory filtered");
+			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastMemoryVersion, lastMemoryKnownCommitted));
+		}
 	}
 
 	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
@@ -2982,6 +3008,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state bool removeUID = false;
 	state FeedDiskReadState feedDiskReadState = STARTING;
 	state Optional<Version> blockedVersion;
+	state Reference<ChangeFeedInfo> feedInfo;
+	state Future<Void> streamEndReached;
+	state bool doFilterMutations;
+	state int commonFeedPrefixLength;
 
 	try {
 		++data->counters.feedStreamQueries;
@@ -3021,7 +3051,26 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
-		wait(success(waitForVersionNoTooOld(data, req.begin)));
+		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
+		wait(success(waitForVersionNoTooOld(data, checkTooOldVersion)));
+
+		// set persistent references to map data structures to not have to re-look them up every loop
+		auto feed = data->uidChangeFeed.find(req.rangeID);
+		if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+			req.reply.sendError(unknown_change_feed());
+			// throw to delete from changeFeedClientVersions if present
+			throw unknown_change_feed();
+		}
+		feedInfo = feed->second;
+
+		streamEndReached =
+		    (req.end == std::numeric_limits<Version>::max()) ? Never() : data->version.whenAtLeast(req.end);
+
+		doFilterMutations = !req.range.contains(feedInfo->range);
+		commonFeedPrefixLength = 0;
+		if (doFilterMutations) {
+			commonFeedPrefixLength = commonPrefixLength(feedInfo->range.begin, feedInfo->range.end);
+		}
 
 		// send an empty version at begin - 1 to establish the stream quickly
 		ChangeFeedStreamReply emptyInitialReply;
@@ -3065,7 +3114,15 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			wait(onReady);
 			// keep this as not state variable so it is freed after sending to reduce memory
 			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, req, false, atLatest, streamUID, &feedDiskReadState);
+			    getChangeFeedMutations(data,
+			                           feedInfo,
+			                           req,
+			                           false,
+			                           atLatest,
+			                           doFilterMutations,
+			                           commonFeedPrefixLength,
+			                           streamUID,
+			                           &feedDiskReadState);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -3096,11 +3153,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
 			if (removeUID) {
 				if (gotAll || req.begin == req.end) {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(streamUID);
+					clientVersions.erase(streamUID);
 					removeUID = false;
 				} else {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
-					    feedReply.mutations.back().version;
+					clientVersions[streamUID] = feedReply.mutations.back().version;
 				}
 			}
 
@@ -3121,19 +3177,16 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 			if (gotAll) {
 				blockedVersion = Optional<Version>();
-				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+				if (feedInfo->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
 				}
 				choose {
-					when(wait(feed->second->newMutations.onTrigger())) {}
-					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
-					                                                         : data->version.whenAtLeast(req.end))) {}
+					when(wait(feedInfo->newMutations.onTrigger())) {}
+					when(wait(streamEndReached)) {}
 				}
-				auto feedItr = data->uidChangeFeed.find(req.rangeID);
-				if (feedItr == data->uidChangeFeed.end() || feedItr->second->removing) {
+				if (feedInfo->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
