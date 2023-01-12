@@ -587,10 +587,8 @@ Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(TenantInfo tenant,
 	ASSERT_EQ(srcTeam.size(), 1);
 	rep.results.emplace_back(single, extractStorageServerInterfaces(srcTeam.front().servers));
 
-	return KeyRangeLocationInfo(
-	    rep.tenantEntry,
-	    KeyRange(toPrefixRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
-	    buildLocationInfo(rep.results[0].second));
+	return KeyRangeLocationInfo(KeyRange(toPrefixRelativeRange(rep.results[0].first, tenant.prefix), rep.arena),
+	                            buildLocationInfo(rep.results[0].second));
 }
 
 Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
@@ -622,8 +620,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
-		results.emplace_back(rep.tenantEntry,
-		                     (toPrefixRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+		results.emplace_back((toPrefixRelativeRange(rep.results[shard].first, tenant.prefix) & keys),
 		                     buildLocationInfo(rep.results[shard].second));
 	}
 	return results;

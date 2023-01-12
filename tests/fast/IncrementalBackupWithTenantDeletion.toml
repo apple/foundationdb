@@ -22,7 +22,7 @@ simBackupAgents = 'BackupToFile'
     [[test.workload]]
     testName = 'BulkLoadWithTenants'
     maxNumTenants = 100
-    minNumTenants = 0
+    minNumTenants = 1
     transactionsPerSecond = 3000.0
     deleteTenants = true
 

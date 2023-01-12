@@ -128,7 +128,6 @@ private:
 					blobGranuleMappingKeys, // Map granule to workers. Track the active granules
 					blobGranuleFileKeys, // Map a granule version to granule files. Track files for a granule
 					blobGranuleHistoryKeys, // Map granule to its parents and parent bundaries. for time-travel read
-					blobGranuleSplitKeys, // Granule split state to recover from a splitting granule
 					blobRangeKeys // Key ranges managed by blob
 				};
 				for (auto range : ranges) {
