@@ -807,9 +807,11 @@ public:
 template <class T>
 class Promise;
 
+using flow_swift::FlowCheckedContinuation;
+
 template<class T>
 class
-//SWIFT_CONFORMS_TO(flow_swift, FlowCallbackForSwiftContinuationT)
+SWIFT_CONFORMS_TO(flow_swift, FlowCallbackForSwiftContinuationT)
 FlowCallbackForSwiftContinuation : Callback<T> {
 public:
 	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;

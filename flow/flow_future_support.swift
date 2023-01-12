@@ -6,9 +6,9 @@ import Flow
 // MARK: CInt
 
 // This is a C++ type that we add the conformance to; so no easier way around it currently
-extension FlowCallbackForSwiftContinuationCInt: FlowCallbackForSwiftContinuationT {
-    public typealias AssociatedFuture = FutureCInt
-}
+//extension FlowCallbackForSwiftContinuationCInt: FlowCallbackForSwiftContinuationT {
+////    public typealias AssociatedFuture = FutureCInt
+//}
 //extension FutureCInt: FlowFutureOps {
 //    public typealias Element = CInt
 //    public typealias FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuationCInt
@@ -18,9 +18,9 @@ extension FlowCallbackForSwiftContinuationCInt: FlowCallbackForSwiftContinuation
 // MARK: Void
 
 // This is a C++ type that we add the conformance to; so no easier way around it currently
-extension FlowCallbackForSwiftContinuationVoid: FlowCallbackForSwiftContinuationT {
-    public typealias AssociatedFuture = FutureVoid
-}
+//extension FlowCallbackForSwiftContinuationVoid: FlowCallbackForSwiftContinuationT {
+////    public typealias AssociatedFuture = FutureVoid
+//}
 //extension FutureVoid: FlowFutureOps {
 //    public typealias Element = Void
 //    public typealias FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuationVoid

@@ -38,10 +38,11 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO: show how we call into swift
 SWIFT_ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
-  self->swiftImpl->getVersion(self.getPtr(), req, /*result=*/promise);
+  self->swiftImpl->getVersion(self.getPtr(), req, /*result=*/promise); // actual call is just raw c++ types
   wait(promise.getFuture());
   return Void();
 }

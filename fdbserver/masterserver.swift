@@ -59,9 +59,10 @@ public func updateLiveCommittedVersion(myself: MasterData, req: ReportRawCommitt
 }
 
 extension NotifiedVersionValue {
+    // FIXME: can this become not mutating
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
-        var f: FutureVoid = self.whenAtLeast(limit)
-        let _ = try await f.waitValue
+        var f = self.whenAtLeast(limit)
+        let _: Flow.Void = try await f.waitValue
     }
 }
 
@@ -161,7 +162,8 @@ public actor MasterDataActor {
         rep.requestNum = req.requestNum
         // print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
 
-        lastVersionReplies.replies = lastVersionReplies.replies.filter({ $0.0 > req.mostRecentProcessedRequestNum })
+        // TODO: highlight some collection use (c++ collection, find on it etc)
+        lastVersionReplies.replies = lastVersionReplies.replies.filter { $0.0 > req.mostRecentProcessedRequestNum }
         lastVersionReplies.replies[req.requestNum] = rep
         assert(rep.prevVersion >= 0)
 
@@ -187,36 +189,20 @@ public actor MasterDataActor {
     }
 
     // ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+    //@exposeFlow
     func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Void {
-        print("[swift] waitForPrev impl, version: \(req.version) -> ")
-
         let startTime = now()
 
-        // wait(myself.liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
-        // NOTE.  To fix: error: value of type 'MasterData' has no member 'liveCommittedVersion'
-        // change type of liveCommittedVersion from NotifiedVersion to NotifiedVersionValue
-        // To fix: note: C++ method 'get' that returns unsafe projection of type 'reference' not imported
-        // replace call to get() with __getUnsafe()
-        // TODO: Why doesn't the C++ code check to see if prevVersion is present?
-        //try! await myself.liveCommittedVersion.atLeast(req.prevVersion.__getUnsafe().pointee/* TODO: Sane way to reference an Optional<Int>? */)
+        // TODO: typealias the optional
         if let prevVersion = Swift.Optional(cxxOptional: req.prevVersion) {
-            // TODO: Something is funky. pointee could be implicitly cast to an Int.  prevVersion is an Int64.
-            try! await myself.liveCommittedVersion.atLeast(Int(prevVersion))
+            try! await myself.liveCommittedVersion.atLeast(Int(prevVersion)) // TODO: try to not need the conversion here
         }
-
 
         let latency = now() - startTime
 
         myself.waitForPrevLatencies.addMeasurement(latency)
-
-        // Note.  To fix: error: value of type 'MasterData' has no member 'waitForPrevCommitRequests'
-        // change the field type in MasterData from Counter to CounterValue
         myself.waitForPrevCommitRequests += 1
 
-        // NOTE.  To fix: error: cannot find 'updateLiveCommittedVersion' in scope
-        // Add the C++ declaration to the .h...
-        // Note:  To fix. cannot convert value of type 'MasterData' to expected argument type '__CxxTemplateInst9ReferenceI10MasterDataE'
-        // Change the C++ method to take a raw C++ reference instead of an FDB Reference<Foo>
         updateLiveCommittedVersion(myself: myself, req: req)
 
         return Void()

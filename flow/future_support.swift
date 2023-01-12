@@ -25,10 +25,12 @@ public protocol FlowFutureOps {
 
     func __getUnsafe() -> UnsafePointer<Element>
 
-    var waitValue: Element { mutating get async throws }
+    var waitValue: Element { mutating get async throws } // TODO: can we try to not make it mutating?
 }
 
 extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture {
+
+    // TODO: make a discardable value() but
     public var waitValue: Element {
         mutating get async throws {
             guard !self.isReady() else {
