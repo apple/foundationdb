@@ -10170,16 +10170,12 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self,
                                Future<Void> timeout,
                                Optional<Key> tenantPrefix) {
 	state PromiseStream<StorageMetrics> change;
+	if (tenantPrefix.present()) {
+		req.keys = req.keys.withPrefix(tenantPrefix.get());
+	}
 	state StorageMetrics metrics = self->getMetrics(req.keys);
 	state Error error = success();
 	state bool timedout = false;
-
-	// if (tenantPrefix.present()) {
-	// 	TraceEvent(SevDebug, "AKWaitMetricsResult")
-	// 	    .detail("Preifx", tenantPrefix.get())
-	// 	    .detail("Metrics", metrics.toString())
-	// 	    .detail("QuickCondition", (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)));
-	// }
 
 	if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
 		CODE_PROBE(true, "ShardWaitMetrics return case 1 (quickly)");
@@ -10285,20 +10281,7 @@ ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsReques
 	wait(success(waitForVersionNoTooOld(self, latestVersion)));
 	Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
 	Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-	if (tenantPrefix.present()) {
-		req.keys = req.keys.withPrefix(tenantPrefix.get());
-	}
-	if (!self->isReadable(req.keys)) {
-		CODE_PROBE(true, "waitMetricsTenantAware wrong_shard_server()");
-		// TraceEvent(SevWarn, "AKWaitMetricsRequestWrongShard2")
-		//     .detail("ServerID", self->thisServerID)
-		//     .detail("TenantId", req.tenantInfo.tenantId)
-		//     .detail("Keys", req.keys.toString());
-
-		self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-	} else {
-		wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT), tenantPrefix));
-	}
+	wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT), tenantPrefix));
 	return Void();
 }
 
@@ -10339,13 +10322,8 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	loop {
 		choose {
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (req.tenantInfo.tenantId == -1 && !self->isReadable(req.keys)) {
+				if (!self->isReadable(req.keys)) {
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
-					// TraceEvent(SevWarn, "AKWaitMetricsRequestWrongShard1")
-					//     .detail("ServerID", self->thisServerID)
-					//     .detail("TenantId", req.tenantInfo.tenantId)
-					//     .detail("Keys", req.keys.toString());
-
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->actors.add(waitMetricsTenantAware(self, req));

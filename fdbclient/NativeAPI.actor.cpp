@@ -7577,59 +7577,33 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
                                                  KeyRange keys,
                                                  Reference<LocationInfo> locationInfo,
-                                                 TenantMapEntry tenantEntry,
-                                                 Optional<Reference<TransactionState>> trState,
-                                                 UID debugId) {
+                                                 Optional<Reference<TransactionState>> trState) {
 	state TenantInfo tenantInfo =
 	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
-	try {
-		WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
-		req.min.bytes = 0;
-		req.max.bytes = -1;
-		// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-		// 	TraceEvent(SevWarn, "AKNative0", debugId)
-		// 	    .detail("TenantId", tenantInfo.tenantId)
-		// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-		// 	    .detail("Keys", keys.toString());
-		// }
-		StorageMetrics m = wait(loadBalance(
-		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
-		// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-		// 	TraceEvent(SevWarn, "AKNative1", debugId)
-		// 	    .detail("TenantId", tenantInfo.tenantId)
-		// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-		// 	    .detail("Metrics", m.toString());
-		// }
-		return m;
-	} catch (Error& e) {
-		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-			TraceEvent(SevError, "WaitStorageMetricsError").error(e);
-			throw;
+	loop {
+		try {
+			WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
+			req.min.bytes = 0;
+			req.max.bytes = -1;
+			StorageMetrics m = wait(loadBalance(
+			    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
+			return m;
+		} catch (Error& e) {
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+				throw;
+			}
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			cx->invalidateCache(Key(), keys);
+			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
+			return m;
 		}
-		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-		cx->invalidateCache(tenantEntry.prefix, keys);
-		// TODO: Is this needed?
-		if (tenantInfo.name.present()) {
-			cx->invalidateCachedTenant(tenantInfo.name.get());
-		}
-
-		// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-		// 	TraceEvent(SevWarn, "AKNative2", debugId)
-		// 	    .detail("TenantId", tenantInfo.tenantId)
-		// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-		// 	    .detail("TenantPrefix", tenantEntry.prefix)
-		// 	    .detail("Keys", keys.toString());
-		// }
-		StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
-		return m;
 	}
 }
 
 ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
                                                             KeyRange keys,
                                                             Optional<Reference<TransactionState>> trState) {
-	state UID debugId = debugRandom()->randomUniqueID();
-	// TraceEvent(SevWarn, "AKNative25", debugId).detail("Keys", keys.toString());
 	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
 	state TenantInfo tenantInfo =
 	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
@@ -7650,21 +7624,9 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 	for (int i = 0; i < nLocs; i++) {
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
-		fx[i] = doGetStorageMetrics(
-		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState, debugId);
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, trState);
 	}
-	// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-	// 	TraceEvent(SevWarn, "AKNative3", debugId)
-	// 	    .detail("TenantId", tenantInfo.tenantId)
-	// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-	// 	    .detail("NumLocs", nLocs);
-	// }
 	wait(waitForAll(fx));
-	// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-	// 	TraceEvent(SevWarn, "AKNative4", debugId)
-	// 	    .detail("TenantId", tenantInfo.tenantId)
-	// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr);
-	// }
 	for (int i = 0; i < nLocs; i++) {
 		total += fx[i].get();
 	}
@@ -7824,17 +7786,16 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 	state TenantInfo tenantInfo =
 	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	loop {
-		state std::vector<KeyRangeLocationInfo> locations =
-		    wait(getKeyRangeLocations(cx,
-		                              tenantInfo,
-		                              keys,
-		                              shardLimit,
-		                              Reverse::False,
-		                              &StorageServerInterface::waitMetrics,
-		                              span.context,
-		                              Optional<UID>(),
-		                              UseProvisionalProxies::False,
-		                              latestVersion));
+		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
+		                                                                        tenantInfo,
+		                                                                        keys,
+		                                                                        shardLimit,
+		                                                                        Reverse::False,
+		                                                                        &StorageServerInterface::waitMetrics,
+		                                                                        span.context,
+		                                                                        Optional<UID>(),
+		                                                                        UseProvisionalProxies::False,
+		                                                                        latestVersion));
 		if (expectedShardCount >= 0 && locations.size() != expectedShardCount) {
 			return std::make_pair(Optional<StorageMetrics>(), locations.size());
 		}
@@ -7860,7 +7821,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 					throw;
 				}
-				cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+				cx->invalidateCache(Key(), keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			}
 		} else {
@@ -7870,7 +7831,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			    .detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
-			cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+			cx->invalidateCache(Key(), keys);
 		}
 	}
 }
