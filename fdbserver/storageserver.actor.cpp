@@ -138,7 +138,7 @@ bool canReplyWith(Error e) {
 	case error_code_server_overloaded:
 	case error_code_change_feed_popped:
 	case error_code_tenant_name_required:
-	case error_code_unknown_tenant:
+	case error_code_tenant_not_found:
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -2015,12 +2015,7 @@ void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
 			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID)
 			    .detail("Tenant", tenantInfo.tenantId)
 			    .backtrace();
-			throw unknown_tenant();
-		}
-
-		// TENANT_TODO: this is temporary pending other changes to remove reliance on names
-		if (*itr != tenantInfo.name.get()) {
-			throw unknown_tenant();
+			throw tenant_not_found();
 		}
 	}
 }
