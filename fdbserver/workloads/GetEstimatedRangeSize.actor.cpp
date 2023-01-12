@@ -20,7 +20,6 @@
 
 #include <cstring>
 
-#include "fdbrpc/TenantName.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
@@ -28,7 +27,6 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 
 #include "flow/Error.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct GetEstimatedRangeSizeWorkload : TestWorkload {
@@ -37,25 +35,21 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	double testDuration;
 	Key keyPrefix;
 	bool hasTenant;
-	Optional<TenantName> tenant;
-	bool checkOnly;
+	TenantName tenant;
 
 	GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
-		nodeCount = getOption(options, "nodeCount"_sr, 10000);
+		nodeCount = getOption(options, "nodeCount"_sr, 10000.0);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		hasTenant = hasOption(options, "tenant"_sr);
-		tenant = hasTenant ? getOption(options, "tenant"_sr, "DefaultNeverUsed"_sr) : Optional<TenantName>();
-		checkOnly = getOption(options, "checkOnly"_sr, false);
+		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (checkOnly) {
+		if (!hasTenant) {
 			return Void();
 		}
-		// The following call to bulkSetup() assumes that we have a valid tenant.
-		ASSERT(hasTenant);
-		// Use default values for arguments between (and including) postSetupWarming and endNodeIdx params.
+		// Use default values for arguments between (and including) postSetupWarming and endNodeIdx params
 		return bulkSetup(cx,
 		                 this,
 		                 nodeCount,
@@ -69,7 +63,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		                 0.1,
 		                 0,
 		                 0,
-		                 { tenant.get() });
+		                 { tenant });
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -90,31 +84,40 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
 	ACTOR static Future<Void> checkSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		state int64_t size = wait(getSize(self, cx));
-		ASSERT(sizeIsAsExpected(self, size));
+		state Optional<TenantName> tenant = self->hasTenant ? self->tenant : Optional<TenantName>();
+		state int64_t size = wait(getSize(self, cx, tenant));
+		ASSERT(sizeIsAsExpected(size, tenant));
 		return Void();
 	}
 
-	static bool sizeIsAsExpected(GetEstimatedRangeSizeWorkload* self, int64_t size) {
-		int nodeSize = self->key(0).size() + self->value(0).size();
-		// We use a wide range to avoid flakiness because the underlying function
+	static bool sizeIsAsExpected(int64_t size, Optional<TenantName> tenant) {
+		// The following expected values are hard coded based on expected size for the
+		// tenants. We use a wide range to avoid flakiness because the underlying function
 		// is making an estimation.
-		return size > self->nodeCount * nodeSize / 2 && size < self->nodeCount * nodeSize * 5;
+		if (!tenant.present()) {
+			return size > 10230000 / 5 && size < 10230000 * 5;
+		} else if (tenant == "First"_sr) {
+			return size > 8525000 / 5 && size < 8525000 * 5;
+		} else if (tenant == "Second"_sr) {
+			return size > 930000 / 5 && size < 930000 * 5;
+		}
+		return false;
 	}
 
-	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		state ReadYourWritesTransaction tr(cx, self->tenant);
+	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self,
+	                                     Database cx,
+	                                     Optional<TenantName> tenant) {
+		state ReadYourWritesTransaction tr(cx, tenant);
 		state double totalDelay = 0.0;
-		TraceEvent(SevDebug, "GetSizeStart")
-		    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
+		TraceEvent(SevDebug, "GetSize1").detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
 
 		loop {
 			try {
 				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-				TraceEvent(SevDebug, "GetSizeResult")
+				TraceEvent(SevDebug, "GetSize2")
 				    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr)
 				    .detail("Size", size);
-				if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
+				if (!sizeIsAsExpected(size, tenant) && totalDelay < 300.0) {
 					totalDelay += 5.0;
 					wait(delay(5.0));
 				} else {

@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
+#include "fdbrpc/TenantName.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULK_SETUP_ACTOR_G_H)
 #define FDBSERVER_BULK_SETUP_ACTOR_G_H
 #include "fdbserver/workloads/BulkSetup.actor.g.h"
@@ -37,7 +38,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TenantName.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class T>

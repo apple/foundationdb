@@ -714,7 +714,6 @@ struct WaitMetricsRequest {
 	// Waits for any of the given minimum or maximum metrics to be exceeded, and then returns the current values
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
-	// Setting the tenantInfo is optional; it makes the request tenant-aware.
 	TenantInfo tenantInfo;
 	Arena arena;
 	KeyRangeRef keys;
