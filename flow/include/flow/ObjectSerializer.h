@@ -185,7 +185,7 @@ class ObjectWriter {
 
 	class AllocateFunctor {
 	public:
-		AllocateFunctor(ObjectWriter* pObjectWriter) : pObjectWriter(pObjectWriter) {}
+		explicit AllocateFunctor(ObjectWriter* pObjectWriter) : pObjectWriter(pObjectWriter), numAllocations(0) {}
 
 		uint8_t* operator()(const size_t size) {
 			++numAllocations;
@@ -208,8 +208,8 @@ class ObjectWriter {
 		int getNumAllocations() const { return numAllocations; }
 
 	private:
-		ObjectWriter* pObjectWriter;
-		int numAllocations;
+		ObjectWriter* pObjectWriter = nullptr;
+		int numAllocations = 0;
 	};
 
 	friend class AllocateFunctor;
