@@ -269,6 +269,8 @@ struct ProxyCommitData {
 		return false;
 	}
 
+	TenantMode getTenantMode() const { return db->get().client.tenantMode; }
+
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
 		    (newLatencyBandConfig.present() &&

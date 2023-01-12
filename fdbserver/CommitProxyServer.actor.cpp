@@ -1167,6 +1167,71 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
+inline int64_t extractTenantIdFromKeyRef(StringRef s) {
+	if (s.size() < TenantAPI::PREFIX_SIZE) {
+		return TenantInfo::INVALID_TENANT;
+	}
+	// Parse mutation key to determine tenant prefix
+	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
+	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+}
+
+int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
+	ASSERT(!isSystemKey(m.param1));
+
+	// The first 8 bytes of the key of this OP is also an 8-byte number
+	if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 && parseVersionstampOffset(m.param1) < 8) {
+		return TenantInfo::INVALID_TENANT;
+	}
+
+	ASSERT(isSingleKeyMutation((MutationRef::Type)m.type));
+
+	return extractTenantIdFromKeyRef(m.param1);
+}
+
+// Return true if a single-key mutation is associated with a valid tenant id or a system key
+bool validTenantAccess(MutationRef m) {
+	if (isSystemKey(m.param1))
+		return true;
+
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		auto tenantId = extractTenantIdFromSingleKeyMutation(m);
+		// throw exception for invalid raw access
+		if (tenantId == TenantInfo::INVALID_TENANT) {
+			return false;
+		}
+	} else {
+		// For clear range, we allow raw access
+		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
+		auto beginTenantId = extractTenantIdFromKeyRef(m.param1);
+		auto endTenantId = extractTenantIdFromKeyRef(m.param2);
+		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
+	}
+	return true;
+}
+
+// Return true if all tenant check pass. Otherwise, return false and send error back
+bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
+	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
+	if (!isValid) {
+		tr.reply.sendError(tenant_not_found());
+		return false;
+	}
+
+	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
+	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
+		return true;
+	}
+
+	for (auto& mutation : tr.transaction.mutations) {
+		if (!validTenantAccess(mutation)) {
+			tr.reply.sendError(illegal_tenant_access());
+			return false;
+		}
+	}
+	return true;
+}
+
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
@@ -1176,11 +1241,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			bool isValid = checkTenantNoWait(pProxyCommitData, trs[t].tenantInfo.tenantId, "Commit", true);
-
-			if (!isValid) {
+			if (!validTenantAccess(trs[t], pProxyCommitData)) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
-				trs[t].reply.sendError(tenant_not_found());
 			} else {
 				self->commitCount++;
 				applyMetadataMutations(trs[t].spanContext,
@@ -1197,13 +1259,15 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       self->commitVersion + 1,
 				                       /* initialCommit= */ false);
 			}
-		}
-		if (self->firstStateMutations) {
-			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
-			self->firstStateMutations = false;
-			self->forceRecovery = false;
+
+			if (self->firstStateMutations) {
+				ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
+				self->firstStateMutations = false;
+				self->forceRecovery = false;
+			}
 		}
 	}
+
 	if (self->forceRecovery) {
 		for (; t < trs.size(); t++)
 			self->committed[t] = ConflictBatch::TransactionConflict;
@@ -1316,12 +1380,10 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			ASSERT(domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID || domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
 		}
 		MutationRef encryptedMutation;
-		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::DISABLED,
-		           "using disabled tenant mode");
-		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::OPTIONAL_TENANT,
+		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED, "using disabled tenant mode");
+		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::OPTIONAL_TENANT,
 		           "using optional tenant mode");
-		CODE_PROBE(self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED,
-		           "using required tenant mode");
+		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED, "using required tenant mode");
 
 		if (encryptedMutationOpt && encryptedMutationOpt->present()) {
 			CODE_PROBE(true, "using already encrypted mutation");

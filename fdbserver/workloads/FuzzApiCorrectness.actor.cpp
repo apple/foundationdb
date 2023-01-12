@@ -122,6 +122,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	int maxClearSize;
 	double initialKeyDensity;
 	bool useSystemKeys;
+	bool writeSystemKeys = false; // whether we really write to a system key in the workload
 	KeyRange conflictRange;
 	unsigned int operationId;
 	int64_t maximumTotalData;
@@ -137,6 +138,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	int numTenants;
 	int numTenantGroups;
 	int minTenantNum = -1;
+
+	bool illegalTenantAccess = false;
 
 	// Map from tenant number to key prefix
 	std::map<int, std::string> keyPrefixes;
@@ -182,6 +185,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		if (useSystemKeys && deterministicRandom()->coinflip()) {
 			keyPrefixes[-1] = "\xff\x01";
+			writeSystemKeys = true;
 		}
 
 		maxClearSize = 1 << deterministicRandom()->randomInt(0, 20);
@@ -262,12 +266,17 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			return loadAndRun(this);
+			return loadAndRun(this, cx);
 		}
 		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override { return success; }
+	Future<bool> check(Database const& cx) override {
+		if (!writeSystemKeys) { // there must be illegal access during data load
+			return illegalTenantAccess;
+		}
+		return success;
+	}
 
 	Key getKeyForIndex(int tenantNum, int idx) {
 		idx += minNode;
@@ -315,7 +324,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self) {
+	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self, Database cx) {
 		state double startTime = now();
 		state int nodesPerTenant = std::max<int>(1, self->nodes / (self->numTenants + 1));
 		state int keysPerBatch =
@@ -367,15 +376,26 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 								break;
 							} catch (Error& e) {
+								if (e.code() == error_code_illegal_tenant_access) {
+									ASSERT(!self->writeSystemKeys);
+									ASSERT_EQ(tenantNum, -1);
+									self->illegalTenantAccess = true;
+									break;
+								}
 								wait(unsafeThreadFutureToFuture(tr->onError(e)));
 							}
+						}
+
+						if (self->illegalTenantAccess) {
+							// no need to do the non-system writes
+							break;
 						}
 					}
 				}
 
 				loop {
 					try {
-						wait(self->randomTransaction(self) && delay(self->numOps * .001));
+						wait(self->randomTransaction(self, cx) && delay(self->numOps * .001));
 					} catch (Error& e) {
 						if (e.code() != error_code_not_committed)
 							throw e;
@@ -391,7 +411,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> randomTransaction(FuzzApiCorrectnessWorkload* self) {
+	ACTOR Future<Void> randomTransaction(FuzzApiCorrectnessWorkload* self, Database cx) {
 		state Reference<ITransaction> tr;
 		state bool readYourWritesDisabled = deterministicRandom()->coinflip();
 		state bool readAheadDisabled = deterministicRandom()->coinflip();
@@ -473,7 +493,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 				if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || cancelled) {
 					throw not_committed();
+				} else if (e.code() == error_code_illegal_tenant_access) {
+					ASSERT_EQ(tenantNum, -1);
+					ASSERT_EQ(cx->getTenantMode(), TenantMode::REQUIRED);
+					return Void();
 				}
+
 				try {
 					wait(unsafeThreadFutureToFuture(tr->onError(e)));
 				} catch (Error& e) {
