@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/TenantEntryCache.actor.h"
+#include "flow/FastRef.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -707,6 +709,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 		// dealing with domain aware encryption so all keys should belong to a tenant
 		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
+		TraceEvent("Nim::hereo").detail("Key", key).detail("Tid", TenantAPI::prefixToId(tenantPrefix));
 		return TenantAPI::prefixToId(tenantPrefix);
 	}
 
@@ -1022,11 +1025,22 @@ private:
 	Key lastValue;
 };
 
+int64_t getTenantIdFromKey(StringRef key) {
+	ASSERT(!isSystemKey(key));
+
+	if (key.size() < TenantAPI::PREFIX_SIZE) {
+		return TenantInfo::INVALID_TENANT;
+	}
+	StringRef prefix = key.substr(0, TenantAPI::PREFIX_SIZE);
+	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+}
+
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
                                         Optional<EncryptionAtRestMode> encryptMode,
-                                        Optional<BlobCipherEncryptHeader> encryptHeader) {
+                                        Optional<BlobCipherEncryptHeader> encryptHeader,
+                                        Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
@@ -1076,9 +1090,22 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		}
 
 		// Read a value, which must exist or the block is invalid
-		uint32_t vLen = reader->consumeNetworkUInt32();
-		const uint8_t* v = reader->consume(vLen);
-		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		state uint32_t vLen = reader->consumeNetworkUInt32();
+		state const uint8_t* v = reader->consume(vLen);
+		if (tenantCache.present() && !isSystemKey(KeyRef(k, kLen))) {
+			state int64_t tenantId = getTenantIdFromKey(KeyRef(k, kLen));
+			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
+			// The first and last KV pairs are not restored so if the tenant is not found for the last key then it's ok
+			// to include it in the restore set
+			if (!payload.present() && !(reader->eof() || *reader->rptr == 0xFF)) {
+				TraceEvent(SevError, "SnapshotRestoreTenantNotFound").detail("TenantId", tenantId).detail("Key", KeyRef(k, kLen));
+				CODE_PROBE(true, "Snapshot restore tenant not found");
+			} else {
+				results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+			}
+		} else {
+			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		}
 
 		// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
 		if (reader->eof() || *reader->rptr == 0xFF)
@@ -1096,7 +1123,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len,
-                                                                      Optional<Database> cx) {
+                                                                      Database cx) {
 	state Standalone<StringRef> buf = makeString(len);
 	int rLen = wait(uncancellable(holdWhile(buf, file->read(mutateString(buf), len, offset))));
 	if (rLen != len)
@@ -1107,17 +1134,27 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	state Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
 	state Arena arena;
+	state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+	if (config.tenantMode == TenantMode::REQUIRED) {
+		tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+		wait(tenantCache.get()->init());
+	}
+	state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
 
 	try {
 		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(
-			    &reader, &results, false, Optional<EncryptionAtRestMode>(), Optional<BlobCipherEncryptHeader>()));
+			wait(decodeKVPairs(&reader,
+			                   &results,
+			                   false,
+			                   Optional<EncryptionAtRestMode>(),
+			                   Optional<BlobCipherEncryptHeader>(),
+			                   tenantCache));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
-			ASSERT(cx.present());
 			// decode options struct
 			uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
@@ -1136,18 +1173,13 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			// get the size of the encrypted payload and decrypt it
 			int64_t dataLen = len - bytesRead;
 			StringRef decryptedData =
-			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
+			    wait(EncryptedRangeFileWriter::decrypt(cx, header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			state Optional<EncryptionAtRestMode> encryptMode;
-			if (g_network && g_network->isSimulated()) {
-				// The encyption mode is only used during simulation for a sanity check
-				DatabaseConfiguration config = wait(getDatabaseConfiguration(cx.get()));
-				encryptMode = config.encryptionAtRestMode;
-			}
-			wait(decodeKVPairs(&reader, &results, true, encryptMode, header));
+			wait(decodeKVPairs(&reader, &results, true, encryptMode, header, tenantCache));
 		} else {
 			throw restore_unsupported_file_version();
 		}
+		TraceEvent("Nim::here1");
 		return results;
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
@@ -3579,6 +3611,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<IAsyncFile> inFile = wait(bc.get()->readFile(rangeFile.fileName));
 		state Standalone<VectorRef<KeyValueRef>> blockData =
 		    wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
+		TraceEvent("Nim::here2").detail("SV", blockData.size());
 
 		// First and last key are the range for this file
 		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
@@ -4663,7 +4696,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		state Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, logsOnly, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion));
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -4917,7 +4950,7 @@ public:
 			    .detail("OverrideTargetVersion", targetVersion);
 		}
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, cx));
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -5893,7 +5926,7 @@ public:
 			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
 		}
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, cx, ranges, onlyApplyMutationLogs, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
