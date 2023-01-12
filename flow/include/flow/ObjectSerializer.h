@@ -26,6 +26,7 @@
 
 #include <unordered_map>
 #include <any>
+#include <iostream>
 
 using ContextVariableMap = std::unordered_map<std::string_view, std::any>;
 
@@ -217,10 +218,10 @@ class ObjectWriter {
 	class SaveContext {
 	private:
 		ObjectWriter* ar;
-		AllocateFunctor allocator;
+		AllocateFunctor& allocator;
 
 	public:
-		SaveContext(ObjectWriter* ar, const AllocateFunctor& allocator) : ar(ar), allocator(allocator) {}
+		SaveContext(ObjectWriter* ar, AllocateFunctor& allocator) : ar(ar), allocator(allocator) {}
 
 		ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
 
@@ -233,7 +234,7 @@ class ObjectWriter {
 
 public:
 	template <class VersionOptions>
-	explicit ObjectWriter(VersionOptions vo) : customAllocator(nullptr) {
+	explicit ObjectWriter(VersionOptions vo) : customAllocator(nullptr), customAllocatorContext(nullptr) {
 		vo.write(*this);
 	}
 
@@ -282,8 +283,8 @@ public:
 
 private:
 	Arena arena;
-	uint8_t* (*customAllocator)(size_t, void*);
-	void* customAllocatorContext;
+	uint8_t* (*customAllocator)(size_t, void*) = nullptr;
+	void* customAllocatorContext = nullptr;
 	uint8_t* data = nullptr;
 	int size = 0;
 };
