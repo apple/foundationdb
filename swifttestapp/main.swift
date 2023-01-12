@@ -34,8 +34,8 @@ func actorTest() async {
 
 func flowActorTest() async {
     do {
-        var f = Flow.flowSimpleIncrement() // FIXME: we can't call .waitValue inline, since it is mutating
-        let returned: CInt = try await f.waitValue
+        var f = Flow.flowSimpleIncrement() // FIXME: we can't call .value() inline, since it is mutating
+        let returned: CInt = try await f.value()
         precondition(returned == CInt(42))
     } catch {
         print("[swift][\(#fileID):\(#line)](\(#function)) error: \(error)")

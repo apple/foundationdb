@@ -17,20 +17,22 @@ public protocol FlowFutureOps {
     /// Element type of the future
     associatedtype Element
     associatedtype FlowCallbackForSwiftContinuation: FlowCallbackForSwiftContinuationT
-    typealias FlowCheckedContinuationSelfT = FlowCheckedContinuation<Element>
 
     func isReady() -> Bool
     func isError() -> Bool
     func canGet() -> Bool
 
     func __getUnsafe() -> UnsafePointer<Element>
-
-    var waitValue: Element { mutating get async throws } // TODO: can we try to not make it mutating?
 }
 
 extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture {
 
+    public mutating func value() async throws -> Element {
+        return try await self.waitValue
+    }
+
     // TODO: make a discardable value() but
+    @available(*, deprecated, renamed: "value()")
     public var waitValue: Element {
         mutating get async throws {
             guard !self.isReady() else {
@@ -49,12 +51,21 @@ extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.Associate
             var s = FlowCallbackForSwiftContinuation()
             return try await withCheckedThrowingContinuation { cc in
                 withUnsafeMutablePointer(to: &s) { ptr in
-                    let ecc = FlowCheckedContinuationSelfT(cc)
+                    let ecc = FlowCheckedContinuation<Element>(cc)
                     withUnsafePointer(to: ecc) { ccPtr in
                         ptr.pointee.set(UnsafeRawPointer(ccPtr), self, UnsafeRawPointer(ptr))
                     }
                 }
             }
         }
+    }
+}
+
+extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture,
+                              Element == Flow.Void {
+
+    @discardableResult
+    public mutating func value() async throws -> Element {
+        return try await self.waitValue
     }
 }

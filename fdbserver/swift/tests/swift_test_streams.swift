@@ -135,7 +135,7 @@ struct StreamTests: SimpleSwiftTestSuite {
                     if lastCollected?.isReady ?? true {
                         group.addTask {
                             var future = promise.__getFutureUnsafe()
-                            let _ = try! await future.waitValue
+                            try! await future.value()
                             return .ready(12)
                         }
                     }
@@ -243,7 +243,7 @@ struct StreamTests: SimpleSwiftTestSuite {
             }.value
 
             var f = p.__getFutureUnsafe()
-            _ = try await f.waitValue
+            try await f.value()
             pprint("All done")
         }
     }

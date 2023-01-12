@@ -9,6 +9,6 @@ import FDBClient
     /// async version of `whenAtLeast`
     public func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
         var f: FutureVoid = self.whenAtLeast(limit)
-        _ = try await f.waitValue
+        _ = try await f.value()
     }
 }*/

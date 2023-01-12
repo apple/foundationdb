@@ -163,7 +163,7 @@ Flow **Futures** can be awaited on in Swift, like this:
 
 ```swift
 var f: FutureCInt = ...
-await f.waitValue
+await f.value()
 ```
 
 to avoid name clashes with `value` it's currently called `waitValue` though we should probably rename this.

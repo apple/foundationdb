@@ -30,7 +30,7 @@ struct TaskTests: SimpleSwiftTestSuite {
 
             var void = Flow.Void()
             p.send(&void)
-            _ = try await voidF.waitValue
+            _ = try await voidF.value()
         }
 
         TestCase("await \(FutureCInt.self)") {
@@ -39,7 +39,7 @@ struct TaskTests: SimpleSwiftTestSuite {
 
             var value: CInt = 42
             p.send(&value)
-            let got = try await intF.waitValue
+            let got = try await intF.value()
             precondition(got == value, "\(got) did not equal \(value)")
         }
 
@@ -57,7 +57,7 @@ struct TaskTests: SimpleSwiftTestSuite {
             pprint("without wait, f.get(): \(f.__getUnsafe().pointee)")
 
             pprint("wait...")
-            let value: CInt = try await f.waitValue
+            let value: CInt = try await f.value()
             assertOnNet2EventLoop() // hopped back to the right executor, yay
             precondition(f.isReady(), "Future should be ready by now")
 
@@ -76,7 +76,7 @@ struct TaskTests: SimpleSwiftTestSuite {
                 p2.send(&workaroundVar)
             }
             pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: waiting...")
-            let got2: CInt? = try? await f2.waitValue
+            let got2: CInt? = try? await f2.value()
             pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2, got: \(String(describing: got2))")
             precondition(got2! == num2, "Value obtained from send after await did not match \(num2), was: \(String(describing: got2))!")
 

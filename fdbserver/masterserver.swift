@@ -62,7 +62,7 @@ extension NotifiedVersionValue {
     // FIXME: can this become not mutating
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
         var f = self.whenAtLeast(limit)
-        let _: Flow.Void = try await f.waitValue
+        let _: Flow.Void = try await f.value()
     }
 }
 
@@ -189,8 +189,8 @@ public actor MasterDataActor {
     }
 
     // ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-    //@exposeFlow
-    func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Void {
+    @discardableResult
+    func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest) async -> Flow.Void {
         let startTime = now()
 
         // TODO: typealias the optional
@@ -217,6 +217,7 @@ public actor MasterDataActor {
         }
     }
 
+    @discardableResult
     public func provideVersions(myself: MasterData) async throws -> Flow.Void {
         //  state ActorCollection versionActors(false);
         //
@@ -300,6 +301,7 @@ public actor MasterDataActor {
         }
     }
 
+    @discardableResult
     public func serveLiveCommittedVersion(myself: MasterData) async -> Flow.Void {
         // TODO: use TaskPool
         await withThrowingTaskGroup(of: Swift.Void.self) { group in
@@ -372,6 +374,7 @@ public actor MasterDataActor {
         return Void()
     }
 
+    @discardableResult
     public func serveUpdateRecoveryData(myself: MasterData) async throws -> Flow.Void {
         try await withThrowingTaskGroup(of: Swift.Void.self) { group in
             // Note: this is an example of one-by-one handling requests, notice the group.next() below.
@@ -421,7 +424,7 @@ public func masterServerSwift(
             try await withThrowingTaskGroup(of: Swift.Void.self) { group in
                 group.addTask {
                     var traceRoleFuture = traceRole(Role.MASTER, mi.id())
-                    try await traceRoleFuture.waitValue // TODO: make these not mutating
+                    try await traceRoleFuture.value()
                 }
                 group.addTask {
                     try await myself.provideVersions(myself: masterData)
@@ -439,7 +442,7 @@ public func masterServerSwift(
 
                 while true {
                     var change = db.onChange()
-                    guard (try? await change.waitValue) != nil else {
+                    guard (try? await change.value()) != nil else {
                         return
                     }
 

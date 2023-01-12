@@ -98,7 +98,7 @@ extension FlowClock: Clock {
         _ = nanosDouble // silence warning
 
         var f = flow_gNetwork_delay(/*secondsDouble=*/secondsDouble, /*priority=*/TaskPriority.DefaultDelay)
-        _ = try await f.waitValue
+        _ = try await f.value()
     }
 
     public static func sleep(
