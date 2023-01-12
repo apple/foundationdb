@@ -747,7 +747,8 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self, bool watchTenantCheck) {
+	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
+		state bool watchTenantCheck = deterministicRandom()->coinflip();
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
@@ -1732,7 +1733,7 @@ struct TenantManagementWorkload : TestWorkload {
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
-				wait(deleteTenant(self, deterministicRandom()->coinflip()));
+				wait(deleteTenant(self));
 			} else if (operation == 2) {
 				wait(getTenant(self));
 			} else if (operation == 3) {
