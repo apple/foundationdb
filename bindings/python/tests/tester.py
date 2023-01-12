@@ -618,6 +618,10 @@ class Tester:
                         except (json.decoder.JSONDecodeError, KeyError):
                             assert False, "Invalid Tenant Metadata"
                     inst.push(fdb.tuple.pack(tuple(result)))
+                elif inst.op == six.u("TENANT_GET_ID"):
+                    if self.tenant != None:
+                        self.tenant.get_id().wait()
+                        inst.push(b"GOT_TENANT_ID")
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)
