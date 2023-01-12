@@ -251,28 +251,15 @@ struct ResolutionRequestBuilder {
 	}
 };
 
-ErrorOr<int64_t> lookupTenant(ProxyCommitData* commitData, TenantNameRef tenant, bool logOnFailure) {
-	auto itr = commitData->tenantNameIndex.find(tenant);
-	if (itr == commitData->tenantNameIndex.end()) {
-		if (logOnFailure) {
-			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("TenantName", tenant);
-		}
-
-		return tenant_not_found();
-	}
-
-	return itr->second;
-}
-
-bool checkTenant(ProxyCommitData* commitData, int64_t tenant, Optional<TenantNameRef> tenantName) {
+bool checkTenantNoWait(ProxyCommitData* commitData, int64_t tenant, const char* context, bool logOnFailure) {
 	if (tenant != TenantInfo::INVALID_TENANT) {
 		auto itr = commitData->tenantMap.find(tenant);
 		if (itr == commitData->tenantMap.end()) {
-			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("Tenant", tenant);
-			return false;
-		} else if (tenantName.present() && itr->second != tenantName.get()) {
-			// This is temporary and will be removed when the client stops caching the tenant name -> ID mapping
-			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("Tenant", tenant);
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid)
+				    .detail("Tenant", tenant)
+				    .detail("Context", context);
+			}
 			return false;
 		}
 
@@ -280,6 +267,19 @@ bool checkTenant(ProxyCommitData* commitData, int64_t tenant, Optional<TenantNam
 	}
 
 	return true;
+}
+
+ACTOR Future<bool> checkTenant(ProxyCommitData* commitData, int64_t tenant, Version minVersion, const char* context) {
+	loop {
+		state Version currentVersion = commitData->version.get();
+		if (checkTenantNoWait(commitData, tenant, context, currentVersion >= minVersion)) {
+			return true;
+		} else if (currentVersion >= minVersion) {
+			return false;
+		} else {
+			wait(commitData->version.whenAtLeast(currentVersion + 1));
+		}
+	}
 }
 
 bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransactionRequest& req) {
@@ -427,6 +427,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 					if ((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) &&
 					    batch.size()) {
+						commitData->triggerCommit.set(false);
 						out.send({ std::move(batch), batchBytes });
 						lastBatch = now();
 						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
@@ -439,8 +440,18 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					commitData->commitBatchesMemBytesCount += bytes;
 				}
 				when(wait(timeout)) {}
+				when(wait(commitData->triggerCommit.onChange())) {
+					ASSERT(commitData->triggerCommit.get());
+					double commitTime = lastBatch + SERVER_KNOBS->COMMIT_TRIGGER_DELAY;
+					if (now() > commitTime) {
+						break;
+					}
+
+					timeout = timeout || delayJittered(commitTime - now(), TaskPriority::ProxyCommitBatcher);
+				}
 			}
 		}
+		commitData->triggerCommit.set(false);
 		out.send({ std::move(batch), batchBytes });
 		lastBatch = now();
 	}
@@ -1201,10 +1212,9 @@ bool validTenantAccess(MutationRef m) {
 
 // Return true if all tenant check pass. Otherwise, return false and send error back
 bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
-	bool isValid = checkTenant(pProxyCommitData, tr.tenantInfo.tenantId, tr.tenantInfo.name);
-
+	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
 	if (!isValid) {
-		tr.reply.sendError(unknown_tenant());
+		tr.reply.sendError(tenant_not_found());
 		return false;
 	}
 
@@ -1233,30 +1243,31 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			if (!validTenantAccess(trs[t], pProxyCommitData)) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
-				continue;
+			} else {
+				self->commitCount++;
+				applyMetadataMutations(trs[t].spanContext,
+				                       *pProxyCommitData,
+				                       self->arena,
+				                       pProxyCommitData->logSystem,
+				                       trs[t].transaction.mutations,
+				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+				                       pProxyCommitData->encryptMode.isEncryptionEnabled() ? &self->cipherKeys
+				                                                                           : nullptr,
+				                       pProxyCommitData->encryptMode,
+				                       self->forceRecovery,
+				                       self->commitVersion,
+				                       self->commitVersion + 1,
+				                       /* initialCommit= */ false);
 			}
 
-			self->commitCount++;
-			applyMetadataMutations(trs[t].spanContext,
-			                       *pProxyCommitData,
-			                       self->arena,
-			                       pProxyCommitData->logSystem,
-			                       trs[t].transaction.mutations,
-			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-			                       pProxyCommitData->encryptMode.isEncryptionEnabled() ? &self->cipherKeys : nullptr,
-			                       pProxyCommitData->encryptMode,
-			                       self->forceRecovery,
-			                       self->commitVersion,
-			                       self->commitVersion + 1,
-			                       /* initialCommit= */ false);
-		}
-
-		if (self->firstStateMutations) {
-			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
-			self->firstStateMutations = false;
-			self->forceRecovery = false;
+			if (self->firstStateMutations) {
+				ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
+				self->firstStateMutations = false;
+				self->forceRecovery = false;
+			}
 		}
 	}
+
 	if (self->forceRecovery) {
 		for (; t < trs.size(); t++)
 			self->committed[t] = ConflictBatch::TransactionConflict;
@@ -2172,10 +2183,8 @@ void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitDat
 	}
 }
 
-ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
+ACTOR static Future<Void> doTenantIdRequest(GetTenantIdRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
@@ -2188,37 +2197,79 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	                                            ? delay(SERVER_KNOBS->FUTURE_VERSION_DELAY)
 	                                            : Never();
 
-	while (req.tenant.name.present() && tenantId.isError()) {
-		bool finalQuery = commitData->version.get() >= minTenantVersion;
-		tenantId = lookupTenant(commitData, req.tenant.name.get(), finalQuery);
+	if (minTenantVersion > commitData->version.get()) {
+		commitData->triggerCommit.set(true);
+	}
 
-		if (tenantId.isError()) {
-			if (finalQuery) {
-				req.reply.sendError(tenantId.getError());
-				return Void();
-			} else {
-				choose {
-					// Wait until we are sure that we've received metadata updates through minTenantVersion
-					// If latestVersion is specified, this will wait until we have definitely received
-					// updates through the version at the time we received the request
-					when(wait(commitData->version.whenAtLeast(minTenantVersion))) {}
-					when(wait(futureVersionDelay)) {
-						req.reply.sendError(future_version());
-						return Void();
-					}
-				}
-			}
+	choose {
+		// Wait until we are sure that we've received metadata updates through minTenantVersion
+		// If latestVersion is specified, this will wait until we have definitely received
+		// updates through the version at the time we received the request
+		when(wait(commitData->version.whenAtLeast(minTenantVersion))) {}
+		when(wait(futureVersionDelay)) {
+			req.reply.sendError(future_version());
+			++commitData->stats.tenantIdRequestOut;
+			++commitData->stats.tenantIdRequestErrors;
+			return Void();
 		}
+	}
+
+	auto itr = commitData->tenantNameIndex.find(req.tenantName);
+	if (itr != commitData->tenantNameIndex.end()) {
+		req.reply.send(GetTenantIdReply(itr->second));
+	} else {
+		TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("TenantName", req.tenantName);
+		++commitData->stats.tenantIdRequestErrors;
+		req.reply.sendError(tenant_not_found());
+	}
+
+	++commitData->stats.tenantIdRequestOut;
+	return Void();
+}
+
+ACTOR static Future<Void> tenantIdServer(CommitProxyInterface proxy,
+                                         PromiseStream<Future<Void>> addActor,
+                                         ProxyCommitData* commitData) {
+	loop {
+		GetTenantIdRequest req = waitNext(proxy.getTenantId.getFuture());
+		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
+		if (commitData->stats.tenantIdRequestIn.getValue() - commitData->stats.tenantIdRequestOut.getValue() >
+		    SERVER_KNOBS->TENANT_ID_REQUEST_MAX_QUEUE_SIZE) {
+			++commitData->stats.tenantIdRequestErrors;
+			req.reply.sendError(commit_proxy_memory_limit_exceeded());
+			TraceEvent(SevWarnAlways, "ProxyGetTenantRequestThresholdExceeded").suppressFor(60);
+		} else {
+			++commitData->stats.tenantIdRequestIn;
+			addActor.send(doTenantIdRequest(req, commitData));
+		}
+	}
+}
+
+ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
+	// We can't respond to these requests until we have valid txnStateStore
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
+
+	wait(commitData->validState.getFuture());
+
+	state Version minVersion = commitData->stats.lastCommitVersionAssigned + 1;
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+
+	bool validTenant = wait(checkTenant(commitData, req.tenant.tenantId, minVersion, "GetKeyServerLocation"));
+
+	if (!validTenant) {
+		++commitData->stats.keyServerLocationOut;
+		req.reply.sendError(tenant_not_found());
+		return Void();
 	}
 
 	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
 
-	if (req.tenant.name.present()) {
-		rep.tenantEntry = TenantMapEntry(tenantId.get(), req.tenant.name.get(), TenantState::READY);
-		req.begin = req.begin.withPrefix(rep.tenantEntry.prefix, req.arena);
+	if (req.tenant.hasTenant()) {
+		req.begin = req.begin.withPrefix(req.tenant.prefix.get(), req.arena);
 		if (req.end.present()) {
-			req.end = req.end.get().withPrefix(rep.tenantEntry.prefix, req.arena);
+			req.end = req.end.get().withPrefix(req.tenant.prefix.get(), req.arena);
 		}
 	}
 
@@ -2995,6 +3046,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData));
+	addActor.send(tenantIdServer(proxy, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
