@@ -77,9 +77,6 @@ const char* TOKEN_NAME_FILE_SEP = "#";
 const char* TOKEN_TUPLE_SEP = ",";
 const char DISCOVER_URL_FILE_URL_SEP = '\n';
 
-const char* QUERY_MODE_LOOKUP_BY_DOMAIN_ID = "lookupByDomainId";
-const char* QUERY_MODE_LOOKUP_BY_KEY_ID = "lookupByKeyId";
-
 const char* BLOB_METADATA_DETAILS_TAG = "blob_metadata_details";
 const char* BLOB_METADATA_DOMAIN_ID_TAG = "domain_id";
 const char* BLOB_METADATA_BASE_LOCATION_TAG = "base_location";
@@ -497,7 +494,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		// just do extra memory copy for simplicity here
 		Standalone<VectorRef<StringRef>> partitions;
 		if (isPartitionsPresent) {
-			for (const auto& partition : doc[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
+			for (const auto& partition : detail[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
 				if (!partition.IsString()) {
 					TraceEvent("ParseBlobMetadataResponseFailurePartitionNotString", ctx->uid)
 					    .detail("Type", partition.GetType());
@@ -615,7 +612,7 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	//   "cipher_key_details" = [
 	//     {
 	//        "base_cipher_id"      : <cipherKeyId>
-	//        "encrypt_domain_id"   : <domainId>
+	//        "encrypt_domain_id"   : <domainId>		// Optional
 	//     },
 	//     {
 	//         ....
@@ -637,9 +634,6 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	rapidjson::Document doc;
 	doc.SetObject();
 
-	// Append 'query_mode' object
-	addQueryModeSection(ctx, doc, QUERY_MODE_LOOKUP_BY_KEY_ID);
-
 	// Append 'cipher_key_details' as json array
 	rapidjson::Value keyIdDetails(rapidjson::kArrayType);
 	for (const auto& detail : req.encryptKeyInfos) {
@@ -651,11 +645,13 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 		baseKeyId.SetUint64(detail.baseCipherId);
 		keyIdDetail.AddMember(key, baseKeyId, doc.GetAllocator());
 
-		// Add 'encrypt_domain_id'
-		key.SetString(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
-		rapidjson::Value domainId;
-		domainId.SetInt64(detail.domainId);
-		keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
+		if (detail.domainId.present()) {
+			// Add 'encrypt_domain_id'
+			key.SetString(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
+			rapidjson::Value domainId;
+			domainId.SetInt64(detail.domainId.get());
+			keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
+		}
 
 		// push above object to the array
 		keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
@@ -812,9 +808,6 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	rapidjson::Document doc;
 	doc.SetObject();
 
-	// Append 'query_mode' object
-	addQueryModeSection(ctx, doc, QUERY_MODE_LOOKUP_BY_DOMAIN_ID);
-
 	// Append 'cipher_key_details' as json array
 	addLatestDomainDetailsToDoc(doc, CIPHER_KEY_DETAILS_TAG, ENCRYPT_DOMAIN_ID_TAG, req.encryptDomainIds);
 
@@ -849,7 +842,7 @@ ACTOR Future<Void> fetchEncryptionKeysByDomainIds(Reference<RESTKmsConnectorCtx>
 		    f = &parseEncryptCipherResponse;
 
 		Standalone<VectorRef<EncryptCipherKeyDetailsRef>> result = wait(kmsRequestImpl(
-		    ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT, requestBodyRef, std::move(f)));
+		    ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, requestBodyRef, std::move(f)));
 		reply.cipherKeyDetails = result;
 		reply.arena.dependsOn(result.arena());
 		req.reply.send(reply);

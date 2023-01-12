@@ -331,6 +331,17 @@ def test_execstack_permissions_libfdb_c(linux_container: Container, snapshot):
     )
 
 
+def test_etc_owner(linux_container: Container, snapshot):
+    # /etc/foundationdb should be owned by the foundationdb user
+    linux_container.run(
+        [
+            "bash",
+            "-c",
+            "stat /etc/foundationdb/ | grep 'Access.*foundationdb'",
+        ]
+    )
+
+
 def test_backup_restore(linux_container: Container, snapshot, tmp_path: pathlib.Path):
     linux_container.run(["fdbcli", "--exec", "writemode on; set x y"])
     assert snapshot == linux_container.run(

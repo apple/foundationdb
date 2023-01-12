@@ -1,4 +1,5 @@
 extraDatabaseMode=Local
+disableEncryption=true
 
 testTitle=DrUpgrade
 clearAfterTest=false
