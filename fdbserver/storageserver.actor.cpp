@@ -10165,11 +10165,21 @@ void StorageServer::byteSampleApplyClear(KeyRangeRef range, Version ver) {
 	}
 }
 
-ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
+ACTOR Future<Void> waitMetrics(StorageServerMetrics* self,
+                               WaitMetricsRequest req,
+                               Future<Void> timeout,
+                               Optional<Key> tenantPrefix) {
 	state PromiseStream<StorageMetrics> change;
 	state StorageMetrics metrics = self->getMetrics(req.keys);
 	state Error error = success();
 	state bool timedout = false;
+
+	if (tenantPrefix.present()) {
+		// TraceEvent(SevDebug, "AKWaitMetricsResult")
+		//     .detail("Prefix", tenantPrefix.get())
+		//     .detail("Bytes", metrics.bytes)
+		//     .detail("QuickCondition", (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)));
+	}
 
 	if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
 		CODE_PROBE(true, "ShardWaitMetrics return case 1 (quickly)");
@@ -10258,8 +10268,8 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 	return Void();
 }
 
-Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Void> delay) {
-	return ::waitMetrics(this, req, delay);
+Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Void> delay, Optional<Key> tenantPrefix) {
+	return ::waitMetrics(this, req, delay, tenantPrefix);
 }
 
 #ifndef __INTEL_COMPILER
@@ -10280,9 +10290,14 @@ ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsReques
 	}
 
 	if (!self->isReadable(req.keys)) {
+		// TraceEvent(SevWarn, "AKWaitMetricsRequestWrongShard2")
+		//     .detail("ServerID", self->thisServerID)
+		//     .detail("TenantId", req.tenantInfo.tenantId)
+		//     .detail("Keys", req.keys.toString());
+
 		self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 	} else {
-		wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT)));
+		wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT), tenantPrefix));
 	}
 	return Void();
 }
@@ -10326,6 +10341,11 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				if (req.tenantInfo.tenantId == -1 && !self->isReadable(req.keys)) {
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
+					// TraceEvent(SevWarn, "AKWaitMetricsRequestWrongShard1")
+					//     .detail("ServerID", self->thisServerID)
+					//     .detail("TenantId", req.tenantInfo.tenantId)
+					//     .detail("Keys", req.keys.toString());
+
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->actors.add(waitMetricsTenantAware(self, req));

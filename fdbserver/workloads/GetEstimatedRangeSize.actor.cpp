@@ -20,7 +20,6 @@
 
 #include <cstring>
 
-#include "fdbrpc/simulator.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -84,16 +83,25 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
 	ACTOR static Future<Void> checkSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		state Optional<TenantName> tenant = self->hasTenant ? self->tenant : Optional<TenantName>();
-		state int64_t size = wait(getSize(self, cx, tenant));
-		ASSERT(sizeIsAsExpected(size, tenant));
+		state int64_t size = wait(getSize(self, cx));
+		// The following expected values are hard coded based on expected size for the tenants.
+		// We use a wide range to avoid flakiness because the underlying function (being tested)
+		// is making an estimation.
+		if (!self->hasTenant) {
+			ASSERT_GT(size, 10230000 / 5);
+			ASSERT_LT(size, 10230000 * 5);
+		} else if (self->tenant == "First"_sr) {
+			ASSERT_GT(size, 8525000 / 5);
+			ASSERT_LT(size, 8525000 * 5);
+		} else if (self->tenant == "Second"_sr) {
+			ASSERT_GT(size, 930000 / 5);
+			ASSERT_LT(size, 930000 * 5);
+		}
+		ASSERT_GE(size, 0);
 		return Void();
 	}
 
 	static bool sizeIsAsExpected(int64_t size, Optional<TenantName> tenant) {
-		// The following expected values are hard coded based on expected size for the
-		// tenants. We use a wide range to avoid flakiness because the underlying function
-		// is making an estimation.
 		if (!tenant.present()) {
 			return size > 10230000 / 5 && size < 10230000 * 5;
 		} else if (tenant == "First"_sr) {
@@ -104,9 +112,8 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		return false;
 	}
 
-	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self,
-	                                     Database cx,
-	                                     Optional<TenantName> tenant) {
+	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
+		state Optional<TenantName> tenant = self->hasTenant ? self->tenant : Optional<TenantName>();
 		state ReadYourWritesTransaction tr(cx, tenant);
 		state double totalDelay = 0.0;
 		TraceEvent(SevDebug, "GetSize1").detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
