@@ -41,10 +41,10 @@ enum class AuditType : uint8_t {
 struct AuditStorageState {
 	constexpr static FileIdentifier file_identifier = 13804340;
 
-	AuditStorageState() = default;
-	AuditStorageState(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)) {}
+	AuditStorageState() : type(0), phase(0) {}
+	AuditStorageState(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)), phase(0) {}
 	AuditStorageState(UID id, KeyRange range, AuditType type)
-	  : id(id), range(range), type(static_cast<uint8_t>(type)) {}
+	  : id(id), range(range), type(static_cast<uint8_t>(type)), phase(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

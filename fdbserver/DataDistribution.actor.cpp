@@ -1448,7 +1448,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));
 				// Simulate restarting.
 				if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
-					throw operation_failed();
+					// throw operation_failed();
 				}
 			}
 
@@ -1514,7 +1514,7 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 	while (begin < range.end) {
 		currentRange = KeyRangeRef(begin, range.end);
 		std::vector<AuditStorageState> auditStates =
-		    wait(getAuditStateForRange(self->txnProcessor->context(), audit->id, range));
+		    wait(getAuditStateForRange(self->txnProcessor->context(), audit->id, currentRange));
 		ASSERT(!auditStates.empty());
 		begin = auditStates.back().range.end;
 		for (const auto& auditState : auditStates) {
@@ -1525,7 +1525,7 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 			} else if (phase == AuditPhase::Error) {
 				throw audit_storage_error();
 			} else {
-				audit->actors.add(scheduleAuditForRange(self, audit, range));
+				audit->actors.add(scheduleAuditForRange(self, audit, auditState.range));
 			}
 		}
 		wait(delay(0.1));
