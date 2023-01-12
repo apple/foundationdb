@@ -10273,13 +10273,11 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #endif
 
 ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsRequest req) {
-	if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
-		wait(success(waitForVersionNoTooOld(self, latestVersion)));
-		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
-		Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-		if (tenantPrefix.present()) {
-			req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
-		}
+	wait(success(waitForVersionNoTooOld(self, latestVersion)));
+	Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
+	Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+	if (tenantPrefix.present()) {
+		req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
 	}
 
 	if (!self->isReadable(req.keys)) {
