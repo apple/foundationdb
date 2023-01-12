@@ -164,6 +164,48 @@ class ClientConfigTest:
             self.tc.assertEqual(1, len(matching_clients))
             self.tc.assertEqual(expected_client, matching_clients[0])
 
+    def check_healthy_status_report(self):
+        self.tc.assertIsNotNone(self.status_json)
+        expected_mvc_attributes = {
+            "Healthy",
+            "InitializationState",
+            "DatabaseStatus",
+            "ProtocolVersion",
+            "AvailableClients",
+            "ConnectionRecord",
+            "ClusterId",
+        }
+        self.tc.assertEqual(expected_mvc_attributes, set(self.status_json.keys()))
+        self.tc.assertEqual("created", self.status_json["InitializationState"])
+        self.tc.assertGreater(len(self.status_json["AvailableClients"]), 0)
+
+        expected_db_attributes = {
+            "Healthy",
+            "Coordinators",
+            "CurrentCoordinator",
+            "ClusterID",
+            "GrvProxies",
+            "CommitProxies",
+            "StorageServers",
+            "Connections",
+            "NumConnectionsFailed",
+        }
+        db_status = self.status_json["DatabaseStatus"]
+        self.tc.assertEqual(expected_db_attributes, set(db_status.keys()))
+        self.tc.assertTrue(db_status["Healthy"])
+        self.tc.assertGreater(len(db_status["Coordinators"]), 0)
+        self.tc.assertGreater(len(db_status["GrvProxies"]), 0)
+        self.tc.assertGreater(len(db_status["CommitProxies"]), 0)
+        self.tc.assertGreater(len(db_status["StorageServers"]), 0)
+        self.tc.assertGreater(len(db_status["Connections"]), 0)
+        self.tc.assertEqual(0, db_status["NumConnectionsFailed"])
+        self.tc.assertTrue(self.status_json["Healthy"])
+
+    def check_healthy_status(self, expected_is_healthy):
+        self.tc.assertIsNotNone(self.status_json)
+        self.tc.assertTrue("Healthy" in self.status_json)
+        self.tc.assertEqual(expected_is_healthy, self.status_json["Healthy"])
+
     def exec(self):
         cmd_args = [self.cluster.client_config_tester_bin, "--cluster-file", self.test_cluster_file]
 
@@ -241,6 +283,7 @@ class ClientConfigTests(unittest.TestCase):
         test = ClientConfigTest(self)
         test.print_status = True
         test.exec()
+        test.check_healthy_status(True)
 
     def test_disable_mvc_bypass(self):
         # Local client only
@@ -248,7 +291,7 @@ class ClientConfigTests(unittest.TestCase):
         test.print_status = True
         test.disable_client_bypass = True
         test.exec()
-        test.check_initialization_state("created")
+        test.check_healthy_status_report()
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
@@ -259,7 +302,7 @@ class ClientConfigTests(unittest.TestCase):
         test.create_external_lib_path(CURRENT_VERSION)
         test.disable_local_client = True
         test.exec()
-        test.check_initialization_state("created")
+        test.check_healthy_status_report()
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
@@ -269,7 +312,7 @@ class ClientConfigTests(unittest.TestCase):
         test.print_status = True
         test.create_external_lib_path(CURRENT_VERSION)
         test.exec()
-        test.check_initialization_state("created")
+        test.check_healthy_status_report()
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
@@ -281,7 +324,7 @@ class ClientConfigTests(unittest.TestCase):
         test.disable_local_client = True
         test.api_version = api_version_from_str(PREV2_RELEASE_VERSION)
         test.exec()
-        test.check_initialization_state("created")
+        test.check_healthy_status_report()
         test.check_available_clients([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
@@ -322,7 +365,7 @@ class ClientConfigTests(unittest.TestCase):
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.ignore_external_client_failures = True
         test.exec()
-        test.check_initialization_state("created")
+        test.check_healthy_status_report()
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
@@ -338,6 +381,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2125  # Incompatible client
         test.exec()
         test.check_initialization_state("incompatible")
+        test.check_healthy_status(False)
         test.check_available_clients([PREV_RELEASE_VERSION])
         test.check_current_client(None)
 
@@ -355,6 +399,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 1031  # Timeout
         test.exec()
         test.check_initialization_state("incompatible")
+        test.check_healthy_status(False)
         test.check_available_clients([PREV_RELEASE_VERSION])
         test.check_current_client(None)
 
@@ -370,6 +415,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 1031  # Timeout
         test.exec()
         test.check_initialization_state("initializing")
+        test.check_healthy_status(False)
         test.check_available_clients([CURRENT_VERSION])
         test.check_protocol_version_not_set()
 
@@ -385,6 +431,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2104  # Connection string invalid
         test.exec()
         test.check_initialization_state("initialization_failed")
+        test.check_healthy_status(False)
         test.check_available_clients([CURRENT_VERSION])
         test.check_protocol_version_not_set()
 
@@ -408,6 +455,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.exec()
         test.check_initialization_state("created")
+        test.check_healthy_status(False)
         test.check_available_clients([PREV_RELEASE_VERSION, CURRENT_VERSION])
         test.check_current_client(PREV_RELEASE_VERSION)
 
@@ -428,6 +476,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.ignore_external_client_failures = True
         test.exec()
         test.check_initialization_state("incompatible")
+        test.check_healthy_status(False)
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(None)
 
@@ -453,7 +502,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             t = Thread(target=upgrade, args=(self.cluster,))
             t.start()
             test.exec()
-            test.check_initialization_state("created")
+            test.check_healthy_status_report()
             test.check_available_clients([CURRENT_VERSION])
             test.check_current_client(CURRENT_VERSION)
             t.join()

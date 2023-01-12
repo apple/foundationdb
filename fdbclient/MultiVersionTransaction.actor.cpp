@@ -2397,6 +2397,7 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 	if (dbProtocolVersion.present()) {
 		statusObj["ProtocolVersion"] = format("%llx", dbProtocolVersion.get().version());
 	}
+	bool dbContextHealthy = false;
 	if (initializationState != InitializationState::INITIALIZATION_FAILED) {
 		if (dbContextStatus.isError()) {
 			statusObj["ErrorRetrievingDatabaseStatus"] = dbContextStatus.getError().code();
@@ -2404,8 +2405,14 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 			json_spirit::mValue dbContextStatusVal;
 			json_spirit::read_string(dbContextStatus.get().toString(), dbContextStatusVal);
 			statusObj["DatabaseStatus"] = dbContextStatusVal;
+			auto& dbContextStatusObj = dbContextStatusVal.get_obj();
+			auto healthyIter = dbContextStatusObj.find("Healthy");
+			if (healthyIter != dbContextStatusObj.end() && healthyIter->second.type() == json_spirit::bool_type) {
+				dbContextHealthy = healthyIter->second.get_bool();
+			}
 		}
 	}
+	statusObj["Healthy"] = initializationState == InitializationState::CREATED && dbContextHealthy;
 	return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
 }
 

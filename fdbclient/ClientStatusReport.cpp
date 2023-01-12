@@ -30,16 +30,18 @@ namespace {
 
 class ClientReportGenerator {
 public:
-	ClientReportGenerator(DatabaseContext& cx) : cx(cx) {}
+	ClientReportGenerator(DatabaseContext& cx) : cx(cx), healthy(true), numConnectionsFailed(0) {}
 
 	Standalone<StringRef> generateReport() {
 		if (cx.isError()) {
 			statusObj["InitializationError"] = cx.deferredError.code();
+			healthy = false;
 		} else {
 			reportCoordinators();
 			reportClientInfo();
 			reportStorageServers();
 			reportConnections();
+			statusObj["Healthy"] = healthy;
 		}
 		return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
 	}
@@ -60,23 +62,36 @@ private:
 		if (cx.coordinator->get().present()) {
 			statusObj["CurrentCoordinator"] = cx.coordinator->get().get().getAddressString();
 		}
+
+		// Update health status
+		if (cs.hostnames.size() + cs.coords.size() == 0) {
+			healthy = false;
+		}
+		if (!cx.coordinator->get().present()) {
+			healthy = false;
+		}
 	}
 
 	void reportClientInfo() {
 		auto& clientInfo = cx.clientInfo->get();
 		statusObj["ClusterID"] = clientInfo.clusterId.toString();
 		json_spirit::mArray grvProxyArr;
-		for (auto& grvProxy : clientInfo.grvProxies) {
+		for (const auto& grvProxy : clientInfo.grvProxies) {
 			serverAddresses.insert(grvProxy.address());
 			grvProxyArr.push_back(grvProxy.address().toString());
 		}
 		statusObj["GrvProxies"] = grvProxyArr;
 		json_spirit::mArray commitProxyArr;
-		for (auto& commitProxy : clientInfo.commitProxies) {
+		for (const auto& commitProxy : clientInfo.commitProxies) {
 			serverAddresses.insert(commitProxy.address());
 			commitProxyArr.push_back(commitProxy.address().toString());
 		}
 		statusObj["CommitProxies"] = commitProxyArr;
+
+		// Update health status
+		if (clientInfo.grvProxies.size() == 0 || clientInfo.commitProxies.size() == 0) {
+			healthy = false;
+		}
 	}
 
 	void reportStorageServers() {
@@ -93,10 +108,16 @@ private:
 
 	void reportConnections() {
 		json_spirit::mArray connectionArr;
-		for (auto& addr : serverAddresses) {
+		for (const auto& addr : serverAddresses) {
 			connectionArr.push_back(connectionStatusReport(addr));
 		}
 		statusObj["Connections"] = connectionArr;
+		statusObj["NumConnectionsFailed"] = numConnectionsFailed;
+
+		// Update health status
+		if (numConnectionsFailed > 0) {
+			healthy = false;
+		}
 	}
 
 	json_spirit::mObject connectionStatusReport(const NetworkAddress& address) {
@@ -110,6 +131,7 @@ private:
 		bool failed = IFailureMonitor::failureMonitor().getState(address).isFailed();
 		if (failed) {
 			connStatus["Status"] = "failed";
+			numConnectionsFailed++;
 		} else if (peerIter == peers.end()) {
 			connStatus["Status"] = "disconnected";
 		} else {
@@ -139,6 +161,8 @@ private:
 	DatabaseContext& cx;
 	json_spirit::mObject statusObj;
 	std::set<NetworkAddress> serverAddresses;
+	int numConnectionsFailed;
+	bool healthy;
 };
 
 } // namespace
