@@ -889,7 +889,7 @@ public:
 	void serializePacketWriter(PacketWriter& w) const override {
 		ObjectWriter writer(
 		    +[](size_t size, void* pPacketWriter) {
-			    return (*reinterpret_cast<PacketWriter*>(pPacketWriter)).writeBytes(size);
+			    return static_cast<PacketWriter*>(pPacketWriter)->writeBytes(size);
 		    },
 		    &w,
 		    AssumeVersion(w.protocolVersion()));
