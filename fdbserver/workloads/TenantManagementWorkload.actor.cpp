@@ -96,6 +96,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	Reference<IDatabase> mvDb;
 	Database dataDb;
+	bool hasNoTenantKey = false; // whether this workload has non-tenant key
 
 	// This test exercises multiple different ways to work with tenants
 	enum class OperationType {
@@ -246,6 +247,7 @@ struct TenantManagementWorkload : TestWorkload {
 		wait(sendTestParameters(cx, self));
 
 		if (self->dataDb->getTenantMode() != TenantMode::REQUIRED) {
+			self->hasNoTenantKey = true;
 			wait(self->writeNonTenantKey());
 		}
 		return Void();
@@ -1859,7 +1861,7 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> checkNonTenantKey(const TenantManagementWorkload* self) {
-		if (self->dataDb->getTenantMode() == TenantMode::REQUIRED)
+		if (!self->hasNoTenantKey)
 			return Void();
 
 		state Transaction tr(self->dataDb);
