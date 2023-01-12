@@ -1096,13 +1096,13 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	// In some rare simulation tests, particularly with log_spill:=1 configured, the TLOG_MAX_CREATE_DURATION limit is
 	// exceeded, causing SevError trace events and simulation test failure. Increasing the value is a workaround to
 	// avoid these failures.
-	state double tLogMaxCreateDuration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION;
+	state double tlog_max_create_duration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION;
 	if (g_network->isSimulated() && logData->logSpillType == TLogSpillType::VALUE) {
-		tLogMaxCreateDuration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION * 2;
+		tlog_max_create_duration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION * 2;
 	}
 	// SOMEDAY: This seems to be running pretty often, should we slow it down???
 	// This needs a timeout since nothing prevents I/O operations from hanging indefinitely.
-	wait(ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration));
+	wait(ioTimeoutError(self->persistentData->commit(), tlog_max_create_duration));
 
 	wait(delay(0, TaskPriority::UpdateStorage));
 

@@ -121,6 +121,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 					totalDelay += 5.0;
 					wait(delay(5.0));
 				} else {
+					tr.reset();
 					return size;
 				}
 			} catch (Error& e) {
