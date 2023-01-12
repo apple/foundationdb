@@ -36,18 +36,17 @@ public:
 		if (cx.isError()) {
 			statusObj["InitializationError"] = cx.deferredError.code();
 		} else {
-			reportCoordinators(cx.connectionRecord->get());
-			reportClientInfo(cx.clientInfo->get());
-			if (cx.coordinator->get().present()) {
-				statusObj["CurrentCoordinator"] = cx.coordinator->get().get().getAddressString();
-			}
+			reportCoordinators();
+			reportClientInfo();
+			reportStorageServers();
 			reportConnections();
 		}
 		return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
 	}
 
 private:
-	void reportCoordinators(Reference<IClusterConnectionRecord> connRecord) {
+	void reportCoordinators() {
+		auto& connRecord = cx.connectionRecord->get();
 		ClusterConnectionString cs = connRecord->getConnectionString();
 		json_spirit::mArray coordArray;
 		for (const auto& hostName : cs.hostnames) {
@@ -58,9 +57,13 @@ private:
 			serverAddresses.insert(addr);
 		}
 		statusObj["Coordinators"] = coordArray;
+		if (cx.coordinator->get().present()) {
+			statusObj["CurrentCoordinator"] = cx.coordinator->get().get().getAddressString();
+		}
 	}
 
-	void reportClientInfo(const ClientDBInfo& clientInfo) {
+	void reportClientInfo() {
+		auto& clientInfo = cx.clientInfo->get();
 		statusObj["ClusterID"] = clientInfo.clusterId.toString();
 		json_spirit::mArray grvProxyArr;
 		for (auto& grvProxy : clientInfo.grvProxies) {
@@ -74,6 +77,18 @@ private:
 			commitProxyArr.push_back(commitProxy.address().toString());
 		}
 		statusObj["CommitProxies"] = commitProxyArr;
+	}
+
+	void reportStorageServers() {
+		json_spirit::mArray storageServerArr;
+		for (const auto& [ssid, serverInfo] : cx.server_interf) {
+			json_spirit::mObject serverDescr;
+			serverDescr["SSID"] = ssid.toString();
+			serverDescr["Address"] = serverInfo->interf.address().toString();
+			serverAddresses.insert(serverInfo->interf.address());
+			storageServerArr.push_back(serverDescr);
+		}
+		statusObj["StorageServers"] = storageServerArr;
 	}
 
 	void reportConnections() {

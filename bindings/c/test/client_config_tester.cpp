@@ -306,29 +306,37 @@ void testTransaction() {
 	fdb::Transaction tx = db.createTransaction();
 	while (true) {
 		// Set a time out to avoid long delays when testing invalid configurations
-		tx.setOption(FDB_TR_OPTION_TIMEOUT, options.transactionTimeout);
-		tx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef("val1"sv));
-		auto commitFuture = tx.commit();
-		fdb_check(commitFuture.blockUntilReady(), "Wait on commit failed");
-		fdb::Error err = commitFuture.error();
-		if (!err) {
+		try {
+			tx.setOption(FDB_TR_OPTION_TIMEOUT, options.transactionTimeout);
+			auto getFuture = tx.get(fdb::toBytesRef("key2"sv), true);
+			fdb_check(getFuture.blockUntilReady(), "Wait on get failed");
+			if (getFuture.error()) {
+				throw getFuture.error();
+			}
+			tx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef("val1"sv));
+			auto commitFuture = tx.commit();
+			fdb_check(commitFuture.blockUntilReady(), "Wait on commit failed");
+			if (commitFuture.error()) {
+				throw commitFuture.error();
+			}
 			break;
-		}
-		if (err.code() == error_code_timed_out) {
-			fmt::print(stderr, "Transaction timed out\n");
-			printDatabaseStatus(db);
-			exitImmediately(1);
-		}
-		auto onErrorFuture = tx.onError(err);
-		fdb_check(onErrorFuture.blockUntilReady(), "Wait on onError failed");
-		auto onErrResult = onErrorFuture.error();
-		if (onErrResult) {
-			fmt::print(stderr,
-			           "Transaction failed with a non-retriable error: {}({})\n",
-			           onErrResult.code(),
-			           onErrResult.what());
-			printDatabaseStatus(db);
-			checkErrorCodeAndExit(onErrResult.code());
+		} catch (fdb::Error err) {
+			if (err.code() == error_code_timed_out) {
+				fmt::print(stderr, "Transaction timed out\n");
+				printDatabaseStatus(db);
+				exitImmediately(1);
+			}
+			auto onErrorFuture = tx.onError(err);
+			fdb_check(onErrorFuture.blockUntilReady(), "Wait on onError failed");
+			auto onErrResult = onErrorFuture.error();
+			if (onErrResult) {
+				fmt::print(stderr,
+				           "Transaction failed with a non-retriable error: {}({})\n",
+				           onErrResult.code(),
+				           onErrResult.what());
+				printDatabaseStatus(db);
+				checkErrorCodeAndExit(onErrResult.code());
+			}
 		}
 	}
 	printDatabaseStatus(db);
