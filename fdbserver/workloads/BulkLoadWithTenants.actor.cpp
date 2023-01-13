@@ -49,7 +49,7 @@ struct BulkSetupWorkload : TestWorkload {
 		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
 		deleteTenants = getOption(options, "deleteTenants"_sr, false);
 		ASSERT(minNumTenants <= maxNumTenants);
-		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		testDuration = getOption(options, "testDuration"_sr, -1);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -99,6 +99,7 @@ struct BulkSetupWorkload : TestWorkload {
 			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
 			wait(tenantCache->init());
 			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenantNames.size() + 1);
+			TraceEvent("BulkSetupTenantDeletion").detail("NumTenants", numTenantsToDelete);
 			if (numTenantsToDelete > 0) {
 				state int i;
 				for (i = 0; i < numTenantsToDelete; i++) {
@@ -143,7 +144,12 @@ struct BulkSetupWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			return timeout(_setup(this, cx), testDuration, Void());
+			if (testDuration > 0) {
+				return timeout(_setup(this, cx), testDuration, Void());
+			} else {
+				TraceEvent("Nim::workload1");
+				return _setup(this, cx);
+			}
 		}
 		return Void();
 	}

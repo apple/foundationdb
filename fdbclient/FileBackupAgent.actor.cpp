@@ -1095,6 +1095,10 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		if (tenantCache.present() && !isSystemKey(KeyRef(k, kLen))) {
 			state int64_t tenantId = getTenantIdFromKey(KeyRef(k, kLen));
 			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
+			if (!payload.present()) {
+				TraceEvent(SevError, "Nim::SnapshotRestoreTenantNotFound").detail("TenantId", tenantId).detail("Key", KeyRef(k, kLen));
+			}
+			TraceEvent("Nim::decode1").detail("TenantId", tenantId).detail("Key", KeyRef(k, kLen)).detail("Payload", payload.present());
 			// The first and last KV pairs are not restored so if the tenant is not found for the last key then it's ok
 			// to include it in the restore set
 			if (!payload.present() && !(reader->eof() || *reader->rptr == 0xFF)) {

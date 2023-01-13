@@ -91,6 +91,7 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 			tenant = deterministicRandom()->randomChoice(tenants);
 		}
 		state Transaction tr(cx, tenant);
+		TraceEvent("Nim::BulkSetup").detail("Tenant", tenant);
 		setAuthToken(*workload, tr);
 		try {
 			// if( deterministicRandom()->random01() < 0.001 )
