@@ -296,7 +296,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					memset(tmp, 0, 6);
 					tmp[0] = 2; // API protocol version
 					tmp[1] = code_int;
-					tmp[2] = matchIndex;
+					tmp[2] = matchIndex; // little endian
 					StringRef str(tmp, 6);
 					Key mrp(str);
 					MappedRangeResultV2 result = wait(tr->getMappedRangeV2(beginSelector,

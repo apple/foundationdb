@@ -50,6 +50,7 @@
 #include "fdb_api.hpp"
 
 const int MATCH_INDEX_TEST_710_API = -1;
+const int code_int = 1;
 
 void fdb_check(fdb_error_t e) {
 	if (e) {
@@ -1081,9 +1082,15 @@ GetMappedRangeResultV2 getMappedIndexEntriesInternalV2(int beginId,
                                                        int endId,
                                                        fdb::Transaction& tr,
                                                        std::string mapper,
-                                                       std::string mrp) {
+													   int matchIndex) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
+	int mrpLength = 6;
+	uint8_t mrp[mrpLength];
+	memset(mrp, 0, mrpLength);
+	mrp[0] = 2; // API protocol version
+	mrp[1] = code_int;
+	mrp[2] = matchIndex; // little endian
 	return get_mapped_range_v2(
 	    tr,
 	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyBegin.c_str(), indexEntryKeyBegin.size()),
@@ -1096,8 +1103,8 @@ GetMappedRangeResultV2 getMappedIndexEntriesInternalV2(int beginId,
 	    /* iteration */ 0,
 	    /* snapshot */ false,
 	    /* reverse */ 0,
-	    (const uint8_t*)mrp.c_str(),
-	    mrp.size());
+	    mrp,
+	    mrpLength);
 }
 
 GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, bool allMissing) {
@@ -1113,7 +1120,7 @@ GetMappedRangeResultV2 getMappedIndexEntries(int beginId,
                                              bool allMissing) {
 	std::string mapper =
 	    Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
-	return getMappedIndexEntriesInternalV2(beginId, endId, tr, mapper, mapper);
+	return getMappedIndexEntriesInternalV2(beginId, endId, tr, mapper, matchIndex);
 }
 
 TEST_CASE("versionstamp_unit_test") {
