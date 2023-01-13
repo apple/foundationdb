@@ -22,7 +22,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
-#include "fdbrpc/TenantName.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULK_SETUP_ACTOR_G_H)
 #define FDBSERVER_BULK_SETUP_ACTOR_G_H
 #include "fdbserver/workloads/BulkSetup.actor.g.h"
@@ -59,13 +58,9 @@ void setAuthToken(T const& self, Transaction& tr) {
 }
 
 ACTOR template <class T>
-Future<bool> checkRangeSimpleValueSize(Database cx,
-                                       T* workload,
-                                       uint64_t begin,
-                                       uint64_t end,
-                                       Optional<TenantName> tenant) {
+Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin, uint64_t end) {
 	loop {
-		state Transaction tr(cx, tenant);
+		state Transaction tr(cx);
 		setAuthToken(*workload, tr);
 		try {
 			state Standalone<KeyValueRef> firstKV = (*workload)(begin);
@@ -161,7 +156,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 			bytesStored += numBytes;
 
 			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
-				state Transaction tr(cx, tenant);
+				state Transaction tr(cx);
 				setAuthToken(*workload, tr);
 				try {
 					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
