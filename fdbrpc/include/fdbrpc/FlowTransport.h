@@ -90,6 +90,7 @@ public:
 	bool operator<(Endpoint const& r) const {
 		return addresses.address < r.addresses.address || (addresses.address == r.addresses.address && token < r.token);
 	}
+	bool operator>=(Endpoint const& r) const { return !(*this < r); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
