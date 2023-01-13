@@ -35,7 +35,7 @@ struct BulkSetupWorkload : TestWorkload {
 	Key keyPrefix;
 	double maxNumTenants;
 	double minNumTenants;
-	std::vector<TenantName> tenantNames;
+	std::vector<Reference<Tenant>> tenants;
 	double testDuration;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -62,18 +62,19 @@ struct BulkSetupWorkload : TestWorkload {
 		state int numTenantsToCreate =
 		    deterministicRandom()->randomInt(workload->minNumTenants, workload->maxNumTenants + 1);
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
+
 		if (numTenantsToCreate > 0) {
-			std::vector<Future<Void>> tenantFutures;
+			state std::vector<Future<Optional<TenantMapEntry>>> tenantFutures;
 			for (int i = 0; i < numTenantsToCreate; i++) {
-				TenantMapEntry entry;
-				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
-				TraceEvent("CreatingTenant")
-				    .detail("Tenant", workload->tenantNames.back())
-				    .detail("TenantGroup", entry.tenantGroup);
-				tenantFutures.push_back(
-				    success(TenantAPI::createTenant(cx.getReference(), workload->tenantNames.back())));
+				TenantName tenantName = TenantNameRef(format("BulkSetupTenant_%04d", i));
+				TraceEvent("CreatingTenant").detail("Tenant", tenantName);
+				tenantFutures.push_back(TenantAPI::createTenant(cx.getReference(), tenantName));
 			}
 			wait(waitForAll(tenantFutures));
+			for (auto& f : tenantFutures) {
+				ASSERT(f.get().present());
+				workload->tenants.push_back(makeReference<Tenant>(f.get().get().id, f.get().get().tenantName));
+			}
 		}
 		wait(bulkSetup(cx,
 		               workload,
@@ -88,7 +89,7 @@ struct BulkSetupWorkload : TestWorkload {
 		               0.1,
 		               0,
 		               0,
-		               workload->tenantNames));
+		               workload->tenants));
 		return Void();
 	}
 
