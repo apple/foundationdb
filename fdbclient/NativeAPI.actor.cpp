@@ -10186,10 +10186,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 }
 
 void coalesceChangeFeedLocations(std::vector<KeyRangeLocationInfo>& locations) {
-	// only coalesce if same tenant
-	if (locations.front().tenantEntry.id != locations.back().tenantEntry.id) {
-		return;
-	}
+	// FIXME: only coalesce if same tenant!
 	std::vector<UID> teamUIDs;
 	bool anyToCoalesce = false;
 	teamUIDs.reserve(locations.size());
