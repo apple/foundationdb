@@ -102,7 +102,9 @@ void applyMetadataMutations(SpanID const& spanContext,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
-
+void applyMetadataMutations(SpanID const& spanContext,
+                            ResolverData& resolverData,
+                            const VectorRef<MutationRef>& mutations, Version v);
 inline bool isSystemKey(KeyRef key) {
 	return key.size() && key[0] == systemKeys.begin[0];
 }

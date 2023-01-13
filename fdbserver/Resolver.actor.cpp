@@ -348,7 +348,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 				SpanID spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanID();
 
-				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
+				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations, req.version);
 			}
 			TEST(self->forceRecovery); // Resolver detects forced recovery
 		}
@@ -432,6 +432,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 					reply.tpcvMap[tLog] = self->tpcvVector[tLog];
 					self->tpcvVector[tLog] = req.version;
 				}
+				TraceEvent("VVTEMPDEBUG", self->dbgid).detail("C",reply.tpcvMap.size()).detail("X",reply.privateMutationCount).detail("W",toCommit->isShardChanged()).detail("R",req.version)
+				.detail("S",shardChanged).detail("I",stateMutations).detail("T",req.txnStateTransactions.size());
 			}
 		}
 		self->version.set(req.version);

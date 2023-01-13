@@ -197,9 +197,11 @@ struct ResolutionRequestBuilder {
 			}
 			if (isMetadataMutation(m)) {
 				isTXNStateTransaction = true;
-				auto& tr = getOutTransaction(0, trIn.read_snapshot);
-				tr.mutations.push_back(requests[0].arena, m);
-				tr.lock_aware = trRequest.isLockAware();
+				for (int r = 0; r < requests.size(); r++) {
+					auto& tr = getOutTransaction(r, trIn.read_snapshot);
+					tr.mutations.push_back(requests[r].arena, m);
+					tr.lock_aware = trRequest.isLockAware();
+				}
 			}
 		}
 		if (isTXNStateTransaction && !trRequest.isLockAware()) {
@@ -852,7 +854,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	return Void();
 }
 
-void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTransactionBatchReply>& resolution) {
+void assertResolutionStateMutationsSizeConsistent(CommitBatchContext* self, const std::vector<ResolveTransactionBatchReply>& resolution) {
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -1244,7 +1246,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	self->isMyFirstBatch = !pProxyCommitData->version.get();
 	self->oldCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
 
-	assertResolutionStateMutationsSizeConsistent(self->resolution);
+	assertResolutionStateMutationsSizeConsistent(self, self->resolution);
 
 	applyMetadataEffect(self);
 
@@ -1352,7 +1354,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	for (auto m : self->msg.messages) {
 		if (firstMessage) {
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && tpcvLoc.size()) {
-				ASSERT(tpcvLoc.size() >= pProxyCommitData->db->get().logSystemConfig.numLogs());
+				ASSERT(tpcvLoc.size() >= 1);
 				self->toCommit.addThisTxsTag(*tpcvLoc.begin());
 			} else {
 				self->toCommit.addTxsTag();
