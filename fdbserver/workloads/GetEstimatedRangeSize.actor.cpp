@@ -44,6 +44,8 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 	}
 
+	std::string description() const override { return "GetEstimatedRangeSizeWorkload"; }
+
 	Future<Void> setup(Database const& cx) override {
 		if (!hasTenant) {
 			return Void();
@@ -88,34 +90,21 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		// We use a wide range to avoid flakiness because the underlying function (being tested)
 		// is making an estimation.
 		if (!self->hasTenant) {
-			ASSERT_GT(size, 10230000 / 5);
-			ASSERT_LT(size, 10230000 * 5);
+			ASSERT_GT(size, 9393000 / 5);
+			ASSERT_LT(size, 9393000 * 5);
 		} else if (self->tenant == "First"_sr) {
 			ASSERT_GT(size, 8525000 / 5);
 			ASSERT_LT(size, 8525000 * 5);
 		} else if (self->tenant == "Second"_sr) {
-			ASSERT_GT(size, 930000 / 5);
-			ASSERT_LT(size, 930000 * 5);
+			ASSERT_GT(size, 93000 / 5);
+			ASSERT_LT(size, 93000 * 5);
 		}
-		ASSERT_GE(size, 0);
 		return Void();
-	}
-
-	static bool sizeIsAsExpected(int64_t size, Optional<TenantName> tenant) {
-		if (!tenant.present()) {
-			return size > 10230000 / 5 && size < 10230000 * 5;
-		} else if (tenant == "First"_sr) {
-			return size > 8525000 / 5 && size < 8525000 * 5;
-		} else if (tenant == "Second"_sr) {
-			return size > 930000 / 5 && size < 930000 * 5;
-		}
-		return false;
 	}
 
 	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
 		state Optional<TenantName> tenant = self->hasTenant ? self->tenant : Optional<TenantName>();
 		state ReadYourWritesTransaction tr(cx, tenant);
-		state double totalDelay = 0.0;
 		TraceEvent(SevDebug, "GetSize1").detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
 
 		loop {
@@ -124,17 +113,9 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 				TraceEvent(SevDebug, "GetSize2")
 				    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr)
 				    .detail("Size", size);
-				if (!sizeIsAsExpected(size, tenant) && totalDelay < 300.0) {
-					totalDelay += 5.0;
-					wait(delay(5.0));
-				} else {
-					tr.reset();
-					return size;
-				}
+				tr.reset();
+				return size;
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "GetSizeError")
-				    .errorUnsuppressed(e)
-				    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
 				wait(tr.onError(e));
 			}
 		}

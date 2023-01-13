@@ -24,7 +24,7 @@ testTitle = 'GetEstimatedRangeSizeTest'
     [[test.workload]]
     testName = 'GetEstimatedRangeSize'
     tenant = 'Second'
-    nodeCount = 25000.0
+    nodeCount = 2500.0
 
     [[test.workload]]
     testName = 'GetEstimatedRangeSize'
