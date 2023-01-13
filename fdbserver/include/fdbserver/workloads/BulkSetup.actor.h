@@ -256,7 +256,7 @@ Future<Void> bulkSetup(Database cx,
 		if (tenants.size() > 0) {
 			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
 		}
-		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode, tenant));
+		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode));
 		if (present) {
 			TraceEvent("BulkSetupRangeAlreadyPresent")
 			    .detail("Begin", startNode)
