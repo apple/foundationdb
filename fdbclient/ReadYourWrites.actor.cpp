@@ -1792,10 +1792,7 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	    .detail("TenantIdValid", tr.trState->tenantId() != TenantInfo::INVALID_TENANT)
 	    .detail("AuthPresent", tr.trState->authToken.present());
 
-	// Pass in the TransactionState only if tenant is present
-	Optional<Reference<TransactionState>> trState =
-	    tr.trState->hasTenant() ? tr.trState : Optional<Reference<TransactionState>>();
-	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1, trState), resetPromise.getFuture()),
+	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1, tr.trState), resetPromise.getFuture()),
 	           [](const StorageMetrics& m) { return m.bytes; });
 }
 
@@ -2544,10 +2541,9 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 		validateOptionValueNotPresent(value);
 		options.bypassUnreadable = true;
 		break;
-	// TODO(kejriwal): Improve the way this is set
+	// TODO(kejriwal): Check if this is needed
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
 		tr.setOption(option, value);
-		break;
 	default:
 		break;
 	}

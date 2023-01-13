@@ -19,12 +19,13 @@ testTitle = 'GetEstimatedRangeSizeTest'
     [[test.workload]]
     testName = 'GetEstimatedRangeSize'
     tenant = 'First'
-    nodeCount = 250.0
+    transactionsPerSecond = 250.0
+    testDuration = 10.0
+    expectedRate = 0.80
 
     [[test.workload]]
     testName = 'GetEstimatedRangeSize'
     tenant = 'Second'
-    nodeCount = 2500.0
-
-    [[test.workload]]
-    testName = 'GetEstimatedRangeSize'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+    expectedRate = 0.80
