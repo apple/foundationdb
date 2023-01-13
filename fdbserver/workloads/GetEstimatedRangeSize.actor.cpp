@@ -92,12 +92,13 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
 		state Optional<TenantName> tenant = self->hasTenant ? self->tenant : Optional<TenantName>();
 		state ReadYourWritesTransaction tr(cx, tenant);
-		TraceEvent(SevDebug, "GetSize1").detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
+		TraceEvent(SevDebug, "AKGetSize1")
+		    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
 
 		loop {
 			try {
 				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-				TraceEvent(SevDebug, "GetSize2")
+				TraceEvent(SevDebug, "AKGetSize2")
 				    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr)
 				    .detail("Size", size);
 				tr.reset();

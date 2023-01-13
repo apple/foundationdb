@@ -391,7 +391,15 @@ struct GetKeyServerLocationsRequest {
 	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
 	    minTenantVersion(minTenantVersion) {}
 
-	bool verify() const { return tenant.isAuthorized(); }
+	bool verify() const {
+		if (!tenant.isAuthorized())
+			TraceEvent(SevWarnAlways, "AKDebug")
+			    .detail("Status", "GetKeyServerLocationsRequest")
+			    .detail("Id", tenant.tenantId)
+			    .detail("Name", tenant.name.present() ? tenant.name.get() : "not present"_sr);
+		return tenant.isAuthorized();
+		// return true;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
