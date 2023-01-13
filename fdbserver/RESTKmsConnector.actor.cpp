@@ -290,14 +290,14 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, RefreshPe
 void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx, const rapidjson::Document& doc, bool isCipher) {
 	// check version tag sanity
 	if (!doc.HasMember(REQUEST_VERSION_TAG) || !doc[REQUEST_VERSION_TAG].IsInt()) {
-		TraceEvent("KMSResponseMissingVersion", ctx->uid).log();
+		TraceEvent(SevWarn, "KMSResponseMissingVersion", ctx->uid).log();
 		throw operation_failed();
 	} else {
 		const int version = doc[REQUEST_VERSION_TAG].GetInt();
 		const int maxSupportedVersion = isCipher ? SERVER_KNOBS->REST_KMS_CURRENT_CIPHER_REQUEST_VERSION
 		                                         : SERVER_KNOBS->REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION;
 		if (version == INVALID_REQUEST_VERSION || version > maxSupportedVersion) {
-			TraceEvent("KMSResponseInvalidVersion", ctx->uid)
+			TraceEvent(SevWarn, "KMSResponseInvalidVersion", ctx->uid)
 			    .detail("Version", version)
 			    .detail("MaxSupportedVersion", maxSupportedVersion);
 			throw operation_failed();
@@ -323,11 +323,11 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx, const rapidjson::
 		}
 
 		if (!errCodeRef.empty() || !errMsgRef.empty()) {
-			TraceEvent("KMSErrorResponse", ctx->uid)
+			TraceEvent(SevWarn, "KMSErrorResponse", ctx->uid)
 			    .detail("ErrorMsg", errMsgRef.empty() ? "" : errMsgRef.toString())
 			    .detail("ErrorCode", errCodeRef.empty() ? "" : errCodeRef.toString());
 		} else {
-			TraceEvent("KMSErrorResponseEmptyDetails", ctx->uid).log();
+			TraceEvent(SevWarn, "KMSErrorResponseEmptyDetails", ctx->uid).log();
 		}
 
 		throw encrypt_keys_fetch_failed();
