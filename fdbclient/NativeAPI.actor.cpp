@@ -6290,7 +6290,7 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 			trCommitCosts.opsCount++;
 			keyRange = KeyRangeRef(it->param1, it->param2);
 			if (trState->options.expensiveClearCostEstimation) {
-				StorageMetrics m = wait(trState->cx->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY, trState));
+				StorageMetrics m = wait(trState->cx->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
 				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));
 				trCommitCosts.writeCosts += getWriteOperationCost(m.bytes);
 				++trCommitCosts.expensiveCostEstCount;
@@ -7570,18 +7570,12 @@ Future<Void> Transaction::onError(Error const& e) {
 
 	return e;
 }
-ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
-                                                            KeyRange keys,
-                                                            Future<TenantInfo> tenantInfoFuture);
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys);
 
-ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
-                                                 KeyRange keys,
-                                                 Reference<LocationInfo> locationInfo,
-                                                 Future<TenantInfo> tenantInfoFuture) {
-	state TenantInfo tenantInfo = wait(tenantInfoFuture);
+ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Reference<LocationInfo> locationInfo) {
 	loop {
 		try {
-			WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
+			WaitMetricsRequest req(keys, StorageMetrics(), StorageMetrics());
 			req.min.bytes = 0;
 			req.max.bytes = -1;
 			StorageMetrics m = wait(loadBalance(
@@ -7594,19 +7588,16 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 			}
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			cx->invalidateCache(Key(), keys);
-			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, tenantInfo));
+			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys));
 			return m;
 		}
 	}
 }
 
-ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
-                                                            KeyRange keys,
-                                                            Future<TenantInfo> tenantInfoFuture) {
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys) {
 	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
-	state TenantInfo tenantInfo = wait(tenantInfoFuture);
 	std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
-	                                                                        tenantInfo,
+	                                                                        TenantInfo(),
 	                                                                        keys,
 	                                                                        std::numeric_limits<int>::max(),
 	                                                                        Reverse::False,
@@ -7622,7 +7613,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 	for (int i = 0; i < nLocs; i++) {
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
-		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, tenantInfo);
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].locations);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -7631,15 +7622,14 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 	return total;
 }
 
-ACTOR Future<Void> trackBoundedStorageMetrics(TenantInfo tenantInfo,
-                                              KeyRange keys,
+ACTOR Future<Void> trackBoundedStorageMetrics(KeyRange keys,
                                               Reference<LocationInfo> location,
                                               StorageMetrics x,
                                               StorageMetrics halfError,
                                               PromiseStream<StorageMetrics> deltaStream) {
 	try {
 		loop {
-			WaitMetricsRequest req(tenantInfo, keys, x - halfError, x + halfError);
+			WaitMetricsRequest req(keys, x - halfError, x + halfError);
 			StorageMetrics nextX = wait(loadBalance(location->locations(), &StorageServerInterface::waitMetrics, req));
 			deltaStream.send(nextX - x);
 			x = nextX;
@@ -7650,8 +7640,7 @@ ACTOR Future<Void> trackBoundedStorageMetrics(TenantInfo tenantInfo,
 	}
 }
 
-ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(TenantInfo tenantInfo,
-                                                                 std::vector<KeyRangeLocationInfo> locations,
+ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(std::vector<KeyRangeLocationInfo> locations,
                                                                  StorageMetrics min,
                                                                  StorageMetrics max,
                                                                  StorageMetrics permittedError) {
@@ -7665,7 +7654,7 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(TenantInfo tena
 	state StorageMetrics minMinus = min - halfErrorPerMachine * (nLocs - 1);
 
 	for (int i = 0; i < nLocs; i++) {
-		WaitMetricsRequest req(tenantInfo, locations[i].range, StorageMetrics(), StorageMetrics());
+		WaitMetricsRequest req(locations[i].range, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
 		fx[i] = loadBalance(locations[i].locations->locations(),
@@ -7686,7 +7675,7 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(TenantInfo tena
 
 	for (int i = 0; i < nLocs; i++)
 		wx[i] = trackBoundedStorageMetrics(
-		    tenantInfo, locations[i].range, locations[i].locations, fx[i].get(), halfErrorPerMachine, deltas);
+		    locations[i].range, locations[i].locations, fx[i].get(), halfErrorPerMachine, deltas);
 
 	loop {
 		StorageMetrics delta = waitNext(deltas.getFuture());
@@ -7777,13 +7766,11 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
                                                                           StorageMetrics max,
                                                                           StorageMetrics permittedError,
                                                                           int shardLimit,
-                                                                          int expectedShardCount,
-                                                                          Future<TenantInfo> tenantInfoFuture) {
+                                                                          int expectedShardCount) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
-	state TenantInfo tenantInfo = wait(tenantInfoFuture);
 	loop {
 		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
-		                                                                        tenantInfo,
+		                                                                        TenantInfo(),
 		                                                                        keys,
 		                                                                        shardLimit,
 		                                                                        Reverse::False,
@@ -7802,9 +7789,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 			try {
 				Future<StorageMetrics> fx;
 				if (locations.size() > 1) {
-					fx = waitStorageMetricsMultipleLocations(tenantInfo, locations, min, max, permittedError);
+					fx = waitStorageMetricsMultipleLocations(locations, min, max, permittedError);
 				} else {
-					WaitMetricsRequest req(tenantInfo, keys, min, max);
+					WaitMetricsRequest req(keys, min, max);
 					fx = loadBalance(locations[0].locations->locations(),
 					                 &StorageServerInterface::waitMetrics,
 					                 req,
@@ -7838,26 +7825,17 @@ Future<std::pair<Optional<StorageMetrics>, int>> DatabaseContext::waitStorageMet
     StorageMetrics const& max,
     StorageMetrics const& permittedError,
     int shardLimit,
-    int expectedShardCount,
-    Optional<Reference<TransactionState>> trState) {
-	Future<TenantInfo> tenantInfoFuture =
-	    trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo();
+    int expectedShardCount) {
 	return ::waitStorageMetrics(Database(Reference<DatabaseContext>::addRef(this)),
 	                            keys,
 	                            min,
 	                            max,
 	                            permittedError,
 	                            shardLimit,
-	                            expectedShardCount,
-	                            tenantInfoFuture);
+	                            expectedShardCount);
 }
 
-Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys,
-                                                          int shardLimit,
-                                                          Optional<Reference<TransactionState>> trState) {
-	Future<TenantInfo> tenantInfoFuture =
-	    trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo();
-
+Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys, int shardLimit) {
 	if (shardLimit > 0) {
 		StorageMetrics m;
 		m.bytes = -1;
@@ -7867,11 +7845,9 @@ Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys,
 		                                           m,
 		                                           StorageMetrics(),
 		                                           shardLimit,
-		                                           -1,
-		                                           tenantInfoFuture));
+		                                           -1));
 	} else {
-		return ::getStorageMetricsLargeKeyRange(
-		    Database(Reference<DatabaseContext>::addRef(this)), keys, tenantInfoFuture);
+		return ::getStorageMetricsLargeKeyRange(Database(Reference<DatabaseContext>::addRef(this)), keys);
 	}
 }
 

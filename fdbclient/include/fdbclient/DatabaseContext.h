@@ -296,19 +296,13 @@ public:
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
-	// Pass a valid `trState` with `hasTenant() == true` to make the function tenant-aware.
-	Future<StorageMetrics> getStorageMetrics(
-	    KeyRange const& keys,
-	    int shardLimit,
-	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
-	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
-	    KeyRange const& keys,
-	    StorageMetrics const& min,
-	    StorageMetrics const& max,
-	    StorageMetrics const& permittedError,
-	    int shardLimit,
-	    int expectedShardCount,
-	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
+	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount);
 	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
 	                                       KeyRange const& keys,
 	                                       StorageMetrics const& limit,

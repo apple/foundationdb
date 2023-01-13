@@ -10165,14 +10165,8 @@ void StorageServer::byteSampleApplyClear(KeyRangeRef range, Version ver) {
 	}
 }
 
-ACTOR Future<Void> waitMetrics(StorageServerMetrics* self,
-                               WaitMetricsRequest req,
-                               Future<Void> timeout,
-                               Optional<Key> tenantPrefix) {
+ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
 	state PromiseStream<StorageMetrics> change;
-	if (tenantPrefix.present()) {
-		req.keys = req.keys.withPrefix(tenantPrefix.get());
-	}
 	state StorageMetrics metrics = self->getMetrics(req.keys);
 	state Error error = success();
 	state bool timedout = false;
@@ -10264,8 +10258,8 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self,
 	return Void();
 }
 
-Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Void> delay, Optional<Key> tenantPrefix) {
-	return ::waitMetrics(this, req, delay, tenantPrefix);
+Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Void> delay) {
+	return ::waitMetrics(this, req, delay);
 }
 
 #ifndef __INTEL_COMPILER
@@ -10313,16 +10307,13 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 
 	loop {
 		choose {
-			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
+			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				if (!self->isReadable(req.keys)) {
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					wait(success(waitForVersionNoTooOld(self, latestVersion)));
-					Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
-					Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-					self->actors.add(self->metrics.waitMetrics(
-					    req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT), tenantPrefix));
+					self->actors.add(
+					    self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT)));
 				}
 			}
 			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {

@@ -121,7 +121,7 @@ struct StorageServerMetrics {
 	                       int64_t versionLag,
 	                       double lastUpdate) const;
 
-	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay, Optional<Key> tenantPrefix);
+	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
 	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard,
 	                                                      double readDensityRatio,
