@@ -253,6 +253,23 @@ std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std:
 	return defaultValue;
 }
 
+std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<int> defaultValue) {
+	for (int i = 0; i < options.size(); i++)
+		if (options[i].key == key) {
+			std::vector<int> v;
+			int begin = 0;
+			for (int c = 0; c < options[i].value.size(); c++)
+				if (options[i].value[c] == ',') {
+					v.push_back(atoi((char*)options[i].value.begin() + begin));
+					begin = c + 1;
+				}
+			v.push_back(atoi((char*)options[i].value.begin() + begin));
+			options[i].value = ""_sr;
+			return v;
+		}
+	return defaultValue;
+}
+
 bool hasOption(VectorRef<KeyValueRef> options, Key key) {
 	for (const auto& option : options) {
 		if (option.key == key) {
