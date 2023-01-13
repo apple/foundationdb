@@ -225,7 +225,7 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 
 ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {
 	Tenant* tenant = this->tenant = Tenant::allocateOnForeignThread();
-	onMainThreadVoid([tenant, db, name]() { new (tenant) Tenant(db->db, name); });
+	onMainThreadVoid([tenant, db, name]() { new (tenant) Tenant(Database(db->db), name); });
 }
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
@@ -235,7 +235,7 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 	Tenant* tenant = this->tenant;
-	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getId(); });
+	return onMainThread([tenant]() -> Future<int64_t> { return tenant->id(); });
 }
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {

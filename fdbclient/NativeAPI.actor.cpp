@@ -2344,30 +2344,6 @@ Database Database::createSimulatedExtraDatabase(std::string connectionString, Op
 	return db;
 }
 
-ACTOR Future<int64_t> fetchTenantId(DatabaseContext* cx, TenantName name) {
-	state int64_t tenantId;
-	state GetKeyServerLocationsRequest req;
-	req.tenant.name = name;
-	loop {
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(GetKeyServerLocationsReply rep =
-			         wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                               &CommitProxyInterface::getKeyServersLocations,
-			                               req,
-			                               TaskPriority::DefaultPromiseEndpoint))) {
-				tenantId = rep.tenantEntry.id;
-				break;
-			}
-		}
-	}
-	return tenantId;
-}
-
-Tenant::Tenant(DatabaseContext* cx, TenantName name) : name(name) {
-	idFuture = fetchTenantId(cx, name);
-}
-
 const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDefaults() const {
 	ASSERT(db);
 	return db->transactionDefaults;
@@ -3230,6 +3206,8 @@ ACTOR Future<int64_t> lookupTenant(Database cx, TenantName tenant, SpanContext s
 		}
 	}
 }
+
+Tenant::Tenant(Database cx, TenantName name) : idFuture(lookupTenant(cx, name, SpanContext())), name(name) {}
 
 FDB_DEFINE_BOOLEAN_PARAM(AllowInvalidTenantID);
 
