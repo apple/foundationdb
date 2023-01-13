@@ -84,7 +84,8 @@ public:
 
 	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
 	                           ResolverData& resolverData_,
-	                           const VectorRef<MutationRef>& mutations_, Version v=invalidVersion)
+	                           const VectorRef<MutationRef>& mutations_,
+	                           Version v = invalidVersion)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
@@ -1249,7 +1250,8 @@ void applyMetadataMutations(SpanID const& spanContext,
 
 void applyMetadataMutations(SpanID const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations, Version v) {
+                            const VectorRef<MutationRef>& mutations,
+                            Version v) {
 	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, v).apply();
 }
 

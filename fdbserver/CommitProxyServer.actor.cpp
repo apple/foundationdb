@@ -854,7 +854,8 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	return Void();
 }
 
-void assertResolutionStateMutationsSizeConsistent(CommitBatchContext* self, const std::vector<ResolveTransactionBatchReply>& resolution) {
+void assertResolutionStateMutationsSizeConsistent(CommitBatchContext* self,
+                                                  const std::vector<ResolveTransactionBatchReply>& resolution) {
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -1271,7 +1272,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaToCommittedTxn");
 	}
-				self->preliminaryCount = self->toCommit.getMutationCount();
+	self->preliminaryCount = self->toCommit.getMutationCount();
 	// Second pass
 	wait(assignMutationsToStorageServers(self));
 
@@ -1393,7 +1394,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	                                                          self->debugID,
 	                                                          tpcvMap);
 
-	TraceEvent(SevWarn,"MutationCount4",pProxyCommitData->dbgid).detail("O",self->preliminaryCount).detail("N",self->toCommit.getMutationCount());
+	TraceEvent(SevWarn, "MutationCount4", pProxyCommitData->dbgid)
+	    .detail("O", self->preliminaryCount)
+	    .detail("N", self->toCommit.getMutationCount());
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
 
