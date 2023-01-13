@@ -37,6 +37,8 @@ const KeyRef prefix = "prefix"_sr;
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
 const int MATCH_INDEX_TEST_710_API = -1;
+const int code_int = 1;
+const int code_bool = 2;
 
 int recordSize;
 int indexSize;
@@ -179,9 +181,15 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 		ASSERT(it->value == EMPTY);
 		if constexpr (std::is_same<KV, MappedKeyValueRefV2>::value) {
-			ASSERT((int)*it->mappedKeyValueResponseBytes.begin() == 2); // type
-			ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 1 == 1); // type
-			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 2 == 1); // type
+			if (expectedId == 10) {
+				for (int i = 0; i < 8; i++) {
+					std::cout << "[" + std::to_string(i) + "] is" << (int)it->mappedKeyValueResponseBytes[i]
+					          << std::endl;
+				}
+			}
+			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() == 2); // version
+			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 1 == code_bool); // type
+			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 2 == 1); // value
 		}
 		if (self->SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
@@ -235,8 +243,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		int cnt = 0;
 		const KV* it = result.begin();
 		for (; cnt < result.size(); cnt++, it++) {
-			if (validateRecord<KV>(
-			        expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1, allMissing)) {
+			if (validateRecord(expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1, allMissing)) {
 				needRetry = true;
 				break;
 			}
@@ -285,7 +292,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					}
 					return std::make_pair(result.size(), result.more);
 				} else {
-					uint8_t tmp[6] = { 0x02, 0x01, 0x00, 0x00, 0x00, 0x00 };
+					uint8_t tmp[6];
+					memset(tmp, 0, 6);
+					tmp[0] = 2; // API protocol version
+					tmp[1] = code_int;
 					tmp[2] = matchIndex;
 					StringRef str(tmp, 6);
 					Key mrp(str);

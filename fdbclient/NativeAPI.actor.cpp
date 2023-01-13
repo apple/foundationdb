@@ -4354,7 +4354,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRefV2 result) {
 		} else {
 			throw internal_error();
 		}
-		bytes += sizeof(int);
+		bytes += mappedKeyValue.mappedKeyValueResponseBytes.size();
 	}
 	return bytes;
 }
@@ -4414,6 +4414,15 @@ void getRangeFinished(Reference<TransactionState> trState,
 		}
 
 		conflictRange.send(std::make_pair(rangeBegin, rangeEnd));
+	}
+}
+
+template <class R>
+void checkR(R r) {
+	if constexpr (std::is_same<R, GetMappedKeyValuesReplyV2>::value) {
+		for (int j = 0; j < 8; j++) {
+			TraceEvent("Hfu5NativeAPI11111").detail("Byte", j).detail("Content", (int)r.data[0].mappedKeyValueResponseBytes[j]);
+		}
 	}
 }
 
@@ -4568,6 +4577,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					                     AtMostOnce::False,
 					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr));
 					rep = _rep;
+					checkR(rep);
 					++trState->cx->transactionPhysicalReadsCompleted;
 				} catch (Error& e) {
 					++trState->cx->transactionPhysicalReadsCompleted;

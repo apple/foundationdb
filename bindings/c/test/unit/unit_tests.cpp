@@ -422,7 +422,7 @@ GetMappedRangeResultV2 get_mapped_range_v2(fdb::Transaction& tr,
 			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
 		auto mappedKeyValueResponseBytes = extractString(mkv.mappedKeyValueResponseBytes);
-
+		std::cout << "mappedKeyValueResponseBytes length is " << mappedKeyValueResponseBytes.length() << std::endl;
 		result.mkvs.emplace_back(key, value, begin, end, range_results, mappedKeyValueResponseBytes);
 	}
 	return result;
@@ -1213,6 +1213,7 @@ void validateIndex(const GetMappedRangeResultV2::MappedKVV2& mkv,
 		CHECK(EMPTY.compare(mkv.key) == 0);
 	}
 	CHECK(EMPTY.compare(mkv.value) == 0);
+	std::cout << "validateIndex:::: " << (int)mkv.mappedKeyValueResponseBytes[0] << std::endl;
 	// CHECK(mkv.mappedKeyValueResponseBytes);
 }
 

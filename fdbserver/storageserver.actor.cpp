@@ -4827,22 +4827,32 @@ std::set<int> supportedVersions{ 2 };
 const int code_int = 1;
 const int code_bool = 2;
 
-void fillKVM(int getMappedRangeProtocolVersion, MappedKeyValueRef* kvm, int local) {
+void fillReply(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRef* kvm, int local, int i) {
 	return;
 }
 
-void setLocal(int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local) {
-	uint8_t* replyBytes[MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH];
+void setLocal(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local, int i) {
+	uint8_t replyBytes[MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH];
 	memset(replyBytes, 0, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
 	replyBytes[0] = getMappedRangeProtocolVersion;
 	replyBytes[1] = code_bool;
-	std::memcpy(replyBytes + 2, local, sizeof(bool));
-
-	*kvm->mappedKeyValueResponseBytes = StringRef(replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
+	replyBytes[2] = 5;
+	kvm->mappedKeyValueResponseBytes = StringRef(*a, replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
+	if (i == 0) {
+		for (int j = 0; j < 8; j++) {
+			TraceEvent("Hfu5Local1111").detail("Byte", j).detail("Content", (int)kvm->mappedKeyValueResponseBytes[j]);
+		}
+		TraceEvent("Hfu5SetLocal")
+		    .detail("Sizeof2", sizeof(*kvm))
+		    .detail("Sizeof1", sizeof(MappedKeyValueRef))
+		    .detail("GetMappedRangeProtocolVersion", (int)replyBytes[0])
+		    .detail("CODE", (int)replyBytes[1])
+		    .detail("Local", (int)replyBytes[2]);
+	}
 }
 
-void fillKVM(int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local) {
-	setLocal(getMappedRangeProtocolVersion, kvm, local);
+void fillReply(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local, int i) {
+	setLocal(a, getMappedRangeProtocolVersion, kvm, local, i);
 }
 
 // returns protocol version for getMappedRange
@@ -4866,7 +4876,7 @@ int parseParams(GetMappedKeyValuesRequestV2* req, int* matchIndex) {
 	int v = mrp[0];
 	if (v > *supportedVersions.rbegin()) {
 		TraceEvent("Hfu5ErrorVersionNotSupport");
-		return;
+		return 0;
 	}
 	parseMatchIndex(mrp, matchIndex, v);
 	return v;
@@ -4883,7 +4893,8 @@ Future<Void> mapSubquery(StorageServer* data,
                          bool isRangeQuery,
                          KeyValueRef* it,
                          MappedKV* kvm,
-                         Key mappedKey) {
+                         Key mappedKey,
+                         int getMappedRangeProtocolVersion) {
 	if (isRangeQuery) {
 		// Use the mappedKey as the prefix of the range query.
 		// if MappedKV is MappedKeyValueRefV2, then set it
@@ -4898,7 +4909,7 @@ Future<Void> mapSubquery(StorageServer* data,
 			}
 			kvm->reqAndResult = getRange;
 		} catch (Error& e) {
-			fillKVM(getMappedRangeProtocolVersion, kvm, e.code() != error_code_quick_get_key_values_miss);
+			fillReply(pArena, getMappedRangeProtocolVersion, kvm, e.code() != error_code_quick_get_key_values_miss, 100);
 			if (e.code() != error_code_quick_get_key_values_miss) {
 				TraceEvent("MapSubQueryError").error(e);
 			}
@@ -4990,7 +5001,7 @@ Future<Reply> mapKeyValues(StorageServer* data,
 			// Clear key value to the default.
 			kvm->key = ""_sr;
 			kvm->value = ""_sr;
-			fillKVM(getMappedRangeProtocolVersion, kvm, true);
+			fillReply(&result.arena, getMappedRangeProtocolVersion, kvm, true, i + offset);
 			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());
@@ -5007,7 +5018,8 @@ Future<Reply> mapKeyValues(StorageServer* data,
 			                                 isRangeQuery,
 			                                 it,
 			                                 kvm,
-			                                 mappedKey));
+			                                 mappedKey,
+			                                 getMappedRangeProtocolVersion));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -5219,6 +5231,16 @@ TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
 	return Void();
 }
 
+
+template <class R>
+void checkR(R r) {
+	if constexpr (std::is_same<R, GetMappedKeyValuesReplyV2>::value) {
+		for (int j = 0; j < 8; j++) {
+			TraceEvent("Hfu5StorageServer111111").detail("Byte", j).detail("Content", (int)r.data[0].mappedKeyValueResponseBytes[j]);
+		}
+	}
+}
+
 // Most of the actor is copied from getKeyValuesQ. I tried to use templates but things become nearly impossible after
 // combining actor shenanigans with template shenanigans.
 ACTOR template <class Req, class Reply, class MappedKV>
@@ -5406,6 +5428,7 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, Req req)
 			}
 
 			r.penalty = data->getPenalty();
+			checkR(r);
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;

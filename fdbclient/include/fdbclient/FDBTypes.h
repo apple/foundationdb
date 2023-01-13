@@ -153,7 +153,7 @@ const int MATCH_INDEX_ALL = 0;
 const int MATCH_INDEX_NONE = 1;
 const int MATCH_INDEX_MATCHED_ONLY = 2;
 const int MATCH_INDEX_UNMATCHED_ONLY = 3;
-const int MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH = 128;
+const int MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH = 8;
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
@@ -870,13 +870,12 @@ struct MappedKeyValueRefV2 : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
-	// use int for less mess about memory alignment
 	KeyRef mappedKeyValueResponseBytes;
 
 	MappedKeyValueRefV2() = default;
 	MappedKeyValueRefV2(Arena& a, const MappedKeyValueRefV2& copyFrom) : KeyValueRef(a, copyFrom) {
+		mappedKeyValueResponseBytes = StringRef(a, copyFrom.mappedKeyValueResponseBytes);
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
-		mappedKeyValueResponseBytes = copyFrom.mappedKeyValueResponseBytes;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
