@@ -49,7 +49,7 @@ struct BulkSetupWorkload : TestWorkload {
 		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
 		deleteTenants = getOption(options, "deleteTenants"_sr, false);
 		ASSERT(minNumTenants <= maxNumTenants);
-		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		testDuration = getOption(options, "testDuration"_sr, -1);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -143,7 +143,11 @@ struct BulkSetupWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			return timeout(_setup(this, cx), testDuration, Void());
+			if (testDuration > 0) {
+				return timeout(_setup(this, cx), testDuration, Void());
+			} else {
+				return _setup(this, cx);
+			}
 		}
 		return Void();
 	}
