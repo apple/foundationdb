@@ -439,9 +439,6 @@ void checkGranuleLock(int64_t epoch, int64_t seqno, int64_t ownerEpoch, int64_t 
 	}
 }
 
-bool isEncryptionOpSupported(EncryptionAtRestMode encryptMode) {
-	return encryptMode.isEncryptionEnabled() && SERVER_KNOBS->BG_METADATA_SOURCE == "tenant";
-}
 } // namespace
 
 // Below actors asssit in fetching/lookup desired encryption keys. Following steps are done for an encryption key
@@ -829,7 +826,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
 
-	if (isEncryptionOpSupported(bwData->encryptMode)) {
+	if (bwData->encryptMode.isEncryptionEnabled()) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
@@ -1042,7 +1039,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
 
-	if (isEncryptionOpSupported(bwData->encryptMode)) {
+	if (bwData->encryptMode.isEncryptionEnabled()) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
@@ -1288,12 +1285,10 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		ASSERT(snapshotVersion < version);
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
-		if (g_network && g_network->isSimulated() && isEncryptionOpSupported(bwData->encryptMode) &&
-		    !snapshotF.cipherKeysMeta.present()) {
-			ASSERT(false);
-		}
+		ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+		         !snapshotF.cipherKeysMeta.present()));
 		if (snapshotF.cipherKeysMeta.present()) {
-			ASSERT(isEncryptionOpSupported(bwData->encryptMode));
+			ASSERT(bwData->encryptMode.isEncryptionEnabled());
 			CODE_PROBE(true, "fetching cipher keys for blob snapshot file");
 			BlobGranuleCipherKeysCtx keysCtx =
 			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
@@ -1320,13 +1315,11 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 			deltaF = files.deltaFiles[deltaIdx];
 
-			if (g_network && g_network->isSimulated() && isEncryptionOpSupported(bwData->encryptMode) &&
-			    !deltaF.cipherKeysMeta.present()) {
-				ASSERT(false);
-			}
+			ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+			         !deltaF.cipherKeysMeta.present()));
 
 			if (deltaF.cipherKeysMeta.present()) {
-				ASSERT(isEncryptionOpSupported(bwData->encryptMode));
+				ASSERT(bwData->encryptMode.isEncryptionEnabled());
 				CODE_PROBE(true, "fetching cipher keys for delta file");
 				BlobGranuleCipherKeysCtx keysCtx =
 				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
@@ -3575,14 +3568,14 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
 			tenantPrefix = tenantEntry.get().prefix;
 		} else {
-			CODE_PROBE(true, "Blob worker unknown tenant");
+			CODE_PROBE(true, "Blob worker tenant not found");
 			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
 			// Just throw wrong_shard_server and make the client retry and assume we load it later
-			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
+			TraceEvent(SevDebug, "BlobWorkerRequestTenantNotFound", bwData->id)
 			    .suppressFor(5.0)
 			    .detail("TenantName", req.tenantInfo.name.get())
 			    .detail("TenantId", req.tenantInfo.tenantId);
-			throw unknown_tenant();
+			throw tenant_not_found();
 		}
 		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
 		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
@@ -3825,13 +3818,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("FileName", chunk.snapshotFile.get().filename.toString())
 							    .detail("Encrypted", encrypted);
 						}
-
-						if (g_network && g_network->isSimulated() && isEncryptionOpSupported(bwData->encryptMode) &&
-						    !encrypted) {
-							ASSERT(false);
-						}
+						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+						         !encrypted));
 						if (encrypted) {
-							ASSERT(isEncryptionOpSupported(bwData->encryptMode));
+							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
 							CODE_PROBE(true, "fetching cipher keys from meta ref for snapshot file");
 							snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
@@ -3848,12 +3838,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (g_network && g_network->isSimulated() && isEncryptionOpSupported(bwData->encryptMode) &&
-						    !encrypted) {
-							ASSERT(false);
-						}
+						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+						         !encrypted));
 						if (encrypted) {
-							ASSERT(isEncryptionOpSupported(bwData->encryptMode));
+							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
 							CODE_PROBE(true, "fetching cipher keys from meta ref for delta files");
 							deltaCipherKeysCtxs.emplace(
@@ -5127,8 +5115,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
-	// Since the blob worker gets initalized through the blob manager it is easier to fetch the encryption state using
-	// the DB Config rather than passing it through the initalization request for the blob manager and blob worker
+	// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption state
+	// using the DB Config rather than passing it through the initalization request for the blob manager and blob worker
 	DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 	self->encryptMode = config.encryptionAtRestMode;
 	TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());

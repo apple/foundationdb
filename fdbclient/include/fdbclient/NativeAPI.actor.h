@@ -237,6 +237,47 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
+class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, NonCopyable {
+public:
+	Tenant(DatabaseContext* cx, TenantName name);
+	Tenant(Future<int64_t> id, Optional<TenantName> name) : idFuture(id), name(name) {}
+
+	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
+
+	int64_t id() const {
+		ASSERT(idFuture.isReady());
+		return idFuture.get();
+	}
+
+	StringRef prefix() const {
+		ASSERT(idFuture.isReady());
+		if (bigEndianId == -1) {
+			bigEndianId = bigEndian64(idFuture.get());
+		}
+		return StringRef(reinterpret_cast<const uint8_t*>(&bigEndianId), TenantAPI::PREFIX_SIZE);
+	}
+
+	std::string description() const {
+		StringRef nameStr = name.castTo<TenantNameRef>().orDefault("<unspecified>"_sr);
+		if (idFuture.canGet()) {
+			return format("%*s (%lld)", nameStr.size(), nameStr.begin(), idFuture.get());
+		} else {
+			return format("%*s", nameStr.size(), nameStr.begin());
+		}
+	}
+
+	Future<int64_t> idFuture;
+	Optional<TenantName> name;
+
+private:
+	mutable int64_t bigEndianId = -1;
+};
+
+template <>
+struct Traceable<Tenant> : std::true_type {
+	static std::string toString(const Tenant& tenant) { return printable(tenant.description()); }
+};
+
 FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
 
 struct TransactionState : ReferenceCounted<TransactionState> {
@@ -280,41 +321,22 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
-	                 Optional<TenantName> tenant,
+	                 Optional<TenantName> tenantName,
 	                 TaskPriority taskID,
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidId = AllowInvalidTenantID::False);
+	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidTenantId = AllowInvalidTenantID::False);
 
-	Optional<TenantName> const& tenant();
+	Optional<Reference<Tenant>> const& tenant();
 	bool hasTenant() const;
 
-	int64_t tenantId() const { return tenantId_; }
-	void trySetTenantId(int64_t tenantId) {
-		if (tenantId_ == TenantInfo::INVALID_TENANT) {
-			tenantId_ = tenantId;
-		}
-	}
-
-	Future<Void> handleUnknownTenant();
+	int64_t tenantId() const { return tenant_.present() ? tenant_.get()->id() : TenantInfo::INVALID_TENANT; }
 
 private:
-	Optional<TenantName> tenant_;
-	int64_t tenantId_ = TenantInfo::INVALID_TENANT;
+	Optional<Reference<Tenant>> tenant_;
 	bool tenantSet;
-};
-
-class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, NonCopyable {
-public:
-	Tenant(DatabaseContext* cx, TenantName name);
-	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
-	Future<int64_t> getId();
-
-private:
-	Future<int64_t> id;
-	TenantName name;
 };
 
 class Transaction : NonCopyable {
@@ -513,7 +535,7 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
-	Optional<TenantName> getTenant() { return trState->tenant(); }
+	Optional<Reference<Tenant>> getTenant() { return trState->tenant(); }
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;

@@ -821,10 +821,11 @@ struct InitializeResolverRequest {
 	int resolverCount;
 	UID masterId; // master's UID
 	ReplyPromise<ResolverInterface> reply;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, masterLifetime, recoveryCount, commitProxyCount, resolverCount, masterId, reply);
+		serializer(ar, masterLifetime, recoveryCount, commitProxyCount, resolverCount, masterId, reply, encryptMode);
 	}
 };
 

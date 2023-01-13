@@ -136,21 +136,22 @@ struct AuthzSecurityWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<KeyRangeLocationInfo> refreshAndGetCachedLocation(AuthzSecurityWorkload* self,
-	                                                                      Database cx,
-	                                                                      TenantName tenant,
-	                                                                      Standalone<StringRef> token,
-	                                                                      StringRef key) {
+	ACTOR static Future<std::pair<KeyRangeLocationInfo, int64_t>> refreshAndGetCachedLocation(
+	    AuthzSecurityWorkload* self,
+	    Database cx,
+	    TenantName tenant,
+	    Standalone<StringRef> token,
+	    StringRef key) {
 		state Transaction tr(cx, tenant);
 		self->setAuthToken(tr, token);
 		loop {
 			try {
 				// trigger GetKeyServerLocationsRequest and subsequent cache update
-				Optional<Value> value = wait(tr.get(key));
-				(void)value;
-				auto loc = cx->getCachedLocation(tenant, key);
+				wait(success(tr.get(key)));
+				int64_t tenantId = wait(tr.getTenant().get()->idFuture);
+				auto loc = cx->getCachedLocation(tr.trState->getTenantInfo(), key);
 				if (loc.present()) {
-					return loc.get();
+					return std::make_pair(loc.get(), tenantId);
 				} else {
 					wait(delay(0.1));
 				}
@@ -173,16 +174,16 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                 Optional<Standalone<StringRef>> expectedValue,
 	                                                 Standalone<StringRef> token,
 	                                                 Database cx,
-	                                                 KeyRangeLocationInfo loc) {
+	                                                 std::pair<KeyRangeLocationInfo, int64_t> locationAndTenant) {
 		loop {
 			GetValueRequest req;
 			req.key = key;
 			req.version = committedVersion;
-			req.tenantInfo.tenantId = loc.tenantEntry.id;
+			req.tenantInfo.tenantId = locationAndTenant.second;
 			req.tenantInfo.name = tenant;
 			req.tenantInfo.token = token;
 			try {
-				GetValueReply reply = wait(loadBalance(loc.locations->locations(),
+				GetValueReply reply = wait(loadBalance(locationAndTenant.first.locations->locations(),
 				                                       &StorageServerInterface::getValue,
 				                                       req,
 				                                       TaskPriority::DefaultPromiseEndpoint,
@@ -212,7 +213,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Version committedVersion =
 		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
 		// refresh key location cache via get()
-		KeyRangeLocationInfo loc = wait(refreshAndGetCachedLocation(self, cx, self->tenant, self->signedToken, key));
+		std::pair<KeyRangeLocationInfo, int64_t> locationAndTenant =
+		    wait(refreshAndGetCachedLocation(self, cx, self->tenant, self->signedToken, key));
 		if (positive) {
 			// Supposed to succeed. Expected to occasionally fail because of buggify, faultInjection, or data
 			// distribution, but should not return permission_denied
@@ -223,7 +225,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			                                           value,
 			                                           self->signedToken /* passing correct token */,
 			                                           cx,
-			                                           loc));
+			                                           locationAndTenant));
 			if (!outcome.present()) {
 				++self->crossTenantGetPositive;
 			} else if (outcome.get().code() == error_code_permission_denied) {
@@ -241,7 +243,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			                     value,
 			                     self->signedTokenAnotherTenant /* deliberately passing bad token */,
 			                     cx,
-			                     loc));
+			                     locationAndTenant));
 			// Should always fail. Expected to return permission_denied, but expected to occasionally fail with
 			// different errors
 			if (!outcome.present()) {
@@ -263,17 +265,15 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                               Value newValue,
 	                                               Version readVersion,
 	                                               Database cx,
-	                                               KeyRangeLocationInfo loc) {
+	                                               int64_t tenantId) {
 		loop {
-			auto const& tenantEntry = loc.tenantEntry;
-			ASSERT(!tenantEntry.prefix.empty());
-			state Key prefixedKey = key.withPrefix(tenantEntry.prefix);
+			state Key prefixedKey = key.withPrefix(TenantAPI::idToPrefix(tenantId));
 			CommitTransactionRequest req;
 			req.transaction.mutations.push_back(req.arena, MutationRef(MutationRef::SetValue, prefixedKey, newValue));
 			req.transaction.read_snapshot = readVersion;
 			req.tenantInfo.name = tenant;
 			req.tenantInfo.token = token;
-			req.tenantInfo.tenantId = tenantEntry.id;
+			req.tenantInfo.tenantId = tenantId;
 			try {
 				CommitID reply = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
 				                                       &CommitProxyInterface::commit,
@@ -297,11 +297,12 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Version committedVersion =
 		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
 		// refresh key location cache to extract tenant prefix
-		KeyRangeLocationInfo loc = wait(refreshAndGetCachedLocation(self, cx, self->tenant, self->signedToken, key));
+		std::pair<KeyRangeLocationInfo, int64_t> locationAndTenant =
+		    wait(refreshAndGetCachedLocation(self, cx, self->tenant, self->signedToken, key));
 		if (positive) {
 			// Expected to succeed, may occasionally fail
-			Optional<Error> outcome =
-			    wait(tryCommit(self, self->tenant, self->signedToken, key, newValue, committedVersion, cx, loc));
+			Optional<Error> outcome = wait(tryCommit(
+			    self, self->tenant, self->signedToken, key, newValue, committedVersion, cx, locationAndTenant.second));
 			if (!outcome.present()) {
 				++self->crossTenantCommitPositive;
 			} else if (outcome.get().code() == error_code_permission_denied) {
@@ -311,8 +312,14 @@ struct AuthzSecurityWorkload : TestWorkload {
 				    .log();
 			}
 		} else {
-			Optional<Error> outcome = wait(tryCommit(
-			    self, self->tenant, self->signedTokenAnotherTenant, key, newValue, committedVersion, cx, loc));
+			Optional<Error> outcome = wait(tryCommit(self,
+			                                         self->tenant,
+			                                         self->signedTokenAnotherTenant,
+			                                         key,
+			                                         newValue,
+			                                         committedVersion,
+			                                         cx,
+			                                         locationAndTenant.second));
 			if (!outcome.present()) {
 				TraceEvent(SevError, "AuthzSecurityError")
 				    .detail("Case", "CrossTenantGetDisallowed")
