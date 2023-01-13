@@ -225,7 +225,11 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 
 ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {
 	Tenant* tenant = this->tenant = Tenant::allocateOnForeignThread();
-	onMainThreadVoid([tenant, db, name]() { new (tenant) Tenant(Database(db->db), name); });
+	DatabaseContext* cx = db->db;
+	onMainThreadVoid([tenant, cx, name]() {
+		cx->addref();
+		new (tenant) Tenant(Database(cx), name);
+	});
 }
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
