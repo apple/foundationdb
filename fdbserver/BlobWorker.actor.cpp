@@ -2103,8 +2103,9 @@ struct WriteAmpTarget {
 			    (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
 			    SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
 			targetWriteAmp = std::max(targetWriteAmp * SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR, minWriteAmp);
-			// To not wait for next re-snapshot, pessimistically assume that all deltas are inserts and new snapshot will be bigger.
-			// This is usually the case in write-heavy catchup cases, but helps us catch up faster regardless
+			// To not wait for next re-snapshot, pessimistically assume that all deltas are inserts and new snapshot
+			// will be bigger. This is usually the case in write-heavy catchup cases, but helps us catch up faster
+			// regardless
 			targetSnapshotBytes += deltaBytes;
 			bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
 		}
