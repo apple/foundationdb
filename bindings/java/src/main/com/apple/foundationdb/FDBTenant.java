@@ -34,7 +34,7 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private final byte[] name;
 	private final Executor executor;
 	private final EventKeeper eventKeeper;
-	private final FutureInt64 idFuture;
+	private FutureInt64 idFuture;
 
 	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor) {
 		this(cPtr, database, name, executor, null);
