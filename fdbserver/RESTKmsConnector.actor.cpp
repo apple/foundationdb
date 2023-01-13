@@ -1538,6 +1538,24 @@ void testMissingOrInvalidVersion(Reference<RESTKmsConnectorCtx> ctx, bool isCiph
 	}
 	versionValue.SetInt(version);
 	doc.AddMember(versionKey, versionValue, doc.GetAllocator());
+
+	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
+	rapidjson::StringBuffer sb;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+	doc.Accept(writer);
+	httpResp->content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+
+	try {
+		if (isCipher) {
+			parseEncryptCipherResponse(ctx, httpResp);
+		} else {
+			parseBlobMetadataResponse(ctx, httpResp);
+		}
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
 }
 
 void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
