@@ -720,7 +720,7 @@ struct WaitMetricsRequest {
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
+	bool verify() const { return tenantInfo.tenantId == TenantInfo::INVALID_TENANT || tenantInfo.isAuthorized(); }
 
 	WaitMetricsRequest() {}
 	WaitMetricsRequest(TenantInfo tenantInfo,
