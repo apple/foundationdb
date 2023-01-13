@@ -48,14 +48,19 @@ int64_t extractTenantIdFromMutation(MutationRef m) {
 			return TenantInfo::INVALID_TENANT;
 		}
 	} else {
+		// Assumes clear range mutations are split on tenant boundaries
 		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
 	}
 
-	if (m.param1.size() < TenantAPI::PREFIX_SIZE) {
+	return extractTenantIdFromKeyRef(m.param1);
+}
+
+int64_t extractTenantIdFromKeyRef(StringRef s) {
+	if (s.size() < TenantAPI::PREFIX_SIZE) {
 		return TenantInfo::INVALID_TENANT;
 	}
 	// Parse mutation key to determine tenant prefix
-	StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
+	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
 	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 }
 
