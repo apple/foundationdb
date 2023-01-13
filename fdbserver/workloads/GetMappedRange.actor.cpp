@@ -155,7 +155,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	// Return true if need to retry.
-	static bool validateRecord(int expectedId,
+	ASSERT(rangeResult.more == false);
+	static void validateRecord(int expectedId,
 	                           const MappedKeyValueRef* it,
 	                           GetMappedRangeWorkload* self,
 	                           int matchIndex,
