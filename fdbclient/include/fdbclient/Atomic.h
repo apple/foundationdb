@@ -21,8 +21,10 @@
 #ifndef FLOW_FDBCLIENT_ATOMIC_H
 #define FLOW_FDBCLIENT_ATOMIC_H
 #pragma once
-
 #include "fdbclient/CommitTransaction.h"
+
+
+# This is calculating
 
 inline ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional,
                                   const ValueRef& otherOperand,
