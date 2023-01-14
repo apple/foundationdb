@@ -22,8 +22,8 @@
 
 #include <string_view>
 
-#include "flow/network.h"
 #include "flow/flow.h"
+#include "flow/network.h"
 
 // Used to manually instrument waiting actors to collect samples for the
 // sampling profiler.
