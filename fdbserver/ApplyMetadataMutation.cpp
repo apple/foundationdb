@@ -75,7 +75,8 @@ public:
 	                           bool& confChange_,
 	                           Version version,
 	                           Version popVersion_,
-	                           bool initialCommit_)
+	                           bool initialCommit_,
+	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
 	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
@@ -85,7 +86,8 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_) {}
+	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_),
+	    provisionalCommitProxy(provisionalCommitProxy_) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -144,6 +146,9 @@ private:
 
 	// true if called from Resolver
 	bool forResolver = false;
+
+	// true if called from a provisional commit proxy
+	bool provisionalCommitProxy = false;
 
 private:
 	// The following variables are used internally
@@ -500,7 +505,8 @@ private:
 		    commit,
 		    committedVersion,
 		    p.keyVersion,
-		    tenantMap);
+		    tenantMap,
+		    provisionalCommitProxy);
 	}
 
 	void checkSetApplyMutationsKeyVersionMapRange(MutationRef m) {
@@ -1333,7 +1339,8 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             bool& confChange,
                             Version version,
                             Version popVersion,
-                            bool initialCommit) {
+                            bool initialCommit,
+                            bool provisionalCommitProxy) {
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
@@ -1345,7 +1352,8 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           confChange,
 	                           version,
 	                           popVersion,
-	                           initialCommit)
+	                           initialCommit,
+	                           provisionalCommitProxy)
 	    .apply();
 }
 

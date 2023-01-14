@@ -99,7 +99,8 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             bool& confChange,
                             Version version,
                             Version popVersion,
-                            bool initialCommit);
+                            bool initialCommit,
+                            bool provisionalCommitProxy);
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,

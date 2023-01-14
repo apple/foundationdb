@@ -20,6 +20,8 @@
 
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/TenantEntryCache.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbrpc/simulator.h"
 #include "flow/FastRef.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -709,7 +711,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 		// dealing with domain aware encryption so all keys should belong to a tenant
 		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
-		TraceEvent("Nim::hereo").detail("Key", key).detail("Tid", TenantAPI::prefixToId(tenantPrefix));
 		return TenantAPI::prefixToId(tenantPrefix);
 	}
 
@@ -1025,16 +1026,6 @@ private:
 	Key lastValue;
 };
 
-int64_t getTenantIdFromKey(StringRef key) {
-	ASSERT(!isSystemKey(key));
-
-	if (key.size() < TenantAPI::PREFIX_SIZE) {
-		return TenantInfo::INVALID_TENANT;
-	}
-	StringRef prefix = key.substr(0, TenantAPI::PREFIX_SIZE);
-	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-}
-
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
@@ -1093,16 +1084,12 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		state uint32_t vLen = reader->consumeNetworkUInt32();
 		state const uint8_t* v = reader->consume(vLen);
 		if (tenantCache.present() && !isSystemKey(KeyRef(k, kLen))) {
-			state int64_t tenantId = getTenantIdFromKey(KeyRef(k, kLen));
+			state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(StringRef(k, kLen));
 			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
-			if (!payload.present()) {
-				TraceEvent(SevError, "Nim::SnapshotRestoreTenantNotFound").detail("TenantId", tenantId).detail("Key", KeyRef(k, kLen));
-			}
-			TraceEvent("Nim::decode1").detail("TenantId", tenantId).detail("Key", KeyRef(k, kLen)).detail("Payload", payload.present());
 			// The first and last KV pairs are not restored so if the tenant is not found for the last key then it's ok
 			// to include it in the restore set
 			if (!payload.present() && !(reader->eof() || *reader->rptr == 0xFF)) {
-				TraceEvent(SevError, "SnapshotRestoreTenantNotFound").detail("TenantId", tenantId).detail("Key", KeyRef(k, kLen));
+				TraceEvent("SnapshotRestoreTenantNotFound").detail("TenantId", tenantId);
 				CODE_PROBE(true, "Snapshot restore tenant not found");
 			} else {
 				results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
@@ -1183,7 +1170,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		} else {
 			throw restore_unsupported_file_version();
 		}
-		TraceEvent("Nim::here1");
 		return results;
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
@@ -3565,6 +3551,16 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		return returnStr;
 	}
 
+	ACTOR static Future<Void> _validTenantAccess(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
+		if (isSystemKey(key)) {
+			return Void();
+		}
+		state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
+		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
+		ASSERT(payload.present());
+		return Void();
+	}
+
 	ACTOR static Future<Void> _execute(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
@@ -3615,7 +3611,14 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<IAsyncFile> inFile = wait(bc.get()->readFile(rangeFile.fileName));
 		state Standalone<VectorRef<KeyValueRef>> blockData =
 		    wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
-		TraceEvent("Nim::here2").detail("SV", blockData.size());
+		state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+		state std::vector<Future<Void>> validTenantCheckFutures;
+		state Arena arena;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		if (config.tenantMode == TenantMode::REQUIRED && g_network && g_network->isSimulated()) {
+			tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+			wait(tenantCache.get()->init());
+		}
 
 		// First and last key are the range for this file
 		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
@@ -3693,6 +3696,12 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+						if (tenantCache.present()) {
+							validTenantCheckFutures.push_back(_validTenantAccess(
+							    StringRef(arena,
+							              data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get())),
+							    tenantCache.get()));
+						}
 						tr->set(data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 						        data[i].value);
 					}
@@ -3707,6 +3716,11 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					wait(checkLock);
 
 					wait(tr->commit());
+
+					if (!validTenantCheckFutures.empty()) {
+						waitForAll(validTenantCheckFutures);
+						validTenantCheckFutures.clear();
+					}
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
