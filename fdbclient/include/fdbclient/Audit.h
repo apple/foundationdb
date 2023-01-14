@@ -25,17 +25,17 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
+enum class AuditType : uint8_t {
+	Invalid = 0,
+	ValidateHA = 1,
+};
+
 enum class AuditPhase : uint8_t {
 	Invalid = 0,
 	Running = 1,
 	Complete = 2,
 	Error = 3,
 	Failed = 4,
-};
-
-enum class AuditType : uint8_t {
-	Invalid = 0,
-	ValidateHA = 1,
 };
 
 struct AuditStorageState {
