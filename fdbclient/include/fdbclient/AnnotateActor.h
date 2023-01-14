@@ -28,8 +28,8 @@
 // Used to manually instrument waiting actors to collect samples for the
 // sampling profiler.
 struct AnnotateActor {
-	unsigned index;
 	bool set;
+	unsigned index;
 
 	AnnotateActor() : set(false) {}
 
