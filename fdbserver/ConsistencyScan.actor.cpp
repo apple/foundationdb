@@ -729,10 +729,15 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 							    .detail("ShardEnd", printable(range.end))
 							    .detail("Address", storageServerInterfaces[j].address())
 							    .detail("UID", storageServerInterfaces[j].id())
+							    .detail("Quiesed", performQuiescentChecks)
 							    .detail("GetKeyValuesToken",
 							            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
 							    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
 
+							if (e.code() == error_code_request_maybe_delivered) {
+								// SS in the team may be removed and we get this error.
+								return false;
+							}
 							// All shards should be available in quiscence
 							if (performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
 								testFailure("Storage server unavailable", performQuiescentChecks, failureIsError);
