@@ -30,7 +30,7 @@
 struct RYWMutation {
 	Optional<ValueRef> value;
 	enum MutationRef::Type type;
-
+	int compare(WriteMapEntry const& r) const { return key.compare(r.key); }
 	RYWMutation(Optional<ValueRef> const& entry, MutationRef::Type type) : value(entry), type(type) {}
 	RYWMutation() : value(), type(MutationRef::NoOp) {}
 
