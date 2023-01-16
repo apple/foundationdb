@@ -722,27 +722,27 @@ public:
 
 	// Get client-side status information as a JSON string with the following schema:
 	// { "Healthy" : <overall health status: true or false>,
-	//    "ClusterID" : <UUID>,
-	//    "Coordinators" : [ <address>, ...  ],
-	//    "CurrentCoordinator" : <address>
-	//    "GrvProxies" : [ <address>, ...  ],
-	//    "CommitProxies" : [ <address>", ... ],
-	//    "StorageServers" : [ { "Address" : <address>, "SSID" : <Storage Server ID> }, ... ],
-	//    "Connections" : [
-	//      { "Address" : "<address>",
-	//        "Status" : <failed|connected|connecting|disconnected>,
-	//        "Compatible" : <is protocol version compatible with the client>,
-	//        "ConnectFailedCount" : <number of failed connection attempts>,
-	//        "LastConnectTime" : <elapsed time in seconds since the last connection attempt>,
-	//        "PingCount" : <total ping count>,
-	//        "PingTimeoutCount" : <number of ping timeouts>,
-	//        "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
-	//        "BytesReceived" : <bytes received>,
-	//        "BytesSent" : <bytes sent>,
-	//        "ProtocolVersion" : <protocol version of the server, missing if unknown>
-	//      },
-	//      ...
-	//    ]
+	//   "ClusterID" : <UUID>,
+	//   "Coordinators" : [ <address>, ...  ],
+	//   "CurrentCoordinator" : <address>
+	//   "GrvProxies" : [ <address>, ...  ],
+	//   "CommitProxies" : [ <address>", ... ],
+	//   "StorageServers" : [ { "Address" : <address>, "SSID" : <Storage Server ID> }, ... ],
+	//   "Connections" : [
+	//     { "Address" : "<address>",
+	//       "Status" : <failed|connected|connecting|disconnected>,
+	//       "Compatible" : <is protocol version compatible with the client>,
+	//       "ConnectFailedCount" : <number of failed connection attempts>,
+	//       "LastConnectTime" : <elapsed time in seconds since the last connection attempt>,
+	//       "PingCount" : <total ping count>,
+	//       "PingTimeoutCount" : <number of ping timeouts>,
+	//       "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
+	//       "BytesReceived" : <bytes received>,
+	//       "BytesSent" : <bytes sent>,
+	//       "ProtocolVersion" : <protocol version of the server, missing if unknown>
+	//     },
+	//     ...
+	//   ]
 	// }
 	//
 	// The addresses in the Connections array match the addresses of Coordinators, GrvProxies,

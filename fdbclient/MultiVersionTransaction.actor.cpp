@@ -2392,7 +2392,7 @@ const char* initializationStateToString(MultiVersionDatabase::InitializationStat
 //   "DatabaseStatus" : <Native Database status report, present if successfully retrieved>,
 //   "ErrorRetrievingDatabaseStatus" : <error code of retrieving status of the Native Database, present if failed>,
 //   "AvailableClients" : [
-//	    { "ProtocolVersion" : <protocol version of the client>,
+//      { "ProtocolVersion" : <protocol version of the client>,
 //        "ReleaseVersion" : <release version of the client>,
 //        "ThreadIndex" : <the index of the client thread serving this database>
 //      },
