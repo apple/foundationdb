@@ -68,7 +68,7 @@ struct TenantManagementWorkload : TestWorkload {
 	int64_t maxId = -1;
 
 	const Key keyName = "key"_sr;
-	const Key testParametersKey = "test_parameters"_sr;
+	const Key testParametersKey = nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	const ClusterName dataClusterName = "cluster1"_sr;
@@ -96,6 +96,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	Reference<IDatabase> mvDb;
 	Database dataDb;
+	bool hasNoTenantKey = false; // whether this workload has non-tenant key
 
 	// This test exercises multiple different ways to work with tenants
 	enum class OperationType {
@@ -169,74 +170,106 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
-		Reference<IDatabase> threadSafeHandle =
-		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+	Future<Optional<Key>> waitDataDbTenantModeChange() const {
+		return runRYWTransaction(dataDb, [](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return tr->get("\xff"_sr); // just a meaningless read
+		});
+	}
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
+	// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
+	Future<Void> writeNonTenantKey() const {
+		return runRYWTransaction(dataDb, [this](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+			tr->set(keyName, noTenantValue);
+			return Future<Void>(Void());
+		});
+	}
 
-		if (self->useMetacluster && self->clientId == 0) {
+	// load test parameters from meta-cluster
+	ACTOR static Future<Void> loadTestParameters(Database cx, TenantManagementWorkload* self) {
+		state Transaction tr(cx);
+		// Read the parameters chosen and saved by client 0
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+				Optional<Value> val = wait(tr.get(self->testParametersKey));
+				if (val.present()) {
+					TestParameters params = TestParameters::decode(val.get());
+					self->useMetacluster = params.useMetacluster;
+					return Void();
+				}
+				wait(delay(1.0));
+				tr.reset();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	// send test parameters from metacluster
+	ACTOR static Future<Void> sendTestParameters(Database cx, TenantManagementWorkload* self) {
+		// Communicates test parameters to all other clients by storing it in a key
+		fmt::print("Sending test parameters ...\n");
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+				tr.set(self->testParametersKey, TestParameters(self->useMetacluster).encode());
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	// only the first client will do this setup
+	ACTOR static Future<Void> firstClientSetup(Database cx, TenantManagementWorkload* self) {
+		if (self->useMetacluster) {
+			fmt::print("Create metacluster and register data cluster ... \n");
+			// Configure the metacluster (this changes the tenant mode)
 			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
 			wait(MetaclusterAPI::registerCluster(
 			    self->mvDb, self->dataClusterName, g_simulator->extraDatabases[0], entry));
-		}
 
-		state Transaction tr(cx);
-		if (self->clientId == 0) {
-			// Communicates test parameters to all other clients by storing it in a key
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					tr.set(self->testParametersKey, TestParameters(self->useMetacluster).encode());
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-		} else {
-			// Read the parameters chosen and saved by client 0
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> val = wait(tr.get(self->testParametersKey));
-					if (val.present()) {
-						TestParameters params = TestParameters::decode(val.get());
-						self->useMetacluster = params.useMetacluster;
-						break;
-					}
-
-					wait(delay(1.0));
-					tr.reset();
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-		}
-
-		if (self->useMetacluster) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
 			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
+			// wait for tenant mode change on dataDB
+			wait(success(self->waitDataDbTenantModeChange()));
 		} else {
 			self->dataDb = cx;
 		}
+		wait(sendTestParameters(cx, self));
+
+		if (self->dataDb->getTenantMode() != TenantMode::REQUIRED) {
+			self->hasNoTenantKey = true;
+			wait(self->writeNonTenantKey());
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
+		Reference<IDatabase> threadSafeHandle =
+		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
+		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->clientId == 0) {
-			// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
-			state Transaction dataTr(self->dataDb);
-			loop {
-				try {
-					dataTr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					dataTr.set(self->keyName, self->noTenantValue);
-					wait(dataTr.commit());
-					break;
-				} catch (Error& e) {
-					wait(dataTr.onError(e));
-				}
+			wait(firstClientSetup(cx, self));
+		} else {
+			wait(loadTestParameters(cx, self));
+			if (self->useMetacluster) {
+				ASSERT(g_simulator->extraDatabases.size() == 1);
+				self->dataDb =
+				    Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
+			} else {
+				self->dataDb = cx;
 			}
 		}
 
@@ -622,6 +655,51 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	// set a random watch on a tenant
+	ACTOR static Future<Void> watchTenant(TenantManagementWorkload* self, TenantName tenant) {
+		loop {
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dataDb, tenant));
+			try {
+				state Future<Void> watch = tr->watch(doubleToTestKey(deterministicRandom()->random01()));
+				wait(tr->commit());
+				wait(watch);
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	void checkWatchOnDeletedTenant(std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>>& watchFutures) {
+		for (auto& [t, f] : watchFutures) {
+			auto& res = f.get();
+			if (res.isError(error_code_tenant_removed) || res.isError(error_code_tenant_not_found)) {
+				CODE_PROBE(res.isError(error_code_tenant_removed),
+				           "Watch Triggered because the tenant is deleted during watch");
+			} else {
+				TraceEvent(SevError, "WatchDeletedTenantCheckFailed")
+				    .detail("Tenant", t)
+				    .detail("IsError", res.isError() ? res.getError().what() : "Void()");
+			}
+		}
+	}
+
+	ACTOR static Future<Void> clearTenantData(TenantManagementWorkload* self, TenantName tenant) {
+		state Transaction clearTr(self->dataDb, tenant);
+		loop {
+			try {
+				clearTr.clear(self->keyName);
+				wait(clearTr.commit());
+				auto itr = self->createdTenants.find(tenant);
+				ASSERT(itr != self->createdTenants.end());
+				itr->second.empty = true;
+				return Void();
+			} catch (Error& e) {
+				wait(clearTr.onError(e));
+			}
+		}
+	}
+
 	// Deletes the tenant or tenant range using the specified operation type
 	ACTOR static Future<Void> deleteTenantImpl(Reference<ReadYourWritesTransaction> tr,
 	                                           TenantName beginTenant,
@@ -670,6 +748,7 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
+		state bool watchTenantCheck = deterministicRandom()->coinflip();
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
@@ -717,23 +796,18 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Check whether each tenant is empty.
 		state int tenantIndex;
+		state std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>> watchFutures;
 		try {
 			if (alreadyExists || endTenant.present()) {
 				for (tenantIndex = 0; tenantIndex < tenants.size(); ++tenantIndex) {
 					// For most tenants, we will delete the contents and make them empty
 					if (deterministicRandom()->random01() < 0.9) {
-						state Transaction clearTr(self->dataDb, tenants[tenantIndex]);
-						loop {
-							try {
-								clearTr.clear(self->keyName);
-								wait(clearTr.commit());
-								auto itr = self->createdTenants.find(tenants[tenantIndex]);
-								ASSERT(itr != self->createdTenants.end());
-								itr->second.empty = true;
-								break;
-							} catch (Error& e) {
-								wait(clearTr.onError(e));
-							}
+						wait(clearTenantData(self, tenants[tenantIndex]));
+
+						// watch the tenant to be deleted
+						if (watchTenantCheck) {
+							watchFutures.emplace_back(tenants[tenantIndex],
+							                          errorOr(watchTenant(self, tenants[tenantIndex])));
 						}
 					}
 					// Otherwise, we will just report the current emptiness of the tenant
@@ -752,6 +826,7 @@ struct TenantManagementWorkload : TestWorkload {
 			return Void();
 		}
 
+		// Tenants deletion retry loop
 		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
@@ -867,6 +942,14 @@ struct TenantManagementWorkload : TestWorkload {
 
 					self->createdTenants.erase(tenant);
 				}
+
+				// check for watch result
+				state int wi = 0;
+				for (; wi < watchFutures.size(); ++wi) {
+					wait(ready(watchFutures[wi].second));
+				}
+				self->checkWatchOnDeletedTenant(watchFutures);
+
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_empty) {
@@ -1810,6 +1893,27 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> _check(Database cx, TenantManagementWorkload* self) {
+		wait(checkNonTenantKey(self));
+		wait(compareTenants(self) && compareTenantGroups(self));
+
+		if (self->useMetacluster) {
+			// The metacluster consistency check runs the tenant consistency check for each cluster
+			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
+			    self->mvDb, AllowPartialMetaclusterOperations::False);
+			wait(metaclusterConsistencyCheck.run());
+			wait(checkTombstoneCleanup(self));
+		} else {
+			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
+			wait(tenantConsistencyCheck.run());
+		}
+
+		return true;
+	}
+
+	ACTOR static Future<Void> checkNonTenantKey(const TenantManagementWorkload* self) {
+		if (!self->hasNoTenantKey)
+			return Void();
+
 		state Transaction tr(self->dataDb);
 
 		// Check that the key we set outside of the tenant is present and has the correct value
@@ -1825,21 +1929,7 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-
-		wait(compareTenants(self) && compareTenantGroups(self));
-
-		if (self->useMetacluster) {
-			// The metacluster consistency check runs the tenant consistency check for each cluster
-			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-			    self->mvDb, AllowPartialMetaclusterOperations::False);
-			wait(metaclusterConsistencyCheck.run());
-			wait(checkTombstoneCleanup(self));
-		} else {
-			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
-			wait(tenantConsistencyCheck.run());
-		}
-
-		return true;
+		return Void();
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

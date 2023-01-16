@@ -183,6 +183,11 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                              std::string filePath,
                                              bool isNewDatabase,
                                              bool force);
+// Trigger audit storage
+ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
+                                           std::vector<StringRef> tokens);
+// Retrieve audit storage status
+ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
