@@ -48,6 +48,7 @@
 #include "fdbclient/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -4446,14 +4447,17 @@ Key constructMappedKey(KeyValueRef* keyValue, std::vector<Optional<Tuple>>& vec,
 }
 
 ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
-                                              KeyRange range,
+                                              AuditStorageState auditState,
                                               Version version,
                                               StorageServerInterface remoteServer) {
 	TraceEvent(SevInfo, "ValidateRangeAgainstServerBegin", data->thisServerID)
-	    .detail("Range", range)
+	    .detail("AuditID", auditState.id)
+	    .detail("Range", auditState.range)
 	    .detail("Version", version)
 	    .detail("RemoteServer", remoteServer.toString());
 
+	state KeyRange range = auditState.range;
+	state Key originBegin = range.begin;
 	state int validatedKeys = 0;
 	state std::string error;
 	loop {
@@ -4498,8 +4502,9 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				}
 			}
 
-			GetKeyValuesReply remote = reps[0].get(), local = reps[1].get();
+			const GetKeyValuesReply &remote = reps[0].get(), local = reps[1].get();
 			Key lastKey = range.begin;
+			auditState.range = range;
 
 			const int end = std::min(local.data.size(), remote.data.size());
 			int i = 0;
@@ -4507,7 +4512,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				KeyValueRef remoteKV = remote.data[i];
 				KeyValueRef localKV = local.data[i];
 				if (!range.contains(remoteKV.key) || !range.contains(localKV.key)) {
-					TraceEvent(SevDebug, "SSValidateRangeKeyOutOfRange", data->thisServerID)
+					TraceEvent(SevWarn, "SSValidateRangeKeyOutOfRange", data->thisServerID)
 					    .detail("Range", range)
 					    .detail("RemoteServer", remoteServer.toString().c_str())
 					    .detail("LocalKey", Traceable<StringRef>::toString(localKV.key).c_str())
@@ -4556,9 +4561,14 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				break;
 			}
 
-			range = KeyRangeRef(keyAfter(lastKey), range.end);
+			if (i > 0) {
+				range = KeyRangeRef(keyAfter(lastKey), range.end);
+				auditState.range = KeyRangeRef(originBegin, range.begin);
+				auditState.setPhase(AuditPhase::Complete);
+				wait(persistAuditStateMap(data->cx, auditState));
+			}
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ValidateRangeAgainstServerError", data->thisServerID)
+			TraceEvent(SevWarn, "ValidateRangeAgainstServerError", data->thisServerID)
 			    .errorUnsuppressed(e)
 			    .detail("RemoteServer", remoteServer.toString())
 			    .detail("Range", range)
@@ -4573,9 +4583,12 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		    .detail("Version", version)
 		    .detail("ErrorMessage", error)
 		    .detail("RemoteServer", remoteServer.toString());
+		auditState.setPhase(AuditPhase::Error);
+		wait(persistAuditStateMap(data->cx, auditState));
+		throw audit_storage_error();
 	}
 
-	TraceEvent(SevDebug, "ValidateRangeAgainstServerEnd", data->thisServerID)
+	TraceEvent(SevInfo, "ValidateRangeAgainstServerEnd", data->thisServerID)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("ValidatedKeys", validatedKeys)
@@ -4584,9 +4597,9 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	return Void();
 }
 
-ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::vector<UID> candidates) {
+ACTOR Future<Void> validateRangeShard(StorageServer* data, AuditStorageState auditState, std::vector<UID> candidates) {
 	TraceEvent(SevDebug, "ServeValidateRangeShardBegin", data->thisServerID)
-	    .detail("Range", range)
+	    .detail("Range", auditState.range)
 	    .detail("Servers", describe(candidates));
 
 	state Version version;
@@ -4627,7 +4640,7 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 
 	if (ssis.size() < 2) {
 		TraceEvent(SevWarn, "ServeValidateRangeShardNotHAConfig", data->thisServerID)
-		    .detail("Range", range)
+		    .detail("Range", auditState.range)
 		    .detail("Servers", describe(candidates));
 		return Void();
 	}
@@ -4645,10 +4658,10 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	}
 
 	if (remoteServer != nullptr) {
-		wait(validateRangeAgainstServer(data, range, version, *remoteServer));
+		wait(validateRangeAgainstServer(data, auditState, version, *remoteServer));
 	} else {
 		TraceEvent(SevWarn, "ServeValidateRangeShardRemoteNotFound", data->thisServerID)
-		    .detail("Range", range)
+		    .detail("Range", auditState.range)
 		    .detail("Servers", describe(candidates));
 		throw audit_storage_failed();
 	}
@@ -4656,9 +4669,12 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	return Void();
 }
 
-ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data, KeyRange range, std::vector<UID> targetServers) {
+ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
+                                               AuditStorageState auditState,
+                                               std::vector<UID> targetServers) {
 	TraceEvent(SevDebug, "ValidateRangeAgainstServersBegin", data->thisServerID)
-	    .detail("Range", range)
+	    .detail("AuditID", auditState.id)
+	    .detail("Range", auditState.range)
 	    .detail("TargetServers", describe(targetServers));
 
 	state Version version;
@@ -4676,10 +4692,8 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data, KeyRange ran
 				}
 			}
 
-			std::vector<Optional<Value>> serverListValues_ = wait(getAll(serverListEntries));
-			serverListValues = serverListValues_;
-			Version version_ = wait(tr.getReadVersion());
-			version = version_;
+			wait(store(serverListValues, getAll(serverListEntries)));
+			wait(store(version, tr.getReadVersion()));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -4689,10 +4703,12 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data, KeyRange ran
 	std::vector<Future<Void>> fs;
 	for (const auto& v : serverListValues) {
 		if (!v.present()) {
-			TraceEvent(SevWarn, "ValidateRangeRemoteServerNotFound", data->thisServerID).detail("Range", range);
+			TraceEvent(SevWarn, "ValidateRangeRemoteServerNotFound", data->thisServerID)
+			    .detail("AuditID", auditState.id)
+			    .detail("Range", auditState.range);
 			throw audit_storage_failed();
 		}
-		fs.push_back(validateRangeAgainstServer(data, range, version, decodeServerListValue(v.get())));
+		fs.push_back(validateRangeAgainstServer(data, auditState, version, decodeServerListValue(v.get())));
 	}
 
 	wait(waitForAll(fs));
@@ -4704,7 +4720,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 
-	TraceEvent(SevInfo, "ServeAuditStorageBegin", data->thisServerID)
+	TraceEvent(SevInfo, "SSAuditStorageBegin", data->thisServerID)
 	    .detail("RequestID", req.id)
 	    .detail("Range", req.range)
 	    .detail("AuditType", req.type)
@@ -4712,6 +4728,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 
 	state Key begin = req.range.begin;
 	state std::vector<Future<Void>> fs;
+	state AuditStorageState res(req.id, req.range, req.getType());
 
 	try {
 		if (req.targetServers.empty()) {
@@ -4735,7 +4752,10 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 						std::vector<UID> dest;
 						UID srcId, destId;
 						decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-						fs.push_back(validateRangeShard(data, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
+						fs.push_back(validateRangeShard(
+						    data,
+						    AuditStorageState(res.id, KeyRangeRef(shards[i].key, shards[i + 1].key), res.getType()),
+						    src));
 						begin = shards[i + 1].key;
 					}
 				} catch (Error& e) {
@@ -4743,19 +4763,27 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 				}
 			}
 		} else {
-			fs.push_back(validateRangeAgainstServers(data, req.range, req.targetServers));
+			fs.push_back(validateRangeAgainstServers(data, res, req.targetServers));
 		}
+
 		wait(waitForAll(fs));
-		AuditStorageState res(req.id, req.getType());
 		res.setPhase(AuditPhase::Complete);
 		req.reply.send(res);
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "ServeAuditStorageError", data->thisServerID)
+		TraceEvent(SevInfo, "SSAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("RequestID", req.id)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		req.reply.sendError(audit_storage_failed());
+		    .detail("AuditType", req.type)
+		    .detail("TargetServers", describe(req.targetServers));
+		if (e.code() != error_code_audit_storage_error) {
+			req.reply.sendError(audit_storage_failed());
+		} else {
+			req.reply.sendError(audit_storage_error());
+		}
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 	}
 
 	return Void();

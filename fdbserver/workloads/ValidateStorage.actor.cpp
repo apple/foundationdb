@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
@@ -75,6 +76,7 @@ struct ValidateStorage : TestWorkload {
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
+		state UID auditId;
 
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
@@ -85,11 +87,32 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			try {
-				UID auditId = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
+				Optional<UID> auditId_ = wait(timeout(
+				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
+				if (!auditId_.present()) {
+					throw audit_storage_failed();
+				}
+				auditId = auditId_.get();
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
 				break;
 			} catch (Error& e) {
-				TraceEvent("AuditStorageError").errorUnsuppressed(e);
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+				wait(delay(1));
+			}
+		}
+
+		loop {
+			try {
+				AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+				if (auditState.getPhase() != AuditPhase::Complete) {
+					ASSERT(auditState.getPhase() == AuditPhase::Running);
+					wait(delay(30));
+				} else {
+					ASSERT(auditState.getPhase() == AuditPhase::Complete);
+					break;
+				}
+			} catch (Error& e) {
+				TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
 				wait(delay(1));
 			}
 		}
@@ -169,7 +192,7 @@ struct ValidateStorage : TestWorkload {
 				try {
 					wait(tr.onError(e));
 				} catch (Error& e) {
-					if (e.code() != error_code_audit_storage_failed) {
+					if (e.code() != error_code_audit_storage_failed && e.code() != error_code_broken_promise) {
 						throw e;
 					}
 				}
