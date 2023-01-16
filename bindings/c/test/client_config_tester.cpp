@@ -19,7 +19,14 @@
  */
 
 /*
- * A utility for testing setting up the FDB client with different configuration options
+ * A utility for testing FDB client with different configuration options
+ *
+ * It performs following steps:
+ * 1. Initialize FDB client with the specified options
+ * 2. Create a database
+ * 3. Perform a simple transaction
+ * 4. Check if these steps succeed of fail with the expected error
+ * 5. Print client status if requested
  */
 
 #include "fmt/core.h"
