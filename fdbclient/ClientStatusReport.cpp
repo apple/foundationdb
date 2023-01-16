@@ -97,11 +97,11 @@ private:
 	void reportStorageServers() {
 		json_spirit::mArray storageServerArr;
 		for (const auto& [ssid, serverInfo] : cx.server_interf) {
-			json_spirit::mObject serverDescr;
-			serverDescr["SSID"] = ssid.toString();
-			serverDescr["Address"] = serverInfo->interf.address().toString();
+			json_spirit::mObject serverDesc;
+			serverDesc["SSID"] = ssid.toString();
+			serverDesc["Address"] = serverInfo->interf.address().toString();
 			serverAddresses.insert(serverInfo->interf.address());
-			storageServerArr.push_back(serverDescr);
+			storageServerArr.push_back(serverDesc);
 		}
 		statusObj["StorageServers"] = storageServerArr;
 	}

@@ -2356,7 +2356,7 @@ void MultiVersionDatabase::DatabaseState::close() {
 
 namespace {
 
-const char* inializationStateToString(MultiVersionDatabase::InitializationState initState) {
+const char* initializationStateToString(MultiVersionDatabase::InitializationState initState) {
 	switch (initState) {
 	case MultiVersionDatabase::InitializationState::INITIALIZING:
 		return "initializing";
@@ -2379,7 +2379,7 @@ const char* inializationStateToString(MultiVersionDatabase::InitializationState 
 Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
     ErrorOr<Standalone<StringRef>> dbContextStatus) {
 	json_spirit::mObject statusObj;
-	statusObj["InitializationState"] = inializationStateToString(initializationState);
+	statusObj["InitializationState"] = initializationStateToString(initializationState);
 	if (initializationState == InitializationState::INITIALIZATION_FAILED) {
 		statusObj["InitializationError"] = initializationError.code();
 	}
