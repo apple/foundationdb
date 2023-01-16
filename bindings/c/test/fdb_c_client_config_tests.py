@@ -173,7 +173,6 @@ class ClientConfigTest:
             "ProtocolVersion",
             "AvailableClients",
             "ConnectionRecord",
-            "ClusterId",
         }
         self.tc.assertEqual(expected_mvc_attributes, set(self.status_json.keys()))
         self.tc.assertEqual("created", self.status_json["InitializationState"])

@@ -2393,7 +2393,6 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 	}
 	statusObj["AvailableClients"] = clientArr;
 	statusObj["ConnectionRecord"] = connectionRecord.toString();
-	statusObj["ClusterId"] = clusterId;
 	if (dbProtocolVersion.present()) {
 		statusObj["ProtocolVersion"] = format("%llx", dbProtocolVersion.get().version());
 	}
