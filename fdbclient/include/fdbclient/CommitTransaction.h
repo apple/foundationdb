@@ -90,7 +90,7 @@ struct MutationRef {
 	uint8_t type;
 	StringRef param1, param2;
 
-	MutationRef() {}
+	MutationRef() : type(MAX_ATOMIC_OP) {}
 	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b) {}
 	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), param1(to, a), param2(to, b) {}
 	MutationRef(Arena& to, const MutationRef& from)
@@ -116,6 +116,7 @@ struct MutationRef {
 	}
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
+	bool isValid() const { return type < MAX_ATOMIC_OP; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -346,6 +347,50 @@ struct MutationsAndVersionRef {
 
 	struct OrderByVersion {
 		bool operator()(MutationsAndVersionRef const& a, MutationsAndVersionRef const& b) const {
+			return a.version < b.version;
+		}
+	};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutations, version, knownCommittedVersion);
+	}
+};
+
+struct EncryptedMutationsAndVersionRef {
+	VectorRef<MutationRef> mutations;
+	Optional<VectorRef<MutationRef>> encrypted;
+	Version version = invalidVersion;
+	Version knownCommittedVersion = invalidVersion;
+
+	EncryptedMutationsAndVersionRef() {}
+	explicit EncryptedMutationsAndVersionRef(Version version, Version knownCommittedVersion)
+	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
+	EncryptedMutationsAndVersionRef(VectorRef<MutationRef> mutations,
+	                                VectorRef<MutationRef> encrypted,
+	                                Version version,
+	                                Version knownCommittedVersion)
+	  : mutations(mutations), encrypted(encrypted), version(version), knownCommittedVersion(knownCommittedVersion) {}
+	EncryptedMutationsAndVersionRef(Arena& to,
+	                                VectorRef<MutationRef> mutations,
+	                                Optional<VectorRef<MutationRef>> encrypt,
+	                                Version version,
+	                                Version knownCommittedVersion)
+	  : mutations(to, mutations), version(version), knownCommittedVersion(knownCommittedVersion) {
+		if (encrypt.present()) {
+			encrypted = VectorRef<MutationRef>(to, encrypt.get());
+		}
+	}
+	EncryptedMutationsAndVersionRef(Arena& to, const EncryptedMutationsAndVersionRef& from)
+	  : mutations(to, from.mutations), version(from.version), knownCommittedVersion(from.knownCommittedVersion) {
+		if (from.encrypted.present()) {
+			encrypted = VectorRef<MutationRef>(to, from.encrypted.get());
+		}
+	}
+	int expectedSize() const { return mutations.expectedSize(); }
+
+	struct OrderByVersion {
+		bool operator()(EncryptedMutationsAndVersionRef const& a, EncryptedMutationsAndVersionRef const& b) const {
 			return a.version < b.version;
 		}
 	};
