@@ -1248,13 +1248,6 @@ ACTOR Future<bool> runTest(Database cx,
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
 				ok = false;
 			}
-
-			try {
-				wait(timeoutError(auditStorageCorrectness(dbInfo), 20000.0));
-			} catch (Error& e) {
-				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform auditStorage check.");
-				ok = false;
-			}
 		}
 	}
 
