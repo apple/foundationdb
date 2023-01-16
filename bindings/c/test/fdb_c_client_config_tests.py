@@ -86,6 +86,11 @@ class ClientConfigTest:
         self.log_dir.mkdir(parents=True)
         self.tmp_dir = self.test_dir.joinpath("tmp")
         self.tmp_dir.mkdir(parents=True)
+        self.test_cluster_file = self.cluster.cluster_file
+        self.port_provider = PortProvider()
+        self.status_json = None
+
+        # Configuration parameters to be set directly as needed
         self.disable_local_client = False
         self.disable_client_bypass = False
         self.ignore_external_client_failures = False
@@ -93,10 +98,11 @@ class ClientConfigTest:
         self.api_version = None
         self.expected_error = None
         self.transaction_timeout = None
-        self.test_cluster_file = self.cluster.cluster_file
         self.print_status = False
-        self.port_provider = PortProvider()
-        self.status_json = None
+
+    # ----------------------------
+    # Configuration methods
+    # ----------------------------
 
     def create_external_lib_dir(self, versions):
         self.external_lib_dir = self.test_dir.joinpath("extclients")
@@ -127,12 +133,9 @@ class ClientConfigTest:
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@")
 
-    def dump_client_logs(self):
-        for log_file in glob.glob(os.path.join(self.log_dir, "*")):
-            print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file), file=sys.stderr)
-            with open(log_file, "r") as f:
-                print(f.read(), file=sys.stderr)
-            print(">>>>>>>>>>>>>>>>>>>> End of {}:".format(log_file), file=sys.stderr)
+    # ----------------------------
+    # Status check methods
+    # ----------------------------
 
     def check_initialization_state(self, expected_state):
         self.tc.assertIsNotNone(self.status_json)
@@ -204,6 +207,10 @@ class ClientConfigTest:
         self.tc.assertIsNotNone(self.status_json)
         self.tc.assertTrue("Healthy" in self.status_json)
         self.tc.assertEqual(expected_is_healthy, self.status_json["Healthy"])
+
+    # ----------------------------
+    # Executing the test
+    # ----------------------------
 
     def exec(self):
         cmd_args = [self.cluster.client_config_tester_bin, "--cluster-file", self.test_cluster_file]
