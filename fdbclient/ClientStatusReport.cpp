@@ -127,7 +127,6 @@ private:
 		auto& peers = FlowTransport::transport().getAllPeers();
 		auto peerIter = peers.find(address);
 
-		FlowTransport::transport().healthMonitor()->getRecentClosedPeers();
 		bool failed = IFailureMonitor::failureMonitor().getState(address).isFailed();
 		if (failed) {
 			connStatus["Status"] = "failed";
