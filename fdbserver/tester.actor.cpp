@@ -1104,11 +1104,11 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 	loop {
 		try {
 			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+			TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
 			if (auditState.getPhase() != AuditPhase::Complete) {
 				ASSERT(auditState.getPhase() == AuditPhase::Running);
 				wait(delay(30));
 			} else {
-				TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
 				ASSERT(auditState.getPhase() == AuditPhase::Complete);
 				break;
 			}
@@ -1249,11 +1249,24 @@ ACTOR Future<bool> runTest(Database cx,
 				ok = false;
 			}
 
-			try {
-				wait(timeoutError(auditStorageCorrectness(dbInfo), 20000.0));
-			} catch (Error& e) {
-				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform auditStorage check.");
-				ok = false;
+			bool qui = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
+			if (qui) {
+				loop {
+					state int retryCount = 0;
+					try {
+						wait(timeoutError(auditStorageCorrectness(dbInfo), 20000.0));
+						break;
+					} catch (Error& e) {
+						ok = false;
+						if (retryCount++ > 3) {
+							TraceEvent(SevError, "TestFailure")
+							    .error(e)
+							    .detail("Reason", "Unable to perform auditStorage check.");
+								ok = false;
+							break;
+						}
+					}
+				}
 			}
 		}
 	}
@@ -2150,9 +2163,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) {
-			return Void();
-		}
+		when(wait(tests)) { return Void(); }
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();

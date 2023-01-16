@@ -146,6 +146,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, 
 			auditStates = res_;
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "GetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", id);
 			wait(tr.onError(e));
 		}
 	}
