@@ -603,7 +603,7 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
-	// Return a JSON string containing database status information
+	// Return a JSON string containing database client-side status information
 	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
 
 private:
@@ -997,7 +997,7 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
-	// Return a JSON string containing database status information
+	// Return a JSON string containing database client-side status information
 	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
 
 	// private:
@@ -1036,7 +1036,7 @@ public:
 		// Get database intialization error if initialization failed
 		ErrorOr<Void> getInitializationError();
 
-		// Return a JSON string containing database status information
+		// Return a JSON string containing database client-side status information
 		Standalone<StringRef> getClientStatus(ErrorOr<Standalone<StringRef>> dbContextStatus);
 
 		// Cleans up state for the legacy version monitors to break reference cycles

@@ -739,14 +739,14 @@ public:
 	//        "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
 	//        "BytesReceived" : <bytes received>,
 	//        "BytesSent" : <bytes sent>,
-	//        "ProtocolVersion" : <protocol version of the server, present if known>
+	//        "ProtocolVersion" : <protocol version of the server, missing if unknown>
 	//      },
 	//      ...
 	//    ]
 	// }
 	//
 	// The addresses in the Connections array match the addresses of Coordinators, GrvProxies,
-	// CommitProxies and StorageServers
+	// CommitProxies and StorageServers, there is one entry per different address
 	//
 	// If the database context is initialized with an error, the JSON contains just the error code
 	// { "InitializationError" : <error code> }
