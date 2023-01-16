@@ -190,6 +190,7 @@ bool processArg(const CSimpleOpt& args) {
 		if (!processIntOption(args.OptionText(), args.OptionArg(), 0, 1000000, options.transactionTimeout)) {
 			return false;
 		}
+		break;
 	case OPT_TRACE:
 		options.trace = true;
 		break;
