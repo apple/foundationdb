@@ -220,7 +220,7 @@ typedef struct bgfilepointer {
 	int64_t file_offset;
 	int64_t file_length;
 	int64_t full_file_length;
-	// encryption keys would go here
+	/* TODO: encryption keys would go here */
 } FDBBGFilePointer;
 
 #pragma pack(push, 4)
@@ -241,7 +241,7 @@ typedef struct bgfiledescription {
 	FDBBGFilePointer* delta_files;
 	int memory_mutation_count;
 	FDBBGMutation* memory_mutations;
-
+	/* TODO: tenant info would go here */
 } FDBBGFileDescription;
 #pragma pack(pop)
 
