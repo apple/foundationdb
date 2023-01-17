@@ -1105,11 +1105,14 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 		try {
 			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
 			TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
-			if (auditState.getPhase() != AuditPhase::Complete) {
-				ASSERT(auditState.getPhase() == AuditPhase::Running);
+			const AuditPhase phase = auditState.getPhase();
+			if (phase == AuditPhase::Running) {
 				wait(delay(30));
+			} else if (phase == AuditPhase::Failed) {
+				TraceEvent(SevWarnAlways, "AuditStorageFailed");
+				break;
 			} else {
-				ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				ASSERT(phase == AuditPhase::Complete);
 				break;
 			}
 		} catch (Error& e) {

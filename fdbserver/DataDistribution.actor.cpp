@@ -1411,11 +1411,14 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 		    .detail("Range", auditState.range)
 		    .detail("AuditType", auditState.type)
 		    .detail("RetryCount", audit->retryCount++);
-		if (e.code() != error_code_actor_cancelled && audit->retryCount < 100) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		} else if (audit->retryCount > 100) {
+			audit->state.setPhase(AuditPhase::Failed);
+			wait(persistAuditState(self->txnProcessor->context(), audit->state));
+		} else {
 			wait(delay(30));
 			self->addActor.send(resumeAuditStorage(self, auditState));
-		} else {
-			throw e;
 		}
 	}
 
