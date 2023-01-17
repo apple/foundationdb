@@ -21,6 +21,7 @@
 #include "TesterBlobGranuleUtil.h"
 #include "TesterUtil.h"
 #include <unordered_set>
+#include <set>
 #include "fdb_api.hpp"
 #include <memory>
 #include <fmt/format.h>
@@ -63,7 +64,7 @@ private:
 	// FIXME: get rid of readSuccess* in this test now that setup is verify()-ing
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	std::unordered_set<std::optional<int>> tenantsWithReadSuccess;
-	std::unordered_set<fdb::ByteString> validatedFiles;
+	std::set<fdb::ByteString> validatedFiles;
 
 	inline void setReadSuccess(std::optional<int> tenantId) { tenantsWithReadSuccess.insert(tenantId); }
 
