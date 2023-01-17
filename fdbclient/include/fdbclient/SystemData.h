@@ -92,10 +92,16 @@ void decodeKeyServersValue(RangeResult result,
                            UID& destID,
                            bool missingIsError = true);
 
-extern const KeyRangeRef auditRange;
+extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
-const Key auditRangePrefix(const AuditType type, const UID& auditId);
+extern const KeyRangeRef auditRanges;
+extern const KeyRef auditRangePrefix;
+
+const Key auditKey(const AuditType type, const UID& auditId);
+const KeyRange auditKeyRange(const AuditType type);
+const Key auditRangeKey(const UID& auditId, const KeyRef& key);
+const Key auditRangePrefixFor(const UID& auditId);
+
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
 
@@ -277,6 +283,7 @@ extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;
 extern const KeyRef perpetualStorageWiggleStatsPrefix;
+extern const KeyRef perpetualStorageWigglePrefix;
 
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;

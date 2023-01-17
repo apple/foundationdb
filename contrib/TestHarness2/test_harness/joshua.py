@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import io
+import re
 import sys
 import xml.sax
 import xml.sax.handler
@@ -50,6 +51,8 @@ def _print_summary(summary: SummaryTree, commands: Set[str]):
         file_name = summary.attributes['TestFile']
         role = 'test' if test_harness.run.is_no_sim(Path(file_name)) else 'simulation'
         cmd += ['-r', role, '-f', file_name]
+        if re.search(r'restarting\/.*-2\.', file_name):
+            cmd += ["--restarting"]
     else:
         cmd += ['-r', 'simulation', '-f', '<ERROR>']
     if 'RandomSeed' in summary.attributes:

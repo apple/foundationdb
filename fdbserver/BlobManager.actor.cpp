@@ -1174,8 +1174,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 	ASSERT(currentLockValue.present());
 	int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
 	if (currentEpoch != bmData->epoch) {
-		ASSERT(currentEpoch > bmData->epoch);
-
 		if (BM_DEBUG) {
 			fmt::print(
 			    "BM {0} found new epoch {1} > {2} in lock check\n", bmData->id.toString(), currentEpoch, bmData->epoch);
@@ -3547,16 +3545,27 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
-		BlobRestoreStatus initStatus(BlobRestorePhase::LOAD_MANIFEST);
-		wait(updateRestoreStatus(bmData->db, normalKeys, initStatus));
-
-		wait(loadManifest(bmData->db, bmData->bstore));
-
-		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
-		wait(updateEpoch(bmData, epoc + 1));
-
-		BlobRestoreStatus completedStatus(BlobRestorePhase::MANIFEST_DONE);
-		wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus));
+		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(bmData->db, normalKeys));
+		ASSERT(status.present());
+		state BlobRestorePhase phase = status.get().phase;
+		if (phase == BlobRestorePhase::STARTING_MIGRATOR || phase == BlobRestorePhase::LOADING_MANIFEST) {
+			wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestoreStatus(LOADING_MANIFEST), {}));
+			try {
+				wait(loadManifest(bmData->db, bmData->bstore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
+				wait(updateEpoch(bmData, epoc + 1));
+				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
+				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
+			} catch (Error& e) {
+				if (e.code() != error_code_restore_missing_data) {
+					throw e; // retryable errors
+				}
+				// terminate blob restore for non-retryable errors
+				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
+				BlobRestoreStatus error(BlobRestorePhase::ERROR, e.code());
+				wait(updateRestoreStatus(bmData->db, normalKeys, error, {}));
+			}
+		}
 	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -5310,10 +5319,6 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 }
 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
-	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
-		return Void();
-	}
-
 	bmData->initBStore();
 	loop {
 		wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
@@ -5322,8 +5327,8 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	}
 }
 
-// Simulation validation that multiple blob managers aren't started with the same epoch
-static std::map<int64_t, UID> managerEpochsSeen;
+// Simulation validation that multiple blob managers aren't started with the same epoch within same cluster
+static std::map<std::pair<UID, int64_t>, UID> managerEpochsSeen;
 
 ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int64_t epoch, UID dbgid) {
 	loop {
@@ -5334,20 +5339,28 @@ ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const>
 	}
 }
 
+ACTOR Future<UID> fetchClusterId(Database db) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+			if (clusterIdVal.present()) {
+				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
+				return clusterId;
+			}
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::BlobManager));
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
-	if (g_network->isSimulated()) {
-		bool managerEpochAlreadySeen = managerEpochsSeen.count(epoch);
-		if (managerEpochAlreadySeen) {
-			TraceEvent(SevError, "DuplicateBlobManagersAtEpoch")
-			    .detail("Epoch", epoch)
-			    .detail("BMID1", bmInterf.id())
-			    .detail("BMID2", managerEpochsSeen.at(epoch));
-		}
-		ASSERT(!managerEpochAlreadySeen);
-		managerEpochsSeen[epoch] = bmInterf.id();
-	}
 	state Reference<BlobManagerData> self =
 	    makeReference<BlobManagerData>(bmInterf.id(),
 	                                   dbInfo,
@@ -5355,6 +5368,20 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	                                   bmInterf.locality.dcId(),
 	                                   epoch);
 
+	if (g_network->isSimulated()) {
+		UID clusterId = wait(fetchClusterId(self->db));
+		auto clusterEpoc = std::make_pair(clusterId, epoch);
+		bool managerEpochAlreadySeen = managerEpochsSeen.count(clusterEpoc);
+		if (managerEpochAlreadySeen) {
+			TraceEvent(SevError, "DuplicateBlobManagersAtEpoch")
+			    .detail("ClusterId", clusterId)
+			    .detail("Epoch", epoch)
+			    .detail("BMID1", bmInterf.id())
+			    .detail("BMID2", managerEpochsSeen.at(clusterEpoc));
+		}
+		ASSERT(!managerEpochAlreadySeen);
+		managerEpochsSeen[clusterEpoc] = bmInterf.id();
+	}
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	if (BM_DEBUG) {
@@ -5390,7 +5417,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			self->addActor.send(backupManifest(self));
 		}
 
-		if (BUGGIFY) {
+		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));
 		}
 

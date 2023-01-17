@@ -27,6 +27,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/VersionedBTreeDebug.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -54,43 +55,6 @@
 #include <vector>
 
 #include "flow/actorcompiler.h" // must be last include
-
-#define REDWOOD_DEBUG 0
-
-// Only print debug info for a specific address
-static NetworkAddress g_debugAddress = NetworkAddress::parse("0.0.0.0:0");
-// Only print debug info after a specific time
-static double g_debugStart = 0;
-// Debug output stream
-static FILE* g_debugStream = stdout;
-
-#define debug_printf_always(...)                                                                                       \
-	if (now() >= g_debugStart && (!g_network->getLocalAddress().isValid() || !g_debugAddress.isValid() ||              \
-	                              g_network->getLocalAddress() == g_debugAddress)) {                                   \
-		std::string prefix = format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);  \
-		std::string msg = format(__VA_ARGS__);                                                                         \
-		fputs(addPrefix(prefix, msg).c_str(), g_debugStream);                                                          \
-		fflush(g_debugStream);                                                                                         \
-	}
-
-#define debug_print(str) debug_printf("%s\n", str.c_str())
-#define debug_print_always(str) debug_printf_always("%s\n", str.c_str())
-#define debug_printf_noop(...)
-
-#if defined(NO_INTELLISENSE)
-#if REDWOOD_DEBUG
-#define debug_printf debug_printf_always
-#else
-#define debug_printf debug_printf_noop
-#endif
-#else
-// To get error-checking on debug_printf statements in IDE
-#define debug_printf printf
-#endif
-
-#define BEACON debug_printf_always("HERE\n")
-#define TRACE                                                                                                          \
-	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
 using namespace std::string_view_literals;
 
@@ -2588,10 +2552,11 @@ public:
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
 	                               Reference<ArenaPage> page,
 	                               bool header = false) {
-		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
+		debug_printf("DWALPager(%s) op=%s %s encoding=%d ptr=%p\n",
 		             filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysicalPage"),
 		             toString(pageIDs).c_str(),
+		             page->getEncodingType(),
 		             page->rawData());
 
 		// Set metadata before prewrite so it's in the pre-encrypted page in cache if the page is encrypted
@@ -2657,16 +2622,17 @@ public:
 		} else if (cacheEntry.reading()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the outstanding read to finish, then start the write
-			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-			    success(cacheEntry.readFuture), [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture = mapAsync(success(cacheEntry.readFuture),
+			                                  [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		}
+
 		// If the page is being written, wait for this write before issuing the new write to ensure the
 		// writes happen in the correct order
 		else if (cacheEntry.writing()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the previous write to finish, then start new write
-			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
-			    cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
+			cacheEntry.writeFuture =
+			    mapAsync(cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		} else {
 			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		}
@@ -5680,7 +5646,10 @@ private:
 					domainId = currentDomainId;
 					domainPrefixLength = prefixLength;
 					canUseDefaultDomain =
-					    (height > 1 && (currentDomainId == defaultDomainId || prefixLength == rec.key.size()));
+					    (height > 1 && (currentDomainId == defaultDomainId ||
+					                    (prefixLength == rec.key.size() &&
+					                     (nextRecord.key == dbEnd.key ||
+					                      !nextRecord.key.startsWith(rec.key.substr(0, prefixLength))))));
 				} else if (splitByDomain) {
 					ASSERT(domainId.present());
 					if (domainId == currentDomainId) {
@@ -5695,7 +5664,7 @@ private:
 					} else if (canUseDefaultDomain &&
 					           (currentDomainId == defaultDomainId ||
 					            (prefixLength == rec.key.size() &&
-					             (nextRecord.key.empty() ||
+					             (nextRecord.key == dbEnd.key ||
 					              !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))))) {
 						// The new record meets one of the following conditions:
 						//   1. it falls in the default domain, or
@@ -5763,7 +5732,6 @@ private:
 		// Leaves can have just one record if it's large, but internal pages should have at least 4
 		int minRecords = height == 1 ? 1 : 4;
 		double maxSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_MAX_SLACK;
-		RedwoodRecordRef emptyRecord;
 		std::vector<PageToBuild> pages;
 
 		// Whether encryption is used and we need to set encryption domain for a page.
@@ -5807,7 +5775,7 @@ private:
 				             records[i].toString(height == 1).c_str());
 			}
 
-			if (!p.addRecord(records[i], i + 1 < records.size() ? records[i + 1] : emptyRecord, deltaSizes[i], force)) {
+			if (!p.addRecord(records[i], i + 1 < records.size() ? records[i + 1] : *upperBound, deltaSizes[i], force)) {
 				p.finish();
 				pages.push_back(p);
 				p = p.next();
@@ -5900,34 +5868,39 @@ private:
 			}
 		}
 
+		state PageToBuild* p = nullptr;
 		for (pageIndex = 0; pageIndex < pagesToBuild.size(); ++pageIndex) {
-			debug_printf("building page %d of %zu %s\n",
-			             pageIndex + 1,
-			             pagesToBuild.size(),
-			             pagesToBuild[pageIndex].toString().c_str());
-			ASSERT(pagesToBuild[pageIndex].count != 0);
+			p = &pagesToBuild[pageIndex];
+			debug_printf("building page %d of %zu %s\n", pageIndex + 1, pagesToBuild.size(), p->toString().c_str());
+			ASSERT(p->count != 0);
 
 			// Use the next entry as the upper bound, or upperBound if there are no more entries beyond this page
-			int endIndex = pagesToBuild[pageIndex].endIndex();
+			int endIndex = p->endIndex();
 			bool lastPage = endIndex == entries.size();
 			pageUpperBound = lastPage ? upperBound->withoutValue() : entries[endIndex].withoutValue();
 
-			if (!lastPage) {
-				PageToBuild& p = pagesToBuild[pageIndex];
-				PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
-				if (height == 1) {
-					// If this is a leaf page, and not the last one to be written, shorten the upper boundary)
-					int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[endIndex - 1], prefixLen);
-					pageUpperBound.truncate(commonPrefix + 1);
-				}
-				if (useEncryptionDomain) {
-					ASSERT(p.domainId.present());
+			// If this is a leaf page, and not the last one to be written, shorten the upper boundary)
+			if (!lastPage && height == 1) {
+				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[endIndex - 1], prefixLen);
+				pageUpperBound.truncate(commonPrefix + 1);
+			}
+
+			if (useEncryptionDomain && pageUpperBound.key != dbEnd.key) {
+				int64_t ubDomainId;
+				KeyRef ubDomainPrefix;
+				if (lastPage) {
+					size_t ubPrefixLength;
+					std::tie(ubDomainId, ubPrefixLength) = self->m_keyProvider->getEncryptionDomain(pageUpperBound.key);
+					ubDomainPrefix = pageUpperBound.key.substr(0, ubPrefixLength);
+				} else {
+					PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
 					ASSERT(nextPage.domainId.present());
-					if (p.domainId.get() != nextPage.domainId.get() &&
-					    nextPage.domainId.get() != self->m_keyProvider->getDefaultEncryptionDomainId()) {
-						pageUpperBound =
-						    RedwoodRecordRef(entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength));
-					}
+					ubDomainId = nextPage.domainId.get();
+					ubDomainPrefix = entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength);
+				}
+				if (ubDomainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
+				    p->domainId.get() != ubDomainId) {
+					pageUpperBound = RedwoodRecordRef(ubDomainPrefix);
 				}
 			}
 
@@ -5937,12 +5910,11 @@ private:
 			// being built now will serve as the previous subtree's upper boundary as it is the same
 			// key as entries[p.startIndex] and there is no need to actually store the null link in
 			// the new page.
-			if (height != 1 && !entries[pagesToBuild[pageIndex].startIndex].value.present()) {
-				auto& p = pagesToBuild[pageIndex];
-				p.kvBytes -= entries[p.startIndex].key.size();
-				++p.startIndex;
-				--p.count;
-				debug_printf("Skipping first null record, new count=%d\n", p.count);
+			if (height != 1 && !entries[p->startIndex].value.present()) {
+				p->kvBytes -= entries[p->startIndex].key.size();
+				++p->startIndex;
+				--p->count;
+				debug_printf("Skipping first null record, new count=%d\n", p->count);
 
 				// In case encryption or encryption domain is not enabled, if the page is now empty then it must be the
 				// last page in pagesToBuild, otherwise there would be more than 1 item since internal pages need to
@@ -5954,7 +5926,7 @@ private:
 				// replacing.  Put another way, the upper boundary of the rightmost page of the page set that was just
 				// built does not match the upper boundary of the original page that the page set is replacing, so
 				// adding the extra null link fixes this.
-				if (p.count == 0) {
+				if (p->count == 0) {
 					ASSERT(useEncryptionDomain || lastPage);
 					records.push_back_deep(records.arena(), pageLowerBound);
 					pageLowerBound = pageUpperBound;
@@ -5963,25 +5935,22 @@ private:
 			}
 
 			// Create and init page here otherwise many variables must become state vars
-			state Reference<ArenaPage> page = self->m_pager->newPageBuffer(pagesToBuild[pageIndex].blockCount);
-			page->init(self->m_encodingType,
-			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
-			           height);
+			state Reference<ArenaPage> page = self->m_pager->newPageBuffer(p->blockCount);
+			page->init(
+			    self->m_encodingType, (p->blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
 			if (page->isEncrypted()) {
 				ArenaPage::EncryptionKey k =
-				    wait(useEncryptionDomain
-				             ? self->m_keyProvider->getLatestEncryptionKey(pagesToBuild[pageIndex].domainId.get())
-				             : self->m_keyProvider->getLatestDefaultEncryptionKey());
+				    wait(useEncryptionDomain ? self->m_keyProvider->getLatestEncryptionKey(p->domainId.get())
+				                             : self->m_keyProvider->getLatestDefaultEncryptionKey());
 				page->encryptionKey = k;
 			}
 
-			auto& p = pagesToBuild[pageIndex];
 			BTreePage* btPage = (BTreePage*)page->mutateData();
-			btPage->init(height, p.kvBytes);
-			g_redwoodMetrics.kvSizeWritten->sample(p.kvBytes);
+			btPage->init(height, p->kvBytes);
+			g_redwoodMetrics.kvSizeWritten->sample(p->kvBytes);
 
 			debug_printf("Building tree for %s\nlower: %s\nupper: %s\n",
-			             p.toString().c_str(),
+			             p->toString().c_str(),
 			             pageLowerBound.toString(false).c_str(),
 			             pageUpperBound.toString(false).c_str());
 
@@ -5989,34 +5958,34 @@ private:
 			debug_printf("Building tree at %p deltaTreeSpace %d p.usedBytes=%d\n",
 			             btPage->tree(),
 			             deltaTreeSpace,
-			             p.usedBytes());
+			             p->usedBytes());
 			state int written = btPage->tree()->build(
-			    deltaTreeSpace, &entries[p.startIndex], &entries[p.endIndex()], &pageLowerBound, &pageUpperBound);
+			    deltaTreeSpace, &entries[p->startIndex], &entries[p->endIndex()], &pageLowerBound, &pageUpperBound);
 
 			if (written > deltaTreeSpace) {
 				debug_printf("ERROR:  Wrote %d bytes to page %s deltaTreeSpace=%d\n",
 				             written,
-				             p.toString().c_str(),
+				             p->toString().c_str(),
 				             deltaTreeSpace);
 				TraceEvent(SevError, "RedwoodDeltaTreeOverflow")
-				    .detail("PageSize", p.pageSize)
+				    .detail("PageSize", p->pageSize)
 				    .detail("BytesWritten", written);
 				ASSERT(false);
 			}
 			auto& metrics = g_redwoodMetrics.level(height);
 			metrics.metrics.pageBuild += 1;
-			metrics.metrics.pageBuildExt += p.blockCount - 1;
+			metrics.metrics.pageBuildExt += p->blockCount - 1;
 
-			metrics.buildFillPctSketch->samplePercentage(p.usedFraction());
-			metrics.buildStoredPctSketch->samplePercentage(p.kvFraction());
-			metrics.buildItemCountSketch->sampleRecordCounter(p.count);
+			metrics.buildFillPctSketch->samplePercentage(p->usedFraction());
+			metrics.buildStoredPctSketch->samplePercentage(p->kvFraction());
+			metrics.buildItemCountSketch->sampleRecordCounter(p->count);
 
 			// Write this btree page, which is made of 1 or more pager pages.
 			state BTreeNodeLinkRef childPageID;
 
 			// If we are only writing 1 BTree node and its block count is 1 and the original node also had 1 block
 			// then try to update the page atomically so its logical page ID does not change
-			if (pagesToBuild.size() == 1 && p.blockCount == 1 && previousID.size() == 1) {
+			if (pagesToBuild.size() == 1 && p->blockCount == 1 && previousID.size() == 1) {
 				page->setLogicalPageInfo(previousID.front(), parentID);
 				LogicalPageID id = wait(
 				    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), page, v));
@@ -6050,7 +6019,7 @@ private:
 					self->freeBTreePage(height, previousID, v);
 				}
 
-				childPageID.resize(records.arena(), p.blockCount);
+				childPageID.resize(records.arena(), p->blockCount);
 				state int i = 0;
 				for (i = 0; i < childPageID.size(); ++i) {
 					LogicalPageID id = wait(self->m_pager->newPageID());
@@ -6065,7 +6034,7 @@ private:
 
 			if (self->m_pBoundaryVerifier != nullptr) {
 				ASSERT(self->m_pBoundaryVerifier->update(
-				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, pagesToBuild[pageIndex].domainId));
+				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, p->domainId));
 			}
 
 			if (++sinceYield > 100) {
@@ -6074,16 +6043,15 @@ private:
 			}
 
 			if (REDWOOD_DEBUG) {
-				auto& p = pagesToBuild[pageIndex];
 				debug_printf("Wrote %s %s original=%s deltaTreeSize=%d for %s\nlower: %s\nupper: %s\n",
 				             toString(v).c_str(),
 				             toString(childPageID).c_str(),
 				             toString(previousID).c_str(),
 				             written,
-				             p.toString().c_str(),
+				             p->toString().c_str(),
 				             pageLowerBound.toString(false).c_str(),
 				             pageUpperBound.toString(false).c_str());
-				for (int j = p.startIndex; j < p.endIndex(); ++j) {
+				for (int j = p->startIndex; j < p->endIndex(); ++j) {
 					debug_printf(" %3d: %s\n", j, entries[j].toString(height == 1).c_str());
 				}
 				ASSERT(pageLowerBound.key <= pageUpperBound.key);
@@ -6182,7 +6150,7 @@ private:
 		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
 		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
 			Error e = unexpected_encoding_type();
-			TraceEvent(SevError, "RedwoodBTreeUnexpectedNodeEncoding")
+			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
 			    .error(e)
 			    .detail("PhysicalPageID", page->getPhysicalPageID())
 			    .detail("IsEncrypted", page->isEncrypted())
@@ -6654,55 +6622,6 @@ private:
 		}
 	};
 
-	ACTOR static Future<Void> buildNewSubtree(VersionedBTree* self,
-	                                          Version version,
-	                                          LogicalPageID parentID,
-	                                          unsigned int height,
-	                                          MutationBuffer::const_iterator mBegin,
-	                                          MutationBuffer::const_iterator mEnd,
-	                                          InternalPageSliceUpdate* update) {
-		ASSERT(height > 1);
-		debug_printf(
-		    "buildNewSubtree start version %" PRId64 ", height %u, %s\n'", version, height, update->toString().c_str());
-		state Standalone<VectorRef<RedwoodRecordRef>> records;
-		while (mBegin != mEnd && mBegin.key() < update->subtreeLowerBound.key) {
-			++mBegin;
-		}
-		while (mBegin != mEnd) {
-			if (mBegin.mutation().boundarySet()) {
-				RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
-				records.push_back_deep(records.arena(), rec);
-				if (REDWOOD_DEBUG) {
-					debug_printf("      Added %s", rec.toString().c_str());
-				}
-			}
-			++mBegin;
-		}
-		if (records.empty()) {
-			update->cleared();
-		} else {
-			state unsigned int h = 1;
-			debug_printf("buildNewSubtree at level %u\n", h);
-			while (h < height) {
-				// Only the parentID at the root is known as we are building the subtree bottom-up.
-				// We use the parentID for all levels, since the parentID is currently used for
-				// debug use only.
-				Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(writePages(self,
-				                                                                     &update->subtreeLowerBound,
-				                                                                     &update->subtreeUpperBound,
-				                                                                     records,
-				                                                                     h,
-				                                                                     version,
-				                                                                     BTreeNodeLinkRef(),
-				                                                                     parentID));
-				records = newRecords;
-				h++;
-			}
-			update->rebuilt(records);
-		}
-		return Void();
-	}
-
 	ACTOR static Future<Void> commitSubtree(
 	    VersionedBTree* self,
 	    CommitBatch* batch,
@@ -7110,25 +7029,6 @@ private:
 			cursor.moveFirst();
 
 			bool first = true;
-
-			if (useEncryptionDomain && cursor.valid() && update->subtreeLowerBound.key < cursor.get().key) {
-				mEnd = batch->mutations->lower_bound(cursor.get().key);
-				first = false;
-				if (mBegin != mEnd) {
-					slices.emplace_back(new InternalPageSliceUpdate());
-					InternalPageSliceUpdate& u = *slices.back();
-					u.cBegin = cursor;
-					u.cEnd = cursor;
-					u.subtreeLowerBound = update->subtreeLowerBound;
-					u.decodeLowerBound = u.subtreeLowerBound;
-					u.subtreeUpperBound = cursor.get();
-					u.decodeUpperBound = u.subtreeUpperBound;
-					u.expectedUpperBound = u.subtreeUpperBound;
-					u.skipLen = 0;
-					recursions.push_back(
-					    self->buildNewSubtree(self, batch->writeVersion, parentID, height, mBegin, mEnd, &u));
-				}
-			}
 
 			while (cursor.valid()) {
 				slices.emplace_back(new InternalPageSliceUpdate());
@@ -7977,10 +7877,11 @@ public:
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
 		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
-			ASSERT(encryptionKeyProvider->expectedEncodingType() == EncodingType::AESEncryptionV1);
-			encodingType = EncodingType::AESEncryptionV1;
+			encodingType = FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ? EncodingType::AESEncryptionWithAuth
+			                                                             : EncodingType::AESEncryption;
+			ASSERT_EQ(encodingType, encryptionKeyProvider->expectedEncodingType());
 			m_keyProvider = encryptionKeyProvider;
-		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
+		} else if (g_allowXOREncryptionInSimulation && g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Simulation only. Deterministically enable encryption based on uid
 			encodingType = EncodingType::XOREncryption_TestOnly;
 			m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(filename);
@@ -8025,7 +7926,8 @@ public:
 				// Run the destructive sanity check, but don't throw.
 				ErrorOr<Void> err = wait(errorOr(self->m_tree->clearAllAndCheckSanity()));
 				// If the test threw an error, it must be an injected fault or something has gone wrong.
-				ASSERT(!err.isError() || err.getError().isInjectedFault());
+				ASSERT(!err.isError() || err.getError().isInjectedFault() ||
+				       err.getError().code() == error_code_unexpected_encoding_type);
 			}
 		} else {
 			// The KVS user shouldn't be holding a commit future anymore so self shouldn't either.
@@ -10043,7 +9945,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
 	state unsigned int encryptionDomainMode =
 	    params.getInt("domainMode")
-	        .orDefault(deterministicRandom()->randomInt(0, RandomEncryptionKeyProvider::EncryptionDomainMode::MAX));
+	        .orDefault(deterministicRandom()->randomInt(
+	            0, RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode::MAX));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -10096,9 +9999,12 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state Reference<IPageEncryptionKeyProvider> keyProvider;
-	if (encodingType == EncodingType::AESEncryptionV1) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider>(
-		    RandomEncryptionKeyProvider::EncryptionDomainMode(encryptionDomainMode));
+	if (encodingType == EncodingType::AESEncryption) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryption>>(
+		    RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode(encryptionDomainMode));
+	} else if (encodingType == EncodingType::AESEncryptionWithAuth) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>(
+		    RandomEncryptionKeyProvider<AESEncryptionWithAuth>::EncryptionDomainMode(encryptionDomainMode));
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
@@ -11245,9 +11151,13 @@ ACTOR Future<Void> sequentialInsert(IKeyValueStore* kvs, int prefixLen, int valu
 	return Void();
 }
 
-Future<Void> closeKVS(IKeyValueStore* kvs) {
+Future<Void> closeKVS(IKeyValueStore* kvs, bool dispose = false) {
 	Future<Void> closed = kvs->onClosed();
-	kvs->close();
+	if (dispose) {
+		kvs->dispose();
+	} else {
+		kvs->close();
+	}
 	return closed;
 }
 
@@ -11422,5 +11332,71 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	return Void();
+}
+
+namespace {
+void setAuthMode(EncodingType encodingType) {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	if (encodingType == AESEncryption) {
+		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ false }));
+	} else {
+		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ true }));
+		g_knobs.setKnob("encrypt_header_auth_token_algo", KnobValueRef::create(int{ 1 }));
+	}
+}
+} // anonymous namespace
+
+TEST_CASE("/redwood/correctness/EnforceEncodingType") {
+	state const std::vector<std::pair<EncodingType, EncodingType>> testCases = {
+		{ XXHash64, AESEncryption }, { AESEncryption, AESEncryptionWithAuth }
+	};
+	state const std::map<EncodingType, Reference<IPageEncryptionKeyProvider>> encryptionKeyProviders = {
+		{ XXHash64, makeReference<NullKeyProvider>() },
+		{ AESEncryption, makeReference<RandomEncryptionKeyProvider<AESEncryption>>() },
+		{ AESEncryptionWithAuth, makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>() }
+	};
+	state IKeyValueStore* kvs = nullptr;
+	g_allowXOREncryptionInSimulation = false;
+	for (const auto& testCase : testCases) {
+		state EncodingType initialEncodingType = testCase.first;
+		state EncodingType reopenEncodingType = testCase.second;
+		ASSERT_NE(initialEncodingType, reopenEncodingType);
+		ASSERT(ArenaPage::isEncodingTypeEncrypted(reopenEncodingType));
+		deleteFile("test.redwood-v1");
+		printf("Create KV store with encoding type %d\n", initialEncodingType);
+		setAuthMode(initialEncodingType);
+		kvs = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1,
+		                  "test.redwood-v1",
+		                  UID(),
+		                  0,
+		                  false,
+		                  false,
+		                  false,
+		                  encryptionKeyProviders.at(initialEncodingType));
+		wait(kvs->init());
+		kvs->set(KeyValueRef("foo"_sr, "bar"_sr));
+		wait(kvs->commit());
+		wait(closeKVS(kvs));
+		// Reopen
+		printf("Reopen KV store with encoding type %d\n", reopenEncodingType);
+		setAuthMode(reopenEncodingType);
+		kvs = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1,
+		                  "test.redwood-v1",
+		                  UID(),
+		                  0,
+		                  false,
+		                  false,
+		                  false,
+		                  encryptionKeyProviders.at(reopenEncodingType));
+		wait(kvs->init());
+		try {
+			Optional<Value> v = wait(kvs->readValue("foo"_sr));
+			UNREACHABLE();
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_unexpected_encoding_type);
+		}
+		wait(closeKVS(kvs, true /*dispose*/));
+	}
 	return Void();
 }

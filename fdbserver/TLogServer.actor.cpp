@@ -23,7 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1622,6 +1622,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
                             Version& endVersion) {
 	ASSERT(!messages.getLength());
 
+	int versionCount = 0;
 	auto& deque = getVersionMessages(self, tag);
 	//TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", req.tag1).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
 
@@ -1652,6 +1653,23 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		DEBUG_TAGS_AND_MESSAGE(
 		    "TLogPeek", currentVersion, StringRef((uint8_t*)data + offset, messages.getLength() - offset), self->logId)
 		    .detail("PeekTag", tag);
+		versionCount++;
+	}
+
+	if (versionCount == 0) {
+		++self->emptyPeeks;
+	} else {
+		++self->nonEmptyPeeks;
+
+		// TODO (version vector) check if this should be included in "status details" json
+		if (self->peekVersionCounts.find(tag) == self->peekVersionCounts.end()) {
+			UID ssID = deterministicRandom()->randomUniqueID();
+			std::string s = "PeekVersionCounts " + tag.toString();
+			self->peekVersionCounts.try_emplace(
+			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		}
+		LatencySample& sample = self->peekVersionCounts.at(tag);
+		sample.addMeasurement(versionCount);
 	}
 }
 
@@ -2787,6 +2805,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = beginVersion;
 	state Version lastVer = 0;
+	state double startTime = now();
 
 	if (endVersion.present()) {
 		TraceEvent("TLogRestoreReplicationFactor", self->dbgid)
@@ -2797,6 +2816,8 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	}
 
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
+		// When we just processed some data, we reset the warning start time.
+		state double lastPullAsyncDataWarningTime = now();
 		loop {
 			choose {
 				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
@@ -2809,6 +2830,13 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
 					dbInfoChange = logData->logSystem->onChange();
+				}
+				when(wait(delay(lastPullAsyncDataWarningTime + SERVER_KNOBS->TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS -
+				                now()))) {
+					TraceEvent(SevWarn, "TLogPullAsyncDataSlow", logData->logId)
+					    .detail("Elapsed", now() - startTime)
+					    .detail("Version", logData->version.get());
+					lastPullAsyncDataWarningTime = now();
 				}
 			}
 		}

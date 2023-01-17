@@ -232,6 +232,43 @@ ACTOR static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransacti
 	return result.front().key;
 }
 
+ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state int64_t size;
+	state IdempotencyIdsExpiredVersion expired;
+	state KeyBackedObjectProperty<IdempotencyIdsExpiredVersion, _Unversioned> expiredKey(idempotencyIdsExpiredVersion,
+	                                                                                     Unversioned());
+	state int64_t oldestIdVersion = 0;
+	state int64_t oldestIdTime = 0;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+			wait(store(size, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)) &&
+			     store(expired, expiredKey.getD(tr)) &&
+			     success(getBoundary(tr, idempotencyIdKeys, Oldest::True, &oldestIdVersion, &oldestIdTime)));
+			JsonBuilderObject result;
+			result["size_bytes"] = size;
+			if (expired.expired != 0) {
+				result["expired_version"] = expired.expired;
+			}
+			if (expired.expiredTime != 0) {
+				result["expired_age"] = int64_t(now()) - expired.expiredTime;
+			}
+			if (oldestIdVersion != 0) {
+				result["oldest_id_version"] = oldestIdVersion;
+			}
+			if (oldestIdTime != 0) {
+				result["oldest_id_age"] = int64_t(now()) - oldestIdTime;
+			}
+			return result;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 	state int64_t idmpKeySize;
 	state int64_t candidateDeleteSize;
@@ -315,8 +352,10 @@ ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 			if (!finalRange.empty()) {
 				tr->addReadConflictRange(finalRange);
 				tr->clear(finalRange);
-				tr->set(idempotencyIdsExpiredVersion,
-				        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ candidateDeleteVersion }, Unversioned()));
+				tr->set(
+				    idempotencyIdsExpiredVersion,
+				    ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ candidateDeleteVersion, candidateDeleteTime },
+				                          Unversioned()));
 				TraceEvent("IdempotencyIdsCleanerAttempt")
 				    .detail("Range", finalRange.toString())
 				    .detail("IdmpKeySizeEstimate", idmpKeySize)

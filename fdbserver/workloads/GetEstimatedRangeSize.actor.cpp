@@ -105,15 +105,12 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
 		state ReadYourWritesTransaction tr(cx, self->tenant);
 		state double totalDelay = 0.0;
-		TraceEvent(SevDebug, "GetSizeStart")
-		    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
+		TraceEvent(SevDebug, "GetSizeStart").detail("Tenant", tr.getTenant());
 
 		loop {
 			try {
 				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-				TraceEvent(SevDebug, "GetSizeResult")
-				    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr)
-				    .detail("Size", size);
+				TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", tr.getTenant()).detail("Size", size);
 				if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
 					totalDelay += 5.0;
 					wait(delay(5.0));
@@ -121,9 +118,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 					return size;
 				}
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "GetSizeError")
-				    .errorUnsuppressed(e)
-				    .detail("Tenant", tr.getTenant().present() ? tr.getTenant().get() : "none"_sr);
+				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", tr.getTenant());
 				wait(tr.onError(e));
 			}
 		}
