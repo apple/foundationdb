@@ -26,11 +26,11 @@ struct StreamTests: SimpleSwiftTestSuite {
         /// Corresponds to FlowTests.actor.cpp "/flow/flow/trivial promisestreams"
         TestCase("PromiseStream: await stream.waitNext") {
             var ps = PromiseStreamCInt()
-            var fs: FutureStreamCInt = ps.__getFutureUnsafe()
+            var fs: FutureStreamCInt = ps.getFuture()
 
             var i: CInt = 1
             ps.send(&i)
-            precondition(ps.__getFutureUnsafe().isReady())
+            precondition(ps.getFuture().isReady())
             precondition(fs.pop() == 1)
 
             i += 1
@@ -42,7 +42,7 @@ struct StreamTests: SimpleSwiftTestSuite {
 
         TestCase("PromiseStream: as Swift AsyncSequence") {
             let ps = PromiseStreamCInt()
-            let fs: FutureStreamCInt = ps.__getFutureUnsafe()
+            let fs: FutureStreamCInt = ps.getFuture()
 
             Task { [ps] in
                 var ps = ps
@@ -134,7 +134,7 @@ struct StreamTests: SimpleSwiftTestSuite {
 
                     if lastCollected?.isReady ?? true {
                         group.addTask {
-                            var future = promise.__getFutureUnsafe()
+                            var future = promise.getFuture()
                             try! await future.value()
                             return .ready(12)
                         }
@@ -197,7 +197,7 @@ struct StreamTests: SimpleSwiftTestSuite {
             // Spawn 2 tasks, one for consuming each of the streams.
             // These tasks will keep looping on the future streams "forever" - until the tasks are cancelled.
             let t1 = Task { [ps1] in
-                let fs: FutureStreamCInt = ps1.__getFutureUnsafe()
+                let fs: FutureStreamCInt = ps1.getFuture()
                 for try await t in fs {
                     pprint("send Task to cook: \(t) (from ps1)")
                     Task {
@@ -209,7 +209,7 @@ struct StreamTests: SimpleSwiftTestSuite {
                 }
             }
             let t2 = Task { [ps2] in
-                let fs: FutureStreamCInt = ps2.__getFutureUnsafe()
+                let fs: FutureStreamCInt = ps2.getFuture()
                 for try await t in fs {
                     pprint("send Task to cook: \(t) (from ps2)")
                     Task {
@@ -242,7 +242,7 @@ struct StreamTests: SimpleSwiftTestSuite {
                 ps2.sendCopy(20)
             }.value
 
-            var f = p.__getFutureUnsafe()
+            var f = p.getFuture()
             try await f.value()
             pprint("All done")
         }

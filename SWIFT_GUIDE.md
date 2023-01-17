@@ -172,7 +172,7 @@ You can also await a next value of a stream:
 
 ```swift
 var ps = PromiseStream<CInt>()
-var fs: FutureStream<CInt> = ps.__getFutureUnsafe()
+var fs: FutureStream<CInt> = ps.getFuture()
 
 // ... 
 

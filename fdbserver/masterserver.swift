@@ -59,10 +59,9 @@ public func updateLiveCommittedVersion(myself: MasterData, req: ReportRawCommitt
 }
 
 extension NotifiedVersionValue {
-    // FIXME: can this become not mutating
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
-        var f = self.whenAtLeast(limit)
-        let _: Flow.Void = try await f.value()
+        var f = self.whenAtLeast(limit) // FutureVoid
+        try await f.value()
     }
 }
 
@@ -95,6 +94,11 @@ public actor MasterDataActor {
             var result = Flow.Void()
             promise.send(&result)
         }
+    }
+    nonisolated public func registerLastCommitProxyVersionReplies(uids: [Flow.UID]) -> FutureVoid {
+        let promise = PromiseVoid()
+        registerLastCommitProxyVersionReplies(uids: uids, result: promise)
+        return promise.getFuture()
     }
 
     func getVersion(myself: MasterData, req: GetCommitVersionRequest) async -> GetCommitVersionReply? {
@@ -187,6 +191,11 @@ public actor MasterDataActor {
             promise.send(&result)
         }
     }
+    nonisolated public func getVersion(myself: MasterData, req: GetCommitVersionRequest) -> FutureVoid {
+        let promise = PromiseVoid()
+        getVersion(myself: myself, req: req, result: promise)
+        return promise.getFuture()
+    }
 
     // ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
     @discardableResult
@@ -215,6 +224,11 @@ public actor MasterDataActor {
             req.reply.send(&rep)
             promise.send(&rep)
         }
+    }
+    nonisolated public func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest) -> FutureVoid {
+        let promise = PromiseVoid()
+        waitForPrev(myself: myself, req: req, result: promise)
+        return promise.getFuture()
     }
 
     @discardableResult
@@ -253,6 +267,11 @@ public actor MasterDataActor {
             var void = try await self.provideVersions(myself: myself)
             promise.send(&void)
         }
+    }
+    nonisolated public func provideVersions(myself: MasterData) -> FutureVoid {
+        let promise = PromiseVoid()
+        provideVersions(myself: myself, result: promise)
+        return promise.getFuture()
     }
 
     public func getLiveCommittedVersion(myself: MasterData, _ req: GetRawCommittedVersionRequest) -> GetRawCommittedVersionReply {
@@ -331,6 +350,11 @@ public actor MasterDataActor {
             promise.send(&void)
         }
     }
+    nonisolated public func serveLiveCommittedVersion(myself: MasterData) -> FutureVoid {
+        let promise = PromiseVoid()
+        serveLiveCommittedVersion(myself: myself, result: promise)
+        return promise.getFuture()
+    }
 
     func updateRecoveryData(myself: MasterData, req: UpdateRecoveryDataRequest) async -> Flow.Void {
         // TODO: trace event here
@@ -391,12 +415,17 @@ public actor MasterDataActor {
         return Flow.Void()
     }
 
-    nonisolated public func serveUpdateRecoveryData(myself: MasterData, promise: PromiseVoid) {
+    nonisolated public func serveUpdateRecoveryData(myself: MasterData, result promise: PromiseVoid) {
         Task {
             // TODO(swift): handle the error
             var void = try await self.serveUpdateRecoveryData(myself: myself)
             promise.send(&void)
         }
+    }
+    nonisolated public func serveUpdateRecoveryData(myself: MasterData) -> FutureVoid {
+        let promise = PromiseVoid()
+        serveUpdateRecoveryData(myself: myself, result: promise)
+        return promise.getFuture()
     }
 
 }

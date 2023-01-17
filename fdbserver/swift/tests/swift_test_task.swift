@@ -26,7 +26,7 @@ struct TaskTests: SimpleSwiftTestSuite {
     var tests: [TestCase] {
         TestCase("await \(FutureVoid.self)") {
             let p = PromiseVoid()
-            var voidF = p.__getFutureUnsafe()
+            var voidF = p.getFuture()
 
             var void = Flow.Void()
             p.send(&void)
@@ -35,7 +35,7 @@ struct TaskTests: SimpleSwiftTestSuite {
 
         TestCase("await \(FutureCInt.self)") {
             let p = PromiseCInt()
-            var intF: FutureCInt = p.__getFutureUnsafe()
+            var intF: FutureCInt = p.getFuture()
 
             var value: CInt = 42
             p.send(&value)
@@ -45,8 +45,8 @@ struct TaskTests: SimpleSwiftTestSuite {
 
         TestCase("more Flow task await tests") {
             let p: PromiseCInt = PromiseCInt()
-            var f: FutureCInt = p.__getFutureUnsafe() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
-            // TODO(swift): we perhaps should add a note that __getFutureUnsafe is available?
+            var f: FutureCInt = p.getFuture() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
+            // TODO(swift): we perhaps should add a note that getFuture() is available?
 
             pprint("got PromiseCInt") // FIXME(swift/c++): printing the promise crashes!
             precondition(!f.isReady(), "Future should not be ready yet")
@@ -66,7 +66,7 @@ struct TaskTests: SimpleSwiftTestSuite {
 
             pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
             let p2 = PromiseCInt()
-            var f2: FutureCInt = p2.__getFutureUnsafe() // FIXME: Make these not unsafe...
+            var f2: FutureCInt = p2.getFuture() // FIXME: Make these not unsafe...
             let num2 = 2222
             Task { [num2] in
                 assertOnNet2EventLoop()

@@ -995,7 +995,8 @@ public:
 		sav->sendError(exc);
 	}
 
-	Future<T> getFuture() const {
+
+	SWIFT_CXX_IMPORT_UNSAFE Future<T> getFuture() const {
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
@@ -1257,7 +1258,7 @@ struct ReplyType<ReplyPromise<T>> {
 #endif
 
 template <class T>
-class PromiseStream {
+class SWIFT_SENDABLE PromiseStream {
 public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
@@ -1301,7 +1302,7 @@ public:
 		return getReply(reply);
 	}
 
-	FutureStream<T> getFuture() const {
+	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() const {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}

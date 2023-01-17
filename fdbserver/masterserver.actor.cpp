@@ -38,19 +38,15 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO: show how we call into swift
 SWIFT_ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-  // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
-  auto promise = Promise<Void>();
-  self->swiftImpl->getVersion(self.getPtr(), req, /*result=*/promise); // actual call is just raw c++ types
-  wait(promise.getFuture());
+  auto future = self->swiftImpl->getVersion(self.getPtr(), req);
+  wait(future);
   return Void();
 }
 
 SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	auto promise = Promise<Void>();
-	self->swiftImpl->waitForPrev(self.getPtr(), req, /*result=*/promise);
-	wait(promise.getFuture());
+	auto future = self->swiftImpl->waitForPrev(self.getPtr(), req);
+	wait(future);
 	return Void();
 }
 
@@ -144,9 +140,8 @@ ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 }
 
 SWIFT_ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-	auto promise = Promise<Void>();
-	self->swiftImpl->provideVersions(self.getPtr(), /*result=*/promise);
-	wait(promise.getFuture());
+	auto future = self->swiftImpl->provideVersions(self.getPtr());
+	wait(future);
 	return Void();
 }
 
@@ -181,16 +176,14 @@ void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequ
 #endif
 
 SWIFT_ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	auto promise = Promise<Void>();
-	self->swiftImpl->serveLiveCommittedVersion(self.getPtr(), /*result=*/promise);
-	wait(promise.getFuture());
+	auto future = self->swiftImpl->serveLiveCommittedVersion(self.getPtr());
+	wait(future);
 	return Void();
 }
 
 SWIFT_ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	auto promise = Promise<Void>();
-	self->swiftImpl->serveUpdateRecoveryData(self.getPtr(), /*result=*/promise);
-	wait(promise.getFuture());
+	auto future = self->swiftImpl->serveUpdateRecoveryData(self.getPtr());
+	wait(future);
 	return Void();
 }
 
