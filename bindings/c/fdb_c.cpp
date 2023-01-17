@@ -338,7 +338,8 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 }
 
 // all for using future result from read_blob_granules_description
-// FIXME: put this behind MVC somehow to remove this file's dependencies on fdbclient/BlobGranuleCommon.h and fdbclient/BlobGranuleFiles.h
+// FIXME: put this behind MVC somehow to remove this file's dependencies on fdbclient/BlobGranuleCommon.h and
+// fdbclient/BlobGranuleFiles.h
 
 void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source) {
 	dest->filename_ptr = source.filename.begin();
