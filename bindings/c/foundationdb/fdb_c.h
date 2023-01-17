@@ -306,7 +306,7 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FD
                                                                               FDBGranuleSummary const** out_summaries,
                                                                               int* out_count);
 
-// all for using future result from read_blob_granules_description
+/* all for using future result from read_blob_granules_description */
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
                                                                             FDBBGFileDescription** out,
                                                                             int* desc_count);
