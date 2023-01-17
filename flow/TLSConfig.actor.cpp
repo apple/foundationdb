@@ -370,17 +370,18 @@ std::string TLSPolicy::Rule::toString() const {
 	return ss.str();
 }
 
-static int hexValue(char c) {
-	static char const digits[] = "0123456789ABCDEF";
+static int hexValue(int c) {
+	static const char* digits = "0123456789ABCDEF";
 
 	if (c >= 'a' && c <= 'f')
 		c -= ('a' - 'A');
 
-	int value = std::find(digits, digits + 16, c) - digits;
-	if (value >= 16) {
+	const char* value = strchr(digits, c);
+	if (value == nullptr) {
 		throw std::runtime_error("hexValue");
 	}
-	return value;
+
+	return (int)(value - digits);
 }
 
 // Does not handle "raw" form (e.g. #28C4D1), only escaped text
@@ -429,7 +430,7 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 				}
 
 				try {
-					output += hexValue(input[p + 1]) * 16 + hexValue(input[p + 2]);
+					output += std::to_string(hexValue(input[p + 1]) * 16 + hexValue(input[p + 2]));
 					p += 3;
 					space_count = 0;
 					continue;
@@ -471,7 +472,7 @@ FIN:
 }
 
 static std::pair<std::string, std::string> splitPair(std::string const& input, char c) {
-	int p = input.find_first_of(c);
+	size_t p = input.find_first_of(c);
 	if (p == input.npos) {
 		throw std::runtime_error("splitPair");
 	}
@@ -504,12 +505,12 @@ static X509Location locationForNID(NID nid) {
 }
 
 void TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
-	for (int i = 0; i < verify_peers.size(); i++) {
+	for (size_t i = 0; i < verify_peers.size(); i++) {
 		try {
 			std::string& verifyString = verify_peers[i];
-			int start = 0;
+			size_t start = 0;
 			while (start < verifyString.size()) {
-				int split = verifyString.find('|', start);
+				size_t split = verifyString.find('|', start);
 				if (split == std::string::npos) {
 					break;
 				}
@@ -529,10 +530,10 @@ void TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
 }
 
 TLSPolicy::Rule::Rule(std::string input) {
-	int s = 0;
+	size_t s = 0;
 
 	while (s < input.size()) {
-		int eq = input.find('=', s);
+		size_t eq = input.find('=', s);
 
 		if (eq == input.npos)
 			throw std::runtime_error("parse_verify");
@@ -540,7 +541,7 @@ TLSPolicy::Rule::Rule(std::string input) {
 		MatchType mt = MatchType::EXACT;
 		if (input[eq - 1] == '>')
 			mt = MatchType::PREFIX;
-		if (input[eq - 1] == '<')
+		else if (input[eq - 1] == '<')
 			mt = MatchType::SUFFIX;
 		std::string term = input.substr(s, eq - s - (mt == MatchType::EXACT ? 0 : 1));
 

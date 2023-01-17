@@ -129,7 +129,6 @@ int cleanupTenants(ipc::AdminServer& server, Arguments const& args, int db_id) {
 		if (res.error_message) {
 			logr.error("{}", *res.error_message);
 			return -1;
-
 		} else {
 			logr.debug("deleted tenant [{}:{})", tenant_id, tenant_id_end);
 			tenant_id = tenant_id_end;
@@ -572,7 +571,7 @@ void runAsyncWorkload(Arguments const& args,
 	auto stopcount = std::atomic<int>{};
 	if (args.mode == MODE_BUILD) {
 		auto states = std::vector<PopulateStateHandle>(args.async_xacts);
-		for (auto i = 0; i < args.async_xacts; i++) {
+		for (int i = 0; i < args.async_xacts; i++) {
 			const auto key_begin = insertBegin(args.rows, worker_id, i, args.num_processes, args.async_xacts);
 			const auto key_end = insertEnd(args.rows, worker_id, i, args.num_processes, args.async_xacts);
 			auto db = databases[i % args.num_databases];
@@ -850,8 +849,8 @@ Arguments::Arguments() {
 	memset(cluster_files, 0, sizeof(cluster_files));
 	memset(txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
 	enable_token_based_authorization = false;
-	for (auto i = 0; i < MAX_OP; i++) {
-		txnspec.ops[i][OP_COUNT] = 0;
+	for (auto& op : txnspec.ops) {
+		op[OP_COUNT] = 0;
 	}
 	client_threads_per_version = 0;
 	disable_client_bypass = false;
@@ -1191,7 +1190,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 	int rc;
 	int c;
 	int idx;
-	while (1) {
+	while (true) {
 		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
@@ -1329,8 +1328,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.mode = MODE_RUN;
 			} else if (strcmp(optarg, "report") == 0) {
 				args.mode = MODE_REPORT;
-				int i = optind;
-				for (; i < argc; i++) {
+				for (int i = optind; i < argc; i++) {
 					if (argv[i][0] != '-') {
 						const std::string report_file = argv[i];
 						strncpy(args.report_files[args.num_report_files], report_file.c_str(), report_file.size());
@@ -1412,9 +1410,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			memcpy(args.tracepath, optarg, strlen(optarg) + 1);
 			break;
 		case ARG_TRACEFORMAT:
-			if (strncmp(optarg, "json", 5) == 0) {
+			if (strncmp(optarg, "json", 4) == 0) {
 				args.traceformat = 1;
-			} else if (strncmp(optarg, "xml", 4) == 0) {
+			} else if (strncmp(optarg, "xml", 3) == 0) {
 				args.traceformat = 0;
 			} else {
 				logr.error("Invalid trace_format {}", optarg);
@@ -1772,8 +1770,8 @@ void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_hea
 	fmt::print("\n");
 
 	putTitleBar();
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0) {
+	for (auto op : args.txnspec.ops) {
+		if (op[OP_COUNT] > 0) {
 			putFieldBar();
 		}
 	}
@@ -2131,7 +2129,7 @@ void printReport(Arguments const& args,
 	fmt::print("\n");
 
 	if (fp) {
-		fmt::fprintf(fp, "}, \"tps\": %.2f, \"conflictsPerSec\": %.2f, \"errors\": {", tps, conflicts_rate);
+		fmt::fprintf(fp, R"(}, "tps": %.2f, "conflictsPerSec": %.2f, "errors": {)", tps, conflicts_rate);
 	}
 
 	/* Errors */
@@ -2250,22 +2248,22 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"total_tenants\": %d,", args.total_tenants);
 		fmt::fprintf(fp, "\"commit_get\": %d,", args.commit_get);
 		fmt::fprintf(fp, "\"verbose\": %d,", args.verbose);
-		fmt::fprintf(fp, "\"cluster_files\": \"%s\",", args.cluster_files[0]);
-		fmt::fprintf(fp, "\"log_group\": \"%s\",", args.log_group);
+		fmt::fprintf(fp, R"("cluster_files": "%s",)", args.cluster_files[0]);
+		fmt::fprintf(fp, R"("log_group": "%s",)", args.log_group);
 		fmt::fprintf(fp, "\"prefixpadding\": %d,", args.prefixpadding);
 		fmt::fprintf(fp, "\"trace\": %d,", args.trace);
-		fmt::fprintf(fp, "\"tracepath\": \"%s\",", args.tracepath);
+		fmt::fprintf(fp, R"("tracepath": "%s",)", args.tracepath);
 		fmt::fprintf(fp, "\"traceformat\": %d,", args.traceformat);
-		fmt::fprintf(fp, "\"knobs\": \"%s\",", args.knobs);
+		fmt::fprintf(fp, R"("knobs": "%s",)", args.knobs);
 		fmt::fprintf(fp, "\"flatbuffers\": %d,", args.flatbuffers);
 		fmt::fprintf(fp, "\"txntrace\": %d,", args.txntrace);
 		fmt::fprintf(fp, "\"txntagging\": %d,", args.txntagging);
-		fmt::fprintf(fp, "\"txntagging_prefix\": \"%s\",", args.txntagging_prefix);
+		fmt::fprintf(fp, R"("txntagging_prefix": "%s",)", args.txntagging_prefix);
 		fmt::fprintf(fp, "\"streaming_mode\": %d,", args.streaming_mode);
 		fmt::fprintf(fp, "\"disable_ryw\": %d,", args.disable_ryw);
 		fmt::fprintf(fp, "\"transaction_timeout_db\": %d,", args.transaction_timeout_db);
 		fmt::fprintf(fp, "\"transaction_timeout_tx\": %d,", args.transaction_timeout_tx);
-		fmt::fprintf(fp, "\"json_output_path\": \"%s\"", args.json_output_path);
+		fmt::fprintf(fp, R"("json_output_path": "%s")", args.json_output_path);
 		fmt::fprintf(fp, "},\"samples\": [");
 	}
 
@@ -2382,7 +2380,7 @@ int populateTenants(ipc::AdminServer& admin, const Arguments& args) {
 int main(int argc, char* argv[]) {
 	setlinebuf(stdout);
 
-	auto rc = int{};
+	int rc = 0;
 	auto args = Arguments{};
 	rc = parseArguments(argc, argv, args);
 	if (rc < 0) {
@@ -2529,7 +2527,7 @@ int main(int argc, char* argv[]) {
 	/* fork worker processes + 1 stats process */
 	auto worker_pids = std::vector<pid_t>(args.num_processes + 1);
 
-	auto worker_id = int{};
+	int worker_id = 0;
 
 	/* forking (num_process + 1) children */
 	/* last process is the stats handler */
@@ -2611,9 +2609,9 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	auto status = int{};
+	int status = 0;
 	/* wait for worker processes to exit */
-	for (auto p = 0; p < args.num_processes; p++) {
+	for (int p = 0; p < args.num_processes; p++) {
 		logr.debug("waiting for worker process {} (PID:{}) to exit", p + 1, worker_pids[p]);
 		auto pid = waitpid(worker_pids[p], &status, 0 /* or what? */);
 		if (pid < 0) {

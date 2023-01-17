@@ -480,7 +480,7 @@ public:
 			writer->post(o);
 
 			std::vector<TraceEventFields> events = latestEventCache.getAllUnsafe();
-			for (int idx = 0; idx < events.size(); idx++) {
+			for (size_t idx = 0; idx < events.size(); idx++) {
 				if (events[idx].size() > 0) {
 					TraceEventFields rolledFields;
 					for (auto itr = events[idx].begin(); itr != events[idx].end(); ++itr) {
@@ -888,7 +888,7 @@ BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 	type = ev.type;
 	timeIndex = ev.timeIndex;
 
-	for (int i = 0; i < 5; i++) {
+	for (unsigned int i = 0; i < 5; i++) {
 		eventCounts[i] = ev.eventCounts[i];
 	}
 
@@ -1426,25 +1426,25 @@ void TraceBatch::dump() {
 		machine = formatIpPort(local.ip, local.port);
 	}
 
-	for (int i = 0; i < attachBatch.size(); i++) {
+	for (auto& i : attachBatch) {
 		if (g_network->isSimulated()) {
-			attachBatch[i].fields.addField("Machine", machine);
+			i.fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(attachBatch[i].fields, "", false);
+		g_traceLog.writeEvent(i.fields, "", false);
 	}
 
-	for (int i = 0; i < eventBatch.size(); i++) {
+	for (auto& i : eventBatch) {
 		if (g_network->isSimulated()) {
-			eventBatch[i].fields.addField("Machine", machine);
+			i.fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(eventBatch[i].fields, "", false);
+		g_traceLog.writeEvent(i.fields, "", false);
 	}
 
-	for (int i = 0; i < buggifyBatch.size(); i++) {
+	for (auto& i : buggifyBatch) {
 		if (g_network->isSimulated()) {
-			buggifyBatch[i].fields.addField("Machine", machine);
+			i.fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
+		g_traceLog.writeEvent(i.fields, "", false);
 	}
 
 	onMainThreadVoid([]() { g_traceLog.flush(); });
@@ -1692,7 +1692,7 @@ std::string TraceEventFields::toString() const {
 		}
 		first = false;
 
-		str += format("\"%s\"=\"%s\"", itr->first.c_str(), itr->second.c_str());
+		str += format(R"("%s"="%s")", itr->first.c_str(), itr->second.c_str());
 	}
 
 	return str;

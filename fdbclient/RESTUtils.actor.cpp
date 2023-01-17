@@ -35,7 +35,7 @@ bool isProtocolSupported(const std::string& protocol) {
 }
 
 bool isSecurePrototol(const std::string& protocol) {
-	return protocol.compare("https") == 0;
+	return protocol == "https";
 }
 } // namespace
 

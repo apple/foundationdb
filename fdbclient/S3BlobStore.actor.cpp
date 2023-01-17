@@ -178,9 +178,7 @@ std::string guessRegionFromDomain(std::string domain) {
 	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
 	boost::algorithm::to_lower(domain);
 
-	for (int i = 0; i < knownServices.size(); ++i) {
-		const char* service = knownServices[i];
-
+	for (const auto& service : knownServices) {
 		std::size_t p = domain.find(service);
 
 		if (p == std::string::npos || (p >= 1 && domain[p - 1] != '.')) {
@@ -1318,11 +1316,11 @@ std::string S3BlobStoreEndpoint::hmac_sha1(Credentials const& creds, std::string
 	key.append(64 - key.size(), '\0');
 
 	std::string kipad = key;
-	for (int i = 0; i < 64; ++i)
+	for (unsigned int i = 0; i < 64; ++i)
 		kipad[i] ^= '\x36';
 
 	std::string kopad = key;
-	for (int i = 0; i < 64; ++i)
+	for (unsigned int i = 0; i < 64; ++i)
 		kopad[i] ^= '\x5c';
 
 	kipad.append(msg);
@@ -1338,8 +1336,8 @@ std::string sha256_hex(std::string str) {
 	SHA256_Update(&sha256, str.c_str(), str.size());
 	SHA256_Final(hash, &sha256);
 	std::stringstream ss;
-	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-		ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+	for (unsigned char i : hash) {
+		ss << std::hex << std::setw(2) << std::setfill('0') << i;
 	}
 	return ss.str();
 }
@@ -1356,8 +1354,8 @@ std::string hmac_sha256_hex(std::string key, std::string msg) {
 
 	std::stringstream ss;
 	ss << std::hex << std::setfill('0');
-	for (int i = 0; i < len; i++) {
-		ss << std::hex << std::setw(2) << (unsigned int)hash[i];
+	for (const auto& i : hash) {
+		ss << std::hex << std::setw(2) << i;
 	}
 	return (ss.str());
 }
@@ -1374,7 +1372,7 @@ std::string hmac_sha256(std::string key, std::string msg) {
 
 	std::stringstream ss;
 	ss << std::setfill('0');
-	for (int i = 0; i < len; i++) {
+	for (const auto& i : hash) {
 		ss << hash[i];
 	}
 	return (ss.str());

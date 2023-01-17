@@ -333,17 +333,17 @@ public:
 static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
 	std::string ret;
 
-	for (int i = 0; i < item.size(); i++) {
-		if (fullEscaping && item[i] == '\\')
+	for (unsigned char i : item) {
+		if (fullEscaping && i == '\\')
 			ret += "\\\\";
-		else if (fullEscaping && item[i] == '"')
+		else if (fullEscaping && i == '"')
 			ret += "\\\"";
-		else if (fullEscaping && item[i] == ' ')
-			ret += format("\\x%02x", item[i]);
-		else if (item[i] >= 32 && item[i] < 127)
-			ret += item[i];
+		else if (fullEscaping && i == ' ')
+			ret += format("\\x%02x", i);
+		else if (i >= 32 && i < 127)
+			ret += i;
 		else
-			ret += format("\\x%02x", item[i]);
+			ret += format("\\x%02x", i);
 	}
 
 	return ret;
@@ -710,7 +710,7 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	state Standalone<StringRef> snapCmd;
 	state UID snapUID = deterministicRandom()->randomUniqueID();
-	for (int i = 1; i < tokens.size(); i++) {
+	for (size_t i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
 			snapCmd = snapCmd.withSuffix(" "_sr);
@@ -757,7 +757,7 @@ std::string newCompletion(const char* base, const char* name) {
 
 void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
-	int len = strlen(text);
+	size_t len = strlen(text);
 
 	const char* helpExtra[] = { "escaping", "options", nullptr };
 
@@ -772,8 +772,7 @@ void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 
 	if (help) {
 		while (*he) {
-			const char* name = *he;
-			he++;
+			const char* name = *he++;
 			if (!strncmp(name, text, len))
 				lc.push_back(newCompletion("help ", name));
 		}
@@ -789,7 +788,7 @@ void helpGenerator(const char* text, std::vector<std::string>& lc) {
 }
 
 void optionGenerator(const char* text, const char* line, std::vector<std::string>& lc) {
-	int len = strlen(text);
+	size_t len = strlen(text);
 
 	for (auto iter = validOptions.begin(); iter != validOptions.end(); ++iter) {
 		const char* name = (*iter).c_str();
@@ -802,11 +801,10 @@ void optionGenerator(const char* text, const char* line, std::vector<std::string
 namespace fdb_cli {
 void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc) {
 	const char** iter = options;
-	int len = strlen(text);
+	size_t len = strlen(text);
 
 	while (*iter) {
-		const char* name = *iter;
-		iter++;
+		const char* name = *iter++;
 		if (!strncmp(name, text, len)) {
 			lc.push_back(newCompletion(line, name));
 		}
@@ -827,10 +825,10 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 		return;
 
 	auto tokens = parsed.back();
-	int count = tokens.size();
+	size_t count = tokens.size();
 
-	// for(int i = 0; i < count; i++) {
-	//	printf("Token (%d): `%s'\n", i, tokens[i].toString().c_str());
+	// for(unsigned int i = 0; i < count; i++) {
+	//	printf("Token (%u): `%s'\n", i, tokens[i].toString().c_str());
 	// }
 
 	std::string ntext = "";
@@ -858,7 +856,7 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 	if (tokencmp(tokens[0], "option")) {
 		if (count == 1)
 			onOffGenerator(ntext.c_str(), base_input.c_str(), lc);
-		if (count == 2)
+		else if (count == 2)
 			optionGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
 
@@ -1730,7 +1728,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							}
 							limit = 0;
 							int place = 1;
-							for (int i = tokens[3].size(); i > 0; i--) {
+							for (auto i = tokens[3].size(); i > 0; i--) {
 								int val = int(tokens[3][i - 1]) - int('0');
 								if (val < 0 || val > 9) {
 									valid = false;
@@ -2181,10 +2179,13 @@ ACTOR Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 		    bool partial = false;
 		    std::string linecopy = line;
 		    std::vector<std::vector<StringRef>> parsed = parseLine(linecopy, error, partial);
-		    if (parsed.size() == 0 || parsed.back().size() == 0)
+		    if (parsed.empty() || parsed.back().empty())
 			    return LineNoise::Hint();
 		    StringRef command = parsed.back().front();
-		    int finishedParameters = parsed.back().size() + error;
+		    auto finishedParameters = parsed.back().size();
+
+		    if (error)
+			    finishedParameters++;
 
 		    // As a user is typing an escaped character, e.g. \", after the \ and before the " is typed
 		    // the string will be a parse error.  Ignore this parse error to avoid flipping the hint to
@@ -2209,7 +2210,7 @@ ACTOR Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 			    if (iter != helpMap.end()) {
 				    std::string helpLine = iter->second.usage;
 				    std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
-				    for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
+				    for (auto i = finishedParameters; i < parsedHelp.back().size(); i++) {
 					    hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
 				    }
 			    } else {
@@ -2261,8 +2262,8 @@ const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs) 
 	auto const loaded = tlsConfig.loadSync();
 	const bool tlsConfigured =
 	    !loaded.getCertificateBytes().empty() || !loaded.getKeyBytes().empty() || !loaded.getCABytes().empty();
-	int tlsAddrs = 0;
-	int totalAddrs = 0;
+	size_t tlsAddrs = 0;
+	size_t totalAddrs = 0;
 	for (const auto& addr : ccs.coords) {
 		if (addr.isTLS())
 			tlsAddrs++;

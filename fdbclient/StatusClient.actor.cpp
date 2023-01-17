@@ -312,14 +312,14 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 
 		state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			if (coord.clientLeaderServers[i].hostname.present()) {
+		for (const auto& clientLeaderServer : coord.clientLeaderServers) {
+			if (clientLeaderServer.hostname.present()) {
 				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-				                                                  coord.clientLeaderServers[i].hostname.get(),
+				                                                  clientLeaderServer.hostname.get(),
 				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
 				                                                  TaskPriority::CoordinationReply));
 			} else {
-				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
+				leaderServers.push_back(retryBrokenPromise(clientLeaderServer.getLeader,
 				                                           GetLeaderRequest(coord.clusterKey, UID()),
 				                                           TaskPriority::CoordinationReply));
 			}
@@ -327,13 +327,13 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 
 		state std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			if (coord.clientLeaderServers[i].hostname.present()) {
-				coordProtocols.push_back(retryGetReplyFromHostname(
-				    ProtocolInfoRequest{}, coord.clientLeaderServers[i].hostname.get(), WLTOKEN_PROTOCOL_INFO));
+		for (const auto& i : coord.clientLeaderServers) {
+			if (i.hostname.present()) {
+				coordProtocols.push_back(
+				    retryGetReplyFromHostname(ProtocolInfoRequest{}, i.hostname.get(), WLTOKEN_PROTOCOL_INFO));
 			} else {
 				RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown(
-					{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO) };
+					{ i.getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO) };
 				coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 			}
 		}
@@ -346,8 +346,8 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 		    quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
 
 		StatusArray coordsStatus;
-		int coordinatorsUnavailable = 0;
-		for (int i = 0; i < leaderServers.size(); i++) {
+		size_t coordinatorsUnavailable = 0;
+		for (size_t i = 0; i < leaderServers.size(); i++) {
 			StatusObject coordStatus;
 			coordStatus["address"] = coord.clientLeaderServers[i].getAddressString();
 			if (leaderServers[i].isReady()) {
@@ -403,7 +403,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 		ClusterConnectionString storedConnectionString = wait(connRecord->getStoredConnectionString());
 		std::string description = "Cluster file contents do not match current cluster connection string.";
 		description += "\nThe file contains the connection string: ";
-		description += storedConnectionString.toString().c_str();
+		description += storedConnectionString.toString();
 		description += "\nThe current connection string is: ";
 		description += connRecord->getConnectionString().toString().c_str();
 		description += "\nVerify the cluster file and its parent directory are writable and that the cluster file has "
@@ -488,12 +488,11 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 			bool data_state_unhealthy =
 			    data_state_present && cluster.has("data.state.healthy") && !cluster.last().get_bool();
 
-			int cluster_messages = cluster.has("messages") ? cluster.last().get_array().size() : 0;
-			int configuration_messages = client.has("configuration.messages") ? client.last().get_array().size() : 0;
+			size_t cluster_messages = cluster.has("messages") ? cluster.last().get_array().size() : 0;
+			size_t configuration_messages = client.has("configuration.messages") ? client.last().get_array().size() : 0;
 
-			isHealthy =
-			    !(cluster_messages > 0 || configuration_messages > 0 || procMessagesPresent || data_state_unhealthy ||
-			      !data_state_present || !client.at("cluster_file.up_to_date").get_bool());
+			isHealthy = !(cluster_messages || configuration_messages || procMessagesPresent || data_state_unhealthy ||
+			              !data_state_present || !client.at("cluster_file.up_to_date").get_bool());
 		}
 	} catch (std::exception&) {
 		// As documented above, exceptions leave isAvailable and isHealthy in the right state

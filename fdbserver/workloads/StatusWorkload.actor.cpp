@@ -116,8 +116,8 @@ struct StatusWorkload : TestWorkload {
 		}
 
 		std::string result = "\"bands\":[";
-		for (int i = 0; i < bands.size(); ++i) {
-			if (i > 0) {
+		for (size_t i = 0; i < bands.size(); ++i) {
+			if (i) {
 				result += ",";
 			}
 
@@ -142,7 +142,7 @@ struct StatusWorkload : TestWorkload {
 					    "},"
 					    "\"read\":{" +
 					    generateBands() +
-					    format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},",
+					    format(R"(, "max_key_selector_offset":%d, "max_read_bytes":%d},)",
 					           deterministicRandom()->randomInt(0, 10000),
 					           deterministicRandom()->randomInt(0, 1000000)) +
 					    ""
@@ -222,16 +222,16 @@ TEST_CASE("/fdbserver/status/schema/basic") {
 	};
 	check(true, "{}");
 	check(true, "{\"apple\":4}");
-	check(false, "{\"apple\":\"wrongtype\"}");
+	check(false, R"({"apple":"wrongtype"})");
 	check(false, "{\"extrathingy\":1}");
-	check(true, "{\"banana\":\"b\",\"sub\":{\"thing\":false}}");
-	check(false, "{\"banana\":\"b\",\"sub\":{\"thing\":false, \"x\":0}}");
-	check(true, "{\"arr\":[{},{\"a\":0}]}");
-	check(false, "{\"arr\":[{\"a\":0},{\"c\":0}]}");
-	check(true, "{\"en\":\"bar\"}");
-	check(false, "{\"en\":\"baz\"}");
-	check(true, "{\"mapped\":{\"item1\":{\"x\":false},\"item2\":{}}}");
-	check(false, "{\"mapped\":{\"item1\":{\"x\":false},\"item2\":{\"y\":1}}}");
+	check(true, R"({"banana":"b","sub":{"thing":false}})");
+	check(false, R"({"banana":"b","sub":{"thing":false, "x":0}})");
+	check(true, R"({"arr":[{},{"a":0}]})");
+	check(false, R"({"arr":[{"a":0},{"c":0}]})");
+	check(true, R"({"en":"bar"})");
+	check(false, R"({"en":"baz"})");
+	check(true, R"({"mapped":{"item1":{"x":false},"item2":{}}})");
+	check(false, R"({"mapped":{"item1":{"x":false},"item2":{"y":1}}})");
 
 	return Void();
 }

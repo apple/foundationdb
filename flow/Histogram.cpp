@@ -56,7 +56,7 @@ void HistogramRegistry::unregisterHistogram(Histogram* h) {
 	if (histograms.find(name) == histograms.end()) {
 		TraceEvent(SevError, "HistogramNotRegistered").detail("group", h->group).detail("op", h->op);
 	}
-	int count = histograms.erase(name);
+	size_t count = histograms.erase(name);
 	ASSERT(count == 1);
 }
 
@@ -90,8 +90,8 @@ const char* const Histogram::UnitToStringMapper[] = { "milliseconds", "bytes", "
 
 void Histogram::writeToLog(double elapsed) {
 	bool active = false;
-	for (uint32_t i = 0; i < 32; i++) {
-		if (buckets[i]) {
+	for (unsigned int bucket : buckets) {
+		if (bucket) {
 			active = true;
 			break;
 		}
@@ -104,7 +104,7 @@ void Histogram::writeToLog(double elapsed) {
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper[(size_t)unit]);
 	if (elapsed > 0)
 		e.detail("Elapsed", elapsed);
-	int totalCount = 0;
+	uint32_t totalCount = 0;
 	for (uint32_t i = 0; i < 32; i++) {
 		uint64_t value = uint64_t(1) << (i + 1);
 
@@ -150,17 +150,17 @@ std::string Histogram::drawHistogram() {
 	const char* xFull = "---▀▀▀\0";
 	const char* xEmpty = "------\0";
 	const char* lineEnd = "--- \0";
-	const unsigned int width = std::strlen(emptyCell);
+	static const size_t width = std::strlen(emptyCell);
 
-	int max_lines = 23;
-	uint32_t total = 0;
+	constexpr unsigned int max_lines = 23;
+	unsigned int total = 0;
 	double maxPct = 0;
 
-	for (int i = 0; i < 32; i++) {
-		total += buckets[i];
+	for (unsigned int bucket : buckets) {
+		total += bucket;
 	}
-	for (int i = 0; i < 32; i++) {
-		maxPct = std::max(maxPct, (100.0 * buckets[i]) / total);
+	for (unsigned int bucket : buckets) {
+		maxPct = std::max(maxPct, (100.0 * bucket) / total);
 	}
 
 	double intervalSize = (maxPct < (max_lines - 3)) ? 1 : maxPct / (max_lines - 3);
@@ -169,12 +169,12 @@ std::string Histogram::drawHistogram() {
 	result << "Total Inputs: " << total << std::fixed << "\n";
 	result << "Percent"
 	       << "\n";
-	for (int l = 0; l < lines; l++) {
+	for (unsigned int l = 0; l < lines; l++) {
 		double currHeight = (lines - l) * intervalSize;
 		double halfFullHeight = currHeight - intervalSize / 4;
 		result << std::setw(6) << std::setprecision(2) << currHeight << " " << verticalLine;
-		for (int i = 0; i < 32; i++) {
-			double pct = (100.0 * buckets[i]) / total;
+		for (unsigned int bucket : buckets) {
+			double pct = (100.0 * bucket) / total;
 			if (pct > currHeight)
 				result << fullCell;
 			else if (pct > halfFullHeight)
@@ -186,8 +186,8 @@ std::string Histogram::drawHistogram() {
 	}
 
 	result << "  0.00 " << origin;
-	for (int i = 0; i < 32; i++) {
-		double pct = (100.0 * buckets[i]) / total;
+	for (unsigned int bucket : buckets) {
+		double pct = (100.0 * bucket) / total;
 		if (pct > intervalSize / 4)
 			result << xFull;
 		else
@@ -196,7 +196,7 @@ std::string Histogram::drawHistogram() {
 	result << lineEnd << "\n";
 
 	result << std::string(9, ' ');
-	for (int i = 0; i < 32; i++) {
+	for (unsigned int i = 0; i < 32; i++) {
 		result << std::left << std::setw(width) << "  B" + std::to_string(i);
 	}
 	result << "\n";

@@ -67,7 +67,7 @@ ACTOR Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
 				// last character is \n
-				auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
+				auto pos = errorMsgStr.find_last_of('\n', errorMsgStr.size() - 2);
 				auto last_line = errorMsgStr.substr(pos + 1);
 				// customized the error message for fdbcli
 				fprintf(stderr,

@@ -189,7 +189,7 @@ struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCop
 };
 template <class F>
 static void specialCounter(CounterCollection& collection, std::string const& name, F&& f) {
-	new SpecialCounter<F>(collection, name, std::move(f));
+	new SpecialCounter<F>(collection, name, std::forward<F>(f));
 }
 
 FDB_DECLARE_BOOLEAN_PARAM(Filtered);
