@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
@@ -2603,81 +2604,13 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	return Void();
 }
 
-MutationsAndVersionRef filterMutationsInverted(Arena& arena,
-                                               EncryptedMutationsAndVersionRef const& m,
-                                               KeyRange const& range,
-                                               bool encrypted) {
-	Optional<VectorRef<MutationRef>> modifiedMutations;
-	for (int i = 0; i < m.mutations.size(); i++) {
-		if (m.mutations[i].type == MutationRef::SetValue) {
-			if (modifiedMutations.present() && !range.contains(m.mutations[i].param1)) {
-				modifiedMutations.get().push_back(
-				    arena, encrypted && m.encrypted.present() ? m.encrypted.get()[i] : m.mutations[i]);
-			}
-			if (!modifiedMutations.present() && range.contains(m.mutations[i].param1)) {
-				if (encrypted && m.encrypted.present()) {
-					modifiedMutations = m.encrypted.get().slice(0, i);
-				} else {
-					modifiedMutations = m.mutations.slice(0, i);
-				}
-				arena.dependsOn(range.arena());
-			}
-		} else {
-			ASSERT(m.mutations[i].type == MutationRef::ClearRange);
-			if (!modifiedMutations.present() &&
-			    (m.mutations[i].param2 > range.begin && m.mutations[i].param1 < range.end)) {
-				if (encrypted && m.encrypted.present()) {
-					modifiedMutations = m.encrypted.get().slice(0, i);
-				} else {
-					modifiedMutations = m.mutations.slice(0, i);
-				}
-				arena.dependsOn(range.arena());
-			}
-			if (modifiedMutations.present()) {
-				if ((m.mutations[i].param1 <= range.begin && m.mutations[i].param2 <= range.begin) ||
-				    (m.mutations[i].param1 >= range.end && m.mutations[i].param2 >= range.end)) {
-					modifiedMutations.get().push_back(
-					    arena, encrypted && m.encrypted.present() ? m.encrypted.get()[i] : m.mutations[i]);
-				} else {
-					if (m.mutations[i].param1 < range.begin) {
-						// FIXME: encrypt
-						modifiedMutations.get().push_back(arena,
-						                                  MutationRef(MutationRef::ClearRange,
-						                                              m.mutations[i].param1,
-						                                              std::min(range.begin, m.mutations[i].param2)));
-					}
-					if (m.mutations[i].param2 > range.end) {
-						// FIXME: encrypt
-						modifiedMutations.get().push_back(arena,
-						                                  MutationRef(MutationRef::ClearRange,
-						                                              std::max(range.end, m.mutations[i].param1),
-						                                              m.mutations[i].param2));
-					}
-				}
-			}
-		}
-	}
-	if (modifiedMutations.present()) {
-		return MutationsAndVersionRef(modifiedMutations.get(), m.version, m.knownCommittedVersion);
-	}
-	if (!encrypted || !m.encrypted.present()) {
-		return MutationsAndVersionRef(m.mutations, m.version, m.knownCommittedVersion);
-	}
-	return MutationsAndVersionRef(m.encrypted.get(), m.version, m.knownCommittedVersion);
-}
-
 MutationsAndVersionRef filterMutations(Arena& arena,
                                        EncryptedMutationsAndVersionRef const& m,
                                        KeyRange const& range,
-                                       bool inverted,
                                        bool encrypted,
                                        int commonPrefixLength) {
 	if (m.mutations.size() == 1 && m.mutations.back().param1 == lastEpochEndPrivateKey) {
 		return MutationsAndVersionRef(m.mutations, m.version, m.knownCommittedVersion);
-	}
-
-	if (inverted) {
-		return filterMutationsInverted(arena, m, range, encrypted);
 	}
 
 	Optional<VectorRef<MutationRef>> modifiedMutations;
@@ -2837,7 +2770,6 @@ enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             Reference<ChangeFeedInfo> feedInfo,
                                                                             ChangeFeedStreamRequest req,
-                                                                            bool inverted,
                                                                             bool atLatest,
                                                                             bool doFilterMutations,
                                                                             int commonFeedPrefixLength,
@@ -2867,7 +2799,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	state uint64_t changeCounter = data->shardChangeCounter;
-	if (!inverted && !data->isReadable(req.range)) {
+	if (!data->isReadable(req.range)) {
 		throw wrong_shard_server();
 	}
 
@@ -2920,7 +2852,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 			MutationsAndVersionRef m;
 			if (doFilterMutations) {
-				m = filterMutations(memoryReply.arena, *it, req.range, inverted, req.encrypted, commonFeedPrefixLength);
+				m = filterMutations(memoryReply.arena, *it, req.range, req.encrypted, commonFeedPrefixLength);
 			} else {
 				m = MutationsAndVersionRef(req.encrypted && it->encrypted.present() ? it->encrypted.get()
 				                                                                    : it->mutations,
@@ -2968,7 +2900,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		data->counters.kvScanBytes += res.logicalSize();
 		++data->counters.changeFeedDiskReads;
 
-		if (!inverted && !req.range.empty()) {
+		if (!req.range.empty()) {
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
@@ -3062,7 +2994,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				    reply.arena,
 				    EncryptedMutationsAndVersionRef(mutations, encrypted, version, knownCommittedVersion),
 				    req.range,
-				    inverted,
 				    req.encrypted,
 				    commonFeedPrefixLength);
 			} else {
@@ -3445,7 +3376,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 
 			// keep this as not state variable so it is freed after sending to reduce memory
 			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture = getChangeFeedMutations(
-			    data, feedInfo, req, false, atLatest, doFilterMutations, commonFeedPrefixLength, &feedDiskReadState);
+			    data, feedInfo, req, atLatest, doFilterMutations, commonFeedPrefixLength, &feedDiskReadState);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -6162,9 +6093,16 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Mutation
 			for (auto& it : r.value()) {
 				if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
 					// clamp feed mutation to change feed range
-					KeyRangeRef clearIntersect = mutationClearRange & it->range;
-					MutationRef clearMutation(MutationRef::Type::ClearRange, clearIntersect.begin, clearIntersect.end);
-
+					MutationRef clearMutation = m;
+					bool modified = false;
+					if (clearMutation.param1 < it->range.begin) {
+						clearMutation.param1 = it->range.begin;
+						modified = true;
+					}
+					if (clearMutation.param2 > it->range.end) {
+						clearMutation.param2 = it->range.end;
+						modified = true;
+					}
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(
 						    EncryptedMutationsAndVersionRef(version, self->knownCommittedVersion.get()));
@@ -6173,7 +6111,7 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Mutation
 						if (!it->mutations.back().encrypted.present()) {
 							it->mutations.back().encrypted = it->mutations.back().mutations;
 						}
-						if (mutationClearRange != clearIntersect) {
+						if (modified) {
 							// FIXME: encrypt
 							it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(),
 							                                                    clearMutation);
