@@ -59,6 +59,8 @@ description is not currently required but encouraged.
             description="Once provided, this string will be used to replace the port/PID in the log file names." />
     <Option name="trace_share_among_client_threads" code="37"
             description="Use the same base trace file name for all client threads as it did before version 7.2. The current default behavior is to use distinct trace file names for client threads by including their version and thread index." />
+    <Option name="trace_initialize_on_setup" code="38"
+            description="Initialize trace files on network setup, determine the local IP later. Otherwise tracing is initialized when opening the first database." />
     <Option name="trace_partial_file_suffix" code="39"
             paramType="String" paramDescription="Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension."
             description="Set file suffix for partially written log files." />

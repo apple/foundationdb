@@ -158,7 +158,7 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 // The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 NetworkOptions::NetworkOptions()
   : traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-    traceFormat("xml"), traceClockSource("now"),
+    traceFormat("xml"), traceClockSource("now"), traceInitializeOnSetup(false),
     supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false),
     primaryClient(true) {}
 
@@ -2215,6 +2215,102 @@ void DatabaseContext::expireThrottles() {
 
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
 
+// Initialize tracing for FDB client
+//
+// connRecord is necessary for determining the local IP, which is then included in the trace
+// file name, and also used to annotate all trace events.
+//
+// If trace_initialize_on_setup is not set, tracing is initialized when opening a database.
+// In that case we can immediatelly determine the IP. Thus, we can use the IP use it in the
+// trace file name and annotate all events with it.
+//
+// If trace_initialize_on_setup network option is set, tracing is at first initialized without
+// connRecord and thus without the local IP. In that case we cannot use the local IP in the
+// trace file names. The IP is then provided by a repeated call to initializeClientTracing
+// when opening a database. All tracing events from this point are annotated with the local IP
+//
+// If tracing initialization is completed, further calls to initializeClientTracing are ignored
+void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Optional<int> apiVersion) {
+	if (!networkOptions.traceDirectory.present()) {
+		return;
+	}
+
+	bool initialized = traceFileIsOpen();
+	if (initialized && (isTraceLocalAddressSet() || !connRecord)) {
+		// Tracing initialization is completed
+		return;
+	}
+
+	// Network must be created before initializing tracing
+	ASSERT(g_network);
+
+	Optional<NetworkAddress> localAddress;
+	if (connRecord) {
+		auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
+		localAddress = NetworkAddress(publicIP, ::getpid());
+	}
+	platform::ImageInfo imageInfo = platform::getImageInfo();
+
+	if (initialized) {
+		// Tracing already initialized, just need to update the IP address
+		setTraceLocalAddress(localAddress.get());
+		TraceEvent("ClientIPDetermined")
+		    .detail("SourceVersion", getSourceVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+		    .detail("ApiVersion", apiVersion)
+		    .detail("ClientLibrary", imageInfo.fileName)
+		    .detailf("ImageOffset", "%p", imageInfo.offset)
+		    .detail("Primary", networkOptions.primaryClient);
+	} else {
+		// Initialize tracing
+		selectTraceFormatter(networkOptions.traceFormat);
+		selectTraceClockSource(networkOptions.traceClockSource);
+		addUniversalTraceField("ClientDescription",
+		                       format("%s-%s-%" PRIu64,
+		                              networkOptions.primaryClient ? "primary" : "external",
+		                              FDB_VT_VERSION,
+		                              deterministicRandom()->randomUInt64()));
+
+		std::string identifier = networkOptions.traceFileIdentifier;
+		if (identifier.empty() && !localAddress.present()) {
+			// If neither identifier is available no localAddress, use PID for identification
+			identifier = format("%d", ::getpid());
+		}
+		openTraceFile(localAddress,
+		              networkOptions.traceRollSize,
+		              networkOptions.traceMaxLogsSize,
+		              networkOptions.traceDirectory.get(),
+		              "trace",
+		              networkOptions.traceLogGroup,
+		              identifier,
+		              networkOptions.tracePartialFileSuffix);
+
+		TraceEvent("ClientStart")
+		    .detail("SourceVersion", getSourceVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+		    .detail("ApiVersion", apiVersion)
+		    .detail("ClientLibrary", imageInfo.fileName)
+		    .detailf("ImageOffset", "%p", imageInfo.offset)
+		    .detail("Primary", networkOptions.primaryClient)
+		    .trackLatest("ClientStart");
+
+		g_network->initMetrics();
+		FlowTransport::transport().initMetrics();
+		initTraceEventMetrics();
+	}
+
+	// Initialize system monitoring once the local IP is available
+	if (localAddress.present()) {
+		initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(localAddress.get().ip)));
+		systemMonitor();
+		uncancellable(recurring(&systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
+	}
+}
+
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
@@ -2228,49 +2324,7 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 
 	ASSERT(TraceEvent::isNetworkThread());
 
-	platform::ImageInfo imageInfo = platform::getImageInfo();
-
-	if (connRecord) {
-		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
-			g_network->initMetrics();
-			FlowTransport::transport().initMetrics();
-			initTraceEventMetrics();
-
-			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
-			selectTraceFormatter(networkOptions.traceFormat);
-			selectTraceClockSource(networkOptions.traceClockSource);
-			addUniversalTraceField("ClientDescription",
-			                       format("%s-%s-%" PRIu64,
-			                              networkOptions.primaryClient ? "primary" : "external",
-			                              FDB_VT_VERSION,
-			                              getTraceThreadId()));
-
-			openTraceFile(NetworkAddress(publicIP, ::getpid()),
-			              networkOptions.traceRollSize,
-			              networkOptions.traceMaxLogsSize,
-			              networkOptions.traceDirectory.get(),
-			              "trace",
-			              networkOptions.traceLogGroup,
-			              networkOptions.traceFileIdentifier,
-			              networkOptions.tracePartialFileSuffix);
-
-			TraceEvent("ClientStart")
-			    .detail("SourceVersion", getSourceVersion())
-			    .detail("Version", FDB_VT_VERSION)
-			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
-			    .detail("ApiVersion", apiVersion)
-			    .detail("ClientLibrary", imageInfo.fileName)
-			    .detailf("ImageOffset", "%p", imageInfo.offset)
-			    .detail("Primary", networkOptions.primaryClient)
-			    .trackLatest("ClientStart");
-
-			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
-
-			systemMonitor();
-			uncancellable(recurring(&systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
-		}
-	}
+	initializeClientTracing(connRecord, apiVersion);
 
 	g_network->initTLS();
 
@@ -2321,7 +2375,7 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	    .detail("Version", FDB_VT_VERSION)
 	    .detail("ClusterFile", connRecord ? connRecord->toString() : "None")
 	    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "None")
-	    .detail("ClientLibrary", imageInfo.fileName)
+	    .detail("ClientLibrary", platform::getImageInfo().fileName)
 	    .detail("Primary", networkOptions.primaryClient)
 	    .detail("Internal", internal)
 	    .trackLatest(database->connectToDatabaseEventCacheHolder.trackingKey);
@@ -2404,6 +2458,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	case FDBNetworkOptions::TRACE_PARTIAL_FILE_SUFFIX:
 		validateOptionValuePresent(value);
 		networkOptions.tracePartialFileSuffix = value.get().toString();
+		break;
+	case FDBNetworkOptions::TRACE_INITIALIZE_ON_SETUP:
+		networkOptions.traceInitializeOnSetup = true;
 		break;
 	case FDBNetworkOptions::KNOB: {
 		validateOptionValuePresent(value);
@@ -2604,6 +2661,10 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	g_network->addStopCallback(Net2FileSystem::stop);
 	FlowTransport::createInstance(true, transportId, WLTOKEN_RESERVED_COUNT);
 	Net2FileSystem::newFileSystem();
+
+	if (networkOptions.traceInitializeOnSetup) {
+		::initializeClientTracing({}, {});
+	}
 
 	uncancellable(monitorNetworkBusyness());
 }
