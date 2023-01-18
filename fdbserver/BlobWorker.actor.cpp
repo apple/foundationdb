@@ -4210,9 +4210,11 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 							// change feed was created as part of this transaction, changeFeedStartVersion
 							// will be set later
 						} else {
-							CODE_PROBE(true, "Granule open found granule in done state");
-							// this sub-granule is done splitting, no need for split logic.
-							info.splitParentGranule.reset();
+							if (!bwData->isFullRestoreMode) {
+								CODE_PROBE(true, "Granule open found granule in done state");
+								// this sub-granule is done splitting, no need for split logic.
+								info.splitParentGranule.reset();
+							}
 						}
 					}
 

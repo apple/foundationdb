@@ -746,6 +746,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
 					delayedHealthUpdateF = delayedHealthUpdate(self->destination, &tooManyConnectionsClosed);
+				self->connected = true;
 				wait(connectionWriter(self, conn) || reader || connectionMonitor(self) ||
 				     self->resetConnection.onTrigger());
 				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID())
@@ -763,6 +764,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				throw e;
 			}
 		} catch (Error& e) {
+			self->connected = false;
 			delayedHealthUpdateF.cancel();
 			if (now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
 				self->reconnectionDelay = FLOW_KNOBS->INITIAL_RECONNECTION_TIME;
@@ -881,7 +883,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 }
 
 Peer::Peer(TransportData* transport, NetworkAddress const& destination)
-  : transport(transport), destination(destination), compatible(true), outgoingConnectionIdle(true),
+  : transport(transport), destination(destination), compatible(true), connected(false), outgoingConnectionIdle(true),
     lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), peerReferences(-1),
     bytesReceived(0), bytesSent(0), lastDataPacketSentTime(now()), outstandingReplies(0),
     pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SKETCH_ACCURACY : 0.1), lastLoggedTime(0.0),
