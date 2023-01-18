@@ -1064,6 +1064,49 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 	}
 }
 
+inline int64_t extractTenantIdFromKeyRef(StringRef s) {
+	if (s.size() < TenantAPI::PREFIX_SIZE) {
+		return TenantInfo::INVALID_TENANT;
+	}
+	// Parse mutation key to determine tenant prefix
+	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
+	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+}
+
+int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
+	ASSERT(!isSystemKey(m.param1));
+
+	// The first 8 bytes of the key of this OP is also an 8-byte number
+	if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 && parseVersionstampOffset(m.param1) < 8) {
+		return TenantInfo::INVALID_TENANT;
+	}
+
+	ASSERT(isSingleKeyMutation((MutationRef::Type)m.type));
+
+	return extractTenantIdFromKeyRef(m.param1);
+}
+
+// Return true if a single-key mutation is associated with a valid tenant id or a system key
+bool validTenantAccess(MutationRef m) {
+	if (isSystemKey(m.param1))
+		return true;
+
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		auto tenantId = extractTenantIdFromSingleKeyMutation(m);
+		// throw exception for invalid raw access
+		if (tenantId == TenantInfo::INVALID_TENANT) {
+			return false;
+		}
+	} else {
+		// For clear range, we allow raw access
+		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
+		auto beginTenantId = extractTenantIdFromKeyRef(m.param1);
+		auto endTenantId = extractTenantIdFromKeyRef(m.param2);
+		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
+	}
+	return true;
+}
+
 // Compute and apply "metadata" effects of each other proxy's most recent batch
 void applyMetadataEffect(CommitBatchContext* self) {
 	bool initialState = self->isMyFirstBatch;
@@ -1078,9 +1121,20 @@ void applyMetadataEffect(CommitBatchContext* self) {
 		     transactionIndex < self->resolution[0].stateMutations[versionIndex].size() && !self->forceRecovery;
 		     transactionIndex++) {
 			bool committed = true;
-			for (int resolver = 0; resolver < self->resolution.size(); resolver++)
+			for (int resolver = 0; resolver < self->resolution.size(); resolver++) {
 				committed =
 				    committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
+			}
+
+			if (committed) {
+				for (auto mutation : self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations) {
+					if (!validTenantAccess(mutation)) {
+						committed = false;
+						break;
+					}
+				}
+			}
+
 			if (committed) {
 				// Note: since we are not to commit, we don't need to pass cipherKeys for encryption.
 				applyMetadataMutations(SpanContext(),
@@ -1096,6 +1150,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       /* popVersion= */ 0,
 				                       /* initialCommit */ false);
 			}
+
 			if (self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() &&
 			    self->firstStateMutations) {
 				ASSERT(committed);
@@ -1165,49 +1220,6 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 			}
 		}
 	}
-}
-
-inline int64_t extractTenantIdFromKeyRef(StringRef s) {
-	if (s.size() < TenantAPI::PREFIX_SIZE) {
-		return TenantInfo::INVALID_TENANT;
-	}
-	// Parse mutation key to determine tenant prefix
-	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
-	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-}
-
-int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
-	ASSERT(!isSystemKey(m.param1));
-
-	// The first 8 bytes of the key of this OP is also an 8-byte number
-	if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 && parseVersionstampOffset(m.param1) < 8) {
-		return TenantInfo::INVALID_TENANT;
-	}
-
-	ASSERT(isSingleKeyMutation((MutationRef::Type)m.type));
-
-	return extractTenantIdFromKeyRef(m.param1);
-}
-
-// Return true if a single-key mutation is associated with a valid tenant id or a system key
-bool validTenantAccess(MutationRef m) {
-	if (isSystemKey(m.param1))
-		return true;
-
-	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		auto tenantId = extractTenantIdFromSingleKeyMutation(m);
-		// throw exception for invalid raw access
-		if (tenantId == TenantInfo::INVALID_TENANT) {
-			return false;
-		}
-	} else {
-		// For clear range, we allow raw access
-		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
-		auto beginTenantId = extractTenantIdFromKeyRef(m.param1);
-		auto endTenantId = extractTenantIdFromKeyRef(m.param2);
-		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
-	}
-	return true;
 }
 
 // Return true if all tenant check pass. Otherwise, return false and send error back

@@ -3,6 +3,9 @@ allowDefaultTenant = false
 tenantModes = ['required']
 allowCreatingTenants = false
 
+[[knobs]]
+proxy_use_resolver_private_mutations = false
+
 [[test]]
 testTitle = 'RawTenantAccessClean'
 clearAfterTest = true
