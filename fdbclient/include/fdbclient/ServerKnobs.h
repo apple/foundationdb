@@ -909,10 +909,17 @@ public:
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
 	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
+	bool BG_ENABLE_DYNAMIC_WRITE_AMP;
+	double BG_DYNAMIC_WRITE_AMP_MIN_FACTOR;
+	double BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
+	// The resnapshot/delta parallelism knobs are deprecated and replaced by the budget_bytes knobs! FIXME: remove after
+	// next release
+	int64_t BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES;
+	int64_t BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
