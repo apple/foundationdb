@@ -91,6 +91,7 @@ void decodeKeyServersValue(RangeResult result,
                            UID& srcID,
                            UID& destID,
                            bool missingIsError = true);
+bool isSystemKey(KeyRef key);
 
 extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
