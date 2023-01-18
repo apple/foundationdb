@@ -222,10 +222,10 @@ class ClientConfigTest:
             cmd_args += ["--log", "--log-dir", self.log_dir]
 
         if self.disable_local_client:
-            cmd_args += ["--disable-local-client"]
+            cmd_args += ["--network-option-disable_local_client", ""]
 
         if self.disable_client_bypass:
-            cmd_args += ["--disable-client-bypass"]
+            cmd_args += ["--network-option-disable_client_bypass", ""]
 
         if self.external_lib_path is not None:
             cmd_args += ["--external-client-library", self.external_lib_path]
@@ -234,10 +234,10 @@ class ClientConfigTest:
             cmd_args += ["--external-client-dir", self.external_lib_dir]
 
         if self.ignore_external_client_failures:
-            cmd_args += ["--ignore-external-client-failures"]
+            cmd_args += ["--network-option-ignore_external_client_failures", ""]
 
         if self.fail_incompatible_client:
-            cmd_args += ["--fail-incompatible-client"]
+            cmd_args += ["--network-option-fail_incompatible_client", ""]
 
         if self.api_version is not None:
             cmd_args += ["--api-version", str(self.api_version)]
