@@ -632,8 +632,11 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			state PromiseStream<Key> resultStream;
 			state Standalone<VectorRef<KeyRef>> keys;
 			// SplitMetrics.bytes / 3 as min split size because of same splitThreshold logic above.
+			// Estimated metrics doesn't work well when split metrics request spans multiple shards, since estimate is
+			// for the whole range. Pass empty metrics instead of *estimated*, since it's already incorporated somewhat
+			// in splitMetrics, and storage will trust its local byte sample over the estimate.
 			state Future<Void> streamFuture = bmData->db->splitStorageMetricsStream(
-			    resultStream, range, splitMetrics, estimated, splitMetrics.bytes / 3);
+			    resultStream, range, splitMetrics, StorageMetrics(), splitMetrics.bytes / 3);
 			loop {
 				try {
 					Key k = waitNext(resultStream.getFuture());

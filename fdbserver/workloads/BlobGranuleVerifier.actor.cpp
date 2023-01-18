@@ -70,6 +70,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	bool doForcePurge;
 	bool purgeAtLatest;
 	bool clearAndMergeCheck;
+	bool granuleSizeCheck;
 
 	DatabaseConfiguration config;
 
@@ -109,6 +110,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
 		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
 		sharedRandomNumber /= 10;
+		// FIXME: enable and fix bugs!
+		// granuleSizeCheck = initAtEnd;
+		granuleSizeCheck = false;
 
 		clearAndMergeCheck = getOption(options, LiteralStringRef("clearAndMergeCheck"), sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
@@ -1065,6 +1069,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		rangeFetcher.cancel();
 
 		allRanges = self->granuleRanges.get();
+		state int64_t totalSnapshotSizes = 0;
+		state int64_t totalChunks = 0;
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			if (BGV_DEBUG) {
@@ -1083,6 +1089,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						ASSERT(chunks.size() > 0);
 						last = chunks.back().keyRange;
 						checks += chunks.size();
+
+						totalChunks += chunks.size();
+						for (auto& it : chunks) {
+							ASSERT(it.snapshotFile.present());
+							totalSnapshotSizes += it.snapshotFile.get().length;
+						}
 
 						break;
 					} catch (Error& e) {
@@ -1120,6 +1132,22 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				break;
 			}
 		}
+		// validate that snapshot files are (approximately) correctly sized on average
+		// Note that injectTooBig in the blob worker can trigger false positives of this check, which is why we increase
+		// the minimum total chunks required
+		if (self->granuleSizeCheck && totalSnapshotSizes >= 1000000 && totalChunks > 4) {
+			double ratio = (1.0 * totalSnapshotSizes) / (totalChunks * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			if (0.5 > ratio || ratio > 1.5) {
+				fmt::print("ERROR: Incorrect snapshot file size:\n  Chunks: {0}\n  Ratio: {1}\n  Avg File Size: "
+				           "{2}\n  Expected Size: {3}\n",
+				           totalChunks,
+				           ratio,
+				           totalSnapshotSizes / totalChunks,
+				           SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			}
+			ASSERT(0.5 <= ratio && ratio <= 1.5);
+		}
+
 		if (BGV_DEBUG && startReadVersion != readVersion) {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
 		}
