@@ -89,7 +89,7 @@ void AdminServer::start() {
 		server_pid = pid;
 		return;
 	} else {
-		logr.error("Failed to fork admin server process: {}", std::strerror(errno));
+		logr.error("failed to fork admin server process: {}", std::strerror(errno));
 		throw std::runtime_error("fork error");
 	}
 	assert(logr.isFor(ProcKind::ADMIN));
@@ -134,12 +134,21 @@ void AdminServer::start() {
 				sendObject(pipe_to_client, Response{});
 				return;
 			} else if (auto p = boost::get<BatchCreateTenantRequest>(&req)) {
+				logr.info("received request to batch-create tenants [{}:{}) in database '{}'",
+				          p->id_begin,
+				          p->id_end,
+				          p->cluster_file);
 				auto err_msg = createTenant(getOrCreateDatabase(databases, p->cluster_file), p->id_begin, p->id_end);
 				sendObject(pipe_to_client, Response{ std::move(err_msg) });
 			} else if (auto p = boost::get<BatchDeleteTenantRequest>(&req)) {
+				logr.info("received request to batch-delete tenants [{}:{}) in database '{}'",
+				          p->id_begin,
+				          p->id_end,
+				          p->cluster_file);
 				auto err_msg = deleteTenant(getOrCreateDatabase(databases, p->cluster_file), p->id_begin, p->id_end);
 				sendObject(pipe_to_client, Response{ std::move(err_msg) });
 			} else {
+				logr.error("unknown request received");
 				sendObject(pipe_to_client, Response{ std::string("unknown request type") });
 			}
 		} catch (const std::exception& e) {
@@ -152,6 +161,7 @@ void AdminServer::start() {
 boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_begin, int id_end) {
 	try {
 		auto tx = db.createTransaction();
+		logr.info("create_tenants [{}-{})", id_begin, id_end);
 		while (true) {
 			for (auto id = id_begin; id < id_end; id++) {
 				auto tenant_name = getTenantNameByIndex(id);
@@ -163,22 +173,20 @@ boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_
 				tx.reset();
 				break;
 			} else if (rc == FutureRC::RETRY) {
+				logr.info("create_tenants retryable error: {}", f.error().what());
 				continue;
 			} else {
-				return fmt::format("create_tenant [{}:{}) failed with '{}'", id_begin, id_end, f.error().what());
+				logr.error("create_tenants unretryable error: {}", f.error().what());
+				return fmt::format("create_tenants [{}:{}) failed with '{}'", id_begin, id_end, f.error().what());
 			}
 		}
-		// tenants created
-		// blobbify tenants
-		std::vector<fdb::TypedFuture<fdb::future_var::Bool>> blobbify_results(id_end - id_begin);
-		for (auto id = id_begin; id < id_end; id++) {
-			auto tenant = db.openTenant(fdb::toBytesRef(getTenantNameByIndex(id)));
-			std::string range_end = "\xff";
-			blobbify_results[id - id_begin] = tenant.blobbifyRange(fdb::BytesRef(), fdb::toBytesRef(range_end));
-		}
+		logr.info("create_tenants [{}-{}) OK", id_begin, id_end);
+		logr.info("blobbify_tenants [{}-{})", id_begin, id_end);
 		for (auto id = id_begin; id < id_end; id++) {
 			while (true) {
-				auto blobbify_future = blobbify_results[id - id_begin];
+				auto tenant = db.openTenant(fdb::toBytesRef(getTenantNameByIndex(id)));
+				std::string range_end = "\xff";
+				auto blobbify_future = tenant.blobbifyRange(fdb::BytesRef(), fdb::toBytesRef(range_end));
 				const auto rc = waitAndHandleError(tx, blobbify_future);
 				if (rc == FutureRC::OK) {
 					if (!blobbify_future.get()) {
@@ -186,14 +194,17 @@ boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_
 					}
 					break;
 				} else if (rc == FutureRC::RETRY) {
+					logr.info("blobbify_tenants retryable error: {}", blobbify_future.error().what());
 					continue;
 				} else {
+					logr.error("blobbify_tenants unretryable error: {}", blobbify_future.error().what());
 					return fmt::format("critical error encountered while blobbifying tenant {}: {}",
 					                   id,
 					                   blobbify_future.error().what());
 				}
 			}
 		}
+		logr.info("blobbify_tenants [{}-{}) OK", id_begin, id_end);
 		return {};
 	} catch (const std::exception& e) {
 		return std::string(e.what());
@@ -245,12 +256,13 @@ boost::optional<std::string> AdminServer::getTenantPrefixes(fdb::Transaction tx,
 
 boost::optional<std::string> AdminServer::deleteTenant(fdb::Database db, int id_begin, int id_end) {
 	try {
+		auto tx = db.createTransaction();
 		while (true) {
 			std::vector<fdb::ByteString> prefixes;
 			if (auto error = getTenantPrefixes(db.createTransaction(), id_begin, id_end, prefixes)) {
 				return error;
 			}
-			auto tx = db.createTransaction();
+			logr.info("collected prefixes of tenants [{}:{})", id_begin, id_end);
 			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, fdb::BytesRef());
 			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, fdb::BytesRef());
 			for (const auto& tenant_prefix : prefixes) {
@@ -262,6 +274,7 @@ boost::optional<std::string> AdminServer::deleteTenant(fdb::Database db, int id_
 				tx.reset();
 				// continue on this iteration
 			} else if (rc == FutureRC::RETRY) {
+				logr.info("clear_tenant_prefixes retryable error: {}", commit_future.error().what());
 				continue;
 			} else {
 				return fmt::format("unretryable error while clearing key ranges for tenant [{}:{}): {}",
@@ -269,6 +282,7 @@ boost::optional<std::string> AdminServer::deleteTenant(fdb::Database db, int id_
 				                   id_end,
 				                   commit_future.error().what());
 			}
+			logr.info("clear_tenant_prefixes [{}:{}) OK", id_begin, id_end);
 			// tenant keyspaces have been cleared. now delete tenants
 			for (int id = id_begin; id < id_end; id++) {
 				fdb::Tenant::deleteTenant(tx, fdb::toBytesRef(getTenantNameByIndex(id)));
@@ -276,6 +290,7 @@ boost::optional<std::string> AdminServer::deleteTenant(fdb::Database db, int id_
 			commit_future = tx.commit();
 			rc = waitAndHandleError(tx, commit_future);
 			if (rc == FutureRC::OK) {
+				logr.info("delete_tenants [{}:{}) OK", id_begin, id_end);
 				return {};
 			} else if (rc == FutureRC::ABORT) {
 				return fmt::format("unretryable error while committing delete-tenant for tenant id range [{}:{}): {}",
@@ -284,6 +299,7 @@ boost::optional<std::string> AdminServer::deleteTenant(fdb::Database db, int id_
 				                   commit_future.error().what());
 			} else {
 				// try again
+				logr.info("delete_tenants retryable error: {}", commit_future.error().what());
 			}
 		}
 	} catch (const std::exception& e) {

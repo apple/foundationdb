@@ -655,6 +655,51 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	// set a random watch on a tenant
+	ACTOR static Future<Void> watchTenant(TenantManagementWorkload* self, TenantName tenant) {
+		loop {
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dataDb, tenant));
+			try {
+				state Future<Void> watch = tr->watch(doubleToTestKey(deterministicRandom()->random01()));
+				wait(tr->commit());
+				wait(watch);
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	void checkWatchOnDeletedTenant(std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>>& watchFutures) {
+		for (auto& [t, f] : watchFutures) {
+			auto& res = f.get();
+			if (res.isError(error_code_tenant_removed) || res.isError(error_code_tenant_not_found)) {
+				CODE_PROBE(res.isError(error_code_tenant_removed),
+				           "Watch Triggered because the tenant is deleted during watch");
+			} else {
+				TraceEvent(SevError, "WatchDeletedTenantCheckFailed")
+				    .detail("Tenant", t)
+				    .detail("IsError", res.isError() ? res.getError().what() : "Void()");
+			}
+		}
+	}
+
+	ACTOR static Future<Void> clearTenantData(TenantManagementWorkload* self, TenantName tenant) {
+		state Transaction clearTr(self->dataDb, tenant);
+		loop {
+			try {
+				clearTr.clear(self->keyName);
+				wait(clearTr.commit());
+				auto itr = self->createdTenants.find(tenant);
+				ASSERT(itr != self->createdTenants.end());
+				itr->second.empty = true;
+				return Void();
+			} catch (Error& e) {
+				wait(clearTr.onError(e));
+			}
+		}
+	}
+
 	// Deletes the tenant or tenant range using the specified operation type
 	ACTOR static Future<Void> deleteTenantImpl(Reference<ReadYourWritesTransaction> tr,
 	                                           TenantName beginTenant,
@@ -703,6 +748,7 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
+		state bool watchTenantCheck = deterministicRandom()->coinflip();
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
@@ -750,23 +796,18 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Check whether each tenant is empty.
 		state int tenantIndex;
+		state std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>> watchFutures;
 		try {
 			if (alreadyExists || endTenant.present()) {
 				for (tenantIndex = 0; tenantIndex < tenants.size(); ++tenantIndex) {
 					// For most tenants, we will delete the contents and make them empty
 					if (deterministicRandom()->random01() < 0.9) {
-						state Transaction clearTr(self->dataDb, tenants[tenantIndex]);
-						loop {
-							try {
-								clearTr.clear(self->keyName);
-								wait(clearTr.commit());
-								auto itr = self->createdTenants.find(tenants[tenantIndex]);
-								ASSERT(itr != self->createdTenants.end());
-								itr->second.empty = true;
-								break;
-							} catch (Error& e) {
-								wait(clearTr.onError(e));
-							}
+						wait(clearTenantData(self, tenants[tenantIndex]));
+
+						// watch the tenant to be deleted
+						if (watchTenantCheck) {
+							watchFutures.emplace_back(tenants[tenantIndex],
+							                          errorOr(watchTenant(self, tenants[tenantIndex])));
 						}
 					}
 					// Otherwise, we will just report the current emptiness of the tenant
@@ -785,6 +826,7 @@ struct TenantManagementWorkload : TestWorkload {
 			return Void();
 		}
 
+		// Tenants deletion retry loop
 		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
@@ -900,6 +942,14 @@ struct TenantManagementWorkload : TestWorkload {
 
 					self->createdTenants.erase(tenant);
 				}
+
+				// check for watch result
+				state int wi = 0;
+				for (; wi < watchFutures.size(); ++wi) {
+					wait(ready(watchFutures[wi].second));
+				}
+				self->checkWatchOnDeletedTenant(watchFutures);
+
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_empty) {

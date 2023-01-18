@@ -93,10 +93,16 @@ void decodeKeyServersValue(RangeResult result,
                            bool missingIsError = true);
 bool isSystemKey(KeyRef key);
 
-extern const KeyRangeRef auditRange;
+extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
-const Key auditRangePrefix(const AuditType type, const UID& auditId);
+extern const KeyRangeRef auditRanges;
+extern const KeyRef auditRangePrefix;
+
+const Key auditKey(const AuditType type, const UID& auditId);
+const KeyRange auditKeyRange(const AuditType type);
+const Key auditRangeKey(const UID& auditId, const KeyRef& key);
+const Key auditRangePrefixFor(const UID& auditId);
+
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
 
