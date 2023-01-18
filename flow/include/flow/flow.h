@@ -57,7 +57,11 @@
 #include "flow/FileIdentifier.h"
 #include "flow/WriteOnlySet.h"
 
+// Flow_CheckedContinuation.h depends on this header, so we first parse it
+// without relying on any imported Swift types.
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 #include "SwiftModules/Flow_CheckedContinuation.h"
+#endif
 
 #include "pthread.h"
 
@@ -807,6 +811,7 @@ public:
 template <class T>
 class Promise;
 
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 using flow_swift::FlowCheckedContinuation;
 
 template<class T>
@@ -857,6 +862,7 @@ public:
 		// TODO(swift): implement
 	}
 };
+#endif
 
 template <class T>
 class
@@ -865,7 +871,9 @@ SWIFT_CONFORMS_TO(flow_swift, FlowFutureOps)
 Future {
 public:
 	using Element = T;
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 	using FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuation<T>;
+#endif
 
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }

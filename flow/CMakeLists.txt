@@ -180,7 +180,7 @@ add_swift_to_cxx_header_gen_target(
    FLAGS
 -Xcc -std=c++17 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
 # Important: This is needed to avoid including headers that depends on this generated header.
--Xcc -DSWIFT_FUTURE_SUPPORT_H -Xcc -DSWIFT_STREAM_SUPPORT_H
+-Xcc -DSWIFT_FUTURE_SUPPORT_H -Xcc -DSWIFT_STREAM_SUPPORT_H -Xcc -DSWIFT_HIDE_CHECKED_CONTINUTATION
 )
 
 add_swift_to_cxx_header_gen_target(
