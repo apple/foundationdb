@@ -1869,6 +1869,7 @@ Future<MappedRangeResultV2> ReadYourWritesTransaction::getMappedRangeV2(KeySelec
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	}
+	TraceEvent("Hfu5 Call ReadYourWritesTransaction::getMappedRangeV2");
 
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();

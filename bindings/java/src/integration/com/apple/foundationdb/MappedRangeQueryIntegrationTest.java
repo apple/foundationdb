@@ -69,6 +69,7 @@ class MappedRangeQueryIntegrationTest {
 	static private String dataOfRecord(int i) { return String.format("data-of-record-%08d", i); }
 
 	static byte[] MAPPER = Tuple.from(PREFIX, RECORD, "{K[3]}", "{...}").pack();
+
 	static int SPLIT_SIZE = 3;
 
 	static private byte[] indexEntryKey(final int i) {
@@ -82,6 +83,19 @@ class MappedRangeQueryIntegrationTest {
 	}
 	static private byte[] recordValue(final int i, final int split) {
 		return Tuple.from(dataOfRecord(i), split).pack();
+	}
+
+	static private int getRandomMatchIndex() {
+		double r = Math.random();
+		if (r < 0.25) {
+			return Transaction.MATCH_INDEX_ALL;
+		} else if (r < 0.5) {
+			return Transaction.MATCH_INDEX_NONE;
+		} else if (r < 0.75) {
+			return Transaction.MATCH_INDEX_MATCHED_ONLY;
+		} else {
+			return Transaction.MATCH_INDEX_UNMATCHED_ONLY;
+		}
 	}
 
 	static private void insertRecordWithIndex(final Transaction tr, final int i) {
@@ -114,9 +128,9 @@ class MappedRangeQueryIntegrationTest {
 		FDB fdb = FDB.selectAPIVersion(API_VERSION);
 		try (Database db = openFDB()) {
 			insertRecordsWithIndexes(numRecords, db);
-			instrument(rangeQueryAndThenRangeQueries, "rangeQueryAndThenRangeQueries", db);
-			instrument(mappedRangeQuery, "mappedRangeQuery", db);
-			instrument(mappedRangeQuery71, "mappedRangeQuery71", db);
+			// instrument(rangeQueryAndThenRangeQueries, "rangeQueryAndThenRangeQueries", db);
+			// instrument(mappedRangeQuery, "mappedRangeQuery", db);
+			instrument(mappedRangeQueryV2, "mappedRangeQueryV2", db);
 		}
 	}
 
@@ -192,22 +206,34 @@ class MappedRangeQueryIntegrationTest {
 		return null;
 	});
 
-	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
+	RangeQueryWithIndex mappedRangeQueryV2 = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
+			// int matchIndex = getRandomMatchIndex();
+			int matchIndex = Transaction.MATCH_INDEX_ALL;
+			System.out.println("MatchIndex = " + matchIndex);
 
-			List<MappedKeyValue> kvs = tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                                             KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                                             ReadTransaction.ROW_LIMIT_UNLIMITED, false,
-			                                             StreamingMode.WANT_ALL, Transaction.MATCH_INDEX_ALL)
-			                               .asList()
-			                               .get();
+			List<MappedKeyValueV2> kvs =
+			    tr.getMappedRangeV2(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                        KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                        ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL, matchIndex)
+			        .asList()
+			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
+			// assuming "local" is always true in the reply
+			byte[] expectParamsBuffer = new byte[] { 0x02, 0x02, 0x01, 0, 0, 0, 0, 0 };
 
 			if (validate) {
-				final Iterator<MappedKeyValue> results = kvs.iterator();
+				final Iterator<MappedKeyValueV2> results = kvs.iterator();
 				for (int id = begin; id < end; id++) {
 					Assertions.assertTrue(results.hasNext());
-					MappedKeyValue mappedKeyValue = results.next();
+					MappedKeyValueV2 mappedKeyValue = results.next();
+					// if (matchIndex == Transaction.MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
+					// 	CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+					// } else if (matchIndex == Transaction.MATCH_INDEX_MATCHED_ONLY) {
+					// 	CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+					// } else {
+					// 	CHECK(EMPTY.compare(mkv.key) == 0);
+					// }
 					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
 					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
 					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
@@ -218,6 +244,10 @@ class MappedRangeQueryIntegrationTest {
 
 					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
 					validateRangeResult(id, rangeResult);
+
+					byte[] paramsBuffer = mappedKeyValue.getParamsBuffer();
+					System.out.println(ByteArrayUtil.printable(paramsBuffer));
+					assertByteArrayEquals(expectParamsBuffer, paramsBuffer);
 				}
 				Assertions.assertFalse(results.hasNext());
 			}
@@ -227,7 +257,7 @@ class MappedRangeQueryIntegrationTest {
 		return null;
 	});
 
-	RangeQueryWithIndex mappedRangeQuery71 = (int begin, int end, Database db) -> db.run(tr -> {
+	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
 
 			List<MappedKeyValue> kvs =

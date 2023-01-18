@@ -4028,17 +4028,16 @@ PublicRequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRange
 	}
 }
 
-template <class GetKeyValuesFamilyRequest>
-void setMrp(GetKeyValuesFamilyRequest& req, Key mrp) {
-	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
-		// do nothing;
-	} else if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
-		// do nothing;
-	} else if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequestV2>::value) {
-		req.mrp = mrp;
-	} else {
-		UNREACHABLE();
-	}
+void setMrp(GetKeyValuesRequest& req, Key mrp) {
+	return;
+}
+
+void setMrp(GetMappedKeyValuesRequest& req, Key mrp) {
+	return;
+}
+
+void setMrp(GetMappedKeyValuesRequestV2& req, Key mrp) {
+	req.mrp = mrp;
 }
 
 ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
@@ -4076,12 +4075,12 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			GetKeyValuesFamilyRequest req;
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
+			req.arena.dependsOn(mrp.arena());
 
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
-
 			setMrp(req, mrp);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(
@@ -4354,7 +4353,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRefV2 result) {
 		} else {
 			throw internal_error();
 		}
-		bytes += mappedKeyValue.mappedKeyValueResponseBytes.size();
+		bytes += mappedKeyValue.paramsBuffer.size();
 	}
 	return bytes;
 }
@@ -4421,7 +4420,7 @@ template <class R>
 void checkR(R r) {
 	if constexpr (std::is_same<R, GetMappedKeyValuesReplyV2>::value) {
 		for (int j = 0; j < 8; j++) {
-			TraceEvent("Hfu5NativeAPI11111").detail("Byte", j).detail("Content", (int)r.data[0].mappedKeyValueResponseBytes[j]);
+			TraceEvent("Hfu5NativeAPI11111").detail("Byte", j).detail("Content", (int)r.data[0].paramsBuffer[j]);
 		}
 	}
 }
@@ -4494,6 +4493,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			state GetKeyValuesFamilyRequest req;
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
+			req.arena.dependsOn(mrp.arena());
 			setMrp(req, mrp);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.options = trState->readOptions;
@@ -4621,7 +4621,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					output.readThroughEnd = readThroughEnd;
 
 					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) &&
-					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value)) {
+					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) &&
+					    (!std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequestV2>::value)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
 						// disable it on prefetch, because boundary entries serve as continuations
@@ -5307,7 +5308,7 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
 	                                                                     begin,
 	                                                                     end,
 	                                                                     ""_sr,
-	                                                                     ""_sr,
+	                                                                     "777"_sr,
 	                                                                     limits,
 	                                                                     Promise<std::pair<Key, Key>>(),
 	                                                                     Snapshot::True,
@@ -5714,7 +5715,6 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
                                                         Reverse reverse) {
 	++trState->cx->transactionLogicalReads;
 	increaseCounterForRequest<GetKeyValuesFamilyRequest>(trState->cx);
-
 	if (limits.isReached())
 		return RangeResultFamily();
 
@@ -5761,7 +5761,7 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           Snapshot snapshot,
                                           Reverse reverse) {
 	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
-	    begin, end, ""_sr, ""_sr, limits, snapshot, reverse);
+	    begin, end, ""_sr, "888"_sr, limits, snapshot, reverse);
 }
 
 Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
@@ -5770,8 +5770,9 @@ Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
                                                       GetRangeLimits limits,
                                                       Snapshot snapshot,
                                                       Reverse reverse) {
+	TraceEvent("Hfu5Transaction::getMappedRangeV1").log();
 	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
-	    begin, end, mapper, ""_sr, limits, snapshot, reverse);
+	    begin, end, mapper, "999"_sr, limits, snapshot, reverse);
 }
 
 Future<MappedRangeResultV2> Transaction::getMappedRangeV2(const KeySelector& begin,
@@ -5781,6 +5782,7 @@ Future<MappedRangeResultV2> Transaction::getMappedRangeV2(const KeySelector& beg
                                                           GetRangeLimits limits,
                                                           Snapshot snapshot,
                                                           Reverse reverse) {
+	TraceEvent("Hfu5Transaction::getMappedRangeV2").log();
 	return getRangeInternal<GetMappedKeyValuesRequestV2, GetMappedKeyValuesReplyV2, MappedRangeResultV2>(
 	    begin, end, mapper, mrp, limits, snapshot, reverse);
 }

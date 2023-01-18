@@ -305,6 +305,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_mappedkeyvalue_array_v2(FDBFutur
                                                                         FDBMappedKeyValueV2 const** out_kvm,
                                                                         int* out_count,
                                                                         fdb_bool_t* out_more) {
+	std::cout << "Size FDBMappedKeyValueV2 " << sizeof(FDBMappedKeyValueV2) << std::endl;
 	CATCH_AND_RETURN(Standalone<MappedRangeResultRefV2> rrr = TSAV(Standalone<MappedRangeResultRefV2>, f)->get();
 	                 *out_kvm = (FDBMappedKeyValueV2*)rrr.begin();
 	                 *out_count = rrr.size();
@@ -816,7 +817,11 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range_v2(FDBTransacti
                                                                     fdb_bool_t reverse,
                                                                     uint8_t const* mapped_range_params,
                                                                     int mapped_range_params_length) {
-	std::cout << "Hfu5 fdb_c::getMappedRangeV2" << std::endl;
+	std::cout << "Hfu5 fdb_c:: fdb_transaction_get_mapped_range_v2 " << mapped_range_params_length
+	          << "  Size FDBMappedKeyValueV2 " << sizeof(FDBMappedKeyValueV2) << std::endl;
+	for (int i = 0; i < mapped_range_params_length; i++) {
+		std::cout << "Hfu5 fdb_c::getMappedRangeV2[" << i << "] = " << (int)mapped_range_params[i] << std::endl;
+	}
 	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
 	if (r != nullptr)
 		return r;

@@ -868,13 +868,12 @@ struct MappedKeyValueRef : KeyValueRef {
 struct MappedKeyValueRefV2 : KeyValueRef {
 	// Save the original key value at the base (KeyValueRef).
 
+	KeyRef paramsBuffer;
 	MappedReqAndResultRef reqAndResult;
-
-	KeyRef mappedKeyValueResponseBytes;
 
 	MappedKeyValueRefV2() = default;
 	MappedKeyValueRefV2(Arena& a, const MappedKeyValueRefV2& copyFrom) : KeyValueRef(a, copyFrom) {
-		mappedKeyValueResponseBytes = StringRef(a, copyFrom.mappedKeyValueResponseBytes);
+		paramsBuffer = StringRef(a, copyFrom.paramsBuffer);
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
@@ -889,7 +888,7 @@ struct MappedKeyValueRefV2 : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRefV2& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult && mappedKeyValueResponseBytes == rhs.mappedKeyValueResponseBytes;
+		       reqAndResult == rhs.reqAndResult && paramsBuffer == rhs.paramsBuffer;
 	}
 	bool operator!=(const MappedKeyValueRefV2& rhs) const { return !(rhs == *this); }
 
@@ -899,7 +898,7 @@ struct MappedKeyValueRefV2 : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult, mappedKeyValueResponseBytes);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult, paramsBuffer);
 	}
 };
 

@@ -49,8 +49,8 @@
 
 #include "fdb_api.hpp"
 
-const int MATCH_INDEX_TEST_710_API = -1;
 const int code_int = 1;
+const int code_bool = 2;
 
 void fdb_check(fdb_error_t e) {
 	if (e) {
@@ -208,16 +208,15 @@ struct GetMappedRangeResultV2 {
 		           const std::string& begin,
 		           const std::string& end,
 		           const std::vector<std::pair<std::string, std::string>>& range_results,
-		           const std::string& mappedKeyValueResponseBytes)
-		  : key(key), value(value), begin(begin), end(end), range_results(range_results),
-		    mappedKeyValueResponseBytes(mappedKeyValueResponseBytes) {}
+		           const std::string& paramsBuffer)
+		  : key(key), value(value), begin(begin), end(end), range_results(range_results), paramsBuffer(paramsBuffer) {}
 
 		std::string key;
 		std::string value;
 		std::string begin;
 		std::string end;
 		std::vector<std::pair<std::string, std::string>> range_results;
-		std::string mappedKeyValueResponseBytes;
+		std::string paramsBuffer;
 	};
 	std::vector<MappedKVV2> mkvs;
 	// True if values remain in the key range requested.
@@ -422,9 +421,13 @@ GetMappedRangeResultV2 get_mapped_range_v2(fdb::Transaction& tr,
 			range_results.emplace_back(k, v);
 			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
-		auto mappedKeyValueResponseBytes = extractString(mkv.mappedKeyValueResponseBytes);
-		std::cout << "mappedKeyValueResponseBytes length is " << mappedKeyValueResponseBytes.length() << std::endl;
-		result.mkvs.emplace_back(key, value, begin, end, range_results, mappedKeyValueResponseBytes);
+		auto paramsBuffer = extractString(mkv.paramsBuffer);
+		std::cout << "paramsBuffer length is " << paramsBuffer.length() << std::endl;
+		for (int i = 0; i < paramsBuffer.length(); i++) {
+			std::cout << (int)paramsBuffer[i] << " ";
+		}
+		std::cout << std::endl;
+		result.mkvs.emplace_back(key, value, begin, end, range_results, paramsBuffer);
 	}
 	return result;
 }
@@ -1091,6 +1094,7 @@ GetMappedRangeResultV2 getMappedIndexEntriesInternalV2(int beginId,
 	mrp[0] = 2; // API protocol version
 	mrp[1] = code_int;
 	mrp[2] = matchIndex; // little endian
+	std::cout << "matchIndex is " << matchIndex << std::endl;
 	return get_mapped_range_v2(
 	    tr,
 	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyBegin.c_str(), indexEntryKeyBegin.size()),
@@ -1193,14 +1197,12 @@ TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
 int getMatchIndexRandom() {
 	const double r = deterministicRandom()->random01();
 	int matchIndex = MATCH_INDEX_ALL;
-	if (r < 0.2) {
+	if (r < 0.5) {
 		matchIndex = MATCH_INDEX_NONE;
-	} else if (r < 0.4) {
+	} else if (r < 0.5) {
 		matchIndex = MATCH_INDEX_MATCHED_ONLY;
-	} else if (r < 0.6) {
+	} else if (r < 0.75) {
 		matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
-	} else if (r < 0.8) {
-		matchIndex = MATCH_INDEX_TEST_710_API;
 	}
 	return matchIndex;
 }
@@ -1211,7 +1213,7 @@ void validateIndex(const GetMappedRangeResultV2::MappedKVV2& mkv,
                    int i,
                    int expectSize,
                    bool allMissing) {
-	if (matchIndex == MATCH_INDEX_ALL || matchIndex == MATCH_INDEX_TEST_710_API || i == 0 || i == expectSize - 1) {
+	if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
 		CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 	} else if ((matchIndex == MATCH_INDEX_MATCHED_ONLY && !allMissing) ||
 	           (matchIndex == MATCH_INDEX_UNMATCHED_ONLY && allMissing)) {
@@ -1220,8 +1222,8 @@ void validateIndex(const GetMappedRangeResultV2::MappedKVV2& mkv,
 		CHECK(EMPTY.compare(mkv.key) == 0);
 	}
 	CHECK(EMPTY.compare(mkv.value) == 0);
-	std::cout << "validateIndex:::: " << (int)mkv.mappedKeyValueResponseBytes[0] << std::endl;
-	// CHECK(mkv.mappedKeyValueResponseBytes);
+	std::cout << "validateIndex:::: " << (int)mkv.paramsBuffer[0] << std::endl;
+	// CHECK(mkv.paramsBuffer);
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {
@@ -1251,6 +1253,10 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		for (int i = 0; i < expectSize; i++, id++) {
 			const auto& mkv = result.mkvs[i];
 			validateIndex(mkv, id, matchIndex, i, expectSize, allMissing);
+			CHECK(mkv.paramsBuffer[0] == 2); // version
+			CHECK(mkv.paramsBuffer[1] == code_bool);
+			CHECK(mkv.paramsBuffer[2] == 1); // assuming always local
+			// TODO: compare the whole byte array
 			CHECK(mkv.range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
 				auto& kv = mkv.range_results[split];
@@ -1325,6 +1331,9 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
 			validateIndex(result.mkvs[i], id, matchIndex, i, expectSize, allMissing);
+			CHECK(result.mkvs[i].paramsBuffer[0] == 2); // version
+			CHECK(result.mkvs[i].paramsBuffer[1] == code_bool);
+			CHECK(result.mkvs[i].paramsBuffer[2] == 1); // assuming local is always true
 		}
 		break;
 	}

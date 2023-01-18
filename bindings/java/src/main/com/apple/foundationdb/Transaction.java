@@ -76,7 +76,6 @@ import com.apple.foundationdb.tuple.Tuple;
  */
 public interface Transaction extends AutoCloseable, ReadTransaction, TransactionContext {
 
-	static public final int MATCH_INDEX_NOT_COMPATIBLE = -1;
 	static public final int MATCH_INDEX_ALL = 0;
 	static public final int MATCH_INDEX_NONE = 1;
 	static public final int MATCH_INDEX_MATCHED_ONLY = 2;

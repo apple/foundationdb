@@ -4820,7 +4820,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
-std::unordered_map<int, int> matchIndexPosForVersions = { std::make_pair(2, 1) };
+std::unordered_map<int, int> versionToPosMatchIndex = { std::make_pair(2, 1) };
 std::unordered_map<int, int> localPosForVersions = { std::make_pair(2, 1) };
 std::set<int> supportedVersions{ 2 };
 
@@ -4836,18 +4836,39 @@ void setLocal(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2* 
 	memset(replyBytes, 0, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
 	replyBytes[0] = getMappedRangeProtocolVersion;
 	replyBytes[1] = code_bool;
-	replyBytes[2] = 5;
-	kvm->mappedKeyValueResponseBytes = StringRef(*a, replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
+	replyBytes[2] = local;
+	kvm->paramsBuffer = StringRef(*a, replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
 	if (i == 0) {
 		for (int j = 0; j < 8; j++) {
-			TraceEvent("Hfu5Local1111").detail("Byte", j).detail("Content", (int)kvm->mappedKeyValueResponseBytes[j]);
+			TraceEvent("Hfu5Local1111").detail("Byte", j).detail("Content", (int)kvm->paramsBuffer[j]);
 		}
 		TraceEvent("Hfu5SetLocal")
 		    .detail("Sizeof2", sizeof(*kvm))
 		    .detail("Sizeof1", sizeof(MappedKeyValueRef))
+		    .detail("SizePtr", sizeof(uint8_t*))
+		    .detail("SizeStringRef", sizeof(kvm->paramsBuffer))
+		    .detail("SizeReq", sizeof(kvm->reqAndResult))
+		    .detail("SizeInt", sizeof(int))
 		    .detail("GetMappedRangeProtocolVersion", (int)replyBytes[0])
 		    .detail("CODE", (int)replyBytes[1])
+		    .detail("PosKVM", (long)kvm)
+		    .detail("PosParamsBuffer", (long)&(kvm->paramsBuffer))
+		    .detail("PosKey", (long)&(kvm->key))
+		    .detail("PosValue", (long)&(kvm->value))
+		    .detail("PosReq", (long)&(kvm->reqAndResult))
 		    .detail("Local", (int)replyBytes[2]);
+		char* p = (char*)&(kvm->paramsBuffer);
+		for (int i = 0; i < sizeof(kvm->paramsBuffer); i++) {
+			TraceEvent("Hfu5Ptr").detail("Index", i).detail("Byte", (int)*(p + i));
+		}
+		p = (char*)&(kvm->reqAndResult);
+		for (int i = 0; i < sizeof(kvm->reqAndResult); i++) {
+			TraceEvent("Hfu5ReqAndRes").detail("Index", i).detail("Byte", (int)*(p + i));
+		}
+		p = (char*)kvm;
+		for (int i = 0; i < sizeof(*kvm); i++) {
+			TraceEvent("Hfu5Guess").detail("Index", i).detail("Byte", (int)*(p + i));
+		}
 	}
 }
 
@@ -4862,20 +4883,26 @@ int parseParams(GetMappedKeyValuesRequest* req, int* matchIndex) {
 }
 
 void parseMatchIndex(KeyRef mrp, int* matchIndex, int version) {
-	int pos = matchIndexPosForVersions[version];
+	int pos = versionToPosMatchIndex[version];
+
 	if (mrp[pos] != code_int) {
 		// err
 		TraceEvent("Hfu5ErrorParsingMatchIndex");
 		return;
 	}
-	std::memcpy(matchIndex, mrp.begin() + pos + 1, sizeof(int));
+	std::memcpy(matchIndex,
+	            mrp.begin() + pos + 1,
+	            sizeof(int)); // assuming to have little endian, if not, then build the int with customized method
 }
 
 int parseParams(GetMappedKeyValuesRequestV2* req, int* matchIndex) {
 	KeyRef mrp = req->mrp;
 	int v = mrp[0];
+	for (int j = 0; j < mrp.size(); j++) {
+		TraceEvent("Hfu5parseParams").detail("Byte", j).detail("Content", (int)mrp[j]);
+	}
 	if (v > *supportedVersions.rbegin()) {
-		TraceEvent("Hfu5ErrorVersionNotSupport");
+		TraceEvent("Hfu5ErrorVersionNotSupport").detail("Version", v);
 		return 0;
 	}
 	parseMatchIndex(mrp, matchIndex, v);
@@ -4894,7 +4921,8 @@ Future<Void> mapSubquery(StorageServer* data,
                          KeyValueRef* it,
                          MappedKV* kvm,
                          Key mappedKey,
-                         int getMappedRangeProtocolVersion) {
+                         int getMappedRangeProtocolVersion,
+                         int index) {
 	if (isRangeQuery) {
 		// Use the mappedKey as the prefix of the range query.
 		// if MappedKV is MappedKeyValueRefV2, then set it
@@ -4908,8 +4936,10 @@ Future<Void> mapSubquery(StorageServer* data,
 				kvm->value = it->value;
 			}
 			kvm->reqAndResult = getRange;
+			fillReply(pArena, getMappedRangeProtocolVersion, kvm, true, index);
 		} catch (Error& e) {
-			fillReply(pArena, getMappedRangeProtocolVersion, kvm, e.code() != error_code_quick_get_key_values_miss, 100);
+			fillReply(
+			    pArena, getMappedRangeProtocolVersion, kvm, e.code() != error_code_quick_get_key_values_miss, index);
 			if (e.code() != error_code_quick_get_key_values_miss) {
 				TraceEvent("MapSubQueryError").error(e);
 			}
@@ -4983,7 +5013,6 @@ Future<Reply> mapKeyValues(StorageServer* data,
 
 	state int sz = input.data.size();
 	TraceEvent("Hfu5 mapKeyValues").detail("Size", sz).detail("MatchIndex", matchIndex);
-	std::cout << "Hfu5 mapKeyValues sz: " << sz << " matchindex: " << matchIndex << std::endl;
 	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
 	state std::vector<MappedKV> kvms(k);
 	state std::vector<Future<Void>> subqueries;
@@ -5019,7 +5048,8 @@ Future<Reply> mapKeyValues(StorageServer* data,
 			                                 it,
 			                                 kvm,
 			                                 mappedKey,
-			                                 getMappedRangeProtocolVersion));
+			                                 getMappedRangeProtocolVersion,
+			                                 i + offset));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -5235,8 +5265,8 @@ TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
 template <class R>
 void checkR(R r) {
 	if constexpr (std::is_same<R, GetMappedKeyValuesReplyV2>::value) {
-		for (int j = 0; j < 8; j++) {
-			TraceEvent("Hfu5StorageServer111111").detail("Byte", j).detail("Content", (int)r.data[0].mappedKeyValueResponseBytes[j]);
+		for (int j = 0; r.data.size() > 0 && j < r.data[0].paramsBuffer.size(); j++) {
+			TraceEvent("Hfu5StorageServer111111").detail("Byte", j).detail("Content", (int)r.data[0].paramsBuffer[j]);
 		}
 	}
 }
@@ -5249,6 +5279,11 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, Req req)
 // selector offset prevents all data from being read in one range read
 {
 	TraceEvent("Hfu5 getMappedKeyValuesQ");
+	if (std::is_same<Req, GetMappedKeyValuesRequest>::value) {
+		TraceEvent("Hfu5 getMappedKeyValuesQ GetMappedKeyValuesRequest");
+	} else if (std::is_same<Req, GetMappedKeyValuesRequestV2>::value) {
+		TraceEvent("Hfu5 getMappedKeyValuesQ GetMappedKeyValuesRequestV2");
+	}
 	std::cout << "Hfu5 getMappedKeyValuesQ" << std::endl;
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;

@@ -203,6 +203,8 @@ ThreadFuture<MappedRangeResultV2> DLTransaction::getMappedRangeV2(const KeySelec
 	if (!api->transactiongetMappedRangeV2) {
 		return unsupported_operation();
 	}
+	TraceEvent("Hfu5 Call DLTransaction::getMappedRangeV2");
+
 	FdbCApi::FDBFuture* f = api->transactiongetMappedRangeV2(tr,
 	                                                         begin.getKey().begin(),
 	                                                         begin.getKey().size(),
@@ -1084,7 +1086,7 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_future_get_mappedkeyvalue_array_v2",
-	                   headerVersion >= 710);
+	                   headerVersion >= 720);
 	loadClientFunction(&api->futureGetGranuleSummaryArray,
 	                   lib,
 	                   fdbCPath,

@@ -450,10 +450,12 @@ ThreadFuture<MappedRangeResultV2> ThreadSafeTransaction::getMappedRangeV2(const 
 	KeySelector b = begin;
 	KeySelector e = end;
 	Key h = mapper;
+	Key m = mrp;
+	TraceEvent("Hfu5 ThreadSafeTransaction::getMappedRangeV2");
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, h, limits, snapshot, reverse, mrp]() -> Future<MappedRangeResultV2> {
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse, m]() -> Future<MappedRangeResultV2> {
 		tr->checkDeferredError();
-		return tr->getMappedRangeV2(b, e, h, mrp, limits, Snapshot{ snapshot }, Reverse{ reverse });
+		return tr->getMappedRangeV2(b, e, h, m, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 

@@ -115,8 +115,6 @@ typedef struct keyvalue {
 } FDBKeyValue;
 #endif
 
-#pragma pack(pop)
-
 /* Memory layout of KeySelectorRef. */
 typedef struct keyselector {
 	FDBKey key;
@@ -176,12 +174,12 @@ typedef struct mappedkeyvaluev2 {
 	FDBKey value;
 	/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange and
 	 * take the shortcut. */
+	FDBKey paramsBuffer;
+	unsigned char buffer1[4];
 	FDBGetRangeReqAndResult getRange;
-	unsigned char buffer[32];
-	FDBKey mappedKeyValueResponseBytes;
+	unsigned char buffer2[32];
 } FDBMappedKeyValueV2;
 
-#pragma pack(push, 4)
 typedef struct keyrange {
 	const uint8_t* begin_key;
 	int begin_key_length;

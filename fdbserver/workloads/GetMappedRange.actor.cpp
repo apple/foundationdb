@@ -183,13 +183,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		if constexpr (std::is_same<KV, MappedKeyValueRefV2>::value) {
 			if (expectedId == 10) {
 				for (int i = 0; i < 8; i++) {
-					std::cout << "[" + std::to_string(i) + "] is" << (int)it->mappedKeyValueResponseBytes[i]
-					          << std::endl;
+					std::cout << "[" + std::to_string(i) + "] is" << (int)it->paramsBuffer[i] << std::endl;
 				}
 			}
-			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() == 2); // version
-			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 1 == code_bool); // type
-			// ASSERT((int)*it->mappedKeyValueResponseBytes.begin() + 2 == 1); // value
+			// ASSERT((int)*it->paramsBuffer.begin() == 2); // version
+			// ASSERT((int)*it->paramsBuffer.begin() + 1 == code_bool); // type
+			// ASSERT((int)*it->paramsBuffer.begin() + 2 == 1); // value
 		}
 		if (self->SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
