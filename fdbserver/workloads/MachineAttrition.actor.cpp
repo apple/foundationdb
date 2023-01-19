@@ -125,7 +125,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 			// Remove this as soon as we track extra databases properly
 			return false;
 		}
-		return work.useDatabase && random.random01() < 1.0 / (2.0 + alreadyAdded);
+		return work.useDatabase && alreadyAdded < 1;
 	}
 
 	void initializeForInjection(DeterministicRandom& random) {
@@ -363,7 +363,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				auto target = self->targetIds.front();
 
 				auto kt = ISimulator::KillInstantly;
-				TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
+				TraceEvent("AssassinationDataHall").detail("TargetDataHall", target).detail("KillType", kt);
 
 				g_simulator->killDataHall(target, kt);
 			} else if (self->killAll) {

@@ -406,6 +406,11 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 		while (shouldInjectFailure(random, work, workload)) {
 			workload->initFailureInjectionMode(random);
 			failureInjection.push_back(workload);
+			TraceEvent("AddFailureInjectionWorkload")
+			    .detail("Name", workload->description())
+			    .detail("ClientID", work.clientId)
+			    .detail("ClientCount", clientCount)
+			    .detail("Title", work.title);
 			workload = factory->create(*this);
 		}
 	}
