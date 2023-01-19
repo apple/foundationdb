@@ -287,9 +287,47 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 
 	state bool useJson = tokens.size() == 3;
 
+	state Reference<ITransaction> tr = db->createTransaction();
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
+	    MetaclusterAPI::getMetaclusterRegistrationEntryTransaction(tr);
+	Optional<MetaclusterRegistrationEntry> metaclusterRegistrationEntry = wait(metaclusterRegistrationFuture);
+
+	const ClusterType clusterType = !metaclusterRegistrationEntry.present()
+	                                    ? ClusterType::STANDALONE
+	                                    : metaclusterRegistrationEntry.get().clusterType;
+	if (ClusterType::STANDALONE == clusterType) {
+		if (useJson) {
+			json_spirit::mObject obj;
+			obj["type"] = "success";
+			obj["management_cluster"] = "null";
+			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+		} else {
+			fmt::print("A standalone cluster, not part of any metacluster\n");
+		}
+		wait(safeThreadFutureToFuture(tr->commit()));
+		return true;
+	} else if (ClusterType::METACLUSTER_DATA == clusterType) {
+		if (useJson) {
+			json_spirit::mObject obj;
+			obj["type"] = "success";
+			obj["management_cluster"] = metaclusterRegistrationEntry.get().metaclusterName.toString();
+			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+		} else {
+			fmt::print(
+			    "This cluster \"{}\" is a data cluster within a metacluster whose management cluster is \"{}\"\n",
+			    metaclusterRegistrationEntry.get().name.toString().c_str(),
+			    metaclusterRegistrationEntry.get().metaclusterName.toString().c_str());
+		}
+		wait(safeThreadFutureToFuture(tr->commit()));
+		return true;
+	} else {
+		ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
+	}
 	try {
 		std::map<ClusterName, DataClusterMetadata> clusters =
-		    wait(MetaclusterAPI::listClusters(db, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+		    wait(MetaclusterAPI::listClustersWithTxn(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
 
 		auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
 
@@ -310,6 +348,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
 		}
 
+		wait(safeThreadFutureToFuture(tr->commit()));
 		return true;
 	} catch (Error& e) {
 		if (useJson) {
@@ -317,10 +356,11 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			obj["type"] = "error";
 			obj["error"] = e.what();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-			return false;
 		} else {
-			throw;
+			fmt::print("{}\n", e.what());
 		}
+		wait(safeThreadFutureToFuture(tr->onError(e)));
+		return false;
 	}
 }
 

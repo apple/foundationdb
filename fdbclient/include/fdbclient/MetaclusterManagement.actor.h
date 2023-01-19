@@ -941,6 +941,21 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 }
 
 ACTOR template <class Transaction>
+Future<Optional<MetaclusterRegistrationEntry>> getMetaclusterRegistrationEntryTransaction(Transaction tr) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	loop {
+		try {
+			Optional<MetaclusterRegistrationEntry> metaclusterRegistrationEntry =
+			    wait(TenantAPI::getMetaclusterRegistration(tr));
+			return metaclusterRegistrationEntry;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class Transaction>
 Future<std::map<ClusterName, DataClusterMetadata>> listClustersTransaction(Transaction tr,
                                                                            ClusterNameRef begin,
                                                                            ClusterNameRef end,
@@ -973,23 +988,32 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClustersTransaction(Trans
 	return clusters;
 }
 
+ACTOR template <class Transaction>
+Future<std::map<ClusterName, DataClusterMetadata>> listClustersWithTxn(Transaction tr,
+                                                                       ClusterName begin,
+                                                                       ClusterName end,
+                                                                       int limit) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	loop {
+		try {
+			std::map<ClusterName, DataClusterMetadata> clusters = wait(listClustersTransaction(tr, begin, end, limit));
+			return clusters;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 ACTOR template <class DB>
 Future<std::map<ClusterName, DataClusterMetadata>> listClusters(Reference<DB> db,
                                                                 ClusterName begin,
                                                                 ClusterName end,
                                                                 int limit) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	std::map<ClusterName, DataClusterMetadata> clusters = wait(listClustersWithTxn(tr, begin, end, limit));
 
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			std::map<ClusterName, DataClusterMetadata> clusters = wait(listClustersTransaction(tr, begin, end, limit));
-
-			return clusters;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
+	return clusters;
 }
 
 template <class Transaction>

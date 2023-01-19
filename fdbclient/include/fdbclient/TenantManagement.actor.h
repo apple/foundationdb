@@ -88,6 +88,13 @@ Future<ClusterType> getClusterType(Transaction tr) {
 }
 
 ACTOR template <class Transaction>
+Future<Optional<MetaclusterRegistrationEntry>> getMetaclusterRegistration(Transaction tr) {
+	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+	return metaclusterRegistration;
+}
+
+ACTOR template <class Transaction>
 Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
