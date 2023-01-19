@@ -478,9 +478,11 @@ ThreadFuture<int64_t> DLTenant::getId() {
 	if (!api->tenantGetId) {
 		return unsupported_operation();
 	}
+
 	FdbCApi::FDBFuture* f = api->tenantGetId(tenant);
+
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		int64_t res;
+		int64_t res = 0;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
 		ASSERT(!error);
 		return res;

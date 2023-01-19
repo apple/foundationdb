@@ -1341,7 +1341,7 @@ class Tenant(_TransactionCreator):
         return Transaction(pointer.value, self)
 
     def get_id(self):
-        if self.idFuture == None:
+        if self.idFuture == None and self.tpointer != None:
             self.idFuture = FutureInt64(self.capi.fdb_tenant_get_id(self.tpointer))
         return self.idFuture
 

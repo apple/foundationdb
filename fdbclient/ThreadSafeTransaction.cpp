@@ -302,7 +302,9 @@ ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRa
 }
 
 ThreadSafeTenant::~ThreadSafeTenant() {
-	tenant->delref();
+	Tenant* t = this->tenant;
+	if (t)
+		onMainThreadVoid([t]() { t->delref(); });
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
