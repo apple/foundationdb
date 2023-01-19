@@ -304,9 +304,8 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			obj["management_cluster"] = "null";
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
-			fmt::print("A standalone cluster, not part of any metacluster\n");
+			fmt::print("This cluster is not part of a metacluster\n");
 		}
-		wait(safeThreadFutureToFuture(tr->commit()));
 		return true;
 	} else if (ClusterType::METACLUSTER_DATA == clusterType) {
 		if (useJson) {
@@ -316,11 +315,10 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print(
-			    "This cluster \"{}\" is a data cluster within a metacluster whose management cluster is \"{}\"\n",
+			    "This cluster \"{}\" is a data cluster within the metacluster whose management cluster is \"{}\"\n",
 			    metaclusterRegistrationEntry.get().name.toString().c_str(),
 			    metaclusterRegistrationEntry.get().metaclusterName.toString().c_str());
 		}
-		wait(safeThreadFutureToFuture(tr->commit()));
 		return true;
 	} else {
 		ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
@@ -348,7 +346,6 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
 		}
 
-		wait(safeThreadFutureToFuture(tr->commit()));
 		return true;
 	} catch (Error& e) {
 		if (useJson) {
@@ -356,11 +353,10 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			obj["type"] = "error";
 			obj["error"] = e.what();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			return false;
 		} else {
-			fmt::print("{}\n", e.what());
+			throw;
 		}
-		wait(safeThreadFutureToFuture(tr->onError(e)));
-		return false;
 	}
 }
 

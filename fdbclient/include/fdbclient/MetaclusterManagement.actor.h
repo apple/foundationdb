@@ -943,11 +943,10 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 ACTOR template <class Transaction>
 Future<Optional<MetaclusterRegistrationEntry>> getMetaclusterRegistrationEntryTransaction(Transaction tr) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	loop {
 		try {
 			Optional<MetaclusterRegistrationEntry> metaclusterRegistrationEntry =
-			    wait(TenantAPI::getMetaclusterRegistration(tr));
+			    wait(MetaclusterAPI::getMetaclusterRegistration(tr));
 			return metaclusterRegistrationEntry;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));

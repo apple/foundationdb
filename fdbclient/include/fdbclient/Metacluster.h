@@ -190,4 +190,13 @@ struct MetaclusterMetadata {
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>& metaclusterRegistration();
 };
 
+namespace MetaclusterAPI {
+
+template <class Transaction>
+Future<Optional<MetaclusterRegistrationEntry>> getMetaclusterRegistration(Transaction tr) {
+	return MetaclusterMetadata::metaclusterRegistration().get(tr);
+}
+
+} // namespace MetaclusterAPI
+
 #endif
