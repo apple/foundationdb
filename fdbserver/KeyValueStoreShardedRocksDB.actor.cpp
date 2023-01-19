@@ -568,6 +568,7 @@ struct PhysicalShard {
 			}
 
 			if (!sstFiles.empty()) {
+				ASSERT(cf != nullptr);
 				rocksdb::IngestExternalFileOptions ingestOptions;
 				ingestOptions.move_files = true;
 				ingestOptions.write_global_seqno = false;
@@ -2342,6 +2343,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						fetchedRanges.push_back(file.range);
 					}
 				}
+				// Verify that the collective fetchedRanges is the same as the collective intendedRanges.
 				std::sort(fetchedRanges.begin(), fetchedRanges.end(), KeyRangeRef::ArbitraryOrder());
 				std::sort(intendedRanges.begin(), intendedRanges.end(), KeyRangeRef::ArbitraryOrder());
 				int i = 0, j = 0;
