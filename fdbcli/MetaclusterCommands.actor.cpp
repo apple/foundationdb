@@ -252,8 +252,8 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "success";
-			obj["cluster"] = metadata.toJson();
+			obj[msgTypeKey] = "success";
+			obj[msgClusterKey] = metadata.toJson();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print("  connection string: {}\n", metadata.connectionString.toString().c_str());
@@ -264,8 +264,8 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 	} catch (Error& e) {
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "error";
-			obj["error"] = e.what();
+			obj[msgTypeKey] = "error";
+			obj[msgErrorKey] = e.what();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 			return false;
 		} else {
@@ -289,7 +289,6 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 
 	state Reference<ITransaction> tr = db->createTransaction();
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
 	    MetaclusterAPI::getMetaclusterRegistrationEntryTransaction(tr);
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistrationEntry = wait(metaclusterRegistrationFuture);
@@ -300,8 +299,8 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 	if (ClusterType::STANDALONE == clusterType) {
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "success";
-			obj["management_cluster"] = "null";
+			obj[msgTypeKey] = "success";
+			obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print("This cluster is not part of a metacluster\n");
@@ -310,8 +309,12 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 	} else if (ClusterType::METACLUSTER_DATA == clusterType) {
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "success";
-			obj["management_cluster"] = metaclusterRegistrationEntry.get().metaclusterName.toString();
+			obj[msgTypeKey] = "success";
+			obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
+			json_spirit::mObject metaclusterObj;
+			metaclusterObj[msgMgmtClusterKey] = metaclusterRegistrationEntry.get().metaclusterName.toString();
+
+			obj[msgMetaclusterKey] = metaclusterObj;
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print(
@@ -331,14 +334,15 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "success";
+			obj[msgTypeKey] = "success";
+			obj[msgClusterTypeKey] = clusterTypeToString(ClusterType::METACLUSTER_MANAGEMENT);
 
 			json_spirit::mObject metaclusterObj;
-			metaclusterObj["data_clusters"] = (int)clusters.size();
-			metaclusterObj["capacity"] = capacityNumbers.first.toJson();
-			metaclusterObj["allocated"] = capacityNumbers.second.toJson();
+			metaclusterObj[msgDataClustersKey] = static_cast<int>(clusters.size());
+			metaclusterObj[msgCapacityKey] = capacityNumbers.first.toJson();
+			metaclusterObj[msgAllocatedKey] = capacityNumbers.second.toJson();
 
-			obj["metacluster"] = metaclusterObj;
+			obj[msgMetaclusterKey] = metaclusterObj;
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print("  number of data clusters: {}\n", clusters.size());
@@ -350,8 +354,8 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 	} catch (Error& e) {
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "error";
-			obj["error"] = e.what();
+			obj[msgTypeKey] = "error";
+			obj[msgErrorKey] = e.what();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 			return false;
 		} else {

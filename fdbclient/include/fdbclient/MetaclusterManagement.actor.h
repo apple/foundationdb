@@ -993,7 +993,6 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClustersWithTxn(Transacti
                                                                        ClusterName end,
                                                                        int limit) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	loop {
 		try {
 			std::map<ClusterName, DataClusterMetadata> clusters = wait(listClustersTransaction(tr, begin, end, limit));

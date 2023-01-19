@@ -39,6 +39,16 @@
 
 namespace fdb_cli {
 
+constexpr char msgTypeKey[] = "type";
+constexpr char msgClusterKey[] = "cluster";
+constexpr char msgClusterTypeKey[] = "cluster_type";
+constexpr char msgMgmtClusterKey[] = "management_cluster";
+constexpr char msgMetaclusterKey[] = "metacluster";
+constexpr char msgDataClustersKey[] = "data_clusters";
+constexpr char msgCapacityKey[] = "capacity";
+constexpr char msgAllocatedKey[] = "allocated";
+constexpr char msgErrorKey[] = "error";
+
 struct CommandHelp {
 	std::string usage;
 	std::string short_desc;
