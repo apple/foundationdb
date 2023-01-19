@@ -574,7 +574,9 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Version* endVersion,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion);
+                                  Reference<KeyRangeMap<Version>> keyVersion,
+                                  std::unordered_map<int64_t, TenantName>* tenantMap,
+                                  bool provisionalProxy);
 ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
 using EBackupState = BackupAgentBase::EnumState;

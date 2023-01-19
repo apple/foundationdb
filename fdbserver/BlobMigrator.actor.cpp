@@ -19,6 +19,8 @@
  */
 #include <algorithm>
 #include <string>
+#include "fdbclient/ClientBooleanParams.h"
+#include "fdbserver/RestoreUtil.h"
 #include "flow/network.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
@@ -103,7 +105,7 @@ private:
 					                         BlobRestorePhase::LOADED_MANIFEST));
 					return Void();
 				}
-			} else if (phase >= BlobRestorePhase::COPYING_DATA) {
+			} else if (phase >= BlobRestorePhase::COPYING_DATA && phase < BlobRestorePhase::DONE) {
 				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", status.get().phase);
 				throw restore_error();
 			}
@@ -259,9 +261,13 @@ private:
 
 				// Count incompleted size
 				int64_t incompleted = 0;
-				for (auto i = 0; i < ranges.size() - 1; ++i) {
+				for (auto i = 0; i < ranges.size(); ++i) {
 					if (ranges[i].value == serverKeysTrue) {
-						KeyRangeRef range(ranges[i].key, ranges[i + 1].key);
+						KeyRef end = normalKeys.end;
+						if (i < ranges.size() - 1) {
+							end = ranges[i + 1].key;
+						}
+						KeyRangeRef range(ranges[i].key, end);
 						int64_t bytes = sizeInBytes(self, range);
 						dprint("   incompleted {}, size: {}\n", range.toString(), bytes);
 						incompleted += bytes;
@@ -474,7 +480,6 @@ private:
 						req.reply.send(rep);
 					}
 					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-						// fmt::print("Handle GetStorageMetrics\n");
 						StorageMetrics metrics;
 						metrics.bytes = sizeInBytes(self);
 						GetStorageMetricsReply resp;

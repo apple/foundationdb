@@ -3568,14 +3568,14 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
 			tenantPrefix = tenantEntry.get().prefix;
 		} else {
-			CODE_PROBE(true, "Blob worker unknown tenant");
+			CODE_PROBE(true, "Blob worker tenant not found");
 			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
 			// Just throw wrong_shard_server and make the client retry and assume we load it later
-			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
+			TraceEvent(SevDebug, "BlobWorkerRequestTenantNotFound", bwData->id)
 			    .suppressFor(5.0)
 			    .detail("TenantName", req.tenantInfo.name.get())
 			    .detail("TenantId", req.tenantInfo.tenantId);
-			throw unknown_tenant();
+			throw tenant_not_found();
 		}
 		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
 		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
@@ -4210,9 +4210,11 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 							// change feed was created as part of this transaction, changeFeedStartVersion
 							// will be set later
 						} else {
-							CODE_PROBE(true, "Granule open found granule in done state");
-							// this sub-granule is done splitting, no need for split logic.
-							info.splitParentGranule.reset();
+							if (!bwData->isFullRestoreMode) {
+								CODE_PROBE(true, "Granule open found granule in done state");
+								// this sub-granule is done splitting, no need for split logic.
+								info.splitParentGranule.reset();
+							}
 						}
 					}
 
