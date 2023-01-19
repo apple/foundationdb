@@ -1235,8 +1235,8 @@ ACTOR Future<bool> runTest(Database cx,
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
+			state bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 			try {
-				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 				wait(timeoutError(checkConsistency(cx,
 				                                   testers,
 				                                   quiescent,
@@ -1252,23 +1252,14 @@ ACTOR Future<bool> runTest(Database cx,
 				ok = false;
 			}
 
-			bool qui = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
-			if (qui) {
-				loop {
-					state int retryCount = 0;
-					try {
-						wait(timeoutError(auditStorageCorrectness(dbInfo), 20000.0));
-						break;
-					} catch (Error& e) {
-						ok = false;
-						if (retryCount++ > 3) {
-							TraceEvent(SevError, "TestFailure")
-							    .error(e)
-							    .detail("Reason", "Unable to perform auditStorage check.");
-								ok = false;
-							break;
-						}
-					}
+			if (quiescent) {
+				try {
+					wait(timeoutError(auditStorageCorrectness(dbInfo), 5000.0));
+				} catch (Error& e) {
+					ok = false;
+					TraceEvent(SevError, "TestFailure")
+					    .error(e)
+					    .detail("Reason", "Unable to perform auditStorage check.");
 				}
 			}
 		}
