@@ -1211,7 +1211,7 @@ static void scanPackets(TransportData* transport,
 		++transport->countPacketsReceived;
 
 		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketReceived")
+			TraceEvent(SevWarn, "LargePacketReceived")
 			    .suppressFor(1.0)
 			    .detail("FromPeer", peerAddress.toString())
 			    .detail("Length", (int)packetLen)
