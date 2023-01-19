@@ -908,6 +908,8 @@ public:
 			throw std::runtime_error("purgeBlobGranules from null database");
 		return native::fdb_database_wait_purge_granules_complete(db.get(), purgeKey.data(), intSize(purgeKey));
 	}
+
+	TypedFuture<future_var::KeyRef> getClientStatus() { return native::fdb_database_get_client_status(db.get()); }
 };
 
 inline Error selectApiVersionNothrow(int version) {

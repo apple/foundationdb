@@ -6589,7 +6589,7 @@ Future<Void> Transaction::commitMutations() {
 
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+			TraceEvent(SevWarn, "LargeTransaction")
 			    .suppressFor(1.0)
 			    .detail("Size", transactionSize)
 			    .detail("NumMutations", tr.transaction.mutations.size())

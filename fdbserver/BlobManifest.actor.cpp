@@ -284,6 +284,8 @@ public:
 						if (e.code() == error_code_restore_missing_data) {
 							dprint("missing data for key range {} \n", granuleRange.toString());
 							TraceEvent("BlobRestoreMissingData").detail("KeyRange", granuleRange.toString());
+						} else {
+							TraceEvent("BlobManifestError").error(e).detail("KeyRange", granuleRange.toString());
 						}
 						throw;
 					}
@@ -379,35 +381,42 @@ private:
 	ACTOR static Future<Standalone<BlobGranuleRestoreVersion>> getGranule(Transaction* tr, KeyRangeRef range) {
 		state Standalone<BlobGranuleRestoreVersion> granuleVersion;
 		state KeyRange historyKeyRange = blobGranuleHistoryKeyRangeFor(range);
-		// reverse lookup so that the first row is the newest version
-		state RangeResult results =
-		    wait(tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::True, Reverse::True));
-		for (KeyValueRef row : results) {
-			state KeyRange keyRange;
-			state Version version;
-			std::tie(keyRange, version) = decodeBlobGranuleHistoryKey(row.key);
-			Standalone<BlobGranuleHistoryValue> historyValue = decodeBlobGranuleHistoryValue(row.value);
-			state UID granuleID = historyValue.granuleID;
+		loop {
+			try {
+				// reverse lookup so that the first row is the newest version
+				state RangeResult results = wait(
+				    tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::True, Reverse::True));
+				for (KeyValueRef row : results) {
+					state KeyRange keyRange;
+					state Version version;
+					std::tie(keyRange, version) = decodeBlobGranuleHistoryKey(row.key);
+					Standalone<BlobGranuleHistoryValue> historyValue = decodeBlobGranuleHistoryValue(row.value);
+					state UID granuleID = historyValue.granuleID;
 
-			std::vector<GranuleFileVersion> files = wait(listGranuleFiles(tr, granuleID));
-			if (files.empty()) {
-				dprint("Granule {} doesn't have files for version {}\n", granuleID.toString(), version);
-				continue; // check previous version
+					std::vector<GranuleFileVersion> files = wait(listGranuleFiles(tr, granuleID));
+
+					granuleVersion.keyRange = KeyRangeRef(granuleVersion.arena(), keyRange);
+					granuleVersion.granuleID = granuleID;
+					if (files.empty()) {
+						dprint("Granule {} doesn't have files for version {}\n", granuleID.toString(), version);
+						granuleVersion.version = version;
+						granuleVersion.sizeInBytes = 1;
+					} else {
+						granuleVersion.version = files.back().version;
+						granuleVersion.sizeInBytes = granuleSizeInBytes(files);
+					}
+					dprint("Granule {}: \n", granuleVersion.granuleID.toString());
+					dprint("  {} {} {}\n", keyRange.toString(), granuleVersion.version, granuleVersion.sizeInBytes);
+					for (auto& file : files) {
+						dprint("  File {}: {} bytes\n", file.filename, file.sizeInBytes);
+					}
+					return granuleVersion;
+				}
+				throw restore_missing_data(); // todo a better error code
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
-
-			granuleVersion.keyRange = KeyRangeRef(granuleVersion.arena(), keyRange);
-			granuleVersion.granuleID = granuleID;
-			granuleVersion.version = files.back().version;
-			granuleVersion.sizeInBytes = granuleSizeInBytes(files);
-
-			dprint("Granule {}: \n", granuleVersion.granuleID.toString());
-			dprint("  {} {} {}\n", keyRange.toString(), granuleVersion.version, granuleVersion.sizeInBytes);
-			for (auto& file : files) {
-				dprint("  File {}: {} bytes\n", file.filename, file.sizeInBytes);
-			}
-			return granuleVersion;
 		}
-		throw restore_missing_data(); // todo a better error code
 	}
 
 	// Return sum of last snapshot file size and delta files afterwards

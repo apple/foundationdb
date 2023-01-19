@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbserver/Knobs.h"
@@ -36,6 +37,7 @@ struct BulkSetupWorkload : TestWorkload {
 	double maxNumTenants;
 	double minNumTenants;
 	std::vector<TenantName> tenantNames;
+	bool deleteTenants;
 	double testDuration;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -45,8 +47,9 @@ struct BulkSetupWorkload : TestWorkload {
 		// maximum and minimum number of tenants per client
 		maxNumTenants = getOption(options, "maxNumTenants"_sr, 0);
 		minNumTenants = getOption(options, "minNumTenants"_sr, 0);
+		deleteTenants = getOption(options, "deleteTenants"_sr, false);
 		ASSERT(minNumTenants <= maxNumTenants);
-		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		testDuration = getOption(options, "testDuration"_sr, -1);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -64,16 +67,17 @@ struct BulkSetupWorkload : TestWorkload {
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
 		if (numTenantsToCreate > 0) {
 			std::vector<Future<Void>> tenantFutures;
+			state std::vector<TenantName> tenantNames;
 			for (int i = 0; i < numTenantsToCreate; i++) {
 				TenantMapEntry entry;
-				workload->tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
+				tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
 				TraceEvent("CreatingTenant")
-				    .detail("Tenant", workload->tenantNames.back())
+				    .detail("Tenant", tenantNames.back())
 				    .detail("TenantGroup", entry.tenantGroup);
-				tenantFutures.push_back(
-				    success(TenantAPI::createTenant(cx.getReference(), workload->tenantNames.back())));
+				tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenantNames.back())));
 			}
 			wait(waitForAll(tenantFutures));
+			workload->tenantNames = tenantNames;
 		}
 		wait(bulkSetup(cx,
 		               workload,
@@ -89,6 +93,49 @@ struct BulkSetupWorkload : TestWorkload {
 		               0,
 		               0,
 		               workload->tenantNames));
+		// We want to ensure that tenant deletion happens before the restore phase starts
+		if (workload->deleteTenants) {
+			state Reference<TenantEntryCache<Void>> tenantCache =
+			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+			wait(tenantCache->init());
+			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenantNames.size() + 1);
+			if (numTenantsToDelete > 0) {
+				state int i;
+				for (i = 0; i < numTenantsToDelete; i++) {
+					state TenantName tenant = deterministicRandom()->randomChoice(workload->tenantNames);
+					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getByName(tenant));
+					ASSERT(payload.present());
+					state int64_t tenantId = payload.get().entry.id;
+					TraceEvent("BulkSetupTenantDeletionClearing")
+					    .detail("TenantName", tenant)
+					    .detail("TenantId", tenantId)
+					    .detail("TotalNumTenants", workload->tenantNames.size());
+					// clear the tenant
+					state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
+					loop {
+						try {
+							tr.clear(normalKeys);
+							wait(tr.commit());
+							break;
+						} catch (Error& e) {
+							wait(tr.onError(e));
+						}
+					}
+					// delete the tenant
+					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant)));
+					for (auto it = workload->tenantNames.begin(); it != workload->tenantNames.end(); it++) {
+						if (*it == tenant) {
+							workload->tenantNames.erase(it);
+							break;
+						}
+					}
+					TraceEvent("BulkSetupTenantDeletionDone")
+					    .detail("TenantName", tenant)
+					    .detail("TenantId", tenantId)
+					    .detail("TotalNumTenants", workload->tenantNames.size());
+				}
+			}
+		}
 		return Void();
 	}
 
@@ -96,7 +143,11 @@ struct BulkSetupWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			return timeout(_setup(this, cx), testDuration, Void());
+			if (testDuration > 0) {
+				return timeout(_setup(this, cx), testDuration, Void());
+			} else {
+				return _setup(this, cx);
+			}
 		}
 		return Void();
 	}

@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "flow/Arena.h"
 #pragma once
 
 #include "fdbclient/fdb_c_options.g.h"
@@ -204,6 +205,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                      uint8_t const* end_key_name,
 	                                      int end_key_name_length,
 	                                      int64_t version);
+
+	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
@@ -602,6 +605,9 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
+
 private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBDatabase*
@@ -994,6 +1000,9 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
+
 	// private:
 
 	struct LegacyVersionMonitor;
@@ -1029,6 +1038,9 @@ public:
 
 		// Get database intialization error if initialization failed
 		ErrorOr<Void> getInitializationError();
+
+		// Return a JSON string containing database client-side status information
+		Standalone<StringRef> getClientStatus(ErrorOr<Standalone<StringRef>> dbContextStatus);
 
 		// Cleans up state for the legacy version monitors to break reference cycles
 		void close();
