@@ -1066,14 +1066,23 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 }
 
 // Return true if a single-key mutation is associated with a valid tenant id or a system key
-bool validTenantAccess(MutationRef m) {
+bool validTenantAccess(MutationRef m,
+                       std::unordered_map<int64_t, TenantName> const& tenantMap,
+                       std::unordered_map<int64_t, bool> const& tenantExisted) {
 	if (isSystemKey(m.param1))
 		return true;
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		auto tenantId = TenantAPI::extractTenantIdFromMutation(m);
-		// throw exception for invalid raw access
-		if (tenantId == TenantInfo::INVALID_TENANT) {
+		// 1. tenantExists[id] = true: exists
+		// 2. tenantExists[id] = false: doesn't exist
+		// 3. tenantMap.count(id) > 0: exists
+		// 4. otherwise: doesn't exist
+		if (tenantExisted.count(tenantId)) {
+			return tenantExisted.at(tenantId);
+		} else if (tenantMap.count(tenantId)) {
+			return true;
+		} else {
 			return false;
 		}
 	} else {
@@ -1082,6 +1091,64 @@ bool validTenantAccess(MutationRef m) {
 		auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param1);
 		auto endTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param2);
 		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
+	}
+	return true;
+}
+
+// Return true if all tenant check pass. Otherwise, return false and send error back
+bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
+	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
+	if (!isValid) {
+		tr.reply.sendError(tenant_not_found());
+		return false;
+	}
+
+	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
+	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
+		return true;
+	}
+
+	const KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
+	// predict whether a tenant exists after apply this and previous mutations
+	// 1. tenantExists[id] = true: exists
+	// 2. tenantExists[id] = false: doesn't exist
+	// 3. tenantMap.count(id) > 0: exists
+	// 4. otherwise: doesn't exist
+	std::unordered_map<int64_t, bool> tenantExists;
+	for (auto& mutation : tr.transaction.mutations) {
+
+		if (mutation.type == MutationRef::SetValue && mutation.param1.startsWith(tenantMapRange.begin)) {
+			// predict the adding tenant
+			TenantMapEntry tenantEntry = TenantMapEntry::decode(mutation.param2);
+			tenantExists[tenantEntry.id] = true;
+		} else if (mutation.type == MutationRef::ClearRange) {
+			KeyRangeRef clearRange(mutation.param1, mutation.param2);
+			// predict whether a tenant is cleared
+			if (tenantMapRange.intersects(clearRange)) {
+				StringRef startTenant =
+				    std::max(clearRange.begin, tenantMapRange.begin).removePrefix(tenantMapRange.begin);
+				StringRef endTenant = clearRange.end.startsWith(tenantMapRange.begin)
+				                          ? clearRange.end.removePrefix(tenantMapRange.begin)
+				                          : "\xff\xff"_sr;
+
+				auto startItr = pProxyCommitData->tenantNameIndex.lower_bound(startTenant);
+				auto endItr = pProxyCommitData->tenantNameIndex.lower_bound(endTenant);
+
+				auto itr = startItr;
+				while (itr != endItr) {
+					tenantExists[itr->second] = false;
+					itr++;
+				}
+			}
+		}
+
+		// splitting clear range
+
+		// check single key operation
+		if (!validTenantAccess(mutation, pProxyCommitData->tenantMap, tenantExists)) {
+			tr.reply.sendError(illegal_tenant_access());
+			return false;
+		}
 	}
 	return true;
 }
@@ -1106,6 +1173,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 			}
 
 			if (committed) {
+				// we check the mutations only when it's going to be committed
 				for (auto mutation : self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations) {
 					if (!validTenantAccess(mutation)) {
 						committed = false;
@@ -1202,27 +1270,6 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
-// Return true if all tenant check pass. Otherwise, return false and send error back
-bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
-	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
-	if (!isValid) {
-		tr.reply.sendError(tenant_not_found());
-		return false;
-	}
-
-	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
-	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
-		return true;
-	}
-
-	for (auto& mutation : tr.transaction.mutations) {
-		if (!validTenantAccess(mutation)) {
-			tr.reply.sendError(illegal_tenant_access());
-			return false;
-		}
-	}
-	return true;
-}
 
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
