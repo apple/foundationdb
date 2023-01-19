@@ -103,7 +103,7 @@ struct StorageServerInterface {
 	PublicRequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
-	PublicRequestStream<struct WaitMetricsRequest> waitMetrics;
+	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
@@ -161,8 +161,7 @@ public:
 				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
-				waitMetrics =
-				    PublicRequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
+				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
 				splitMetrics = RequestStream<struct SplitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(5));
 				getStorageMetrics =
 				    RequestStream<struct GetStorageMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(6));
@@ -714,25 +713,18 @@ struct WaitMetricsRequest {
 	// Waits for any of the given minimum or maximum metrics to be exceeded, and then returns the current values
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
-	// Setting the tenantInfo makes the request tenant-aware.
-	Optional<TenantInfo> tenantInfo;
 	Arena arena;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
 
-	bool verify() const { return tenantInfo.present() && tenantInfo.get().isAuthorized(); }
-
 	WaitMetricsRequest() {}
-	WaitMetricsRequest(TenantInfo tenantInfo,
-	                   KeyRangeRef const& keys,
-	                   StorageMetrics const& min,
-	                   StorageMetrics const& max)
-	  : tenantInfo(tenantInfo), keys(arena, keys), min(min), max(max) {}
+	WaitMetricsRequest(KeyRangeRef const& keys, StorageMetrics const& min, StorageMetrics const& max)
+	  : keys(arena, keys), min(min), max(max) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, min, max, reply, tenantInfo, arena);
+		serializer(ar, keys, min, max, reply, arena);
 	}
 };
 

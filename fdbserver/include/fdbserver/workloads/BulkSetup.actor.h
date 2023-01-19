@@ -37,7 +37,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TenantName.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class T>
@@ -59,13 +58,9 @@ void setAuthToken(T const& self, Transaction& tr) {
 }
 
 ACTOR template <class T>
-Future<bool> checkRangeSimpleValueSize(Database cx,
-                                       T* workload,
-                                       uint64_t begin,
-                                       uint64_t end,
-                                       Optional<TenantName> tenant) {
+Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin, uint64_t end) {
 	loop {
-		state Transaction tr(cx, tenant);
+		state Transaction tr(cx);
 		setAuthToken(*workload, tr);
 		try {
 			state Standalone<KeyValueRef> firstKV = (*workload)(begin);
@@ -88,7 +83,7 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 	loop {
 		Optional<TenantName> tenant;
 		if (tenants.size() > 0) {
-			tenant = deterministicRandom()->randomChoice(tenants);
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
 		}
 		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
@@ -154,14 +149,14 @@ Future<uint64_t> setupRangeWorker(Database cx,
 
 		Optional<TenantName> tenant;
 		if (tenants.size() > 0) {
-			tenant = deterministicRandom()->randomChoice(tenants);
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
 		}
 		if (keySaveIncrement > 0) {
 			keysLoaded += job.second - job.first;
 			bytesStored += numBytes;
 
 			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
-				state Transaction tr(cx, tenant);
+				state Transaction tr(cx);
 				setAuthToken(*workload, tr);
 				try {
 					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
@@ -259,9 +254,9 @@ Future<Void> bulkSetup(Database cx,
 	if (valuesInconsequential) {
 		Optional<TenantName> tenant;
 		if (tenants.size() > 0) {
-			tenant = deterministicRandom()->randomChoice(tenants);
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
 		}
-		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode, tenant));
+		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode));
 		if (present) {
 			TraceEvent("BulkSetupRangeAlreadyPresent")
 			    .detail("Begin", startNode)
