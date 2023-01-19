@@ -43,10 +43,18 @@ Choose a machine to be the starting machine for your cluster. The database on th
 
 .. note:: A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>` for all connections (between server processes and between clients and servers). To enable TLS on a new cluster, see :ref:`Enabling TLS <enable-TLS>`.
 
-By default, the script will pick a local network interface that can access the internet. To specify the address manually, use the ``-a`` flag and choose an address that is accessible by all machines in the cluster as well as by all intended clients.::
+By default, the script will pick a local network interface that can access the internet. To specify the address manually, use the ``-a`` flag and choose an address that is accessible by all machines in the cluster as well as by all intended clients::
 
     user@host1$ sudo /usr/lib/foundationdb/make_public.py -a 10.0.1.1
     /etc/foundationdb/fdb.cluster is now using address 10.0.1.1
+
+Create a new database
+=====================
+
+If you are setting up a new FoundationDB cluster, and do not have existing databases, you can execute the following command to create a database::
+
+    user@host1$ fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure single new ssd"
+    Database created
 
 .. _test-the-database:
 
